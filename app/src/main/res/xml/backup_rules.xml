@@ -1,3 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
+    <exclude domain="sharedpref" path="TSPPrefs.xml" />
+    <exclude domain="sharedpref" path="WebViewChromiumPrefs.xml" />
+    <exclude domain="file" path="app_webview" />
+    <exclude domain="file" path="app_webview_cache" />
+    <exclude domain="database" path="webview.db" />
+    <exclude domain="database" path="webviewCache.db" />
 </full-backup-content>

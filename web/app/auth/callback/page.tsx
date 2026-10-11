@@ -304,9 +304,15 @@ async function maybeHandoffToAndroid(
     const access = data.session?.access_token;
     const refresh = data.session?.refresh_token || '';
     if (!access) return;
+    const page = new URL(window.location.href);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const nonce = page.searchParams.get('tsp_nonce') || hashParams.get('tsp_nonce') || '';
+    const state = page.searchParams.get('state') || hashParams.get('state') || '';
     const deep =
       `totalservicepro://auth-callback#access_token=${encodeURIComponent(access)}` +
-      `&refresh_token=${encodeURIComponent(refresh)}&next=${encodeURIComponent(dest)}&type=signup`;
+      `&refresh_token=${encodeURIComponent(refresh)}&next=${encodeURIComponent(dest)}&type=signup` +
+      (nonce ? `&tsp_nonce=${encodeURIComponent(nonce)}` : '') +
+      (state ? `&state=${encodeURIComponent(state)}` : '');
     setAppHandoff(deep);
     setMessage('Opening the Total Service Pro app… If nothing happens, tap the button below.');
     window.location.href = deep;

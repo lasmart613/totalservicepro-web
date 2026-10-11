@@ -1,0 +1,13 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.photometrytools",
+      "sha256_cert_fingerprints": [
+        "51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9",
+        "REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256"
+      ]
+    }
+  }
+]

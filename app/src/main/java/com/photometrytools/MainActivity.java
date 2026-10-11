@@ -19,6 +19,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.CancellationSignal;
 import android.os.Environment;
+import android.provider.MediaStore;
 import android.os.Message;
 import android.os.ParcelFileDescriptor;
 import android.print.PageRange;
@@ -41,6 +42,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
@@ -61,7 +63,9 @@ import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.webkit.WebViewCompat;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
@@ -72,10 +76,16 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executor;
 
 /**
@@ -92,6 +102,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_SESSION_KEY = "storedSession";
     private static final String PREFS_LAST_URL = "last_url";
     private static final String PREFS_BIOMETRIC_KEY = "biometricEnabled";
+    private static final String PREFS_AUTH_NONCE = "pending_auth_nonce";
+    private static final String PREFS_AUTH_STATE = "pending_auth_state";
+    private static final String PREFS_AUTH_EXPIRY = "pending_auth_expiry";
     private static final int RECORD_AUDIO_PERMISSION_CODE = 2108;
 
     private static final Map<String, String> ASSET_TO_PATH = new HashMap<>();
@@ -154,7 +167,12 @@ public class MainActivity extends AppCompatActivity {
     private BiometricPrompt biometricPrompt;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<Intent> fileChooserLauncher;
+    private Uri pendingCameraUri;
     private String pendingLaunchUrl = null;
+    private String acceptedAuthNavigation;
+    private volatile String mainFrameUrl;
+    private boolean recoveringRenderer;
+    private boolean backCallbackInstalled;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -187,6 +205,12 @@ public class MainActivity extends AppCompatActivity {
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
                     Uri[] uris = WebChromeClient.FileChooserParams.parseResult(result.getResultCode(), result.getData());
+                    if ((uris == null || uris.length == 0)
+                            && result.getResultCode() == RESULT_OK
+                            && pendingCameraUri != null) {
+                        uris = new Uri[]{pendingCameraUri};
+                    }
+                    pendingCameraUri = null;
                     if (filePathCallback != null) {
                         filePathCallback.onReceiveValue(uris);
                         filePathCallback = null;
@@ -256,11 +280,13 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void showToast(String msg) {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show());
         }
 
         @JavascriptInterface
         public void saveSession(String sessionJson) {
+            if (!originAllowsBridge()) return;
             storedSession = sessionJson;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
@@ -270,11 +296,13 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public String getStoredSession() {
+            if (!originAllowsBridge()) return null;
             return storedSession;
         }
 
         @JavascriptInterface
         public void clearSession() {
+            if (!originAllowsBridge()) return;
             storedSession = null;
             biometricEnabled = false;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -286,6 +314,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void setBiometricEnabled(boolean enabled) {
+            if (!originAllowsBridge()) return;
             biometricEnabled = enabled;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
@@ -295,27 +324,31 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public boolean isBiometricEnabled() {
+            if (!originAllowsBridge()) return false;
             return biometricEnabled;
         }
 
         @JavascriptInterface
         public boolean canUseBiometric() {
+            if (!originAllowsBridge()) return false;
             return canAuthenticateWithBiometrics();
         }
 
         @JavascriptInterface
         public void setPremiumStatus(boolean premium) {
+            if (!originAllowsBridge()) return;
             // Ads removed from this build. Paid "no ads" is already true.
         }
 
         @JavascriptInterface
         public void launchBillingFlow(String sku) {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> loadProductionOrAsset("/plans", "paywall.html"));
         }
 
         @JavascriptInterface
         public void openUrl(String url) {
-            if (url == null) return;
+            if (!originAllowsBridge() || url == null) return;
             runOnUiThread(() -> {
                 try {
                     // geo: is handled inside navigateInWebView, which returns true so this
@@ -333,6 +366,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printReport(String html, String jobName) {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> {
                 WebView pdfWebView = new WebView(MainActivity.this);
                 WebSettings settings = pdfWebView.getSettings();
@@ -394,6 +428,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void speak(String text) {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> speakWithDeviceTts(text));
         }
 
@@ -404,6 +439,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void speakAnswer(String text, String voiceId, String engine, String accessToken) {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> startGrokAnswer(text, voiceId, engine, accessToken));
         }
 
@@ -413,6 +449,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void interruptSpeech() {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> {
                 speechGeneration++;
                 stopGrokPlayer();
@@ -423,11 +460,13 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void stopSpeaking() {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> stopAnswer(true));
         }
 
         @JavascriptInterface
         public void startVoiceRecognition() {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> {
                 stopAnswer(true);
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
@@ -445,6 +484,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void stopVoiceRecognition() {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> stopListening(true));
         }
 
@@ -454,11 +494,13 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void onCitationObserved(String manualId, String page) {
+            if (!originAllowsBridge()) return;
             Log.i(TAG, "assistant:citation-open manualId=" + manualId + " page=" + page);
         }
 
         @JavascriptInterface
         public void goBack() {
+            if (!originAllowsBridge()) return;
             runOnUiThread(() -> {
                 if (webView != null && webView.canGoBack()) webView.goBack();
             });
@@ -509,6 +551,12 @@ public class MainActivity extends AppCompatActivity {
     private void loadApp() {
         ensureDeviceTts();
         webView = findViewById(R.id.webView);
+        bindWebView(webView);
+        webView.loadUrl(chooseStartUrl());
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void bindWebView(WebView webView) {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -538,7 +586,10 @@ public class MainActivity extends AppCompatActivity {
 
         webView.addJavascriptInterface(new WebAppInterface(), "Android");
         webView.addJavascriptInterface(new PrintBridge(webView, false), "TSPPrint");
+        installOriginLockedListener(webView);
 
+        if (!backCallbackInstalled) {
+            backCallbackInstalled = true;
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
@@ -555,20 +606,35 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+        }
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback,
                                              FileChooserParams fileChooserParams) {
+                if (!originAllowsBridge()) {
+                    filePathCallback.onReceiveValue(null);
+                    return false;
+                }
                 if (MainActivity.this.filePathCallback != null) {
                     MainActivity.this.filePathCallback.onReceiveValue(null);
                 }
                 MainActivity.this.filePathCallback = filePathCallback;
+                pendingCameraUri = null;
                 try {
-                    fileChooserLauncher.launch(fileChooserParams.createIntent());
+                    Intent content = fileChooserParams.createIntent();
+                    Intent chooser = Intent.createChooser(content, "Upload");
+                    if (acceptsImages(fileChooserParams)) {
+                        Intent capture = cameraCaptureIntent();
+                        if (capture != null) {
+                            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{capture});
+                        }
+                    }
+                    fileChooserLauncher.launch(chooser);
                     return true;
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
+                    pendingCameraUri = null;
                     return false;
                 }
             }
@@ -596,7 +662,7 @@ public class MainActivity extends AppCompatActivity {
                 if (alreadyViewing) {
                     return;
                 }
-                if (url != null && isManualHost(url)) {
+                if (url != null && TrustedOrigins.allowsUrl(url)) {
                     Toast.makeText(MainActivity.this,
                             "Manuals stay in the in-app viewer — download is disabled.",
                             Toast.LENGTH_LONG).show();
@@ -618,33 +684,61 @@ public class MainActivity extends AppCompatActivity {
                 Uri uri = request.getUrl();
                 if (uri == null) return false;
                 String url = uri.toString();
-                if (isGeoUrl(url)) {
-                    openGeoOrMaps(url);
-                    return true;
+                if (!request.isForMainFrame()) {
+                    if (isGeoUrl(url)) {
+                        openGeoOrMaps(url);
+                        return true;
+                    }
+                    return !TrustedOrigins.subframeMayLoad(url);
                 }
-                // Chapter PDFs load in the viewer frame. Do not replace that
-                // navigation with /manuals/view, whether get-manual-url is live or not.
-                if (!request.isForMainFrame()) return false;
-                return !navigateInWebView(url);
+                return overrideMainFrame(view, url);
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (isGeoUrl(url)) {
-                    openGeoOrMaps(url);
-                    return true;
+                return overrideMainFrame(view, url);
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (url == null) return;
+                String shown = view.getUrl();
+                if (shown != null && TrustedOrigins.isSessionPage(shown) && !shown.equals(url)
+                        && !TrustedOrigins.isSessionPage(url)) {
+                    return;
                 }
-                return !navigateInWebView(url);
+                mainFrameUrl = url;
+                if (TrustedOrigins.isSessionPage(url) || isInlineDocumentUrl(url)) return;
+                if (url.equals(acceptedAuthNavigation)) return;
+                view.stopLoading();
+                openOutside(url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                updateBottomNavVisibilityAndSelection(url);
+                String main = view.getUrl();
+                if (url != null && main != null && !url.equals(main)) return;
+                String page = main != null ? main : url;
+                mainFrameUrl = page;
+                updateBottomNavVisibilityAndSelection(page);
+                if (page != null && page.equals(acceptedAuthNavigation)) acceptedAuthNavigation = null;
+                if (!TrustedOrigins.isSessionPage(page)) return;
                 injectStoredSession(view);
                 injectCitationOpenBridge(view);
-                injectOnlineVoice(view, url);
+                injectOnlineVoice(view, page);
                 injectPrintHook(view);
+                injectOriginLockedShim(view);
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    if (view == webView) recoverFromRendererCrash();
+                    else disposePrintPopup(view);
+                });
+                return true;
             }
 
             @Override
@@ -656,13 +750,10 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        bottomNav = findViewById(R.id.bottom_navigation);
+        if (bottomNav == null) bottomNav = findViewById(R.id.bottom_navigation);
         if (bottomNav != null) {
             bottomNav.setOnItemSelectedListener(navListener);
         }
-
-        String start = chooseStartUrl();
-        webView.loadUrl(start);
     }
 
     private String chooseStartUrl() {
@@ -673,7 +764,7 @@ public class MainActivity extends AppCompatActivity {
         }
         String last = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREFS_LAST_URL, null);
         if (isNetworkAvailable()) {
-            if (last != null && isAllowedWebUrl(last) && !looksLikePdfDownload(last)) {
+            if (last != null && TrustedOrigins.isFirstPartyAppPage(last) && !looksLikePdfDownload(last)) {
                 return last;
             }
             return PRODUCTION_ORIGIN + "/";
@@ -691,59 +782,72 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** @return true if the URL was handled inside the WebView (or we navigated). */
+    /** @return true when openUrl should not start a second intent. */
     private boolean navigateInWebView(String url) {
+        if (webView == null || url == null) return true;
+        if (!overrideMainFrame(webView, url)) webView.loadUrl(url);
+        return true;
+    }
+
+    /**
+     * @return true when the WebView must not load this main-frame URL.
+     * First-party https pages and bundled assets stay. Auth starts a Custom Tab
+     * bound to a one-time nonce. Every other host leaves the WebView.
+     */
+    private boolean overrideMainFrame(WebView view, String url) {
         if (url == null) return true;
-        String lower = url.toLowerCase(Locale.US);
         if (isGeoUrl(url)) {
-            // One launch. Returning true tells openUrl not to start the intent again.
             openGeoOrMaps(url);
             return true;
         }
-        if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")) {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-            } catch (Exception ignored) {
-            }
-            return false;
+        String lower = url.toLowerCase(Locale.US);
+        if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")
+                || lower.startsWith("intent:") || lower.startsWith("market:")) {
+            openOutside(url);
+            return true;
         }
         if (lower.startsWith("totalservicepro://")) {
-            captureLaunchIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-            applyPendingLaunch();
-            return true;
-        }
-        if (isExternalAuthUrl(url)) {
-            openCustomTab(url);
-            return false;
-        }
-        if (lower.startsWith("intent:") || lower.startsWith("market:")) return false;
-        if (lower.contains("play.google.com/store") || lower.contains("apps.apple.com")) {
-            Toast.makeText(this, "The mobile apps are coming soon — they are not in the stores yet.",
-                    Toast.LENGTH_LONG).show();
-            return false;
-        }
-        if (looksLikePdfDownload(url) && isManualHost(url)) {
-            webView.loadUrl(PRODUCTION_ORIGIN + "/manuals/view");
-            return true;
-        }
-        if (url.startsWith("file:///android_asset/")) {
-            String mapped = mapAssetUrlToProduction(url);
-            if (mapped != null && isNetworkAvailable()) {
-                webView.loadUrl(mapped);
+            Uri uri = Uri.parse(url);
+            if (!allowCredentialCallback(uri)) {
+                if (view != null) view.loadUrl(homeUrl());
                 return true;
             }
-            webView.loadUrl(url);
+            String dest = productionAuthCallbackUrl(uri);
+            acceptedAuthNavigation = dest;
+            rememberSessionFromAuthUri(uri);
+            if (view != null) view.loadUrl(dest);
             return true;
         }
-        if (isAllowedWebUrl(url)) {
-            webView.loadUrl(url);
+        if (TrustedOrigins.isAuthCallback(url) && callbackCarriesCredential(Uri.parse(url))) {
+            if (url.equals(acceptedAuthNavigation)) {
+                acceptedAuthNavigation = null;
+                return false;
+            }
+            Uri uri = Uri.parse(url);
+            if (!allowCredentialCallback(uri)) return true;
+            rememberSessionFromAuthUri(uri);
+            return false;
+        }
+        if (TrustedOrigins.isAuthStart(url)) {
+            beginAuthAndOpenCustomTab(url);
             return true;
         }
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-        } catch (Exception ignored) {
+        if (TrustedOrigins.isBundledAsset(url)) {
+            if (isNetworkAvailable()) {
+                if (view != null) view.loadUrl(mapAssetUrlToProduction(url));
+                return true;
+            }
+            return false;
         }
-        return false;
+        if (TrustedOrigins.isFirstPartyAppPage(url)) {
+            if (looksLikePdfDownload(url) && TrustedOrigins.allowsUrl(url)) {
+                if (view != null) view.loadUrl(PRODUCTION_ORIGIN + "/manuals/view");
+                return true;
+            }
+            return false;
+        }
+        openOutside(url);
+        return true;
     }
 
     private boolean isGeoUrl(String url) {
@@ -833,29 +937,6 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /**
-     * Google rejects OAuth inside an embedded WebView (disallowed_useragent).
-     * Supabase authorize and accounts.google.com open in a Custom Tab so the
-     * system browser can return through the https App Link or totalservicepro://.
-     */
-    static boolean isExternalAuthUrl(String url) {
-        if (url == null) return false;
-        try {
-            Uri uri = Uri.parse(url);
-            String host = uri.getHost();
-            if (host == null) return false;
-            host = host.toLowerCase(Locale.US);
-            String path = uri.getPath() == null ? "" : uri.getPath().toLowerCase(Locale.US);
-            if ("accounts.google.com".equals(host) || "accounts.youtube.com".equals(host)) return true;
-            if ((host.equals("google.com") || host.endsWith(".google.com")) && path.contains("/o/oauth")) {
-                return true;
-            }
-            return host.endsWith(".supabase.co") && path.contains("/auth/v1/authorize");
-        } catch (RuntimeException e) {
-            return false;
-        }
-    }
-
     private void openCustomTab(String url) {
         try {
             CustomTabsIntent tabs = new CustomTabsIntent.Builder().setShowTitle(true).build();
@@ -865,38 +946,8 @@ public class MainActivity extends AppCompatActivity {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
             } catch (RuntimeException ignored) {
-                showToast("Could not open Google sign-in");
+                showToast("Could not open link");
             }
-        }
-    }
-
-    private boolean isAllowedWebUrl(String url) {
-        try {
-            Uri uri = Uri.parse(url);
-            String host = uri.getHost();
-            if (host == null) return false;
-            host = host.toLowerCase(Locale.US);
-            return host.equals("repairplanet.net")
-                    || host.endsWith(".repairplanet.net")
-                    || host.endsWith("supabase.co")
-                    || host.endsWith("stripe.com")
-                    || host.endsWith("netlify.app")
-                    || host.endsWith("googleapis.com")
-                    || host.endsWith("gstatic.com")
-                    || host.endsWith("google.com");
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean isManualHost(String url) {
-        try {
-            String host = Uri.parse(url).getHost();
-            if (host == null) return false;
-            host = host.toLowerCase(Locale.US);
-            return host.contains("supabase.co") || host.contains("repairplanet.net");
-        } catch (Exception e) {
-            return false;
         }
     }
 
@@ -912,7 +963,283 @@ public class MainActivity extends AppCompatActivity {
         return param != null ? base + "?" + param : base;
     }
 
+    private boolean isInlineDocumentUrl(String url) {
+        if (url == null) return false;
+        String lower = url.toLowerCase(Locale.US);
+        return lower.startsWith("about:") || lower.startsWith("data:")
+                || lower.startsWith("blob:") || lower.startsWith("javascript:");
+    }
+
+    private String homeUrl() {
+        if (isNetworkAvailable()) return PRODUCTION_ORIGIN + "/";
+        return localAssetUrl("index.html");
+    }
+
+    private void openOutside(String url) {
+        if (url == null || url.isEmpty()) return;
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.US);
+        if ("https".equals(scheme) || "http".equals(scheme)) {
+            openCustomTab(url);
+            return;
+        }
+        try {
+            startExternal(url);
+        } catch (RuntimeException ignored) {
+            showToast("Could not open link");
+        }
+    }
+
+    private void beginAuthAndOpenCustomTab(String url) {
+        String nonce = newNonce();
+        String state = null;
+        try {
+            state = Uri.parse(url).getQueryParameter("state");
+        } catch (RuntimeException ignored) {
+        }
+        long expiry = System.currentTimeMillis() + AuthHandoff.TTL_MS;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREFS_AUTH_NONCE, nonce)
+                .putString(PREFS_AUTH_STATE, state == null ? "" : state)
+                .putLong(PREFS_AUTH_EXPIRY, expiry)
+                .apply();
+        openCustomTab(AuthHandoff.withNonceOnRedirect(url, nonce));
+    }
+
+    private String newNonce() {
+        byte[] bytes = new byte[16];
+        new SecureRandom().nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) sb.append(String.format(Locale.US, "%02x", b & 0xff));
+        return sb.toString();
+    }
+
+    private AuthHandoff.Pending loadPendingAuth() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String nonce = prefs.getString(PREFS_AUTH_NONCE, "");
+        if (nonce == null || nonce.isEmpty()) return null;
+        return new AuthHandoff.Pending(nonce, prefs.getString(PREFS_AUTH_STATE, ""),
+                prefs.getLong(PREFS_AUTH_EXPIRY, 0L));
+    }
+
+    private void clearPendingAuth() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .remove(PREFS_AUTH_NONCE)
+                .remove(PREFS_AUTH_STATE)
+                .remove(PREFS_AUTH_EXPIRY)
+                .apply();
+    }
+
+    /** Single-use. A callback with a code or tokens must match the login this app started. */
+    private boolean allowCredentialCallback(Uri uri) {
+        if (uri == null || !callbackCarriesCredential(uri)) return false;
+        boolean ok = AuthHandoff.matches(loadPendingAuth(),
+                callbackParam(uri, "tsp_nonce"),
+                callbackParam(uri, "state"),
+                System.currentTimeMillis());
+        clearPendingAuth();
+        return ok;
+    }
+
+    private boolean callbackCarriesCredential(Uri uri) {
+        return callbackParam(uri, "access_token") != null || callbackParam(uri, "code") != null;
+    }
+
+    private String callbackParam(Uri uri, String name) {
+        if (uri == null || name == null) return null;
+        try {
+            String query = uri.getQueryParameter(name);
+            if (query != null && !query.isEmpty()) return query;
+            String fragment = uri.getFragment();
+            if (fragment == null || fragment.isEmpty()) return null;
+            String fromFragment = Uri.parse("https://repairplanet.net/?" + fragment).getQueryParameter(name);
+            return fromFragment == null || fromFragment.isEmpty() ? null : fromFragment;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private boolean originAllowsBridge() {
+        return TrustedOrigins.isSessionPage(urlOnUiThread(webView));
+    }
+
+    /**
+     * Print popups are about:blank documents owned by a session page.
+     * A popup whose own URL is some other origin does not get the bridge.
+     */
+    private boolean originAllowsPrint(WebView target) {
+        String url = urlOnUiThread(target);
+        if (TrustedOrigins.isSessionPage(url)) return true;
+        if (target == null || target == webView || !isInlineDocumentUrl(url)) return false;
+        return TrustedOrigins.isSessionPage(urlOnUiThread(webView));
+    }
+
+    private String urlOnUiThread(WebView target) {
+        final String[] holder = new String[1];
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            holder[0] = target != null ? target.getUrl() : mainFrameUrl;
+            return holder[0];
+        }
+        CountDownLatch latch = new CountDownLatch(1);
+        runOnUiThread(() -> {
+            holder[0] = target != null ? target.getUrl() : mainFrameUrl;
+            latch.countDown();
+        });
+        try {
+            if (!latch.await(750, TimeUnit.MILLISECONDS)) return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        return holder[0];
+    }
+
+    private void installOriginLockedListener(WebView target) {
+        if (target == null) return;
+        Set<String> origins = new HashSet<>();
+        origins.add("https://" + TrustedOrigins.HOST_REPAIRPLANET);
+        origins.add("https://" + TrustedOrigins.HOST_WWW);
+        try {
+            WebViewCompat.addWebMessageListener(target, "tspNative", origins,
+                    (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+                        if (!isMainFrame || message == null) return;
+                        if (sourceOrigin == null || !TrustedOrigins.isFirstPartyAppPage(sourceOrigin.toString())) {
+                            return;
+                        }
+                        onOriginLockedMessage(view, message.getData());
+                    });
+        } catch (RuntimeException e) {
+            Log.w(TAG, "WebMessageListener unavailable", e);
+        }
+    }
+
+    private void onOriginLockedMessage(WebView source, String data) {
+        if (data == null || data.isEmpty()) return;
+        runOnUiThread(() -> {
+            if (!originAllowsBridge()) return;
+            try {
+                org.json.JSONObject obj = new org.json.JSONObject(data);
+                String method = obj.optString("m", "");
+                WebAppInterface bridge = new WebAppInterface();
+                if ("showToast".equals(method)) bridge.showToast(obj.optString("msg", ""));
+                else if ("saveSession".equals(method)) bridge.saveSession(obj.optString("json", ""));
+                else if ("clearSession".equals(method)) bridge.clearSession();
+                else if ("setBiometricEnabled".equals(method)) bridge.setBiometricEnabled(obj.optBoolean("on", false));
+                else if ("launchBillingFlow".equals(method)) bridge.launchBillingFlow(obj.optString("sku", ""));
+                else if ("openUrl".equals(method)) bridge.openUrl(obj.optString("url", ""));
+                else if ("printReport".equals(method)) bridge.printReport(obj.optString("html", ""), obj.optString("jobName", ""));
+                else if ("speak".equals(method)) bridge.speak(obj.optString("text", ""));
+                else if ("speakAnswer".equals(method)) bridge.speakAnswer(
+                        obj.optString("text", ""), obj.optString("voiceId", ""),
+                        obj.optString("engine", ""), obj.optString("token", ""));
+                else if ("interruptSpeech".equals(method)) bridge.interruptSpeech();
+                else if ("stopSpeaking".equals(method)) bridge.stopSpeaking();
+                else if ("startVoiceRecognition".equals(method)) bridge.startVoiceRecognition();
+                else if ("stopVoiceRecognition".equals(method)) bridge.stopVoiceRecognition();
+                else if ("onCitationObserved".equals(method)) bridge.onCitationObserved(
+                        obj.optString("manualId", ""), obj.optString("page", ""));
+                else if ("goBack".equals(method)) bridge.goBack();
+                else if ("printPage".equals(method)) printWebView(source != null ? source : webView, data, source != null && source != webView);
+            } catch (Exception e) {
+                Log.w(TAG, "tspNative message rejected", e);
+            }
+        });
+    }
+
+    private void injectOriginLockedShim(WebView view) {
+        if (view == null) return;
+        view.evaluateJavascript(
+                "(function(){if(window.__tspOriginShim||!window.tspNative)return;"
+                        + "window.__tspOriginShim=true;var host=window.Android;"
+                        + "function post(o){try{window.tspNative.postMessage(JSON.stringify(o));}catch(e){}}"
+                        + "window.Android={"
+                        + "showToast:function(m){post({m:'showToast',msg:m});},"
+                        + "saveSession:function(j){post({m:'saveSession',json:j});},"
+                        + "getStoredSession:function(){try{return host&&host.getStoredSession?host.getStoredSession():null;}catch(e){return null;}},"
+                        + "clearSession:function(){post({m:'clearSession'});},"
+                        + "setBiometricEnabled:function(v){post({m:'setBiometricEnabled',on:!!v});},"
+                        + "isBiometricEnabled:function(){try{return !!(host&&host.isBiometricEnabled&&host.isBiometricEnabled());}catch(e){return false;}},"
+                        + "canUseBiometric:function(){try{return !!(host&&host.canUseBiometric&&host.canUseBiometric());}catch(e){return false;}},"
+                        + "setPremiumStatus:function(){},"
+                        + "launchBillingFlow:function(s){post({m:'launchBillingFlow',sku:s});},"
+                        + "openUrl:function(u){post({m:'openUrl',url:u});},"
+                        + "printReport:function(h,n){post({m:'printReport',html:h,jobName:n});},"
+                        + "speak:function(t){post({m:'speak',text:t});},"
+                        + "speakAnswer:function(t,v,e,a){post({m:'speakAnswer',text:t,voiceId:v,engine:e,token:a});},"
+                        + "interruptSpeech:function(){post({m:'interruptSpeech'});},"
+                        + "stopSpeaking:function(){post({m:'stopSpeaking'});},"
+                        + "startVoiceRecognition:function(){post({m:'startVoiceRecognition'});},"
+                        + "stopVoiceRecognition:function(){post({m:'stopVoiceRecognition'});},"
+                        + "onCitationObserved:function(id,p){post({m:'onCitationObserved',manualId:id,page:p});},"
+                        + "goBack:function(){post({m:'goBack'});}"
+                        + "};})();",
+                null);
+    }
+
+    private boolean acceptsImages(WebChromeClient.FileChooserParams params) {
+        if (params == null) return false;
+        String[] types = params.getAcceptTypes();
+        if (types == null) return false;
+        for (String type : types) {
+            if (type == null) continue;
+            String lower = type.trim().toLowerCase(Locale.US);
+            if (lower.startsWith("image/") || "image".equals(lower)) return true;
+        }
+        return false;
+    }
+
+    private Intent cameraCaptureIntent() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            File photo = new File(dir, "capture-" + System.currentTimeMillis() + ".jpg");
+            Uri output = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", photo);
+            Intent capture = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            if (capture.resolveActivity(getPackageManager()) == null) return null;
+            capture.putExtra(MediaStore.EXTRA_OUTPUT, output);
+            capture.setClipData(android.content.ClipData.newRawUri("capture", output));
+            capture.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            pendingCameraUri = output;
+            return capture;
+        } catch (RuntimeException e) {
+            pendingCameraUri = null;
+            return null;
+        }
+    }
+
+    private void recoverFromRendererCrash() {
+        if (recoveringRenderer || isDestroyed()) return;
+        recoveringRenderer = true;
+        try {
+            for (int i = printPopups.size() - 1; i >= 0; i--) disposePrintPopup(printPopups.get(i));
+            ConstraintLayout root = findViewById(R.id.main);
+            WebView dead = webView;
+            if (root == null || dead == null) return;
+            int index = root.indexOfChild(dead);
+            android.view.ViewGroup.LayoutParams params = dead.getLayoutParams();
+            root.removeView(dead);
+            WebView fresh = new WebView(this);
+            fresh.setId(R.id.webView);
+            if (index < 0) root.addView(fresh, params);
+            else root.addView(fresh, index, params);
+            webView = fresh;
+            try {
+                dead.destroy();
+            } catch (RuntimeException ignored) {
+            }
+            bindWebView(fresh);
+            String next = chooseStartUrl();
+            if (!TrustedOrigins.isSessionPage(next)) next = homeUrl();
+            fresh.loadUrl(next);
+        } finally {
+            recoveringRenderer = false;
+        }
+    }
+
     private void injectStoredSession(WebView view) {
+        if (view == null || !TrustedOrigins.isSessionPage(view.getUrl())) return;
         if (storedSession == null || storedSession.isEmpty()) return;
         String payload = persistableSessionJson(storedSession);
         if (payload == null) payload = storedSession;
@@ -958,13 +1285,19 @@ public class MainActivity extends AppCompatActivity {
         if (uri == null) return;
         String scheme = uri.getScheme();
         if (scheme == null) return;
-        if ("totalservicepro".equalsIgnoreCase(scheme)) {
-            pendingLaunchUrl = productionAuthCallbackUrl(uri);
+        if (TrustedOrigins.isAuthCallback(uri.toString()) && callbackCarriesCredential(uri)) {
+            if (!allowCredentialCallback(uri)) return;
+            if ("totalservicepro".equalsIgnoreCase(scheme)) {
+                pendingLaunchUrl = productionAuthCallbackUrl(uri);
+            } else {
+                pendingLaunchUrl = uri.toString();
+            }
+            acceptedAuthNavigation = pendingLaunchUrl;
             rememberSessionFromAuthUri(uri);
             return;
         }
-        if (("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
-                && isAllowedWebUrl(uri.toString())
+        if ("https".equalsIgnoreCase(scheme)
+                && TrustedOrigins.isFirstPartyAppPage(uri.toString())
                 && !looksLikePdfDownload(uri.toString())) {
             pendingLaunchUrl = uri.toString();
         }
@@ -1548,11 +1881,34 @@ public class MainActivity extends AppCompatActivity {
             "(function(){"
                     + "function hookPrint(win){"
                     + "if(!win)return;"
+                    + "function reportNumber(){"
+                    + "try{"
+                    + "var path=(location&&location.pathname)||'';"
+                    + "var id=path.match(/\\/reports\\/([^\\/?#]+)/);"
+                    + "if(id&&id[1]&&id[1]!=='new')return decodeURIComponent(id[1]);"
+                    + "var labels=document.querySelectorAll('label');"
+                    + "for(var i=0;i<labels.length;i++){"
+                    + "var text=(labels[i].innerText||'').replace(/\\s+/g,' ').trim();"
+                    + "if(!text||text.length>48)continue;"
+                    + "var input=labels[i].querySelector('input');"
+                    + "if(!input&&labels[i].htmlFor)input=document.getElementById(labels[i].htmlFor);"
+                    + "if(!input||!(input.value||'').trim())continue;"
+                    + "if(/report|informe|rapport|bericht|relat|rapporto|דוח|گزارش|تقرير|#/i.test(text))return input.value.trim();"
+                    + "}"
+                    + "var marked=document.querySelector('input[placeholder*=\"SR-\"]');"
+                    + "if(marked&&(marked.value||'').trim())return marked.value.trim();"
+                    + "}catch(e){}"
+                    + "return '';"
+                    + "}"
                     + "try{win.print=function(){"
-                    + "var title='';"
-                    + "try{title=(win.document&&win.document.title)||'';}catch(e){}"
+                    + "var payload={title:'',reportNumber:'',path:''};"
+                    + "try{payload.title=(win.document&&win.document.title)||'';}catch(e){}"
+                    + "try{payload.reportNumber=reportNumber();}catch(e){}"
+                    + "try{payload.path=(win.location&&win.location.pathname)||'';}catch(e){}"
                     + "try{if(win.__tspPrintTimer){win.clearInterval(win.__tspPrintTimer);win.__tspPrintTimer=0;}}catch(e){}"
-                    + "try{if(win.TSPPrint&&win.TSPPrint.printPage)win.TSPPrint.printPage(String(title));}catch(e){}"
+                    + "var body=JSON.stringify(payload);"
+                    + "try{if(win.tspNative&&win.tspNative.postMessage){win.tspNative.postMessage(JSON.stringify({m:'printPage',title:payload.title,reportNumber:payload.reportNumber,path:payload.path}));return;}}catch(e){}"
+                    + "try{if(win.TSPPrint&&win.TSPPrint.printPage)win.TSPPrint.printPage(body);}catch(e){}"
                     + "};}catch(e){}"
                     + "}"
                     + "function arm(win){"
@@ -1659,17 +2015,61 @@ public class MainActivity extends AppCompatActivity {
         cookies.setAcceptThirdPartyCookies(child, true);
         child.setBackgroundColor(Color.WHITE);
         child.addJavascriptInterface(new PrintBridge(child, true), "TSPPrint");
+        installOriginLockedListener(child);
         child.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                Uri uri = request == null ? null : request.getUrl();
-                return handlePopupNavigation(view, uri);
+                if (request == null || request.getUrl() == null) return false;
+                String url = request.getUrl().toString();
+                if (!request.isForMainFrame()) {
+                    if (isGeoUrl(url)) {
+                        openGeoOrMaps(url);
+                        return true;
+                    }
+                    return !TrustedOrigins.subframeMayLoad(url);
+                }
+                return handlePopupNavigation(view, request.getUrl());
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handlePopupNavigation(view, url == null ? null : Uri.parse(url));
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (url == null) return;
+                String shown = view.getUrl();
+                if (shown != null && (TrustedOrigins.isSessionPage(shown) || isInlineDocumentUrl(shown))
+                        && !shown.equals(url)
+                        && !TrustedOrigins.isSessionPage(url)
+                        && !isInlineDocumentUrl(url)) {
+                    return;
+                }
+                if (TrustedOrigins.isSessionPage(url) || isInlineDocumentUrl(url)) return;
+                view.stopLoading();
+                runOnUiThread(() -> {
+                    navigateInWebView(url);
+                    disposePrintPopup(view);
+                });
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                injectPrintHook(view);
+                String main = view.getUrl();
+                if (url != null && main != null && !url.equals(main)) return;
+                String page = main != null ? main : url;
+                if (TrustedOrigins.isSessionPage(page) || isInlineDocumentUrl(page)) {
+                    injectPrintHook(view);
+                }
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> disposePrintPopup(view));
+                return true;
             }
         });
         child.setWebChromeClient(new WebChromeClient() {
@@ -1795,7 +2195,25 @@ public class MainActivity extends AppCompatActivity {
             if (state.printRequested) return;
             state.printRequested = true;
         }
-        String name = PrintJobs.jobNameFromTitle(jobName);
+        String title = jobName;
+        String reportNumber = null;
+        String path = null;
+        if (jobName != null && jobName.startsWith("{")) {
+            try {
+                org.json.JSONObject payload = new org.json.JSONObject(jobName);
+                if (payload.has("m") && payload.has("title")) {
+                    title = payload.optString("title", "");
+                    reportNumber = payload.optString("reportNumber", "");
+                    path = payload.optString("path", "");
+                } else if (payload.has("title") || payload.has("reportNumber") || payload.has("path")) {
+                    title = payload.optString("title", "");
+                    reportNumber = payload.optString("reportNumber", "");
+                    path = payload.optString("path", "");
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        String name = PrintJobs.jobName(title, reportNumber, path, System.currentTimeMillis(), TimeZone.getDefault());
         PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
         if (printManager == null) {
             Toast.makeText(this, "Printing is not available on this device.", Toast.LENGTH_LONG).show();
@@ -1842,6 +2260,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printPage(String jobName) {
+            if (!originAllowsPrint(target)) return;
             runOnUiThread(() -> printWebView(target, jobName, disposeAfterPrint));
         }
     }

@@ -23,7 +23,8 @@ test('Android gradle version is 0.5.2-beta / 44 and loads production', () => {
   assert.match(main, /PRODUCTION_ORIGIN/);
   assert.match(main, /TSPAndroid\/0\.5\.2-beta/);
   assert.match(main, /CustomTabsIntent/);
-  assert.match(main, /accounts\.google\.com/);
+  const origins = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/TrustedOrigins.java'), 'utf8');
+  assert.match(origins, /accounts\.google\.com/);
   assert.match(main, /totalservicepro:\/\//);
   assert.match(main, /__tspRestoreAndroidSession/);
   assert.doesNotMatch(main, /MobileAds|AdView|play-services-ads/);

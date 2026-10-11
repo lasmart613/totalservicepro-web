@@ -65,8 +65,8 @@ Answer the form from what the app actually does. "Collected" means it leaves the
 | Name, email, phone, job title | Yes | Supabase (account and profile) | Account and team | Required to use the signed-in product |
 | Organization, customers, tickets, estimates, invoices, reports | Yes | Supabase | The service workflow | Created by the user |
 | Auth session (access and refresh token) | Yes, stored on device | Sent back to Supabase and repairplanet.net as Bearer | Stay signed in | Required |
-| Photos / files picked in the page | Yes, when the user picks one | Supabase Storage (logos and similar uploads) | Company logo and page file inputs | User chooses the file |
-| Camera | Not a declared permission | The system photo picker can take a picture if the user chooses it | No in-app camera API | User initiated |
+| Photos / files picked in the page | Yes, when the user submits one | Supabase Storage (logos and similar uploads) | Company logo and page file inputs. A picture taken with the system camera stays on the device until that submit | User chooses the file |
+| Camera | Not a declared permission. Do not declare `CAMERA` or business-card OCR | The system camera app (`ACTION_IMAGE_CAPTURE`) is offered beside the gallery when a file input accepts images. This app has no camera API and no OCR | Attach a photo the user chose to take | User initiated |
 | Microphone / voice | Yes when voice mode is on | On-device speech recognition. The transcript is sent to the assistant. Grok voice sends the answer **text** to Supabase `grok-tts`, which calls xAI. The raw mic audio is not uploaded for Grok. | Read an answer aloud and dictate a question | User starts voice mode |
 | Audio playback | The spoken answer is fetched as audio from `grok-tts` | xAI generates that audio on the server | Playback | Only in Grok voice mode |
 | Approximate or precise location | No location permission | A typed address can open `geo:` or Google Maps. The app does not read GPS. | Open a ticket address | User taps the address |
@@ -83,7 +83,7 @@ Use the IARC questionnaire in Play Console. Guidance from the product, not a pre
 - Category: utility / business tool. No violence, sexual content, or gambling.
 - Users can sign in and create business records.
 - The marketplace and directory let users post listings and contact details. Treat that as user-generated content if the questionnaire asks. There is no in-app chat moderation tool in the Android shell.
-- No unrestricted web browser. The shell only loads repairplanet.net, Supabase, Stripe, and the Google sign-in handoff.
+- No unrestricted web browser. The WebView stays on `https://repairplanet.net` and `https://www.repairplanet.net`, plus bundled `file:///android_asset/` pages. Hosts are compared with `Uri` exactly, https only. `totalservicepro.netlify.app` is not embedded. Google sign-in and every other main-frame link open in a Custom Tab or the external browser. `yljztfajyvjzqikxdddf.supabase.co` may load only as a subframe for this project's files. Session tokens and the JS bridge are not injected into that host or into any other-origin frame.
 - Online interaction exists (team invites, marketplace). Answer those questions yes.
 - Target audience is working technicians, not children.
 
@@ -103,7 +103,9 @@ From the source manifest, plus permissions the Play Billing library merges:
 | `com.android.vending.BILLING` | Yes (financial) | Merged from the Billing library. Subscriptions |
 | `com.photometrytools.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | No | AndroidX library signature permission |
 
-`CAMERA` is not declared. `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` are not declared. Biometric login uses the system biometric prompt and does not add a permission of its own.
+`CAMERA` is not declared. Photo capture uses the system camera app through `ACTION_IMAGE_CAPTURE` and `FileProvider`. The image leaves the device only when the user submits the form. There is no business-card OCR in this app. Do not declare OCR or `CAMERA` on the Data safety form.
+
+`ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` are not declared. Biometric login uses the system biometric prompt and does not add a permission of its own.
 
 ## Target API
 
@@ -134,7 +136,31 @@ A headless emulator capture is a candidate only. Larry should replace it with re
 
 ## Signing
 
-No upload key, `keystore.properties`, or Play listing was in this repo. The in-app copy still says the mobile apps are not in the stores. This launch uses a **new** upload key (alias `upload`, RSA 4096). The keystore and password are not in git. Larry must back up both and enroll the app in **Play App Signing** when he creates the listing. Losing the upload key means a new Play app id if App Signing was never enrolled.
+No upload key, `keystore.properties`, or Play listing was in this repo. This launch uses a **new** upload key (alias `upload`, RSA 4096). The keystore and password are not in git. Larry must back up both and enroll the app in **Play App Signing** when he creates the listing. Losing the upload key means a new Play app id if App Signing was never enrolled.
+
+The upload certificate SHA-256 is `51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9`. Play App Signing uses a different certificate. That SHA-256 exists only after Larry enrolls, so it is not in this build.
+
+## App Links statement for Web Dev
+
+`https://repairplanet.net/.well-known/assetlinks.json` returned **404** on 11 Oct 2026, so the https auth return does not verify as an App Link yet. Publish this file at that URL (and the same file on `https://www.repairplanet.net/.well-known/assetlinks.json` if www is a separate host). The source copy is `docs/android/assetlinks.json`:
+
+```json
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.photometrytools",
+      "sha256_cert_fingerprints": [
+        "51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9",
+        "REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256"
+      ]
+    }
+  }
+]
+```
+
+`REPLACE_WITH_PLAY_APP_SIGNING_CERT_SHA256` is a placeholder, not a certificate. Replace it with the Play App Signing cert SHA-256 from Play Console after enrollment, before publishing the file. Until then, publish only the upload fingerprint above. A non-fingerprint string in the live file can make the statement fail to verify.
 
 ## Steps only Larry can do in Play Console
 
