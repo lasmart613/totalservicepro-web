@@ -163,8 +163,10 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const handleLogout = async () => {
     setDropdownOpen(false);
     setMobileMenuOpen(false);
-    nav.clear();
+    // Revoke on the server first (needs the stored token), then clear local and
+    // nav state, then leave. signOutAndClearIdentity never throws.
     await signOutAndClearIdentity(supabase);
+    nav.clear();
     window.location.replace('/login');
   };
 

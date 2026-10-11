@@ -273,7 +273,7 @@ export default function Settings() {
 
           <div>
             <div className="font-semibold mb-2">{t('Account')}</div>
-            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">{t('Sign Out Everywhere')}</button>
+            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s, { scope: 'global' }); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">{t('Sign Out Everywhere')}</button>
           </div>
 
           <div className="pt-2 border-t border-[var(--border)]">
