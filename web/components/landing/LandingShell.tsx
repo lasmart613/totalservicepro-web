@@ -70,6 +70,9 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           <PublicLink href="/login">{t('Sign in')}</PublicLink>
           <PublicLink href="/signup">{t('Register for Total Service Pro')}</PublicLink>
           <PublicLink href="/forgot-password">{t('Forgot password')}</PublicLink>
+          <PublicLink href="/privacy">Privacy</PublicLink>
+          <PublicLink href="/terms">Terms</PublicLink>
+          <PublicLink href="/delete-account">Delete account</PublicLink>
         </div>
       </footer>
     </div>

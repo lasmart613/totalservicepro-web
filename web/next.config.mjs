@@ -41,6 +41,8 @@ const nextConfig = {
   async redirects() {
     // Belt-and-suspenders with middleware: old Android asset URLs
     return [
+      { source: '/privacy-policy', destination: '/privacy', permanent: true },
+      { source: '/legal/privacy', destination: '/privacy', permanent: true },
       { source: '/accepted_bids.html', destination: '/accepted-bids', permanent: false },
       { source: '/service_requests.html', destination: '/accepted-bids', permanent: false },
       { source: '/notifications.html', destination: '/notifications', permanent: false },

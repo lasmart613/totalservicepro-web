@@ -144,6 +144,13 @@ test('public locale links stay on the mirrored pages', () => {
   assert.equal(PUBLIC_PATHS.has('/calculators'), true);
   assert.equal(PUBLIC_PATHS.has('/business/job-costing'), false);
   assert.equal(PUBLIC_PATHS.has('/business/financial-reporting'), false);
+  assert.equal(PUBLIC_PATHS.has('/privacy'), false);
+  assert.equal(prefixLocaleHref('es', '/privacy'), '/privacy');
+  assert.equal(prefixLocaleHref('fr', '/delete-account'), '/delete-account');
+  assert.equal(prefixLocaleHref('de', '/terms'), '/terms');
+  assert.equal(prefixLocaleHref('es', '/privacy?from=footer'), '/privacy?from=footer');
+  assert.equal(hrefForLocale('/privacy', 'es'), '/privacy');
+  assert.equal(hrefForLocale('/fa/privacy', 'en'), '/privacy');
 });
 
 test('Hebrew and Arabic read right to left; Italian, German, and Portuguese stay left to right', () => {
