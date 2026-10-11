@@ -1045,6 +1045,7 @@ export type Database = {
           is_incomplete: boolean
           language: string | null
           model: string
+          published: boolean
           storage_path: string
           tier_required: string | null
           title: string
@@ -1062,6 +1063,7 @@ export type Database = {
           is_incomplete?: boolean
           language?: string | null
           model: string
+          published?: boolean
           storage_path: string
           tier_required?: string | null
           title: string
@@ -1079,6 +1081,7 @@ export type Database = {
           is_incomplete?: boolean
           language?: string | null
           model?: string
+          published?: boolean
           storage_path?: string
           tier_required?: string | null
           title?: string

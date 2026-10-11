@@ -4,6 +4,7 @@ import { MANUAL_PATH_NOT_COVERED, manualPathCovered, normalizeStoragePath, stora
 import { pdfInlineHeaders } from '@/lib/manuals';
 import { mayOpenManual, mayViewAiScopedManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
+import { isPublishedColumnMissing, isUnpublishedManual } from '@/lib/manual-published';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { pdfPathsForManual } from '@/lib/manual-search-index';
 
@@ -97,29 +98,60 @@ function catalogCoversPath(
   });
 }
 
+async function readCatalogQuery(
+  client: ReturnType<typeof createClient>,
+  columns: string,
+  apply: (query: any) => any,
+  includePublished: boolean,
+): Promise<{ row: any; unpublished: boolean; schemaMiss: boolean }> {
+  const selected = includePublished ? `${columns}, published` : columns;
+  const result = await apply(client.from('manuals').select(selected)).maybeSingle();
+  if (result.error && includePublished && isPublishedColumnMissing(result.error.message)) {
+    return { row: null, unpublished: false, schemaMiss: true };
+  }
+  if (!result.error && isUnpublishedManual(result.data)) {
+    return { row: null, unpublished: true, schemaMiss: false };
+  }
+  if (result.error) {
+    return {
+      row: null,
+      unpublished: false,
+      schemaMiss: /schema cache|column|does not exist|PGRST204/i.test(result.error.message || ''),
+    };
+  }
+  return { row: result.data || null, unpublished: false, schemaMiss: false };
+}
+
 async function loadCatalogRow(
   client: ReturnType<typeof createClient>,
   manualId?: string | number | null,
-  storagePath?: string | null
-) {
-  const select = `${MANUAL_LIBRARY_SELECT_WITH_KIND}, is_folder, entry_file_path, chapter_metadata`;
-  if (manualId != null) {
-    const full = await client.from('manuals').select(select).eq('id', manualId).maybeSingle();
-    if (!full.error) return full.data;
-    const min = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle();
-    return min.data;
+  storagePath?: string | null,
+): Promise<{ row: any; unpublished: boolean }> {
+  const rich = `${MANUAL_LIBRARY_SELECT_WITH_KIND}, is_folder, entry_file_path, chapter_metadata`;
+  const empty = { row: null, unpublished: false };
+  const apply = (query: any) => {
+    if (manualId != null) return query.eq('id', manualId);
+    if (storagePath) return query.eq('storage_path', storagePath);
+    return query;
+  };
+  if (manualId == null && !storagePath) return empty;
+
+  const full = await readCatalogQuery(client, rich, apply, true);
+  if (full.unpublished) return { row: null, unpublished: true };
+  if (full.row) return { row: full.row, unpublished: false };
+  if (full.schemaMiss) {
+    const legacy = await readCatalogQuery(client, rich, apply, false);
+    if (legacy.row) return { row: legacy.row, unpublished: false };
   }
-  if (storagePath) {
-    const full = await client.from('manuals').select(select).eq('storage_path', storagePath).maybeSingle();
-    if (!full.error) return full.data;
-    const min = await client
-      .from('manuals')
-      .select(MANUAL_LIBRARY_SELECT_MINIMAL)
-      .eq('storage_path', storagePath)
-      .maybeSingle();
-    return min.data;
+
+  const min = await readCatalogQuery(client, MANUAL_LIBRARY_SELECT_MINIMAL, apply, true);
+  if (min.unpublished) return { row: null, unpublished: true };
+  if (min.row) return { row: min.row, unpublished: false };
+  if (min.schemaMiss) {
+    const plain = await readCatalogQuery(client, MANUAL_LIBRARY_SELECT_MINIMAL, apply, false);
+    return { row: plain.row, unpublished: false };
   }
-  return null;
+  return empty;
 }
 
 function resolveCatalogPdfPath(
@@ -169,9 +201,17 @@ async function streamAiCatalogPdf(opts: {
 }): Promise<NextResponse | null> {
   if (!hasServiceRole()) return null;
   const admin = getSupabaseAdmin();
-  const catalog =
-    (await loadCatalogRow(admin, opts.manualId, opts.storagePath)) ||
-    (await loadCatalogRow(opts.userClient, opts.manualId, opts.storagePath));
+  const primary = await loadCatalogRow(admin, opts.manualId, opts.storagePath);
+  if (primary.unpublished) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+  const secondary = primary.row
+    ? primary
+    : await loadCatalogRow(opts.userClient, opts.manualId, opts.storagePath);
+  if (secondary.unpublished) {
+    return NextResponse.json({ error: 'not_found' }, { status: 404 });
+  }
+  const catalog = secondary.row;
   const storagePath = cleanStoragePath(catalog?.storage_path || opts.storagePath);
   if (
     !mayViewAiScopedManual({
@@ -227,6 +267,12 @@ export async function POST(req: NextRequest) {
     if (!access.page) {
       return NextResponse.json({ error: manualsForbiddenMessage(profile?.role, orgType) }, { status: 403 });
     }
+    if (hasServiceRole()) {
+      const hidden = await loadCatalogRow(getSupabaseAdmin(), manualId, storagePath || null);
+      if (hidden.unpublished) {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
+    }
     if (!access.service) {
       let catalog: {
         title?: string | null;
@@ -236,30 +282,17 @@ export async function POST(req: NextRequest) {
         doc_kind?: string | null;
       } | null = null;
       if (manualId != null) {
-        const full = await caller.supabase
-          .from('manuals')
-          .select(MANUAL_LIBRARY_SELECT_WITH_KIND)
-          .eq('id', manualId)
-          .maybeSingle();
-        catalog = full.error
-          ? (await caller.supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle())
-              .data
-          : full.data;
+        const loaded = await loadCatalogRow(caller.supabase, manualId, null);
+        if (loaded.unpublished) {
+          return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        }
+        catalog = loaded.row;
       } else if (storagePath) {
-        const full = await caller.supabase
-          .from('manuals')
-          .select(MANUAL_LIBRARY_SELECT_WITH_KIND)
-          .eq('storage_path', storagePath)
-          .maybeSingle();
-        catalog = full.error
-          ? (
-              await caller.supabase
-                .from('manuals')
-                .select(MANUAL_LIBRARY_SELECT_MINIMAL)
-                .eq('storage_path', storagePath)
-                .maybeSingle()
-            ).data
-          : full.data;
+        const loaded = await loadCatalogRow(caller.supabase, null, storagePath);
+        if (loaded.unpublished) {
+          return NextResponse.json({ error: 'not_found' }, { status: 404 });
+        }
+        catalog = loaded.row;
         if (!catalog) {
           catalog = { storage_path: storagePath, title: storagePath };
         }
@@ -289,6 +322,9 @@ export async function POST(req: NextRequest) {
       storagePath,
     });
     if (!resolved.url) {
+      if (resolved.json?.error === 'not_found') {
+        return NextResponse.json({ error: 'not_found' }, { status: 404 });
+      }
       if (resolved.json?.error === 'file_missing') {
         return NextResponse.json({ error: 'file_missing' }, { status: 404 });
       }

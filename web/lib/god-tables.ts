@@ -477,7 +477,7 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Manuals',
     group: 'catalog',
     description:
-      'Two libraries: Service Manuals (service / technical / parts) and Operators Manuals (operator / user / IFU). Set doc_kind so the book lands on the right shelf — Operators content must not sit on the Service shelf (e.g. Lyra 767). language is an ISO 639-1 code (default en); a trailing title suffix such as (German) is kept on the title. equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF (still indexable). PDF body text lives in manual_search_index; xai_collection_id marks rows already in the shared Grok collection.',
+      'Two libraries: Service Manuals (service / technical / parts) and Operators Manuals (operator / user / IFU). Set doc_kind so the book lands on the right shelf — Operators content must not sit on the Service shelf (e.g. Lyra 767). language is an ISO 639-1 code (default en); a trailing title suffix such as (German) is kept on the title. equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF (still indexable). published = false hides the row from the library, search, and AI assistant; this table still lists it. Toggle published on Manuals catalog. PDF body text lives in manual_search_index; xai_collection_id marks rows already in the shared Grok collection.',
     listColumns: [
       'id',
       'brand',
@@ -486,6 +486,7 @@ export const GOD_TABLES: GodTableDef[] = [
       'language',
       'equipment_type',
       'is_incomplete',
+      'published',
       'xai_collection_id',
       'storage_path',
       'created_at',

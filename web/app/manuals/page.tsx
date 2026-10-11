@@ -57,6 +57,12 @@ import {
   manualLanguageBadge,
   resolveManualLanguage,
 } from '@/lib/manual-language';
+import {
+  filterPublishedManuals,
+  isPublishedColumnMissing,
+  isUnpublishedManual,
+  wherePublished,
+} from '@/lib/manual-published';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -162,12 +168,20 @@ export default function ManualsLibrary() {
     setLoading(true);
     const supabase = getSupabaseClient();
     try {
-      const manRes = await fetchManualLibraryRows((select) =>
-        fetchAllPages<any>(async (from, to) =>
-          supabase.from('manuals').select(select).order('brand').order('title').range(from, to)
-        )
-      );
-      const catalogRows = manRes.data || [];
+      const loadCatalog = (publishedOnly: boolean) =>
+        fetchManualLibraryRows((select) =>
+          fetchAllPages<any>(async (from, to) =>
+            wherePublished(
+              supabase.from('manuals').select(select).order('brand').order('title'),
+              publishedOnly,
+            ).range(from, to)
+          )
+        );
+      let manRes = await loadCatalog(true);
+      if (manRes.error && isPublishedColumnMissing(manRes.error.message)) {
+        manRes = await loadCatalog(false);
+      }
+      const catalogRows = filterPublishedManuals(manRes.data || []);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -239,6 +253,7 @@ export default function ManualsLibrary() {
           .eq('organization_id', oId);
         if (!omErr && orgOwned) {
           orgOwned.forEach((row: any) => {
+            if (isUnpublishedManual(row.manuals)) return;
             if (row.manual_id != null) ids.add(String(row.manual_id));
             if (row.manuals) lib.push(row.manuals);
           });
@@ -251,6 +266,7 @@ export default function ManualsLibrary() {
         .select('manual_id, manuals(*)')
         .eq('user_id', user.id);
       (userOwned || []).forEach((row: any) => {
+        if (isUnpublishedManual(row.manuals)) return;
         if (row.manual_id != null) ids.add(String(row.manual_id));
         if (row.manuals && !lib.some((m) => String(m.id) === String(row.manuals.id))) {
           lib.push(row.manuals);

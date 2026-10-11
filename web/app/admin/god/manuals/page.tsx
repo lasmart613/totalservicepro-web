@@ -19,6 +19,15 @@ import {
 } from '@/lib/manual-catalog';
 import { manualLanguageLabel, resolveManualLanguage } from '@/lib/manual-language';
 
+type GodShelfManual = {
+  id: number;
+  brand: string | null;
+  model: string | null;
+  title: string | null;
+  doc_kind: string | null;
+  published: boolean;
+};
+
 export default function GodManualsCatalogPage() {
   const [ready, setReady] = useState(false);
   const [allowed, setAllowed] = useState(false);
@@ -33,6 +42,11 @@ export default function GodManualsCatalogPage() {
   const [reindexing, setReindexing] = useState(false);
   const [reindexNote, setReindexNote] = useState('');
   const [reindexManualId, setReindexManualId] = useState('');
+  const [shelf, setShelf] = useState<GodShelfManual[]>([]);
+  const [shelfQuery, setShelfQuery] = useState('');
+  const [shelfReady, setShelfReady] = useState(false);
+  const [publishedColumn, setPublishedColumn] = useState(true);
+  const [togglingId, setTogglingId] = useState<number | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -41,6 +55,29 @@ export default function GodManualsCatalogPage() {
       if (cancelled) return;
       setAllowed(!!god);
       setReady(true);
+      if (god) {
+        try {
+          const headers = await godAuthHeader();
+          const res = await fetch('/api/god/manuals/published', { headers });
+          const json = (await res.json().catch(() => ({}))) as {
+            ok?: boolean;
+            manuals?: GodShelfManual[];
+            publishedColumn?: boolean;
+            error?: string;
+          };
+          if (cancelled) return;
+          if (res.ok && json.ok) {
+            setShelf(json.manuals || []);
+            setPublishedColumn(json.publishedColumn !== false);
+          } else if (json.error) {
+            toast.error(json.error);
+          }
+        } catch (err) {
+          if (!cancelled) toast.error(err instanceof Error ? err.message : 'Could not load manuals');
+        } finally {
+          if (!cancelled) setShelfReady(true);
+        }
+      }
     })();
     return () => {
       cancelled = true;
@@ -58,6 +95,41 @@ export default function GodManualsCatalogPage() {
     () => catalogModelsForManufacturer(brand, equipmentType),
     [brand, equipmentType]
   );
+
+  const shelfMatches = useMemo(() => {
+    const q = shelfQuery.trim().toLowerCase();
+    if (!q) return shelf;
+    return shelf.filter((row) => {
+      const hay = [row.id, row.brand, row.model, row.title, row.doc_kind].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [shelf, shelfQuery]);
+
+  const unpublishedCount = shelf.filter((row) => row.published === false).length;
+
+  async function togglePublished(row: GodShelfManual) {
+    const next = row.published === false;
+    setTogglingId(row.id);
+    try {
+      const headers = await godAuthHeader();
+      const res = await fetch('/api/god/manuals/published', {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ id: row.id, published: next }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !json.ok) {
+        toast.error(json.error || 'Could not update published');
+        return;
+      }
+      setShelf((prev) => prev.map((item) => (item.id === row.id ? { ...item, published: next } : item)));
+      toast.success(next ? `Catalog id ${row.id} is published` : `Catalog id ${row.id} is unpublished`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Could not update published');
+    } finally {
+      setTogglingId(null);
+    }
+  }
 
   function applySeed(index: number) {
     const seed = BIOMED_MANUAL_SEEDS[index];
@@ -260,6 +332,68 @@ export default function GodManualsCatalogPage() {
       </p>
 
       <div className="card p-4 mb-6">
+        <div className="flex flex-wrap items-end justify-between gap-3 mb-3">
+          <div>
+            <div className="text-sm font-semibold">Published</div>
+            <p className="text-sm text-[var(--text3)] mt-1">
+              Unpublished manuals stay on this list and are marked. They are hidden from the
+              library, search, and the AI assistant. Only this God route can change the flag.
+            </p>
+          </div>
+          <div className="text-sm text-[var(--text3)]">
+            {shelf.length} manuals
+            {unpublishedCount ? (
+              <span className="ml-2 font-semibold text-amber-300">{unpublishedCount} unpublished</span>
+            ) : null}
+          </div>
+        </div>
+        <label className="block mb-3">
+          <span className="text-xs text-[var(--text3)]">Find by id, brand, model, or title</span>
+          <input
+            className="input w-full"
+            value={shelfQuery}
+            onChange={(e) => setShelfQuery(e.target.value)}
+            placeholder="764"
+          />
+        </label>
+        {!publishedColumn ? (
+          <p className="text-sm text-amber-300 mb-2">
+            The published column is not on this database yet. Every row is treated as published until the migration is applied.
+          </p>
+        ) : null}
+        {!shelfReady ? (
+          <p className="text-sm text-[var(--text3)]">Loading shelf…</p>
+        ) : shelfMatches.length === 0 ? (
+          <p className="text-sm text-[var(--text3)]">No manuals match.</p>
+        ) : (
+          <ul className="max-h-[28rem] overflow-y-auto divide-y divide-[var(--line)]">
+            {shelfMatches.map((row) => (
+              <li key={row.id} className="flex flex-wrap items-center gap-3 py-2">
+                <label className="flex items-center gap-2 text-sm shrink-0">
+                  <input
+                    type="checkbox"
+                    checked={row.published !== false}
+                    disabled={!publishedColumn || togglingId === row.id}
+                    onChange={() => togglePublished(row)}
+                  />
+                  Published
+                </label>
+                {row.published === false ? (
+                  <span className="text-xs font-semibold uppercase tracking-wide text-amber-300">Unpublished</span>
+                ) : (
+                  <span className="text-xs text-[var(--text3)]">Published</span>
+                )}
+                <span className="font-mono text-xs text-[var(--text3)]">#{row.id}</span>
+                <span className="text-sm">
+                  {[row.brand, row.model, row.title].filter(Boolean).join(' · ') || 'Untitled'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="card p-4 mb-6">
         <div className="text-sm font-semibold mb-2">PDF text index (library search)</div>
         <p className="text-sm text-[var(--text3)] mb-3">
           Two indexes: <strong className="text-[var(--text)]">Index missing PDF text</strong> fills{' '}
@@ -278,9 +412,10 @@ export default function GodManualsCatalogPage() {
           <code>is_incomplete</code> does not skip either action. Clear the Incomplete badge
           separately in God → Tables → manuals if the PDF is actually complete. Language is an
           ISO 639-1 code on the catalog row (default en). A title that ends in (German) is stored
-          as de and the suffix stays on the title. Neither index reads that column, so adding
+          as de and the suffix stays on the title.         Neither index reads that column, so adding
           language does not require a corpus re-index. A new non-English PDF still needs Index
-          and Attach, the same as an English one.
+          and Attach, the same as an English one. Unpublished rows stay in this list and can
+          still be reindexed. They drop out of the public shelf, search, and the AI assistant.
         </p>
         <div className="flex flex-wrap items-end gap-2 mb-2">
           <button

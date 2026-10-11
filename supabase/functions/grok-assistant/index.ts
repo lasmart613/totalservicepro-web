@@ -1870,6 +1870,18 @@ function excerptIndexedManualText(
     .slice(0, maxChars)
 }
 
+/** True unless the catalog row is explicitly unpublished. A missing column stays visible. */
+async function catalogManualIsPublished(db: any, id: number): Promise<boolean> {
+  const { data, error } = await db.from('manuals').select('id,published').eq('id', id).maybeSingle()
+  if (error) {
+    const msg = String(error.message || '')
+    if (/published/i.test(msg) && /schema cache|column|does not exist|PGRST204/i.test(msg)) return true
+    return true
+  }
+  if (!data) return true
+  return data.published !== false
+}
+
 async function searchIndexedManualText(
   db: any,
   manualId: number | null,
@@ -1880,6 +1892,7 @@ async function searchIndexedManualText(
 ): Promise<Retrieved | null> {
   const id = asManualId(manualId)
   if (id == null) return null
+  if (!(await catalogManualIsPublished(db, id))) return null
   const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', id).maybeSingle()
   if (error || !data?.search_text) return null
   const full = String(data.search_text)
@@ -1989,17 +2002,47 @@ function prefixGeneralGuidance(
 const MANUAL_ROW_COLUMNS =
   'id,title,brand,model,storage_path,entry_file_path,chapter_metadata,is_incomplete,is_folder'
 
-/** language is optional until the manuals migration is applied. A missing column must not drop the row. */
+function dropUnpublishedManualRows(result: {
+  data: any
+  error: { message?: string } | null
+  unpublished?: boolean
+}) {
+  if (!result || result.error) return result
+  const data = result.data
+  if (Array.isArray(data)) {
+    const kept = data.filter((row) => !row || row.published !== false)
+    const removed = data.some((row) => row && row.published === false)
+    return { ...result, data: kept, unpublished: removed && kept.length === 0 }
+  }
+  if (data && data.published === false) {
+    return { data: null, error: null, unpublished: true }
+  }
+  return result
+}
+
+/**
+ * language and published are optional until their migrations are applied.
+ * A missing column must not drop the row. Language does not exclude a manual.
+ * published = false does.
+ */
 async function selectManualRows(
   db: any,
   apply: (query: any) => Promise<{ data: any; error: { message?: string } | null }>
-): Promise<{ data: any; error: { message?: string } | null }> {
-  const first = await apply(db.from('manuals').select(`${MANUAL_ROW_COLUMNS},language`))
-  if (!first?.error) return first
-  if (/language/i.test(String(first.error.message || ''))) {
-    return apply(db.from('manuals').select(MANUAL_ROW_COLUMNS))
+): Promise<{ data: any; error: { message?: string } | null; unpublished?: boolean }> {
+  const attempts = [
+    `${MANUAL_ROW_COLUMNS},language,published`,
+    `${MANUAL_ROW_COLUMNS},published`,
+    `${MANUAL_ROW_COLUMNS},language`,
+    MANUAL_ROW_COLUMNS,
+  ]
+  let last: { data: any; error: { message?: string } | null } = { data: null, error: null }
+  for (const columns of attempts) {
+    last = await apply(db.from('manuals').select(columns))
+    if (!last?.error) return dropUnpublishedManualRows(last)
+    const msg = String(last.error.message || '')
+    if (!/schema cache|column|does not exist|PGRST204/i.test(msg)) return last
   }
-  return first
+  return last
 }
 
 const CATALOG_CITE_COLUMNS = 'id,title,brand,model,storage_path'
@@ -2034,8 +2077,21 @@ async function loadSiblingCatalog(
   if (!nameFilters.length) return empty
 
   let rows: CatalogCiteRow[] = []
-  const basic = await db.from('manuals').select(CATALOG_CITE_COLUMNS).or(nameFilters.join(',')).limit(20)
-  if (!basic?.error && Array.isArray(basic.data)) rows = basic.data
+  let basic = await db
+    .from('manuals')
+    .select(`${CATALOG_CITE_COLUMNS},published`)
+    .or(nameFilters.join(','))
+    .limit(20)
+  if (
+    basic?.error &&
+    /published/i.test(String(basic.error.message || '')) &&
+    /schema cache|column|does not exist|PGRST204/i.test(String(basic.error.message || ''))
+  ) {
+    basic = await db.from('manuals').select(CATALOG_CITE_COLUMNS).or(nameFilters.join(',')).limit(20)
+  }
+  if (!basic?.error && Array.isArray(basic.data)) {
+    rows = basic.data.filter((row: { published?: unknown }) => row?.published !== false)
+  }
 
   const indexes: Record<number, string> = {}
   const ids = [...new Set(rows.map((row) => Number(row.id)).filter((id) => id > 0))]
@@ -2203,8 +2259,9 @@ serve(async (req) => {
 
       let manualLabel = ''
       let manualMeta: any = null
-      const rawPath = String(manualPath || '').trim()
-      const rawId = asManualId(manualId)
+      let rawPath = String(manualPath || '').trim()
+      let rawId = asManualId(manualId)
+      let hideUnpublished = false
       const hintedTitle = String(body.manualTitle || body.title || '').trim()
       const hintedBrand = String(body.manualBrand || body.brand || '').trim()
       const hintedModel = String(body.manualModel || body.model || '').trim()
@@ -2215,28 +2272,27 @@ serve(async (req) => {
       // Language does not exclude a manual: a German PDF is still retrieved and cited.
       try {
         if (rawId != null) {
-          const { data } = await selectManualRows(db, (query) => query.eq('id', rawId).maybeSingle())
-          if (data) manualMeta = data
+          const found = await selectManualRows(db, (query) => query.eq('id', rawId).maybeSingle())
+          if (found.unpublished) hideUnpublished = true
+          else if (found.data) manualMeta = found.data
         }
-        if (!manualMeta) {
+        if (!manualMeta && !hideUnpublished) {
           const path = normalizeManualPath(rawPath)
           if (path) {
-            const { data: exact } = await selectManualRows(db, (query) =>
-              query.eq('storage_path', path).limit(8)
-            )
-            manualMeta = resolveManualFromCatalog(exact || [], { manualId: rawId, manualPath: path })
-            if (!manualMeta && path.includes('/')) {
+            const exact = await selectManualRows(db, (query) => query.eq('storage_path', path).limit(8))
+            if (exact.unpublished) hideUnpublished = true
+            else manualMeta = resolveManualFromCatalog(exact.data || [], { manualId: rawId, manualPath: path })
+            if (!manualMeta && !hideUnpublished && path.includes('/')) {
               const folder = path.replace(/\/[^/]+$/, '')
               if (folder && folder !== path) {
-                const { data: parent } = await selectManualRows(db, (query) =>
-                  query.eq('storage_path', folder).limit(8)
-                )
-                manualMeta = resolveManualFromCatalog(parent || [], { manualId: rawId, manualPath: path })
+                const parent = await selectManualRows(db, (query) => query.eq('storage_path', folder).limit(8))
+                if (parent.unpublished) hideUnpublished = true
+                else manualMeta = resolveManualFromCatalog(parent.data || [], { manualId: rawId, manualPath: path })
               }
             }
           }
         }
-        if (!manualMeta && rawId != null && (hintedTitle || hintedBrand || hintedModel)) {
+        if (!manualMeta && !hideUnpublished && rawId != null && (hintedTitle || hintedBrand || hintedModel)) {
           manualMeta = {
             id: rawId,
             title: hintedTitle,
@@ -2244,6 +2300,11 @@ serve(async (req) => {
             model: hintedModel,
             storage_path: rawPath,
           }
+        }
+        if (hideUnpublished) {
+          manualMeta = null
+          rawPath = ''
+          rawId = null
         }
         if (manualMeta) {
           if (!manualMeta.model && hintedModel) manualMeta.model = hintedModel

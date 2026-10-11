@@ -41,6 +41,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap } from "./page-map.ts";
+import { isUnpublishedManual, unpublishedManualDenial } from "./published.ts";
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -48,6 +49,29 @@ const cors: Record<string, string> = {
     "authorization, x-client-info, apikey, content-type, prefer",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
+
+function unpublishedManualResponse(row: { published?: unknown } | null | undefined) {
+  const denied = unpublishedManualDenial(row);
+  if (!denied) return null;
+  return json(denied.status, { error: denied.error });
+}
+
+async function queryManual(
+  admin: { from: (table: string) => any },
+  columns: string,
+  finish: (query: any) => Promise<{ data: any; error: { message?: string } | null }>,
+): Promise<{ data: any; error: { message?: string } | null }> {
+  const first = await finish(admin.from("manuals").select(`${columns},published`));
+  const message = String(first?.error?.message || "");
+  if (
+    first?.error &&
+    /published/i.test(message) &&
+    /column|schema cache|does not exist|PGRST204/i.test(message)
+  ) {
+    return finish(admin.from("manuals").select(columns));
+  }
+  return first;
+}
 
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
@@ -657,11 +681,11 @@ Deno.serve(async (req) => {
 
       let man: any = null;
       if (manualId) {
-        let q = await admin
-          .from("manuals")
-          .select("id, storage_path, title, is_folder, entry_file_path, chapter_metadata")
-          .eq("id", manualId)
-          .maybeSingle();
+        let q = await queryManual(
+          admin,
+          "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
+          (query) => query.eq("id", manualId).maybeSingle(),
+        );
         if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
           q = await admin
             .from("manuals")
@@ -678,6 +702,9 @@ Deno.serve(async (req) => {
         }
         man = q.data;
       }
+
+      const hidden = unpublishedManualResponse(man);
+      if (hidden) return hidden;
 
       const row = owned.get(manualId);
       const libraryOk = owned.has(manualId) || !!(ticketPath && pathIsOwned(owned, ticketPath));
@@ -832,13 +859,11 @@ Deno.serve(async (req) => {
     let man: any = null;
     // Resolve manual row by id or storage_path
     if (manualId) {
-      let q = await admin
-        .from("manuals")
-        .select(
-          "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
-        )
-        .eq("id", manualId)
-        .maybeSingle();
+      let q = await queryManual(
+        admin,
+        "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
+        (query) => query.eq("id", manualId).maybeSingle(),
+      );
       if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
         q = await admin
           .from("manuals")
@@ -857,13 +882,11 @@ Deno.serve(async (req) => {
       if (man?.storage_path && !storagePath) storagePath = cleanPath(man.storage_path);
     } else if (storagePath) {
       // Match by storage path (exact, then folder prefix)
-      let q = await admin
-        .from("manuals")
-        .select(
-          "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
-        )
-        .eq("storage_path", storagePath)
-        .maybeSingle();
+      let q = await queryManual(
+        admin,
+        "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
+        (query) => query.eq("storage_path", storagePath).maybeSingle(),
+      );
       if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
         q = await admin
           .from("manuals")
@@ -885,23 +908,24 @@ Deno.serve(async (req) => {
         while (parts.length > 1 && !man) {
           parts.pop();
           const prefix = parts.join("/");
-          let q2 = await admin
-            .from("manuals")
-            .select("id, storage_path, title, is_folder, entry_file_path, chapter_metadata")
-            .eq("storage_path", prefix)
-            .maybeSingle();
+          let q2 = await queryManual(
+            admin,
+            "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
+            (query) => query.eq("storage_path", prefix).maybeSingle(),
+          );
           if (q2.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q2.error.message || "")) {
-            q2 = await admin
-              .from("manuals")
-              .select("id, storage_path, title")
-              .eq("storage_path", prefix)
-              .maybeSingle();
+            q2 = await queryManual(admin, "id, storage_path, title", (query) =>
+              query.eq("storage_path", prefix).maybeSingle(),
+            );
           }
           if (q2.data) man = q2.data;
         }
       }
       if (man?.id) manualId = String(man.id);
     }
+
+    const hidden = unpublishedManualResponse(man);
+    if (hidden) return hidden;
 
     // ----- Add to company library (Browse All → claim a slot) -----
     if (wantAdd) {
@@ -1062,10 +1086,10 @@ Deno.serve(async (req) => {
 
       // 2) Sibling manuals rows under prefix
       if (!chapters.length && parentPath) {
-        const { data: kids } = await admin
-          .from("manuals")
-          .select("id, title, storage_path")
-          .like("storage_path", parentPath + "/%");
+        const kidsQuery = await queryManual(admin, "id, title, storage_path", (query) =>
+          query.like("storage_path", parentPath + "/%"),
+        );
+        const kids = (kidsQuery.data || []).filter((row: { published?: unknown }) => !isUnpublishedManual(row));
         for (const row of kids || []) {
           const p = cleanPath(row.storage_path);
           if (isPdfPath(p)) {
