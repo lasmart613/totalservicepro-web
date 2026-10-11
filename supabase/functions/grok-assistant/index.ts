@@ -17,6 +17,14 @@
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
+  effectiveAiTier,
+  loadAiCaller,
+  loadOwnedManuals,
+  manualScopeAllowed,
+  repairAiDecision,
+  type AiCaller,
+} from './ai-access.ts'
+import {
   asManualId,
   collectionSearchRequiresManualMatch,
   folderPrefixForAiAttach,
@@ -2257,6 +2265,19 @@ serve(async (req) => {
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
     const body = await req.json()
     const uid = user.id
+    // Repair AI is for service-company members only (web canAccessRepairAi),
+    // checked here before any manual, index or PDF read. attach-collection is
+    // God-only and keeps its own allowlist below.
+    let aiCaller: AiCaller | null = null
+    if (body?.action !== 'attach-collection') {
+      aiCaller = await loadAiCaller(db, uid)
+      const gate = repairAiDecision(aiCaller)
+      if (!gate.ok)
+        return new Response(JSON.stringify({ error: gate.error, message: gate.message }), {
+          status: gate.status,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+    }
     // .single() is HTTP 406 when the user has no subscriptions row. No row is the free tier.
     const { data: sub, error: subError } = await db
       .from('subscriptions')
@@ -2265,7 +2286,9 @@ serve(async (req) => {
       .maybeSingle()
     if (subError) console.error('[grok-assistant] subscription', subError.message)
     const tier = sub?.status === 'active' && sub?.tier ? sub.tier : 'free'
-    const effectiveTier = sub?.expires_at && new Date(sub.expires_at) < new Date() ? 'free' : tier
+    const userTier = sub?.expires_at && new Date(sub.expires_at) < new Date() ? 'free' : tier
+    // Caps follow the org's plan too (company Premium), not only a per-user row.
+    const effectiveTier = effectiveAiTier(userTier, aiCaller?.org ?? null)
     const limits = LIMITS[effectiveTier] || LIMITS.free
     const XAI_KEY = Deno.env.get('XAI_API_KEY')
     if (!XAI_KEY)
@@ -2368,6 +2391,18 @@ serve(async (req) => {
             brand && title.toLowerCase().startsWith(brand.toLowerCase()) ? title : `${brand} ${title}`.trim()
         }
       } catch (_e) {}
+
+      // A selected manual must be in the caller's library (organization_manuals /
+      // user_manuals) or the shared catalog, as in get-manual-url, before the
+      // index is read or any PDF is attached.
+      if (manualMeta) {
+        const owned = await loadOwnedManuals(db, uid, aiCaller?.orgId ?? null)
+        if (!manualScopeAllowed({ manualId: manualMeta.id ?? rawId, storagePath: manualMeta.storage_path || rawPath, owned }))
+          return new Response(
+            JSON.stringify({ error: 'manual_not_accessible', message: 'This manual is not in your library.' }),
+            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          )
+      }
 
       const nonSys = messages.filter((m: any) => m.role !== 'system')
       const lastUser = [...nonSys].reverse().find((m: any) => m.role === 'user')
