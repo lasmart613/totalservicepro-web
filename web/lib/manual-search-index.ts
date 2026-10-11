@@ -4,14 +4,14 @@
  */
 
 import {
-  clipManualSearchText,
   extractPdfPageSlice,
   looksLikePdf,
   manualPdfByteLimitError,
-  PDF_INDEX_TEXT_MAX,
   singleLetterTokenRatio,
   stampPdfPages,
+  storeIndexText,
   type PdfPageText,
+  type StoredIndexText,
 } from './manual-pdf-text.ts';
 import { containsTextImatch } from './email-match.ts';
 import { chapterMetadataWithPageCounts } from './manual-page-map.ts';
@@ -188,7 +188,14 @@ export type IndexedPdfPart = { path: string; pageCount: number };
 export async function extractManualBodyText(
   storage: StorageClient,
   manual: ManualIndexRow
-): Promise<{ text: string; files: number; fileCounts: IndexedPdfPart[]; skipped?: string; fatal?: string }> {
+): Promise<{
+  text: string;
+  files: number;
+  fileCounts: IndexedPdfPart[];
+  clip?: StoredIndexText;
+  skipped?: string;
+  fatal?: string;
+}> {
   const paths = await resolveManualPdfPaths(storage, manual);
   if (!paths.length) {
     return { text: '', files: 0, fileCounts: [], skipped: 'no_pdf_path' };
@@ -219,7 +226,8 @@ export async function extractManualBodyText(
     }
   }
   if (!files) return { text: '', files: 0, fileCounts, skipped: 'no_extractable_text' };
-  return { text: clipManualSearchText(chunks.join('\f'), PDF_INDEX_TEXT_MAX), files, fileCounts };
+  const stored = storeIndexText(chunks.join('\f'));
+  return { text: stored.text, files, fileCounts, clip: stored };
 }
 
 /** Store pdf.js page_count and page_start on the folder's chapter_metadata. */
@@ -270,7 +278,7 @@ export function mergeStampedManualPages(
   if (!max) return '';
   const pages: PdfPageText[] = [];
   for (let page = 1; page <= max; page++) pages.push({ page, text: map.get(page) || '' });
-  return clipManualSearchText(stampPdfPages(pages), PDF_INDEX_TEXT_MAX);
+  return storeIndexText(stampPdfPages(pages)).text;
 }
 
 export type ManualPageReindexResult = {
@@ -324,24 +332,33 @@ function stampedPageMap(existing: string): Map<number, string> {
 /**
  * Build the stamped row from a finished stage. A blank new page keeps text
  * the existing row already has for that physical page.
+ * `clipped` is true when the 1,500,000-character cap dropped a tail.
  */
-export function assembleReindexedManual(
+export function assembleReindexedManualStored(
   staged: Map<number, string>,
   totalPages: number,
   existing: string
-): string {
+): StoredIndexText {
   const prev = stampedPageMap(existing);
   let total = Math.max(0, Math.floor(Number(totalPages) || 0));
   for (const page of prev.keys()) if (page > total) total = page;
   for (const page of staged.keys()) if (page > total) total = page;
-  if (!total) return '';
+  if (!total) return { text: '', clipped: false, indexedPageMax: null };
   const pages: PdfPageText[] = [];
   for (let page = 1; page <= total; page++) {
     const fresh = (staged.get(page) || '').trim();
     const old = (prev.get(page) || '').trim();
     pages.push({ page, text: fresh || old });
   }
-  return clipManualSearchText(stampPdfPages(pages), PDF_INDEX_TEXT_MAX);
+  return storeIndexText(stampPdfPages(pages));
+}
+
+export function assembleReindexedManual(
+  staged: Map<number, string>,
+  totalPages: number,
+  existing: string
+): string {
+  return assembleReindexedManualStored(staged, totalPages, existing).text;
 }
 
 const DICTIONARY_WORDS = new Set(
@@ -634,10 +651,10 @@ export async function reindexManualPageRange(
 
   const existing = await readExistingSearchText(client, catalogId);
   if (!existing.ok) return { ...empty(existing.error), path, totalPages: sliced.total };
-  const merged = assembleReindexedManual(map, sliced.total, existing.text);
-  const refusal = searchTextWriteRefusal(existing.text, merged);
-  if (refusal) return { ...empty(refusal), path, totalPages: sliced.total, chars: merged.length };
-  const saved = await upsertManualSearchIndex(client, catalogId, merged);
+  const merged = assembleReindexedManualStored(map, sliced.total, existing.text);
+  const refusal = searchTextWriteRefusal(existing.text, merged.text);
+  if (refusal) return { ...empty(refusal), path, totalPages: sliced.total, chars: merged.text.length };
+  const saved = await upsertManualSearchIndex(client, catalogId, merged.text, merged);
   if (!saved.ok) return { ...empty(saved.error || 'upsert failed'), path, totalPages: sliced.total };
   await persistChapterPageCounts(
     client,
@@ -700,16 +717,28 @@ async function readExistingSearchText(db: TableClient, manualId: number): Promis
 export async function upsertManualSearchIndex(
   db: TableClient,
   manualId: string | number,
-  searchText: string
+  searchText: string,
+  clip?: StoredIndexText | null,
 ): Promise<{ ok: boolean; error?: string }> {
   const id = asManualCatalogId(manualId);
   if (id == null) return { ok: false, error: 'manual_id must be a bigint catalog id' };
+  const indexedAt = new Date().toISOString();
   const payload = {
     manual_id: id,
     search_text: searchText,
-    indexed_at: new Date().toISOString(),
+    indexed_at: indexedAt,
+    index_clipped: clip?.clipped === true,
+    indexed_page_max: clip?.indexedPageMax ?? null,
   };
-  const { error } = await db.from('manual_search_index').upsert(payload, { onConflict: 'manual_id' });
+  const first = await db.from('manual_search_index').upsert(payload, { onConflict: 'manual_id' });
+  let error = first?.error;
+  if (error && /index_clipped|indexed_page_max/i.test(String(error.message || ''))) {
+    const fallback = await db.from('manual_search_index').upsert(
+      { manual_id: id, search_text: searchText, indexed_at: indexedAt },
+      { onConflict: 'manual_id' },
+    );
+    error = fallback?.error;
+  }
   if (error) return { ok: false, error: error.message || 'upsert failed' };
   return { ok: true };
 }
@@ -738,7 +767,7 @@ export async function indexManualSearchText(
       skipped: 'kept_existing_index',
     };
   }
-  const saved = await upsertManualSearchIndex(client, catalogId, extracted.text || '');
+  const saved = await upsertManualSearchIndex(client, catalogId, extracted.text || '', extracted.clip);
   if (!extracted.text) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || saved.error };
   }

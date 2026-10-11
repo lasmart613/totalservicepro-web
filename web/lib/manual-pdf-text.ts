@@ -13,9 +13,9 @@ import { join, sep } from 'node:path';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 // @ts-ignore -- pdfjs-dist ships no type declarations for the worker entry
 import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
-import { clipManualSearchText } from './manual-search-text.ts';
+import { clipManualSearchText, clipManualSearchTextResult } from './manual-search-text.ts';
 
-export { clipManualSearchText, normalizeManualSearchText, MANUAL_SEARCH_TEXT_MAX } from './manual-search-text.ts';
+export { clipManualSearchText, clipManualSearchTextResult, normalizeManualSearchText, MANUAL_SEARCH_TEXT_MAX } from './manual-search-text.ts';
 
 /**
  * Largest PDF the manual indexer will load.
@@ -33,6 +33,14 @@ export const MANUAL_SEARCH_PDF_MAX_BYTES = 200 * 1024 * 1024;
 
 /** Keep late physical pages. A 161-page manual does not fit in the old 200k clip. */
 export const PDF_INDEX_TEXT_MAX = 1_500_000;
+
+/**
+ * Postgres char_length at or above this is the pre-marker 1,500,000-character
+ * slice. JS `String.length` counts UTF-16 units, so a sliced index can be a
+ * few code points under 1,500,000 (manual 73 is 1,499,994). The next full
+ * index is manual 58 at 1,386,147, so 1,499,000 matches only the clipped rows.
+ */
+export const INDEX_CLIPPED_CHAR_LENGTH = 1_499_000;
 
 /*
  * Node has no Web Worker, so pdf.js runs its worker in-process. Registering the
@@ -216,6 +224,33 @@ export async function extractPdfPages(
 export function stampPdfPages(pages: PdfPageText[]): string {
   if (!pages.length) return '';
   return pages.map((page) => `[[pdfpage:${page.page}]] ${page.text}`.trim()).join('\f');
+}
+
+/** Highest complete [[pdfpage:N]] stamp. A stamp cut by the clip does not count. */
+export function maxPdfPageStamp(text: string): number | null {
+  let max = 0;
+  for (const match of String(text || '').matchAll(/\[\[pdfpage:(\d{1,4})\]\]/g)) {
+    const n = Number(match[1]);
+    if (n > max) max = n;
+  }
+  return max || null;
+}
+
+export type StoredIndexText = {
+  text: string;
+  /** True only when the character cap dropped a tail, not when whitespace was normalized. */
+  clipped: boolean;
+  indexedPageMax: number | null;
+};
+
+/** Cap used when a search row is saved. `clipped` is the explicit index marker. */
+export function storeIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX): StoredIndexText {
+  const clipped = clipManualSearchTextResult(value, max);
+  return {
+    text: clipped.text,
+    clipped: clipped.clipped,
+    indexedPageMax: maxPdfPageStamp(clipped.text),
+  };
 }
 
 /**

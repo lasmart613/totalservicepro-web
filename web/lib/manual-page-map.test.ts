@@ -9,12 +9,14 @@ import {
   annotateChaptersWithPageMap,
   buildJoinedPageMap,
   chapterMetadataWithPageCounts,
+  gateJoinedPageMap,
+  joinedPageMapAllowed,
   resolveJoinedPage,
   viewerTargetForJoinedPage,
   type JoinedPagePart,
 } from './manual-page-map.ts';
 import { indexOrderPdfParts, indexOrderPdfPaths } from '../../supabase/functions/get-manual-url/chapters.ts';
-import { backfillStatus } from '../scripts/backfill-chapter-page-counts.mjs';
+import { backfillStatus, backfillWrites, indexRowClipped } from '../scripts/backfill-chapter-page-counts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FOLDER = 'shared/candela/VBeam2 (Perfecta, Aesthetica, or Platinum)';
@@ -272,7 +274,95 @@ test('a folder citation chip keeps the joined page and the viewer resolves it', 
   const script = readFileSync(join(here, '../scripts/backfill-chapter-page-counts.mjs'), 'utf8');
   assert.match(script, /--apply/);
   assert.match(script, /dry-run/);
+  assert.match(script, /index_clipped/);
+  assert.match(script, /1499000/);
   assert.equal(backfillStatus({ pageSum: 273, maxPage: 273, countedFiles: 52, expectedFiles: 52 }), 'match');
   assert.equal(backfillStatus({ pageSum: 1157, maxPage: 1018, countedFiles: 46, expectedFiles: 46 }), 'mismatch');
+  assert.equal(
+    backfillStatus({ pageSum: 1157, maxPage: 1018, countedFiles: 46, expectedFiles: 46, clipped: true }),
+    'clipped',
+  );
   assert.equal(backfillStatus({ pageSum: null, maxPage: 6, countedFiles: 0, expectedFiles: 3 }), 'skipped');
+  assert.equal(backfillWrites('match'), true);
+  assert.equal(backfillWrites('clipped'), true);
+  assert.equal(backfillWrites('mismatch'), false);
+  assert.equal(indexRowClipped('x'.repeat(1_500_000), undefined), true);
+  assert.equal(indexRowClipped('x'.repeat(1_499_994), undefined), true);
+  assert.equal(indexRowClipped('x'.repeat(1_386_147), undefined), false);
+  assert.equal(indexRowClipped('short', true), true);
+  assert.equal(indexRowClipped('x'.repeat(1_500_000), false), false);
+
+  const migration = readFileSync(
+    join(here, '../supabase/migrations/20261011_000911_manual_search_index_clip.sql'),
+    'utf8',
+  );
+  const rollback = readFileSync(
+    join(here, '../supabase/migrations/20261011_000911_manual_search_index_clip_rollback.sql'),
+    'utf8',
+  );
+  assert.match(migration, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(migration, /index_clipped/);
+  assert.match(migration, /indexed_page_max/);
+  assert.match(migration, /1499000/);
+  assert.doesNotMatch(migration, /\bCOMMIT\b/);
+  assert.doesNotMatch(migration, /CONCURRENTLY/);
+  assert.match(rollback, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(rollback, /DROP COLUMN IF EXISTS index_clipped/);
+  assert.match(rollback, /DROP COLUMN IF EXISTS indexed_page_max/);
+  assert.doesNotMatch(rollback, /\bCOMMIT\b/);
+  assert.doesNotMatch(rollback, /CONCURRENTLY/);
+  assert.match(edge, /gateJoinedPageMap/);
+  assert.match(edge, /index_clipped/);
+  assert.match(edge, /indexed_page_max/);
+});
+
+test('a clipped index keeps the page map when the stored sum covers every stamp', () => {
+  const parts: JoinedPagePart[] = [
+    { storagePath: 'a.pdf', pageCount: 800 },
+    { storagePath: 'b.pdf', pageCount: 357 },
+  ];
+  const plain = parts.map((part) => ({ storage_path: part.storagePath, title: part.storagePath }));
+  const mapped = annotateChaptersWithPageMap(plain, parts);
+  assert.equal(mapped.joinedPageCount, 1157);
+  const allowed = gateJoinedPageMap(mapped, { indexMax: 1018, clipped: true }, plain);
+  assert.equal(allowed.joinedPageCount, 1157);
+  assert.equal(allowed.chapters[1].pageStart, 801);
+  assert.equal(joinedPageMapAllowed({ pageSum: 1157, indexMax: 1018, clipped: true }), true);
+  assert.equal(joinedPageMapAllowed({ pageSum: 1621, indexMax: 1402, clipped: true }), true);
+  assert.equal(joinedPageMapAllowed({ pageSum: 1207, indexMax: 1090, clipped: true }), true);
+  assert.equal(joinedPageMapAllowed({ pageSum: 273, indexMax: 273, clipped: false }), true);
+  const hit = viewerTargetForJoinedPage(allowed.chapters, 801);
+  assert.equal(hit.kind, 'hit');
+  if (hit.kind !== 'hit') return;
+  assert.equal(hit.localPage, 1);
+  assert.equal(hit.storagePath, 'b.pdf');
+});
+
+test('an unclipped mismatch omits the page map', () => {
+  const parts: JoinedPagePart[] = [
+    { storagePath: 'a.pdf', pageCount: 800 },
+    { storagePath: 'b.pdf', pageCount: 357 },
+  ];
+  const plain = parts.map((part) => ({ storage_path: part.storagePath }));
+  const mapped = annotateChaptersWithPageMap(plain, parts);
+  const omitted = gateJoinedPageMap(mapped, { indexMax: 1018, clipped: false }, plain);
+  assert.equal(omitted.joinedPageCount, null);
+  assert.equal(omitted.chapters.some((chapter) => chapter.pageStart != null), false);
+  assert.equal(joinedPageMapAllowed({ pageSum: 1157, indexMax: 1018, clipped: false }), false);
+  assert.equal(viewerTargetForJoinedPage(omitted.chapters, 23).kind, 'unmapped');
+});
+
+test('a stored sum smaller than the index max omits the page map', () => {
+  const parts: JoinedPagePart[] = [
+    { storagePath: 'a.pdf', pageCount: 40 },
+    { storagePath: 'b.pdf', pageCount: 60 },
+  ];
+  const plain = parts.map((part) => ({ storage_path: part.storagePath }));
+  const mapped = annotateChaptersWithPageMap(plain, parts);
+  assert.equal(mapped.joinedPageCount, 100);
+  const omitted = gateJoinedPageMap(mapped, { indexMax: 120, clipped: true }, plain);
+  assert.equal(omitted.joinedPageCount, null);
+  assert.equal(omitted.chapters.some((chapter) => chapter.pageStart != null), false);
+  assert.equal(joinedPageMapAllowed({ pageSum: 100, indexMax: 120, clipped: true }), false);
+  assert.equal(joinedPageMapAllowed({ pageSum: 100, indexMax: 120, clipped: false }), false);
 });

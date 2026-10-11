@@ -112,6 +112,62 @@ export function resolveJoinedPage(
   return null;
 }
 
+/**
+ * The viewer map is the stored pdf.js sum. It is allowed when that sum equals
+ * the highest [[pdfpage:N]] still in the index, or when the index is known to
+ * be clipped and the sum still covers every stamp (pages before the clip use
+ * the same offsets). A sum below the index max is omitted: the index has
+ * pages the map does not account for. An unclipped sum above the max is
+ * omitted: the counts and the index disagree. A missing index max cannot
+ * disagree, so the stored map is kept.
+ */
+export function joinedPageMapAllowed(opts: {
+  pageSum: number | null;
+  indexMax: number | null;
+  clipped: boolean;
+}): boolean {
+  const pageSum = opts.pageSum;
+  const indexMax = opts.indexMax;
+  if (pageSum == null || !Number.isFinite(pageSum) || pageSum < 1) return false;
+  if (indexMax == null || !Number.isFinite(indexMax) || indexMax < 1) return true;
+  const sum = Math.floor(pageSum);
+  const max = Math.floor(indexMax);
+  if (sum < max) return false;
+  if (sum === max) return true;
+  return opts.clipped === true;
+}
+
+/**
+ * Drop pageStart/pageCount when joinedPageMapAllowed refuses the map.
+ * `plain` is the chapter list from before annotation.
+ */
+export function gateJoinedPageMap<T extends { pageStart?: number; pageCount?: number }>(
+  mapped: { chapters: T[]; joinedPageCount: number | null },
+  index: { indexMax: number | null; clipped: boolean },
+  plain: readonly T[],
+): { chapters: T[]; joinedPageCount: number | null } {
+  if (!mapped.joinedPageCount) return mapped;
+  if (
+    joinedPageMapAllowed({
+      pageSum: mapped.joinedPageCount,
+      indexMax: index.indexMax,
+      clipped: index.clipped,
+    })
+  ) {
+    return mapped;
+  }
+  return {
+    chapters: plain.map((chapter) => {
+      if (!chapter || typeof chapter !== 'object') return chapter;
+      const copy = { ...chapter };
+      delete copy.pageStart;
+      delete copy.pageCount;
+      return copy;
+    }),
+    joinedPageCount: null,
+  };
+}
+
 export function annotateChaptersWithPageMap<T extends { storage_path: string }>(
   chapters: readonly T[],
   parts: readonly JoinedPagePart[],
