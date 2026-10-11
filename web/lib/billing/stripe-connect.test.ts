@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   authorizeConnectCallback,
   buyerConnectBlockedMessage,
+  authorizeConnectOrg,
   canStartStripeConnect,
   checkoutKind,
   decideSellerChargeRoute,
@@ -25,6 +26,7 @@ import {
   webhookCheckoutAction,
   emptyPayoutAccount,
 } from './stripe-connect.ts';
+import { NextRequest } from 'next/server';
 import {
   completeOnboardingReturn,
   connectLinkUrls,
@@ -33,7 +35,9 @@ import {
   isMissingStripeColumn,
   loadSellerPayoutAccount,
   refreshOnboardingFromState,
+  StripeConnectApiError,
 } from './stripe-connect-api.ts';
+import { runStripeConnectGet, runStripeConnectPost } from '../../app/api/billing/stripe/connect/route.ts';
 import { buildPartCheckoutSessionFields } from './stripe-marketplace.ts';
 import {
   buildInvoiceCheckoutParams,
@@ -276,19 +280,74 @@ test('invoice checkout is not a parts order, and payout destination is stored on
   });
 });
 
-test('only admin and company_admin can start Connect, and the return path stays on-site', () => {
+test('admins and a parts_supplier of their own supplier org can start Connect', () => {
   assert.equal(canStartStripeConnect('admin', 'service_company'), true);
   assert.equal(canStartStripeConnect('company_admin', 'service_company'), true);
   assert.equal(canStartStripeConnect('company_admin', 'parts_supplier'), true);
   assert.equal(canStartStripeConnect('admin', 'vendor'), true);
+  assert.equal(canStartStripeConnect('parts_supplier', 'parts_supplier'), true);
+  assert.equal(canStartStripeConnect('parts_supplier', 'vendor'), true);
   assert.equal(canStartStripeConnect('billing_manager', 'service_company'), false);
   assert.equal(canStartStripeConnect('service_manager', 'service_company'), false);
-  assert.equal(canStartStripeConnect('parts_supplier', 'parts_supplier'), false);
   assert.equal(canStartStripeConnect('parts_supplier', 'service_company'), false);
+  assert.equal(canStartStripeConnect('parts_supplier', 'laser_clinic'), false);
+  assert.equal(canStartStripeConnect('parts_supplier', 'medical spa'), false);
   assert.equal(canStartStripeConnect('supplier', 'vendor'), false);
   assert.equal(canStartStripeConnect('fse', 'service_company'), false);
+  assert.equal(canStartStripeConnect('fse', 'parts_supplier'), false);
   assert.equal(canStartStripeConnect('owner', 'laser_clinic'), false);
-  const hidden = connectStatusPayload({
+  assert.equal(canStartStripeConnect('owner', 'service_company'), false);
+  assert.equal(canStartStripeConnect('company_admin', 'laser_clinic'), false);
+  const ownSupplier = authorizeConnectOrg({
+    membershipRole: 'parts_supplier',
+    orgType: 'parts_supplier',
+    ownOrgId: 2617,
+    targetOrgId: 2617,
+  });
+  assert.equal(ownSupplier.ok, true);
+  const otherOrg = authorizeConnectOrg({
+    membershipRole: 'parts_supplier',
+    orgType: 'parts_supplier',
+    ownOrgId: 2617,
+    targetOrgId: 4,
+  });
+  assert.equal(otherOrg.ok, false);
+  if (!otherOrg.ok) assert.equal(otherOrg.status, 403);
+  const nonSupplier = authorizeConnectOrg({
+    membershipRole: 'parts_supplier',
+    orgType: 'service_company',
+    ownOrgId: 2617,
+  });
+  assert.equal(nonSupplier.ok, false);
+  if (!nonSupplier.ok) assert.equal(nonSupplier.status, 403);
+  const fse = authorizeConnectOrg({
+    membershipRole: 'fse',
+    orgType: 'service_company',
+    ownOrgId: 4,
+  });
+  assert.equal(fse.ok, false);
+  if (!fse.ok) assert.equal(fse.status, 403);
+  const companyAdmin = authorizeConnectOrg({
+    membershipRole: 'company_admin',
+    orgType: 'service_company',
+    ownOrgId: 4,
+  });
+  assert.equal(companyAdmin.ok, true);
+  const companyAdminNamesOther = authorizeConnectOrg({
+    membershipRole: 'company_admin',
+    orgType: 'service_company',
+    ownOrgId: 4,
+    targetOrgId: 2617,
+  });
+  assert.equal(companyAdminNamesOther.ok, true);
+  const owner = authorizeConnectOrg({
+    membershipRole: 'owner',
+    orgType: 'laser_clinic',
+    ownOrgId: 8,
+  });
+  assert.equal(owner.ok, false);
+  if (!owner.ok) assert.equal(owner.status, 403);
+  const techCaller = {
     userId: 'tech',
     email: null,
     role: 'billing_manager',
@@ -298,16 +357,26 @@ test('only admin and company_admin can start Connect, and the return path stays 
     orgEmail: null,
     account: emptyPayoutAccount(),
     schemaReady: true,
-  });
+  };
+  const hidden = connectStatusPayload(techCaller);
   assert.equal(hidden.eligible, false);
   assert.equal(hidden.canStart, false);
   const supplierMember = connectStatusPayload({
-    ...hidden,
+    ...techCaller,
     userId: 'supplier',
     role: 'parts_supplier',
     orgType: 'parts_supplier',
-  } as never);
-  assert.equal(supplierMember.eligible, false);
+  });
+  assert.equal(supplierMember.eligible, true);
+  assert.equal(supplierMember.canStart, true);
+  const supplierElsewhere = connectStatusPayload({
+    ...techCaller,
+    userId: 'supplier',
+    role: 'parts_supplier',
+    orgType: 'service_company',
+  });
+  assert.equal(supplierElsewhere.eligible, false);
+  assert.equal(supplierElsewhere.canStart, false);
   const adminCard = connectStatusPayload({
     userId: 'admin',
     email: null,
@@ -670,7 +739,10 @@ test('Connect return and refresh require the admin who started onboarding', asyn
   process.env.CONTEXT = 'dev';
   const state = { orgId: '4', accountId: 'acct_shop123', next: '/company', userId: 'user-admin' };
   const token = signConnectState(state, secret);
+  const supplierState = { orgId: '2617', accountId: 'acct_shop123', next: '/company', userId: 'user-supplier' };
+  const supplierToken = signConnectState(supplierState, secret);
   const admin = { userId: 'user-admin', orgId: 4, role: 'company_admin', orgType: 'service_company' };
+  const supplier = { userId: 'user-supplier', orgId: 2617, role: 'parts_supplier', orgType: 'parts_supplier' };
   assert.equal(authorizeConnectCallback(state, null).ok, false);
   if (!authorizeConnectCallback(state, null).ok) {
     assert.equal(authorizeConnectCallback(state, null).reason, 'signed_out');
@@ -682,7 +754,25 @@ test('Connect return and refresh require the admin who started onboarding', asyn
   assert.equal(tech.ok, false);
   if (!tech.ok) assert.equal(tech.reason, 'not_admin');
   assert.equal(authorizeConnectCallback(state, { ...admin, role: 'fse', userId: 'user-fse' }).ok, false);
-  assert.equal(authorizeConnectCallback(state, { ...admin, role: 'parts_supplier', orgType: 'parts_supplier' }).ok, false);
+  assert.equal(
+    authorizeConnectCallback(state, { ...admin, role: 'parts_supplier', orgType: 'service_company' }).ok,
+    false
+  );
+  const supplierOwn = authorizeConnectCallback(state, {
+    ...admin,
+    role: 'parts_supplier',
+    orgType: 'parts_supplier',
+  });
+  assert.equal(supplierOwn.ok, true);
+  const supplierOther = authorizeConnectCallback(state, {
+    ...admin,
+    orgId: 2617,
+    userId: 'user-supplier',
+    role: 'parts_supplier',
+    orgType: 'parts_supplier',
+  });
+  assert.equal(supplierOther.ok, false);
+  if (!supplierOther.ok) assert.equal(supplierOther.reason, 'other_org');
   assert.equal(authorizeConnectCallback(state, admin).ok, true);
 
   let calls = 0;
@@ -720,6 +810,27 @@ test('Connect return and refresh require the admin who started onboarding', asyn
         }),
       /company admin/
     );
+    await assert.rejects(
+      () => completeOnboardingReturn(token, supplier, writer as never),
+      (err: unknown) => err instanceof StripeConnectApiError && err.status === 403
+    );
+    await assert.rejects(
+      () => completeOnboardingReturn(supplierToken, { ...supplier, role: 'fse' }, writer as never),
+      (err: unknown) => err instanceof StripeConnectApiError && err.status === 403
+    );
+    await assert.rejects(
+      () =>
+        completeOnboardingReturn(
+          supplierToken,
+          { ...supplier, orgType: 'service_company' },
+          writer as never
+        ),
+      (err: unknown) => err instanceof StripeConnectApiError && err.status === 403
+    );
+    await assert.rejects(
+      () => refreshOnboardingFromState(supplierToken, 'https://repairplanet.example', { ...supplier, orgId: 4 }),
+      (err: unknown) => err instanceof StripeConnectApiError && err.status === 403
+    );
     assert.equal(calls, 0);
 
     globalThis.fetch = (async (url: unknown) => {
@@ -756,6 +867,10 @@ test('Connect return and refresh require the admin who started onboarding', asyn
     assert.equal(updates[0].stripe_account_id, 'acct_shop123');
     assert.equal(updates[0].stripe_charges_enabled, true);
     assert.equal(calls, 1);
+    const supplierDone = await completeOnboardingReturn(supplierToken, supplier, savingWriter as never);
+    assert.equal(supplierDone.connected, true);
+    assert.equal(updates.length, 2);
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = original;
     if (previousSecret == null) delete process.env.STRIPE_SECRET_KEY;
@@ -845,5 +960,226 @@ test('a Netlify deploy-hash host still yields repairplanet.net for Connect retur
     assert.match(src, /connectSiteOrigin\(req\)/);
     assert.doesNotMatch(src, /nextUrl\.origin/);
     assert.doesNotMatch(src, /x-forwarded-host/);
+  }
+  assert.match(onboarding, /orgId: caller\.orgId/);
+  assert.match(onboarding, /getOrgRole|loadConnectCaller/);
+});
+
+const STRIPE_SECRET_ENV = ['STRIPE_SECRET_KEY', 'STRIPE_SECRET'] as const;
+
+function connectRequest(method: 'GET' | 'POST', body?: Record<string, unknown>) {
+  return new NextRequest('https://repairplanet.net/api/billing/stripe/connect', {
+    method,
+    headers: { authorization: 'Bearer session-token', 'content-type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+}
+
+function connectClients(input: {
+  profileOrgId: number;
+  profileRole: string;
+  memberships: Array<{ organization_id: number; role: string }>;
+  orgs: Array<{ id: number; type: string }>;
+}) {
+  const userId = 'user-supplier';
+  let writes = 0;
+  function chain(table: string, which: 'user' | 'admin') {
+    const filters: Record<string, unknown> = {};
+    const api = {
+      select() {
+        return api;
+      },
+      eq(column: string, value: unknown) {
+        filters[column] = value;
+        return api;
+      },
+      maybeSingle: async () => {
+        if (table === 'user_profiles') {
+          if (which === 'user') {
+            return {
+              data: {
+                id: userId,
+                role: input.profileRole,
+                organization_id: input.profileOrgId,
+                active_organization_id: null,
+              },
+              error: null,
+            };
+          }
+          return { data: { id: userId, role: input.profileRole }, error: null };
+        }
+        if (table === 'organization_memberships') {
+          const row = input.memberships.find((item) => String(item.organization_id) === String(filters.organization_id ?? ''));
+          if (!row) return { data: null, error: null };
+          return { data: { user_id: userId, organization_id: row.organization_id, role: row.role }, error: null };
+        }
+        if (table === 'organizations') {
+          const org = input.orgs.find((item) => String(item.id) === String(filters.id ?? ''));
+          if (!org) return { data: null, error: null };
+          return {
+            data: {
+              id: org.id,
+              type: org.type,
+              name: 'Org',
+              email: null,
+              created_by: userId,
+              stripe_account_id: null,
+              stripe_charges_enabled: false,
+              stripe_payouts_enabled: false,
+              stripe_details_submitted: false,
+            },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      },
+      update() {
+        writes += 1;
+        return { eq: async () => ({ error: null }) };
+      },
+    };
+    return api;
+  }
+  return {
+    writes: () => writes,
+    deps: {
+      hasServiceRole: () => true,
+      userClient: {
+        auth: {
+          getUser: async () => ({ data: { user: { id: userId, email: 'founder@supplier.test' } }, error: null }),
+        },
+        from: (table: string) => chain(table, 'user'),
+      },
+      adminClient: {
+        from: (table: string) => chain(table, 'admin'),
+      },
+    },
+  };
+}
+
+test('parts_supplier Connect is their own supplier org, and other callers stay put', async () => {
+  const previous = new Map<string, string | undefined>();
+  for (const key of STRIPE_SECRET_ENV) previous.set(key, process.env[key]);
+  for (const key of STRIPE_SECRET_ENV) delete process.env[key];
+  const supplierOrg = { id: 2617, type: 'parts_supplier' };
+  const serviceOrg = { id: 4, type: 'service_company' };
+  const clinicOrg = { id: 8, type: 'laser_clinic' };
+  try {
+    const own = connectClients({
+      profileOrgId: 2617,
+      profileRole: 'fse',
+      memberships: [{ organization_id: 2617, role: 'parts_supplier' }],
+      orgs: [supplierOrg],
+    });
+    const started = await runStripeConnectPost(connectRequest('POST', { returnTo: '/company' }), own.deps);
+    assert.equal(started.status, 503);
+    assert.equal(((await started.json()) as { code?: string }).code, 'stripe_unavailable');
+    assert.equal(own.writes(), 0);
+    const status = await runStripeConnectGet(connectRequest('GET'), own.deps);
+    assert.equal(status.status, 200);
+    const statusBody = (await status.json()) as { eligible?: boolean; canStart?: boolean };
+    assert.equal(statusBody.eligible, true);
+    assert.equal(statusBody.canStart, true);
+
+    const namedOther = connectClients({
+      profileOrgId: 2617,
+      profileRole: 'parts_supplier',
+      memberships: [{ organization_id: 2617, role: 'parts_supplier' }],
+      orgs: [supplierOrg, serviceOrg],
+    });
+    const other = await runStripeConnectPost(connectRequest('POST', { organizationId: 4 }), namedOther.deps);
+    assert.equal(other.status, 403);
+    assert.equal(namedOther.writes(), 0);
+
+    const profileOther = connectClients({
+      profileOrgId: 4,
+      profileRole: 'parts_supplier',
+      memberships: [{ organization_id: 2617, role: 'parts_supplier' }],
+      orgs: [supplierOrg, serviceOrg],
+    });
+    const pointed = await runStripeConnectPost(connectRequest('POST', { returnTo: '/company' }), profileOther.deps);
+    assert.equal(pointed.status, 403);
+
+    const nonSupplier = connectClients({
+      profileOrgId: 2617,
+      profileRole: 'parts_supplier',
+      memberships: [{ organization_id: 2617, role: 'parts_supplier' }],
+      orgs: [{ id: 2617, type: 'service_company' }],
+    });
+    const wrongType = await runStripeConnectPost(connectRequest('POST'), nonSupplier.deps);
+    assert.equal(wrongType.status, 403);
+
+    const profileGrant = connectClients({
+      profileOrgId: 2617,
+      profileRole: 'parts_supplier',
+      memberships: [{ organization_id: 2617, role: 'fse' }],
+      orgs: [supplierOrg],
+    });
+    const fromProfile = await runStripeConnectPost(connectRequest('POST'), profileGrant.deps);
+    assert.equal(fromProfile.status, 403);
+
+    const fse = connectClients({
+      profileOrgId: 4,
+      profileRole: 'company_admin',
+      memberships: [{ organization_id: 4, role: 'fse' }],
+      orgs: [serviceOrg],
+    });
+    const tech = await runStripeConnectPost(connectRequest('POST'), fse.deps);
+    assert.equal(tech.status, 403);
+
+    const shopAdmin = connectClients({
+      profileOrgId: 4,
+      profileRole: 'fse',
+      memberships: [{ organization_id: 4, role: 'company_admin' }],
+      orgs: [serviceOrg],
+    });
+    const adminStart = await runStripeConnectPost(connectRequest('POST', { returnTo: '/company' }), shopAdmin.deps);
+    assert.equal(adminStart.status, 503);
+    assert.equal(((await adminStart.json()) as { code?: string }).code, 'stripe_unavailable');
+
+    const adminElsewhere = connectClients({
+      profileOrgId: 4,
+      profileRole: 'company_admin',
+      memberships: [{ organization_id: 4, role: 'company_admin' }],
+      orgs: [serviceOrg],
+    });
+    const adminNamed = await runStripeConnectPost(
+      connectRequest('POST', { organizationId: 2617, returnTo: '/company' }),
+      adminElsewhere.deps
+    );
+    assert.equal(adminNamed.status, 503);
+
+    const supplierAdmin = connectClients({
+      profileOrgId: 2617,
+      profileRole: 'fse',
+      memberships: [{ organization_id: 2617, role: 'company_admin' }],
+      orgs: [supplierOrg],
+    });
+    const supplierAdminStart = await runStripeConnectPost(connectRequest('POST'), supplierAdmin.deps);
+    assert.equal(supplierAdminStart.status, 503);
+
+    const clinic = connectClients({
+      profileOrgId: 8,
+      profileRole: 'owner',
+      memberships: [{ organization_id: 8, role: 'owner' }],
+      orgs: [clinicOrg],
+    });
+    const ownerStart = await runStripeConnectPost(connectRequest('POST'), clinic.deps);
+    assert.equal(ownerStart.status, 403);
+
+    const ownerShop = connectClients({
+      profileOrgId: 4,
+      profileRole: 'owner',
+      memberships: [{ organization_id: 4, role: 'owner' }],
+      orgs: [serviceOrg],
+    });
+    const ownerShopStart = await runStripeConnectPost(connectRequest('POST'), ownerShop.deps);
+    assert.equal(ownerShopStart.status, 403);
+  } finally {
+    for (const key of STRIPE_SECRET_ENV) {
+      const value = previous.get(key);
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
   }
 });

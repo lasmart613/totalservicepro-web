@@ -9,11 +9,42 @@ import {
   saveOrgStripeAccount,
   StripeConnectApiError,
 } from '@/lib/billing/stripe-connect-api';
-import { canStartStripeConnect, safeConnectNext } from '@/lib/billing/stripe-connect';
+import { authorizeConnectOrg, requestedConnectOrgId, safeConnectNext } from '@/lib/billing/stripe-connect';
 
 export const dynamic = 'force-dynamic';
 
-async function callerFrom(req: NextRequest) {
+type ConnectUser = { id: string; email?: string | null };
+
+export type StripeConnectDeps = {
+  userClient?: {
+    auth: {
+      getUser: (token?: string) => Promise<{ data: { user: ConnectUser | null }; error: unknown }>;
+    };
+    from: (table: string) => any;
+  };
+  adminClient?: { from: (table: string) => any };
+  hasServiceRole?: () => boolean;
+};
+
+async function callerFrom(req: NextRequest, deps: StripeConnectDeps = {}) {
+  if (deps.userClient) {
+    const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
+    if (!token) return { error: 'Sign in required', status: 401 as const, code: 'signed_out' };
+    const { data, error } = await deps.userClient.auth.getUser(token);
+    if (error || !data.user?.id) return { error: 'Invalid session', status: 401 as const, code: 'signed_out' };
+    const { data: profile } = await deps.userClient
+      .from('user_profiles')
+      .select('role, organization_id, active_organization_id')
+      .eq('id', data.user.id)
+      .maybeSingle();
+    return loadConnectCaller({
+      userId: data.user.id,
+      email: data.user.email,
+      profile,
+      adminClient: deps.adminClient,
+      serviceRoleReady: deps.hasServiceRole ? deps.hasServiceRole() : undefined,
+    });
+  }
   const loaded = await loadBillingCaller(req);
   if ('error' in loaded) return loaded;
   const { data: profile } = await loaded.supabase
@@ -30,8 +61,12 @@ async function callerFrom(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  return runStripeConnectGet(req);
+}
+
+export async function runStripeConnectGet(req: NextRequest, deps: StripeConnectDeps = {}) {
   try {
-    const caller = await callerFrom(req);
+    const caller = await callerFrom(req, deps);
     if ('error' in caller && 'status' in caller) {
       return NextResponse.json({ error: caller.error, code: caller.code }, { status: caller.status });
     }
@@ -45,19 +80,30 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  return runStripeConnectPost(req);
+}
+
+export async function runStripeConnectPost(req: NextRequest, deps: StripeConnectDeps = {}) {
   try {
-    const caller = await callerFrom(req);
+    const caller = await callerFrom(req, deps);
     if ('error' in caller && 'status' in caller) {
       return NextResponse.json({ error: caller.error, code: caller.code }, { status: caller.status });
     }
     if ('error' in caller) return caller.error;
-    if (!canStartStripeConnect(caller.role, caller.orgType)) {
+    const body = await req.json().catch(() => ({}));
+    const access = authorizeConnectOrg({
+      membershipRole: caller.role,
+      orgType: caller.orgType,
+      ownOrgId: caller.orgId,
+      targetOrgId: requestedConnectOrgId(body),
+    });
+    if (!access.ok) {
       return NextResponse.json(
         {
           error: 'A company admin needs to connect Stripe for this organization.',
           code: 'forbidden',
         },
-        { status: 403 }
+        { status: access.status }
       );
     }
     if (!caller.schemaReady) {
@@ -70,7 +116,6 @@ export async function POST(req: NextRequest) {
         { status: 503 }
       );
     }
-    const body = await req.json().catch(() => ({}));
     const next = safeConnectNext(typeof body?.returnTo === 'string' ? body.returnTo : '/company');
     const account = await ensureExpressAccount({
       orgId: caller.orgId,
