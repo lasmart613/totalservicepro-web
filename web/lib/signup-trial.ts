@@ -22,8 +22,8 @@ export const SIGNUP_TRIAL_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** Existing-org read for the grant. trial_granted_at and created_at are required for a grant. */
 export const FOUNDER_ORG_COLUMNS =
   'id, type, created_by, created_at, is_premium, premium_until, premium_grant, trial_granted_at';
-/** Pre-000915 read: still links the founder, never grants. */
-export const FOUNDER_ORG_COLUMNS_LEGACY = 'id, type, created_by, is_premium, premium_until, premium_grant';
+/** Pre-000915 read: still links the founder, never grants. created_at feeds the founder claim check (000916). */
+export const FOUNDER_ORG_COLUMNS_LEGACY = 'id, type, created_by, created_at, is_premium, premium_until, premium_grant';
 
 export type FounderOrgRow = {
   id: number | string;
