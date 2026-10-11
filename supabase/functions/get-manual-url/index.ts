@@ -425,9 +425,11 @@ async function listStorageLevel(
 }
 
 /**
- * One metadata check for the exact object. Info first (no bytes). A clear
- * "Object not found" is missing. Anything else falls back to one parent-folder
- * list filtered to that filename — still not a download.
+ * One metadata check for the exact object, without a 4xx for a missing file.
+ * List the parent folder filtered to the filename first: storage answers 200
+ * with an empty list when the object is gone, so a stale path does not put a
+ * 400 in the API logs. Only when that list itself fails do we fall back to
+ * object/info (no bytes). Never a download.
  */
 async function probeStorageObject(
   supabaseUrl: string,
@@ -436,27 +438,6 @@ async function probeStorageObject(
 ): Promise<StorageProbe> {
   const path = cleanPath(objectPath);
   if (!path || !isStoredFilePath(path)) return "no";
-  const encoded = path.split("/").map(encodeURIComponent).join("/");
-  const infoUrl =
-    `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/info/manuals/${encoded}`;
-  try {
-    const res = await fetch(infoUrl, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${serviceKey}`,
-        apikey: serviceKey,
-      },
-    });
-    const body = await res.text();
-    if (res.ok) return "yes";
-    if (/object not found/i.test(body)) return "no";
-    if (!storageResponseIsMissing(res.status, body)) {
-      console.warn("storage info unexpected", res.status, path, body.slice(0, 180));
-    }
-  } catch (err) {
-    console.warn("storage info threw", err);
-    return "unknown";
-  }
   const slash = path.lastIndexOf("/");
   const dir = slash >= 0 ? path.slice(0, slash) : "";
   const name = slash >= 0 ? path.slice(slash + 1) : path;
@@ -478,19 +459,40 @@ async function probeStorageObject(
       }),
     });
     const body = await res.text();
-    if (!res.ok) {
-      console.warn("storage list probe failed", res.status, path, body.slice(0, 180));
-      return "unknown";
+    if (res.ok) {
+      const data = JSON.parse(body) as unknown;
+      if (Array.isArray(data)) {
+        const hit = data.find((item) => {
+          if (!item || typeof item !== "object") return false;
+          return (item as { name?: string }).name === name && (item as { id?: string | null }).id != null;
+        });
+        return hit ? "yes" : "no";
+      }
+    } else {
+      console.warn("storage list probe failed", res.status, body.slice(0, 180));
     }
-    const data = JSON.parse(body) as unknown;
-    if (!Array.isArray(data)) return "unknown";
-    const hit = data.find((item) => {
-      if (!item || typeof item !== "object") return false;
-      return (item as { name?: string }).name === name && (item as { id?: string | null }).id != null;
-    });
-    return hit ? "yes" : "no";
   } catch (err) {
     console.warn("storage list probe threw", err);
+  }
+  // List failed or returned something odd: one info call decides.
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const infoUrl =
+    `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/info/manuals/${encoded}`;
+  try {
+    const res = await fetch(infoUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+      },
+    });
+    const body = await res.text();
+    if (res.ok) return "yes";
+    if (/object not found/i.test(body) || storageResponseIsMissing(res.status, body)) return "no";
+    console.warn("storage info unexpected", res.status, body.slice(0, 180));
+    return "unknown";
+  } catch (err) {
+    console.warn("storage info threw", err);
     return "unknown";
   }
 }
