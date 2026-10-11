@@ -23,9 +23,11 @@ export function useUpgradeEntry(): UpgradeEntry {
 
     (async () => {
       try {
+        // Local session only: no /auth/v1/user call. RLS still checks the token.
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
         if (!user) {
           if (!cancelled) setEntry({ show: false, target: 'plans' });
           return;
