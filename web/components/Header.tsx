@@ -35,7 +35,8 @@ import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
-import { isUnreadPollBackoffError, startDocumentUnreadPoll } from '@/lib/unread-poll';
+import { isUnreadPollBackoffError, startDocumentUnreadPoll, unreadPollUserId } from '@/lib/unread-poll';
+import { headerAuthDecision } from '@/lib/header-auth-events';
 import { useLocalizedPublic, useSiteLocale, useT } from '@/lib/fa/locale';
 import { FaPublicHeader } from '@/components/fa/FaPublicHeader';
 import { LanguageSelector } from '@/components/i18n/LanguageSelector';
@@ -186,10 +187,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       setOrgNav(orgNavFromLookup(looked));
     };
 
+    // True while this mount's getUser() load runs; INITIAL_SESSION during it is a duplicate.
+    let initialLoadPending = true;
+
     const loadUser = async () => {
       const {
         data: { user: u },
       } = await supabase.auth.getUser();
+      initialLoadPending = false;
       activeUserId = u?.id ?? null;
       setUser(u);
       if (!u) {
@@ -215,7 +220,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT' || !session?.user) {
+      const decision = headerAuthDecision(event, session?.user?.id, activeUserId, initialLoadPending);
+      if (decision === 'ignore') {
+        // Same user: keep the loaded profile and org role. Token refreshes and
+        // focus-time SIGNED_IN no longer refetch; the next navigation does
+        // (each page mounts Header, which loads fresh).
+        if (session?.user) setUser(session.user);
+        return;
+      }
+      if (decision === 'clear' || !session?.user) {
         activeUserId = null;
         setUser(null);
         setProfile(null);
@@ -240,11 +253,9 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     });
 
     const stopUnreadPoll = startDocumentUnreadPoll(async () => {
-      const {
-        data: { user: u },
-      } = await supabase.auth.getUser();
-      if (!u) return false;
-      return refreshUnread(u.id);
+      const uid = await unreadPollUserId(supabase.auth);
+      if (!uid) return false;
+      return refreshUnread(uid);
     });
 
     return () => {
