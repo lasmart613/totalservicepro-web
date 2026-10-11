@@ -73,12 +73,11 @@ async function setup(logout: 'ok' | 'offline' | 'error500' | 'stall') {
   return { supabase, local, events, signOutAndClearIdentity };
 }
 
-test('sign-out calls /auth/v1/logout (default scope) with the old token before clearing local state', async () => {
+async function revokeOrder(scope: 'local' | 'global' | undefined) {
   const { supabase, local, events, signOutAndClearIdentity } = await setup('ok');
-  await signOutAndClearIdentity(supabase as any);
+  await signOutAndClearIdentity(supabase as any, scope ? { scope } : {});
   const logout = events.findIndex((e) => e.what.startsWith('POST /auth/v1/logout'));
   assert.ok(logout >= 0, `logout never called: ${events.map((e) => e.what).join(', ')}`);
-  assert.equal(events[logout].what, 'POST /auth/v1/logout?scope=global');
   assert.equal(events[logout].auth, 'Bearer old-access');
   assert.equal(events[logout].tokenInStorage, true, 'token was cleared before the revoke');
   // Report-cookie DELETEs come after the revoke.
@@ -89,6 +88,16 @@ test('sign-out calls /auth/v1/logout (default scope) with the old token before c
   assert.equal(local.getItem('tsp-pending-signup'), null);
   const { data } = await supabase.auth.getSession();
   assert.equal(data.session, null);
+  return events[logout].what;
+}
+
+test('default sign-out calls /auth/v1/logout?scope=local with the old token before clearing local state', async () => {
+  assert.equal(await revokeOrder(undefined), 'POST /auth/v1/logout?scope=local');
+  assert.equal(await revokeOrder('local'), 'POST /auth/v1/logout?scope=local');
+});
+
+test('Sign Out Everywhere (scope global) calls /auth/v1/logout?scope=global, same order', async () => {
+  assert.equal(await revokeOrder('global'), 'POST /auth/v1/logout?scope=global');
 });
 
 for (const mode of ['offline', 'error500'] as const) {
@@ -111,14 +120,15 @@ test('a stalled revoke times out and still clears local state', async () => {
   assert.equal(local.getItem(KEY), null);
 });
 
-test('helper order: signOut() first, then the local clear; no scope override', () => {
+test('helper order: signOut({ scope }) first, then the local clear; default local', () => {
   const src = readFileSync(join(here, 'auth-session.ts'), 'utf8');
   const fn = src.slice(src.indexOf('export async function signOutAndClearIdentity'), src.indexOf('export async function prepareFreshSignup'));
-  const signOut = fn.indexOf('supabase.auth.signOut()');
+  const signOut = fn.indexOf('supabase.auth.signOut({ scope })');
   assert.ok(signOut > 0);
+  assert.match(fn, /const scope: SignOutScope = options\.scope === 'global' \? 'global' : 'local';/);
   assert.ok(fn.indexOf('clearBrowserIdentityArtifacts()') > signOut, 'local clear after signOut');
   assert.equal((fn.match(/clearBrowserIdentityArtifacts\(\)/g) || []).length, 1, 'no clear before the revoke');
-  assert.doesNotMatch(fn, /\.auth\.signOut\(\{/);
+  assert.equal((fn.match(/\.auth\.signOut\(/g) || []).length, 1, 'one revoke call, no retry');
   assert.ok(fn.indexOf("method: 'DELETE'") > signOut);
 });
 
@@ -131,9 +141,34 @@ test('Header: revoke, then nav.clear(), then redirect to /login', () => {
   assert.ok(revoke > 0 && clear > revoke && redirect > clear, fn);
 });
 
-test('Settings sign-out awaits the revoke before redirecting', () => {
+test('only Settings\' Sign Out Everywhere uses the global scope', () => {
   const settings = readFileSync(join(webRoot, 'app/settings/page.tsx'), 'utf8');
-  assert.match(settings, /await signOutAndClearIdentity\(s\); window\.location\.href = '\/login';/);
+  assert.match(
+    settings,
+    /await signOutAndClearIdentity\(s, \{ scope: 'global' \}\); window\.location\.href = '\/login';[^\n]*Sign Out Everywhere/
+  );
+  // Header, the login switch-user path, and fresh signup take the default (local).
+  const header = readFileSync(join(webRoot, 'components/Header.tsx'), 'utf8');
+  const login = readFileSync(join(webRoot, 'app/login/page.tsx'), 'utf8');
+  const session = readFileSync(join(here, 'auth-session.ts'), 'utf8');
+  assert.match(header, /await signOutAndClearIdentity\(supabase\);/);
+  assert.match(login, /await signOutAndClearIdentity\(supabase\);/);
+  const prepare = session.slice(session.indexOf('export async function prepareFreshSignup'));
+  assert.match(prepare, /await signOutAndClearIdentity\(supabase\);/);
+  // No other caller asks for global.
+  const globals: string[] = [];
+  const walk = (dir: string) => {
+    for (const name of readdirSync(dir)) {
+      if (['node_modules', '.next', 'out', 'build', 'dist'].includes(name)) continue;
+      const p = join(dir, name);
+      if (statSync(p).isDirectory()) walk(p);
+      else if (/\.(tsx?|mjs|js)$/.test(name) && !/\.test\./.test(name)) {
+        if (/scope: 'global'/.test(readFileSync(p, 'utf8'))) globals.push(relative(webRoot, p));
+      }
+    }
+  };
+  for (const d of ['app', 'components', 'lib']) walk(join(webRoot, d));
+  assert.deepEqual(globals, [join('app', 'settings', 'page.tsx')]);
 });
 
 test('every sign-out goes through signOutAndClearIdentity', () => {

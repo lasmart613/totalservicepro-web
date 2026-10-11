@@ -41,6 +41,9 @@ export function clearBrowserIdentityArtifacts() {
   }
 }
 
+/** 'local': this device's session only. 'global': every session for the user. */
+export type SignOutScope = 'local' | 'global';
+
 /** How long sign-out waits for /auth/v1/logout before clearing locally anyway. */
 export const SIGN_OUT_REVOKE_TIMEOUT_MS = 5000;
 
@@ -49,20 +52,25 @@ export const SIGN_OUT_REVOKE_TIMEOUT_MS = 5000;
  *
  * Order matters. supabase-js reads the session from tsp-auth-token to call
  * POST /auth/v1/logout; clearing the token first made it skip the call, so the
- * old access and refresh tokens stayed valid. Default scope, so the server
- * revokes the refresh token. If the revoke fails or stalls (offline), the
- * local session is still dropped and the caller still redirects.
+ * old access and refresh tokens stayed valid.
+ *
+ * scope 'local' (default): POST /auth/v1/logout?scope=local revokes this
+ * session's refresh token on the server; the user's other devices stay signed
+ * in. scope 'global' ends every session for the user (Settings' Sign Out
+ * Everywhere only). If the revoke fails or stalls (offline), the local
+ * session is still dropped and the caller still redirects.
  */
 export async function signOutAndClearIdentity(
   supabase: SupabaseClient,
-  options: { revokeTimeoutMs?: number } = {}
+  options: { scope?: SignOutScope; revokeTimeoutMs?: number } = {}
 ): Promise<void> {
+  const scope: SignOutScope = options.scope === 'global' ? 'global' : 'local';
   const revokeTimeoutMs = options.revokeTimeoutMs ?? SIGN_OUT_REVOKE_TIMEOUT_MS;
   let revoked = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const result = await Promise.race([
-      supabase.auth.signOut(),
+      supabase.auth.signOut({ scope }),
       new Promise<{ error: Error }>((resolve) =>
         (timer = setTimeout(() => resolve({ error: new Error('sign-out timed out') }), revokeTimeoutMs))
       ),
@@ -74,9 +82,9 @@ export async function signOutAndClearIdentity(
     if (timer) clearTimeout(timer);
   }
   if (!revoked) {
-    // signOut({ scope: 'local' }) would also call /auth/v1/logout and keep the
-    // session on a network error, so stop the refresh timer here and let the
-    // storage clear below drop the session locally.
+    // Retrying signOut would call /auth/v1/logout again and keep the session
+    // on a network error, so stop the refresh timer here and let the storage
+    // clear below drop the session locally.
     try {
       await supabase.auth.stopAutoRefresh();
     } catch {
