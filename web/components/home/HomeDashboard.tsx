@@ -21,13 +21,13 @@ import {
   orgNavFromLookup,
   type OrgNavState,
 } from '@/lib/profile-nav';
-import { fetchGodMe } from '@/lib/god-client';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { inviteInPlay } from '@/lib/invite-claim';
 import { homeDest, profileOrgId } from '@/lib/no-org-route';
 import { adminRoutingNeedsOrgSetupLookup, lookupOrgSetUp } from '@/lib/org-setup';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
+import { useNavIdentity } from '@/components/NavIdentityProvider';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
   isClosedTicketStatus,
@@ -74,25 +74,14 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   });
   const [fseStats, setFseStats] = useState<any[]>([]);
   const [upcoming, setUpcoming] = useState<any[]>([]);
-  const [god, setGod] = useState(false);
   const [orgNav, setOrgNav] = useState<OrgNavState>(ORG_NAV_PENDING);
 
   const supabase = getSupabaseClient();
   const upgrade = useUpgradeEntry();
 
-  useEffect(() => {
-    if (!user) {
-      setGod(false);
-      return;
-    }
-    let cancelled = false;
-    fetchGodMe().then((value) => {
-      if (!cancelled) setGod(value);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [user]);
+  // God status comes from NavIdentityProvider (one /api/god/me per session).
+  const navIdentity = useNavIdentity();
+  const god = !!user && navIdentity.isGod;
 
   useEffect(() => {
     let cancelled = false;
