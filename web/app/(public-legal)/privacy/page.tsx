@@ -56,8 +56,9 @@ export default function PrivacyPolicyPage() {
         stores (a password, or the identity Google shares when you use Google sign-in, such as
         email, name, and profile photo URL). The website and the Android app keep a session
         (access token and refresh token) so you stay signed in. The app stores that session on
-        the device and sends it back to Supabase and to {LEGAL_ORIGIN.replace('https://', '')}. An
-        account is required for the signed-in product.
+        the device and sends it back to Supabase and to {LEGAL_ORIGIN.replace('https://', '')}.
+        That saved sign-in session is excluded from Android cloud backup. An account is required
+        for the signed-in product.
       </p>
       <p>
         The Android app can use the system biometric prompt to unlock a session that is already
@@ -80,28 +81,37 @@ export default function PrivacyPolicyPage() {
         records.
       </p>
 
-      <h3>Photos</h3>
+      <h3>Photos and camera</h3>
       <p>
-        When you choose an image to keep with a record, we store that file. On the website and
-        in the Android app this includes an organization logo, a profile photo, an equipment
-        photo, a parts image, and marketplace listing photos. Logos and similar uploads go to
-        Supabase Storage. A signature you draw is stored on the profile. These files are separate
-        from a business-card scan: the image you pick is the image we keep.
+        On the website, an image you choose for a record is stored when you save the form. That
+        includes an organization logo, a profile photo, an equipment photo, a parts image, and
+        marketplace listing photos. Logos and similar uploads go to Supabase Storage. A signature
+        you draw is stored on the profile.
+      </p>
+      <p>
+        On Android, you pick an image with the system file picker. The next app build can also
+        open the system camera app so you can take a picture, and that picture comes back as the
+        file you chose. The Android app does not request the CAMERA permission and does not run
+        its own camera. An image is uploaded to our storage, for example a part image, only when
+        you submit the form. The app keeps no other copy of that image.
+      </p>
+      <p>
+        The Android app has no optical character recognition and does not scan business cards.
       </p>
 
-      <h3>Camera and business cards</h3>
+      <h3>Business cards (iPhone and iPad only)</h3>
       <p>
-        The mobile apps can scan a business card to fill a customer record. The camera is used
-        only when you choose to scan. Card text is recognized on the device. It is not sent to a
-        cloud optical character recognition service. You review the fields, such as name, company,
-        phone, email, and address, and you can edit them. Only the fields you confirm are saved
-        to your customer records. Those confirmed fields are stored with the customer. The card
-        image is not uploaded and is not kept. If you cancel before you confirm, nothing from
-        that card is saved.
+        Business-card scanning is only in the iPhone and iPad app. It is not in the Android app
+        and not on the website. The camera is used only when you choose to scan. Card text is
+        recognized on the device with Apple Vision. It is not sent to a cloud optical character
+        recognition service. You review the fields, such as name, company, phone, email, and
+        address, and you can edit them. Only the fields you confirm are saved to your customer
+        records. The card image is not uploaded and is not kept. If you cancel before you
+        confirm, nothing from that card is saved.
       </p>
       <p>
-        If a confirmed save cannot finish immediately, the confirmed fields can stay on the phone
-        until they sync. The card image is not part of that waiting copy.
+        If a confirmed save cannot finish immediately, the confirmed fields can stay on the
+        iPhone or iPad until they sync. The card image is not part of that waiting copy.
       </p>
 
       <h3>Purchases</h3>
@@ -112,10 +122,9 @@ export default function PrivacyPolicyPage() {
         card number.
       </p>
       <p>
-        In the Android app, subscriptions use Google Play Billing. The app sends the product id
-        and purchase token to our Supabase function <code>verify-subscription</code> so we can
-        confirm the purchase. Google Play processes the payment. You only send a purchase token
-        if you buy.
+        Purchases in the Android app go through Google Play Billing. The app sends the product
+        id and purchase token to our Supabase function <code>verify-subscription</code> so we can
+        confirm the purchase. You only send a purchase token if you buy.
       </p>
 
       <h3>Voice and microphone</h3>
@@ -125,18 +134,19 @@ export default function PrivacyPolicyPage() {
         is sent to the assistant as text.
       </p>
       <p>
-        If you use Grok voice, the answer text (not the raw microphone audio) is sent to the
-        Supabase function <code>grok-tts</code>. That function calls xAI, which generates the
-        spoken audio. The app then plays that audio. You can use the device&apos;s own voice
-        instead. The website assistant is text only. Voice readout is an Android feature.
+        If you use Grok voice, the text sent to xAI text-to-speech is the AI answer text. That
+        text goes through our Supabase function <code>grok-tts</code>, which calls xAI to
+        generate the spoken audio. The raw microphone audio is not sent. The app then plays that
+        audio. You can use the device&apos;s own voice instead. The website assistant is text
+        only. Voice readout is an Android feature.
       </p>
 
       <h3>AI assistant</h3>
       <p>
-        Questions you ask the manuals assistant, on the website or in the app, are sent to xAI
-        through the Supabase function <code>grok-assistant</code>. The request can include the
-        question and the manual context needed to answer it. xAI processes that content to
-        produce the answer. The xAI key stays on the server.
+        AI assistant questions are processed by xAI. On the website and in the app, the question
+        and the manual context needed to answer it are sent through the Supabase function{' '}
+        <code>grok-assistant</code>. xAI processes that content to produce the answer. The xAI
+        key stays on the server.
       </p>
       <p>
         We store a usage row in Supabase (<code>api_usage</code>): your account id, the request
