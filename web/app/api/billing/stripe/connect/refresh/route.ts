@@ -6,7 +6,7 @@ import {
   StripeConnectApiError,
 } from '@/lib/billing/stripe-connect-api';
 import { connectActorFromRequest } from '@/lib/billing/stripe-connect-actor';
-import { authorizeConnectCallback, safeConnectNext } from '@/lib/billing/stripe-connect';
+import { authorizeConnectCallback, CONNECT_PAYOUT_SETUP_DENIED, safeConnectNext } from '@/lib/billing/stripe-connect';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
   const state = readConnectState(stateToken);
   if (!actor || !state || !authorizeConnectCallback(state, actor).ok) {
     return NextResponse.json(
-      { error: 'Sign in as a company admin of this organization to finish Stripe setup.', code: 'forbidden' },
+      { error: CONNECT_PAYOUT_SETUP_DENIED, code: 'forbidden' },
       { status: 403 }
     );
   }
