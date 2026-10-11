@@ -1,10 +1,13 @@
 export {
+  MANUAL_PATH_NOT_COVERED,
   chooseManualObject,
   fileExtension,
   isPdfFilePath,
   isStoredFilePath,
   manualContentType,
   manualFileKind,
+  manualPathCovered,
+  normalizeStoragePath,
   storageResponseIsMissing,
   type ManualFileKind,
   type ManualObjectChoice,

@@ -6,7 +6,7 @@
 // schematics. The stored chapter_metadata order is left on each item's
 // `order` field — this does not renumber pages or rewrite the database.
 
-import { fileExtension, isStoredFilePath } from "../../../web/lib/manual-file.ts";
+import { fileExtension, isStoredFilePath, normalizeStoragePath } from "../../../web/lib/manual-file.ts";
 
 export type ManualChapterRef = {
   order: number;
@@ -38,20 +38,7 @@ export function isFolderManual(value: unknown): boolean {
 }
 
 function cleanPath(input: unknown): string {
-  if (input == null) return "";
-  let s = String(input).trim();
-  if (!s) return "";
-  if (/%[0-9A-Fa-f]{2}/.test(s)) {
-    try {
-      s = decodeURIComponent(s);
-    } catch {
-      /* keep */
-    }
-  }
-  s = s.replace(/\+/g, " ").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-  s = s.replace(/^\/+/, "");
-  if (s.toLowerCase().startsWith("manuals/")) s = s.slice(8);
-  return s.trim();
+  return normalizeStoragePath(input);
 }
 
 function isPdfPath(p: string): boolean {

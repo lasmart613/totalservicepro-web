@@ -30,10 +30,13 @@ import {
   type ManualDownloadRef,
 } from "./chapters.ts";
 import {
+  MANUAL_PATH_NOT_COVERED,
   chooseManualObject,
   fileExtension,
   manualContentType,
   manualFileKind,
+  manualPathCovered,
+  normalizeStoragePath,
   storageResponseIsMissing,
   type StorageProbe,
 } from "./files.ts";
@@ -54,20 +57,7 @@ function json(status: number, body: Record<string, unknown>) {
 }
 
 function cleanPath(input: unknown): string {
-  if (input == null) return "";
-  let s = String(input).trim();
-  if (!s) return "";
-  if (/%[0-9A-Fa-f]{2}/.test(s)) {
-    try {
-      s = decodeURIComponent(s);
-    } catch {
-      /* keep */
-    }
-  }
-  s = s.replace(/\+/g, " ").replace(/\\/g, "/").replace(/\/{2,}/g, "/");
-  s = s.replace(/^\/+/, "");
-  if (s.toLowerCase().startsWith("manuals/")) s = s.slice(8);
-  return s.trim();
+  return normalizeStoragePath(input);
 }
 
 function isPdfPath(p: string): boolean {
@@ -697,32 +687,32 @@ Deno.serve(async (req) => {
         return json(403, { error: "Access denied", manual_id: manualId });
       }
 
-      // Prefer ticket path (chapter PDF); never stream a bare folder prefix
-      let sp = ticketPath;
-      if (!sp || !isPdfPath(sp)) {
-        sp = cleanPath(man?.storage_path || row?.storage_path || "");
+      // Ticket path is the object we would stream. It has to be this manual's
+      // file before any byte is read — a ticket is not a pass for every key.
+      const ticketSent = !!String(ticketPath || "").trim();
+      let sp = cleanPath(ticketPath);
+      const streamParent = cleanPath(man?.storage_path || row?.storage_path || "");
+      if (ticketSent && !sp) {
+        return json(403, { error: MANUAL_PATH_NOT_COVERED });
+      }
+      if (!sp) sp = streamParent;
+      const streamCovered = (candidate: string) =>
+        manualPathCovered({
+          storagePath: candidate,
+          rowStoragePath: streamParent,
+          entryFilePath: man?.entry_file_path,
+          chapterMetadata: man?.chapter_metadata,
+          isFolder: man?.is_folder,
+          parentPath: streamParent,
+        });
+      if ((ticketSent && !streamCovered(cleanPath(ticketPath))) || !streamCovered(sp)) {
+        return json(403, { error: MANUAL_PATH_NOT_COVERED });
       }
       if (sp && !isPdfPath(sp)) {
         return json(400, {
           error: "Stream path is a folder, not a PDF",
-          storage_path: sp,
           hint: "Open a chapter PDF path, or call list_chapters first",
         });
-      }
-      const ticketCovers =
-        ticketTrusted &&
-        (!ticketPath || pathAllowed(ticketPath, sp) || cleanPath(ticketPath) === cleanPath(sp));
-      if (
-        sp &&
-        !pathIsOwned(owned, sp) &&
-        !(manualId && owned.has(manualId) && pathAllowed(row?.storage_path || man?.storage_path || "", sp)) &&
-        !ticketCovers
-      ) {
-        // Allow if they own parent folder and path is under it
-        const parent = cleanPath(row?.storage_path || man?.storage_path || "");
-        if (!(parent && pathAllowed(parent, sp))) {
-          return json(403, { error: "Path not covered by ownership", storage_path: sp });
-        }
       }
 
       const publicUrl = (man?.xai_public_url || row?.xai_public_url || "").trim();
@@ -733,7 +723,7 @@ Deno.serve(async (req) => {
       if (sp) {
         const streamed = await streamPdfFromStorage(supabaseUrl, serviceKey, sp, req.headers);
         if (streamed === "missing") {
-          return json(404, { error: "file_missing", storage_path: sp });
+          return json(404, { error: "file_missing" });
         }
         if (streamed) return streamed;
       }
@@ -787,7 +777,10 @@ Deno.serve(async (req) => {
       body.action === "add" ||
       body.add === true ||
       body.confirm_add === true;
-    let storagePath = cleanPath(body.storage_path ?? body.path);
+    const rawStoragePath = body.storage_path ?? body.path;
+    const sentPath = rawStoragePath != null && String(rawStoragePath).trim() !== "";
+    let storagePath = cleanPath(rawStoragePath);
+    const requestedNorm = storagePath;
     let manualId =
       body.manual_id != null && String(body.manual_id).trim() !== ""
         ? String(body.manual_id).trim()
@@ -892,11 +885,18 @@ Deno.serve(async (req) => {
         while (parts.length > 1 && !man) {
           parts.pop();
           const prefix = parts.join("/");
-          const q2 = await admin
+          let q2 = await admin
             .from("manuals")
-            .select("id, storage_path, title")
+            .select("id, storage_path, title, is_folder, entry_file_path, chapter_metadata")
             .eq("storage_path", prefix)
             .maybeSingle();
+          if (q2.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q2.error.message || "")) {
+            q2 = await admin
+              .from("manuals")
+              .select("id, storage_path, title")
+              .eq("storage_path", prefix)
+              .maybeSingle();
+          }
           if (q2.data) man = q2.data;
         }
       }
@@ -983,7 +983,6 @@ Deno.serve(async (req) => {
       );
       if (
         parent &&
-        isPdfPath(storagePath) &&
         !pathAllowed(parent, storagePath) &&
         cleanPath(parent) !== cleanPath(storagePath) &&
         !pathIsOwned(owned, storagePath)
@@ -1035,9 +1034,7 @@ Deno.serve(async (req) => {
     }
 
     const ownedRow = manualId ? owned.get(manualId) || null : null;
-    const parentPath = cleanPath(
-      man?.storage_path || ownedRow?.storage_path || storagePath,
-    );
+    const parentPath = cleanPath(man?.storage_path || ownedRow?.storage_path || "");
 
     // ----- List chapters (folder / multi-PDF manuals) -----
     if (wantList) {
@@ -1139,10 +1136,27 @@ Deno.serve(async (req) => {
       isFolder: man?.is_folder,
       chapterMetadata: man?.chapter_metadata,
     });
-    let sp = opened.storagePath;
+    let sp = cleanPath(opened.storagePath);
     let chaptersForFolder = dedupeChapterList(opened.chapters);
     const downloadsForFolder: ManualDownloadRef[] = opened.downloads || [];
     const downloadFields = downloadsForFolder.length ? { downloads: downloadsForFolder } : {};
+    const pathCovered = (candidate: unknown) =>
+      manualPathCovered({
+        storagePath: candidate,
+        rowStoragePath: parentPath,
+        entryFilePath: man?.entry_file_path,
+        chapterPaths: chaptersForFolder.map((chapter) => chapter.storage_path),
+        downloadPaths: downloadsForFolder.map((item) => item.storage_path),
+        chapterMetadata: man?.chapter_metadata,
+        isFolder: man?.is_folder,
+        parentPath,
+      });
+    // Owned and ai_context reads both stop here. No probe, list, or signed URL
+    // until the key is this manual's file, entry, chapter, download, or — for a
+    // folder row — a child of its prefix.
+    if ((sentPath && !pathCovered(requestedNorm)) || !pathCovered(sp)) {
+      return json(403, { error: MANUAL_PATH_NOT_COVERED });
+    }
 
     // Folder prefixes only. A docx/xlsx/image is a file and is signed below.
     // A list that finds the PDF is the existence check for that object.
@@ -1184,12 +1198,13 @@ Deno.serve(async (req) => {
         return json(404, {
           error: "file_missing",
           manual_id: manualId,
-          prefix: folderPrefix,
-          storage_path: folderPrefix,
           chapters: [],
           count: 0,
           title: man?.title || null,
         });
+      }
+      if (!pathCovered(sp)) {
+        return json(403, { error: MANUAL_PATH_NOT_COVERED });
       }
 
       // Fall through with concrete PDF `sp` — still include chapters in the stream response below
@@ -1244,11 +1259,17 @@ Deno.serve(async (req) => {
         return json(404, {
           error: "file_missing",
           manual_id: manualId,
-          storage_path: sp || parentPath,
           title: man?.title || null,
         });
       }
-      sp = choice.storagePath;
+      sp = cleanPath(choice.storagePath);
+      if (!pathCovered(sp)) {
+        return json(403, { error: MANUAL_PATH_NOT_COVERED });
+      }
+    }
+
+    if (!pathCovered(sp)) {
+      return json(403, { error: MANUAL_PATH_NOT_COVERED });
     }
 
     if (sp && isStoredFilePath(sp) && !isPdfPath(sp)) {

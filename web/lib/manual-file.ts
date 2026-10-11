@@ -120,12 +120,138 @@ export function storageResponseIsMissing(status: number, body: string): boolean 
   return /object not found|not[_ ]found|nosuchkey|does not exist/i.test(String(body || "").slice(0, 800));
 }
 
-function cleanKey(input: unknown): string {
-  let s = String(input ?? "").trim();
+/** Body returned when a caller asks for a key this manual does not cover. No path. */
+export const MANUAL_PATH_NOT_COVERED = "Path not covered by this manual";
+
+/**
+ * Storage key, safe to compare and to sign.
+ * Decodes percent-encoding (including double encoding), strips a leading
+ * slash and a `manuals/` bucket prefix, collapses duplicate slashes, and
+ * resolves `.` / `..`. A `..` that climbs above the bucket root becomes
+ * empty so it cannot satisfy a prefix check.
+ */
+export function normalizeStoragePath(input: unknown): string {
+  if (input == null) return "";
+  let s = String(input).trim();
   if (!s) return "";
-  s = s.replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^\/+/, "");
+  for (let i = 0; i < 5; i++) {
+    if (!/%[0-9A-Fa-f]{2}/.test(s)) break;
+    try {
+      const next = decodeURIComponent(s);
+      if (next === s) break;
+      s = next;
+    } catch {
+      break;
+    }
+  }
+  s = s.replace(/\+/g, " ").replace(/\\/g, "/").replace(/\/{2,}/g, "/").replace(/^\/+/, "");
   if (s.toLowerCase().startsWith("manuals/")) s = s.slice("manuals/".length);
-  return s;
+  const stack: string[] = [];
+  for (const part of s.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!stack.length) return "";
+      stack.pop();
+      continue;
+    }
+    stack.push(part);
+  }
+  return stack.join("/").trim();
+}
+
+function cleanKey(input: unknown): string {
+  return normalizeStoragePath(input);
+}
+
+/** True when `requested` is `parent` or a child of it. Both sides are normalized first. */
+export function storagePrefixCovers(parent: unknown, requested: unknown): boolean {
+  const owned = normalizeStoragePath(parent).toLowerCase();
+  const path = normalizeStoragePath(requested).toLowerCase();
+  if (!owned || !path) return false;
+  if (owned === path) return true;
+  return path.startsWith(owned.endsWith("/") ? owned : `${owned}/`);
+}
+
+export function resolveEntryStoragePath(parentPath: unknown, entryFilePath: unknown): string {
+  const entry = normalizeStoragePath(entryFilePath);
+  if (!entry) return "";
+  const parent = normalizeStoragePath(parentPath);
+  const entryLower = entry.toLowerCase();
+  if (
+    entryLower.startsWith("shared/") ||
+    entryLower.startsWith("http://") ||
+    entryLower.startsWith("https://")
+  ) {
+    return entry;
+  }
+  if (!parent) return entry;
+  const parentLower = parent.toLowerCase();
+  if (entryLower === parentLower || entryLower.startsWith(`${parentLower}/`)) return entry;
+  return normalizeStoragePath(`${parent}/${entry}`);
+}
+
+function isFolderFlag(value: unknown, storagePath: string): boolean {
+  if (value === true || value === 1 || value === "1" || value === "true" || value === "t") return true;
+  if (value === false || value === 0 || value === "0" || value === "false" || value === "f") return false;
+  return !!storagePath && !isStoredFilePath(storagePath);
+}
+
+function joinUnderParent(parentPath: string, raw: unknown): string {
+  const path = normalizeStoragePath(raw);
+  if (!path) return "";
+  const parent = normalizeStoragePath(parentPath);
+  if (!parent) return path;
+  const parentLower = parent.toLowerCase();
+  const lower = path.toLowerCase();
+  if (lower.startsWith("shared/") || lower === parentLower || lower.startsWith(`${parentLower}/`)) return path;
+  return resolveEntryStoragePath(parent, path);
+}
+
+function pathsFromMetadata(metadata: unknown, parent: string): string[] {
+  if (!Array.isArray(metadata)) return [];
+  const out: string[] = [];
+  for (const item of metadata) {
+    if (!item || typeof item !== "object") continue;
+    const raw =
+      (item as { storage_path?: unknown; path?: unknown }).storage_path ??
+      (item as { path?: unknown }).path;
+    const path = joinUnderParent(parent, raw);
+    if (path) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * The key about to be signed or streamed belongs to this manual row.
+ * Exact match against the row path, its resolved entry, or a chapter/download
+ * path. Folder rows may also sign a child of their prefix. Ownership and
+ * ai_context are not inputs — both reads use this same gate.
+ */
+export function manualPathCovered(input: {
+  storagePath: unknown;
+  rowStoragePath?: unknown;
+  entryFilePath?: unknown;
+  chapterPaths?: readonly unknown[];
+  downloadPaths?: readonly unknown[];
+  chapterMetadata?: unknown;
+  isFolder?: unknown;
+  parentPath?: unknown;
+}): boolean {
+  const storagePath = normalizeStoragePath(input.storagePath);
+  if (!storagePath) return false;
+  const parent = normalizeStoragePath(input.parentPath ?? input.rowStoragePath);
+  const row = normalizeStoragePath(input.rowStoragePath);
+  const entry = resolveEntryStoragePath(parent || row, input.entryFilePath);
+  const same = (value: string) => value !== "" && value === storagePath;
+  if (same(row) || same(entry)) return true;
+  const listed = [
+    ...(input.chapterPaths || []).map((path) => joinUnderParent(parent || row, path)),
+    ...(input.downloadPaths || []).map((path) => joinUnderParent(parent || row, path)),
+    ...pathsFromMetadata(input.chapterMetadata, parent || row),
+  ];
+  if (listed.some(same)) return true;
+  if (isFolderFlag(input.isFolder, row) && storagePrefixCovers(parent || row, storagePath)) return true;
+  return false;
 }
 
 function firstListedChapter(
