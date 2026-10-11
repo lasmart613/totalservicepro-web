@@ -19,6 +19,13 @@ export type ManualChapter = {
   label?: string;
 };
 
+/** Chapters button is for a real multi-file manual, not a single PDF. */
+export function showManualChaptersButton<T>(
+  chapters: readonly T[] | null | undefined,
+): chapters is T[] {
+  return Array.isArray(chapters) && chapters.length > 1;
+}
+
 export type ManualViewPayload = {
   manualId?: string | number | null;
   title?: string;

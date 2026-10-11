@@ -10,6 +10,7 @@ import {
   matchingTextItemSpans,
   pageTextMatches,
   readManualView,
+  showManualChaptersButton,
   type ManualChapter,
   type ManualViewPayload,
 } from '@/lib/manuals';
@@ -405,9 +406,9 @@ export function ManualPdfViewer({
       });
       setProgress(35);
       const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
-      if (nextChapters.length > 1) setChapters(nextChapters);
+      if (showManualChaptersButton(nextChapters)) setChapters(nextChapters);
 
-      if (!storagePath && !json.url && !json.data_base64 && nextChapters.length > 1) {
+      if (!storagePath && !json.url && !json.data_base64 && showManualChaptersButton(nextChapters)) {
         setChapters(nextChapters);
         setShowChapters(true);
         setLoading(false);
@@ -525,7 +526,7 @@ export function ManualPdfViewer({
           }
         }
         if (!cancelled) setIsIncomplete(incomplete);
-        if (Array.isArray(payload.chapters) && payload.chapters.length > 1) {
+        if (showManualChaptersButton(payload.chapters)) {
           setChapters(payload.chapters);
         }
         if (!payload.manualId && !payload.storagePath && !payload.url && !payload.dataBase64) {
@@ -803,9 +804,10 @@ export function ManualPdfViewer({
           >
             {showRail ? 'Hide tools' : 'Search / AI'}
           </button>
-          {chapters.length > 1 && (
+          {showManualChaptersButton(chapters) && (
             <button
               type="button"
+              aria-label="Chapters"
               className="rounded-md border border-[#FBBF24] bg-[rgba(251,191,36,0.25)] px-2.5 py-1.5 text-[13px] text-[#fbbf24]"
               onClick={() => setShowChapters((v) => !v)}
             >
