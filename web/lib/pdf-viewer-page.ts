@@ -42,6 +42,38 @@ export function viewerCitedPageNotice(
   return viewerPageOutOfRangeNotice(page, documentPages);
 }
 
+/** Joined page is past the folder. Single-PDF deep links keep the PDF wording. */
+export function viewerFolderOutOfRangeNotice(requested: number | null | undefined): string | null {
+  const page = Math.floor(Number(requested));
+  if (!Number.isFinite(page) || page < 1) return null;
+  return `Page ${page} isn't in this manual`;
+}
+
+/** One page is `p. N`. A span is `pp. start–end`. */
+export function chapterPageRangeLabel(pageStart: number, pageCount: number): string | null {
+  const start = Math.floor(Number(pageStart));
+  const count = Math.floor(Number(pageCount));
+  if (!Number.isFinite(start) || start < 1 || !Number.isFinite(count) || count < 1) return null;
+  if (count === 1) return `p. ${start}`;
+  return `pp. ${start}–${start + count - 1}`;
+}
+
+/**
+ * 1-based rank by joined page start. The array order (service manual first)
+ * is the display order and is not rearranged here.
+ */
+export function chapterTileNumber(
+  chapters: readonly { pageStart?: number | null }[],
+  index: number,
+): number | null {
+  const ranked = chapters
+    .map((chapter, i) => ({ i, start: Math.floor(Number(chapter.pageStart)) }))
+    .filter((chapter) => Number.isFinite(chapter.start) && chapter.start >= 1)
+    .sort((a, b) => a.start - b.start || a.i - b.i);
+  const place = ranked.findIndex((chapter) => chapter.i === index);
+  return place >= 0 ? place + 1 : null;
+}
+
 /**
  * Stable placeholder height for one page, including the row's vertical padding.
  * Scroll-to-page must use this before canvases paint, or a short placeholder
