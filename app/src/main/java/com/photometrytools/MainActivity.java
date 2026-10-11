@@ -66,6 +66,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
@@ -1098,6 +1099,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void installOriginLockedListener(WebView target) {
         if (target == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
         Set<String> origins = new HashSet<>();
         origins.add("https://" + TrustedOrigins.HOST_REPAIRPLANET);
         origins.add("https://" + TrustedOrigins.HOST_WWW);
