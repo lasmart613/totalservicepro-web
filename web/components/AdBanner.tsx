@@ -53,9 +53,11 @@ export default function AdBanner() {
 
     (async () => {
       try {
+        // Local session only: no /auth/v1/user call. RLS still checks the token.
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user ?? null;
         if (cancelled) return;
         if (!user) {
           setShowAd(false);

@@ -155,3 +155,25 @@ export function startDocumentUnreadPoll(poll: () => Promise<boolean>): () => voi
     },
   });
 }
+
+type SessionAuth = {
+  getSession: () => Promise<{ data: { session: { user?: { id?: string | null } | null } | null } }>;
+};
+
+/**
+ * Signed-in user id for an unread-poll tick from the local session.
+ * getSession() reads the stored session (and refreshes it when expired); it
+ * does not call /auth/v1/user on every tick. The notifications read is still
+ * RLS-scoped to the token, so a stale id cannot read another user's rows.
+ */
+export async function unreadPollUserId(auth: SessionAuth): Promise<string | null> {
+  try {
+    const {
+      data: { session },
+    } = await auth.getSession();
+    const id = String(session?.user?.id || '').trim();
+    return id || null;
+  } catch {
+    return null;
+  }
+}
