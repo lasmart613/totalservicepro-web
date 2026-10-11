@@ -4,6 +4,15 @@
 [build]
   command = "npm run build"
   publish = ".next"
+  # UI base directory is web. Netlify then skips a build when web/ matches the
+  # last successful deploy of that same context. A rebase or an empty retrigger
+  # commit keeps that tree, so the preview is canceled in a few seconds and the
+  # header/redirect plugins never run. Deploy previews build when web/ differs
+  # from the production branch, which stays true after an empty commit.
+  # Production and branch deploys keep the base-directory check, so a commit
+  # that only touches the Android app does not rebuild the site.
+  # Exit 0 skips. Exit 1 builds.
+  ignore = 'if [ "$CONTEXT" != "deploy-preview" ]; then git diff --quiet "$CACHED_COMMIT_REF" "$COMMIT_REF" -- .; else git fetch --no-tags --depth=1 origin main && git diff --quiet FETCH_HEAD "$COMMIT_REF" -- .; fi'
 
 [build.environment]
   # Site UI Node is 20.20.2. This sets the build command (`next build`) only.
