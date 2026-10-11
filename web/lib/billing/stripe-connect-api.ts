@@ -15,6 +15,7 @@ import {
   normalizeStripeAccountId,
   partnerReferralFromEnv,
   authorizeConnectCallback,
+  CONNECT_PAYOUT_SETUP_DENIED,
   safeConnectNext,
   sellerConnectPrompt,
   signConnectState,
@@ -430,7 +431,7 @@ function assertConnectActor(
   const allowed = authorizeConnectCallback(state, actor);
   if (!allowed.ok) {
     throw new StripeConnectApiError(
-      'Sign in as a company admin of this organization to finish Stripe setup.',
+      CONNECT_PAYOUT_SETUP_DENIED,
       403,
       'forbidden'
     );

@@ -23,6 +23,12 @@ export const STRIPE_CONNECT_ENFORCE_ENV = 'STRIPE_CONNECT_ENFORCE';
 export const STRIPE_CONNECT_EXEMPT_ORG_IDS_ENV = 'STRIPE_CONNECT_EXEMPT_ORG_IDS';
 export const CONNECT_REQUIRED_CODE = 'stripe_connect_required';
 export const CONNECT_PATH = '/api/billing/stripe/connect';
+/**
+ * 403 when this caller may not start or finish Connect.
+ * English is the dictionary key (lib/i18n/gap-copy.ts). The client translates it with useT.
+ */
+export const CONNECT_PAYOUT_SETUP_DENIED =
+  "Only the shop's admin or the supplier account owner can set up payouts.";
 const DEFAULT_EXEMPT_ORG_IDS = '4';
 
 const PARTNER_ADMIN_MESSAGE = 'Ask your platform admin for the Stripe partner signup link.';

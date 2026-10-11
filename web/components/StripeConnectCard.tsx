@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { useT } from '@/lib/fa/locale';
 import { toast } from 'sonner';
 
 type Prompt = {
@@ -28,6 +29,7 @@ type Status = {
  * Hides itself for clinics and signed-out visitors. Never invents a partner URL.
  */
 export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string }) {
+  const t = useT();
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -63,7 +65,7 @@ export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string
       const { data } = await supabase.auth.getSession();
       const token = data.session?.access_token;
       if (!token) {
-        toast.error('Sign in to connect Stripe.');
+        toast.error(t('Sign in to connect Stripe.'));
         return;
       }
       const res = await fetch('/api/billing/stripe/connect', {
@@ -87,12 +89,12 @@ export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string
         return;
       }
       if (!res.ok || !json?.url) {
-        toast.error(json?.error || 'Could not start Stripe setup');
+        toast.error(t(json?.error || 'Could not start Stripe setup'));
         return;
       }
       window.location.assign(json.url);
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Could not start Stripe setup');
+      toast.error(e instanceof Error ? t(e.message) : t('Could not start Stripe setup'));
     } finally {
       setBusy(false);
     }
@@ -127,7 +129,7 @@ export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string
           {busy ? 'Opening Stripe…' : status.hasAccount ? 'Finish Stripe setup' : 'Connect Stripe'}
         </button>
       ) : status.schemaReady === false ? null : (
-        <p className="text-sm">A company admin needs to connect Stripe for this organization.</p>
+        <p className="text-sm">{t("Only the shop's admin or the supplier account owner can set up payouts.")}</p>
       )}
       {prompt?.partnerUrl ? (
         <a

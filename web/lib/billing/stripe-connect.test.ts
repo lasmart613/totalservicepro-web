@@ -25,6 +25,7 @@ import {
   verifyConnectState,
   webhookCheckoutAction,
   emptyPayoutAccount,
+  CONNECT_PAYOUT_SETUP_DENIED,
 } from './stripe-connect.ts';
 import { NextRequest } from 'next/server';
 import {
@@ -37,7 +38,8 @@ import {
   refreshOnboardingFromState,
   StripeConnectApiError,
 } from './stripe-connect-api.ts';
-import { runStripeConnectGet, runStripeConnectPost } from '../../app/api/billing/stripe/connect/route.ts';
+import { appStrings } from '../i18n/app-copy.ts';
+import { runStripeConnectGet, runStripeConnectPost } from './stripe-connect-access.ts';
 import { buildPartCheckoutSessionFields } from './stripe-marketplace.ts';
 import {
   buildInvoiceCheckoutParams,
@@ -787,19 +789,19 @@ test('Connect return and refresh require the admin who started onboarding', asyn
     },
   };
   try {
-    await assert.rejects(() => completeOnboardingReturn(token, null, writer as never), /company admin/);
+    await assert.rejects(() => completeOnboardingReturn(token, null, writer as never), /set up payouts/);
     await assert.rejects(
       () => completeOnboardingReturn(token, { ...admin, orgId: 8 }, writer as never),
-      /company admin/
+      /set up payouts/
     );
     await assert.rejects(
       () => completeOnboardingReturn(token, { ...admin, role: 'service_manager', userId: 'user-sm' }, writer as never),
-      /company admin/
+      /set up payouts/
     );
-    await assert.rejects(() => refreshOnboardingFromState(token, 'https://repairplanet.example', null), /company admin/);
+    await assert.rejects(() => refreshOnboardingFromState(token, 'https://repairplanet.example', null), /set up payouts/);
     await assert.rejects(
       () => refreshOnboardingFromState(token, 'https://repairplanet.example', { ...admin, orgId: 8 }),
-      /company admin/
+      /set up payouts/
     );
     await assert.rejects(
       () =>
@@ -808,7 +810,7 @@ test('Connect return and refresh require the admin who started onboarding', asyn
           role: 'billing_manager',
           userId: 'user-bill',
         }),
-      /company admin/
+      /set up payouts/
     );
     await assert.rejects(
       () => completeOnboardingReturn(token, supplier, writer as never),
@@ -953,16 +955,31 @@ test('a Netlify deploy-hash host still yields repairplanet.net for Connect retur
   );
 
   const here = dirname(fileURLToPath(import.meta.url));
-  const onboarding = readFileSync(join(here, '../../app/api/billing/stripe/connect/route.ts'), 'utf8');
+  const route = readFileSync(join(here, '../../app/api/billing/stripe/connect/route.ts'), 'utf8');
+  const onboarding = readFileSync(join(here, 'stripe-connect-access.ts'), 'utf8');
   const returned = readFileSync(join(here, '../../app/api/billing/stripe/connect/return/route.ts'), 'utf8');
   const refresh = readFileSync(join(here, '../../app/api/billing/stripe/connect/refresh/route.ts'), 'utf8');
-  for (const src of [onboarding, returned, refresh]) {
-    assert.match(src, /connectSiteOrigin\(req\)/);
+  assert.doesNotMatch(route, /export (async )?function runStripeConnect/);
+  assert.doesNotMatch(route, /export (type|interface) StripeConnectDeps/);
+  assert.match(route, /export async function GET/);
+  assert.match(route, /export async function POST/);
+  for (const src of [onboarding, returned, refresh, route]) {
     assert.doesNotMatch(src, /nextUrl\.origin/);
     assert.doesNotMatch(src, /x-forwarded-host/);
   }
+  for (const src of [onboarding, returned, refresh]) {
+    assert.match(src, /connectSiteOrigin\(req\)/);
+  }
   assert.match(onboarding, /orgId: caller\.orgId/);
   assert.match(onboarding, /getOrgRole|loadConnectCaller/);
+  assert.match(onboarding, /CONNECT_PAYOUT_SETUP_DENIED/);
+  const card = readFileSync(join(here, '../../components/StripeConnectCard.tsx'), 'utf8');
+  assert.match(card, /useT\(\)/);
+  assert.match(card, /Only the shop's admin or the supplier account owner can set up payouts/);
+  assert.doesNotMatch(card, /A company admin needs to connect Stripe/);
+  assert.notEqual(appStrings('de')[CONNECT_PAYOUT_SETUP_DENIED], CONNECT_PAYOUT_SETUP_DENIED);
+  assert.match(appStrings('he')[CONNECT_PAYOUT_SETUP_DENIED], /[\u0590-\u05FF]/);
+  assert.match(appStrings('ar')[CONNECT_PAYOUT_SETUP_DENIED], /[\u0600-\u06FF]/);
 });
 
 const STRIPE_SECRET_ENV = ['STRIPE_SECRET_KEY', 'STRIPE_SECRET'] as const;
@@ -1089,6 +1106,7 @@ test('parts_supplier Connect is their own supplier org, and other callers stay p
     });
     const other = await runStripeConnectPost(connectRequest('POST', { organizationId: 4 }), namedOther.deps);
     assert.equal(other.status, 403);
+    assert.equal(((await other.json()) as { error?: string }).error, CONNECT_PAYOUT_SETUP_DENIED);
     assert.equal(namedOther.writes(), 0);
 
     const profileOther = connectClients({
