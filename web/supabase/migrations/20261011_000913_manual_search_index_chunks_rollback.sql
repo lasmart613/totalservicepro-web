@@ -35,6 +35,9 @@ ALTER TABLE public.manual_search_index
 ALTER TABLE public.manual_search_index
   ADD CONSTRAINT manual_search_index_pkey PRIMARY KEY (manual_id);
 
+-- Restores the live definition from 20261011_000911_manuals_published.sql
+-- (pg_get_functiondef on yljztfajyvjzqikxdddf). That definition joins
+-- manuals and keeps unpublished rows out. It is not the pre-000911 body.
 CREATE OR REPLACE FUNCTION public.search_manual_catalog(q text)
 RETURNS TABLE(manual_id bigint)
 LANGUAGE sql
@@ -44,7 +47,9 @@ SET search_path = public
 AS $$
   SELECT i.manual_id
   FROM public.manual_search_index i
-  WHERE nullif(btrim(q), '') IS NOT NULL
+  JOIN public.manuals m ON m.id = i.manual_id
+  WHERE m.published = true
+    AND nullif(btrim(q), '') IS NOT NULL
     AND char_length(btrim(q)) >= 2
     AND (
       i.search_tsv @@ plainto_tsquery('simple', q)
@@ -53,6 +58,6 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.search_manual_catalog(text) IS
-  'Returns catalog ids (bigint) whose indexed PDF body matches q. Does not return search_text. Does not filter by ownership.';
+  'Returns catalog ids (bigint) whose indexed PDF body matches q and whose manual is published. Does not return search_text. Does not filter by ownership.';
 
 NOTIFY pgrst, 'reload schema';

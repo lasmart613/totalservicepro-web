@@ -827,6 +827,10 @@ test('chunk migration keeps the lock timeout and the md5 replace function', () =
   assert.match(migration, /SET LOCAL lock_timeout = '5s'/);
   assert.match(migration, /chunk_index/);
   assert.match(migration, /SELECT DISTINCT i\.manual_id/);
+  assert.match(migration, /JOIN public\.manuals m ON m\.id = i\.manual_id/);
+  assert.match(migration, /m\.published = true/);
+  assert.match(migration, /SET search_path = ''/);
+  assert.doesNotMatch(migration, /pg_catalog\.(extract|coalesce)/i);
   assert.match(migration, /replace_manual_search_index/);
   assert.match(migration, /pg_advisory_xact_lock/);
   assert.match(migration, /set_config\('lock_timeout', '5s', true\)/);
@@ -839,6 +843,9 @@ test('chunk migration keeps the lock timeout and the md5 replace function', () =
   assert.match(rollback, /DELETE FROM public\.manual_search_index WHERE chunk_index > 0/);
   assert.match(rollback, /DROP COLUMN IF EXISTS chunk_index/);
   assert.match(rollback, /PRIMARY KEY \(manual_id\)/);
+  assert.match(rollback, /JOIN public\.manuals m ON m\.id = i\.manual_id/);
+  assert.match(rollback, /m\.published = true/);
+  assert.doesNotMatch(rollback, /SELECT DISTINCT/);
   assert.doesNotMatch(rollback, /\bCOMMIT\b/);
   assert.doesNotMatch(rollback, /CONCURRENTLY/);
   assert.match(edge, /loadJoinedSearchText/);

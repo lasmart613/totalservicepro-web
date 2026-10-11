@@ -23,10 +23,15 @@ END $$;
 BEGIN;
 
 CREATE TABLE public.manuals (
-  id bigint PRIMARY KEY
+  id bigint PRIMARY KEY,
+  published boolean NOT NULL DEFAULT true
 );
 
-INSERT INTO public.manuals (id) VALUES (1), (72), (99);
+INSERT INTO public.manuals (id, published) VALUES
+  (1, true),
+  (72, true),
+  (99, true),
+  (7, false);
 
 CREATE TABLE public.manual_search_index (
   manual_id bigint PRIMARY KEY REFERENCES public.manuals(id) ON DELETE CASCADE,
@@ -40,7 +45,8 @@ ALTER TABLE public.manual_search_index
 
 INSERT INTO public.manual_search_index (manual_id, search_text) VALUES
   (1, '[[pdfpage:2]] alpha'),
-  (72, '[[pdfpage:517]] kept');
+  (72, '[[pdfpage:517]] kept'),
+  (7, '[[pdfpage:1]] alpha hidden');
 
 \i web/supabase/migrations/20261011_000912_manual_search_index_clip.sql
 \i web/supabase/migrations/20261011_000913_manual_search_index_chunks.sql
@@ -109,6 +115,36 @@ BEGIN
     RAISE EXCEPTION 'catalog search returned duplicate manual ids';
   END IF;
 
+  IF EXISTS (
+    SELECT 1 FROM public.search_manual_catalog('alpha') WHERE manual_id = 7
+  ) THEN
+    RAISE EXCEPTION 'unpublished manual was returned by search_manual_catalog';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.search_manual_catalog('alpha hidden') WHERE manual_id = 7
+  ) THEN
+    RAISE EXCEPTION 'unpublished manual matched its own text';
+  END IF;
+
+  IF public.replace_manual_search_index(
+    99,
+    ARRAY['[[pdfpage:1]] redwidget', '[[pdfpage:2]] bluewidget'],
+    ARRAY[false, false],
+    ARRAY[1, 2],
+    NULL
+  ) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'split-chunk manual was refused';
+  END IF;
+
+  IF (SELECT count(*) FROM public.search_manual_catalog('redwidget bluewidget')) <> 0 THEN
+    RAISE EXCEPTION 'a multi-word query matched across two chunks';
+  END IF;
+
+  IF (SELECT count(*) FROM public.search_manual_catalog('redwidget')) <> 1 THEN
+    RAISE EXCEPTION 'a single word in one chunk was not found';
+  END IF;
+
   IF public.replace_manual_search_index(
     1,
     ARRAY['[[pdfpage:1]] stale'],
@@ -128,9 +164,9 @@ BEGIN
     ARRAY['[[pdfpage:1]] fresh'],
     ARRAY[false],
     ARRAY[1],
-    NULL
+    md5('[[pdfpage:1]] redwidget' || E'\f' || '[[pdfpage:2]] bluewidget')
   ) IS DISTINCT FROM true THEN
-    RAISE EXCEPTION 'null md5 did not match an empty index';
+    RAISE EXCEPTION 'matching md5 did not replace the split chunks';
   END IF;
 END $$;
 
@@ -145,11 +181,42 @@ BEGIN
   IF def NOT LIKE '%pg_advisory_xact_lock%' THEN
     RAISE EXCEPTION 'replace function missing advisory lock';
   END IF;
+  IF position('public.manual_search_index' IN def) = 0 THEN
+    RAISE EXCEPTION 'replace function does not schema-qualify the table';
+  END IF;
+  IF position($empty$SET search_path TO ''$empty$ IN def) = 0 THEN
+    RAISE EXCEPTION 'replace function search_path is not empty';
+  END IF;
+  IF position('pg_catalog.coalesce' IN lower(def)) > 0 OR position('pg_catalog.extract' IN lower(def)) > 0 THEN
+    RAISE EXCEPTION 'builtins were schema-qualified';
+  END IF;
   IF def LIKE '%COMMIT%' THEN
     RAISE EXCEPTION 'replace function must not commit';
   END IF;
-  IF pg_get_functiondef('public.search_manual_catalog(text)'::regprocedure) NOT LIKE '%SELECT DISTINCT%' THEN
+  IF NOT (
+    SELECT prosecdef
+    FROM pg_proc
+    WHERE oid = 'public.replace_manual_search_index(bigint, text[], boolean[], integer[], text)'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'replace function is not security definer';
+  END IF;
+  IF has_function_privilege(
+    'public',
+    'public.replace_manual_search_index(bigint, text[], boolean[], integer[], text)',
+    'EXECUTE'
+  ) THEN
+    RAISE EXCEPTION 'PUBLIC can execute replace_manual_search_index';
+  END IF;
+
+  def := pg_get_functiondef('public.search_manual_catalog(text)'::regprocedure);
+  IF def NOT LIKE '%SELECT DISTINCT%' THEN
     RAISE EXCEPTION 'catalog search is not distinct';
+  END IF;
+  IF position('JOIN public.manuals m ON m.id = i.manual_id' IN def) = 0 THEN
+    RAISE EXCEPTION 'catalog search dropped the manuals join';
+  END IF;
+  IF position('m.published = true' IN def) = 0 THEN
+    RAISE EXCEPTION 'catalog search dropped the published filter';
   END IF;
 END $$;
 
@@ -200,6 +267,29 @@ BEGIN
 
   IF pg_get_functiondef('public.search_manual_catalog(text)'::regprocedure) LIKE '%SELECT DISTINCT%' THEN
     RAISE EXCEPTION 'rollback left DISTINCT in catalog search';
+  END IF;
+
+  IF position(
+    'JOIN public.manuals m ON m.id = i.manual_id' IN pg_get_functiondef('public.search_manual_catalog(text)'::regprocedure)
+  ) = 0
+  OR position(
+    'm.published = true' IN pg_get_functiondef('public.search_manual_catalog(text)'::regprocedure)
+  ) = 0 THEN
+    RAISE EXCEPTION 'rollback did not restore the 000911 published filter';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1 FROM public.search_manual_catalog('alpha') WHERE manual_id = 7
+  ) OR EXISTS (
+    SELECT 1 FROM public.search_manual_catalog('alpha hidden') WHERE manual_id = 7
+  ) THEN
+    RAISE EXCEPTION 'rollback re-exposed an unpublished manual';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.search_manual_catalog('alpha') WHERE manual_id = 1
+  ) THEN
+    RAISE EXCEPTION 'rollback hid the published manual';
   END IF;
 
   IF (

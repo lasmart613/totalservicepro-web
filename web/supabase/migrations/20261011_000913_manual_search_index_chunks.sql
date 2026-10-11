@@ -12,13 +12,16 @@
 -- is why this does not raise the cap.
 --
 -- [[pdfpage:N]] is not renumbered. Chunk 0 holds the earlier pages, later
--- chunks continue the same stamps. search_manual_catalog returns each
--- manual once.
+-- chunks continue the same stamps. search_manual_catalog keeps the live
+-- published filter and returns each manual once. A multi-word match is
+-- only within one chunk.
 --
 -- replace_manual_search_index is the only writer that swaps every chunk.
 -- It takes a transaction advisory lock, compares md5 of the joined chunks
 -- to p_expected_md5, and refuses the write when they differ. Empty storage
--- is md5 NULL on both sides. EXECUTE is service_role only.
+-- is md5 NULL on both sides. SECURITY DEFINER so the write bypasses RLS.
+-- search_path is empty and every table reference is schema-qualified.
+-- EXECUTE is service_role only.
 --
 -- Apply 20261011_000912_manual_search_index_clip.sql first. That file
 -- adds index_clipped and indexed_page_max. 20261011_000911_manuals_published.sql
@@ -49,6 +52,9 @@ ALTER TABLE public.manual_search_index
 ALTER TABLE public.manual_search_index
   ADD CONSTRAINT manual_search_index_pkey PRIMARY KEY (manual_id, chunk_index);
 
+-- Live body from search_manual_catalog after 000911, plus SELECT DISTINCT
+-- so several chunk rows for one manual return one id. The published join
+-- stays. A multi-word query matches only inside a single chunk.
 CREATE OR REPLACE FUNCTION public.search_manual_catalog(q text)
 RETURNS TABLE(manual_id bigint)
 LANGUAGE sql
@@ -58,7 +64,9 @@ SET search_path = public
 AS $$
   SELECT DISTINCT i.manual_id
   FROM public.manual_search_index i
-  WHERE nullif(btrim(q), '') IS NOT NULL
+  JOIN public.manuals m ON m.id = i.manual_id
+  WHERE m.published = true
+    AND nullif(btrim(q), '') IS NOT NULL
     AND char_length(btrim(q)) >= 2
     AND (
       i.search_tsv @@ plainto_tsquery('simple', q)
@@ -67,8 +75,12 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.search_manual_catalog(text) IS
-  'Returns catalog ids (bigint) whose indexed PDF body matches q. One id per manual even when the index is stored in several chunks. Does not return search_text.';
+  'Returns catalog ids (bigint) whose indexed PDF body matches q and whose manual is published. One id per manual when the index is stored in several chunks. Does not return search_text. Does not filter by ownership.';
 
+-- SECURITY DEFINER bypasses RLS. An empty search_path stops a caller from
+-- shadowing public. Tables are schema-qualified. extract, coalesce, md5,
+-- and now stay unqualified. Qualifying extract fails at CREATE (42601)
+-- and qualifying coalesce fails at the first call (42883).
 CREATE OR REPLACE FUNCTION public.replace_manual_search_index(
   p_manual_id bigint,
   p_chunks text[],
@@ -79,7 +91,7 @@ CREATE OR REPLACE FUNCTION public.replace_manual_search_index(
 RETURNS boolean
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = ''
 AS $$
 DECLARE
   current_md5 text;
