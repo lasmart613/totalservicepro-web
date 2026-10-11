@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import {
   clipManualSearchText,
   extractPdfPages,
+  storeIndexText,
   extractPdfSearchText,
   looksLikePdf,
   normalizeManualSearchText,
@@ -163,4 +164,18 @@ test('multi-page text PDF stamps every physical page', async () => {
 test('clip and normalize keep substring search usable', () => {
   assert.equal(normalizeManualSearchText('V-Beam / GentleMax'), 'v beam gentlemax');
   assert.ok(clipManualSearchText('a'.repeat(12), 8).length <= 8);
+});
+
+test('the index clip marker is the tail the character cap dropped', () => {
+  const page1 = '[[pdfpage:1]] hello';
+  const full = `${page1}\f[[pdfpage:2]] world that continues past the cap`;
+  const cut = storeIndexText(full, page1.length + 4);
+  assert.equal(cut.clipped, true);
+  assert.equal(cut.indexedPageMax, 1);
+  assert.equal(cut.text.startsWith(page1), true);
+  assert.doesNotMatch(cut.text, /\[\[pdfpage:2\]\]/);
+  const fit = storeIndexText(full, 10_000);
+  assert.equal(fit.clipped, false);
+  assert.equal(fit.indexedPageMax, 2);
+  assert.equal(fit.text, full);
 });

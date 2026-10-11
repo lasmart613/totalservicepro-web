@@ -40,7 +40,7 @@ import {
   storageResponseIsMissing,
   type StorageProbe,
 } from "./files.ts";
-import { annotateChaptersWithPageMap } from "./page-map.ts";
+import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
 import {
   isMissingColumn,
   isPublishedColumnMissing,
@@ -549,20 +549,66 @@ function chaptersFromPaths(paths: string[]): Array<{
     });
 }
 
+function asIndexManualId(value: unknown): number | null {
+  const n = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+/**
+ * index_clipped / indexed_page_max from the search row. A missing column or a
+ * missing row leaves the max unknown so a stored map is not dropped.
+ */
+async function loadIndexPageBound(
+  admin: { from: (table: string) => any },
+  manualId: unknown,
+): Promise<{ clipped: boolean; indexedPageMax: number | null }> {
+  const unknown = { clipped: false, indexedPageMax: null as number | null };
+  const id = asIndexManualId(manualId);
+  if (id == null) return unknown;
+  try {
+    const q = await admin
+      .from("manual_search_index")
+      .select("index_clipped,indexed_page_max")
+      .eq("manual_id", id)
+      .maybeSingle();
+    if (q?.error || !q?.data) return unknown;
+    const raw = q.data.indexed_page_max;
+    const max = typeof raw === "number" ? raw : Number(raw);
+    return {
+      clipped: q.data.index_clipped === true,
+      indexedPageMax: Number.isFinite(max) && max >= 1 && max <= 9999 ? Math.floor(max) : null,
+    };
+  } catch {
+    return unknown;
+  }
+}
+
 /**
  * Attach pageStart/pageCount from stored chapter_metadata.page_count.
  * The count is the pdf.js numPages the indexer wrote. A missing count omits
- * the whole map. This does not download PDFs.
+ * the whole map. A stored sum that is not the index max is omitted unless
+ * the row is clipped and the sum still covers every stamp. This does not
+ * download PDFs.
  */
-function annotateFolderChapters<T extends { storage_path: string }>(
+async function annotateFolderChapters<T extends { storage_path: string }>(
+  admin: { from: (table: string) => any },
+  manualId: unknown,
   chapters: readonly T[],
   metadata: unknown,
   parentPath: string,
-): { chapters: T[]; joinedPageCount: number | null } {
+): Promise<{ chapters: T[]; joinedPageCount: number | null }> {
   if (chapters.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
   const parts = indexOrderPdfParts(metadata, parentPath);
   if (parts.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
-  return annotateChaptersWithPageMap(chapters, parts);
+  const mapped = annotateChaptersWithPageMap(chapters, parts);
+  if (!mapped.joinedPageCount) return mapped;
+  const index = await loadIndexPageBound(admin, manualId);
+  return gateJoinedPageMap(
+    mapped,
+    { indexMax: index.indexedPageMax, clipped: index.clipped },
+    chapters,
+  );
 }
 
 async function downloadStorageObject(
@@ -1108,7 +1154,9 @@ Deno.serve(async (req) => {
       }
 
       chapters = dedupeChapterList(chapters);
-      const mapped = annotateFolderChapters(
+      const mapped = await annotateFolderChapters(
+        admin,
+        manualId,
         chapters,
         man?.chapter_metadata,
         parentPath,
@@ -1342,7 +1390,9 @@ Deno.serve(async (req) => {
     // Edge stream proxy is kept as fallback — it historically advertised Accept-Ranges
     // without honoring client Range requests, which broke large manuals into "1 page".
     if (!preferBase64 && manualId && sp && isPdfPath(sp)) {
-      const mappedChapters = annotateFolderChapters(
+      const mappedChapters = await annotateFolderChapters(
+        admin,
+        manualId,
         chaptersForFolder,
         man?.chapter_metadata,
         parentPath,

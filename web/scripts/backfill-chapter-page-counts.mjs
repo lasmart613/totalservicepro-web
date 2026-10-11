@@ -4,8 +4,11 @@
  * Each chapter PDF is counted with pdf.js (document.numPages). That is the same
  * count the search indexer writes. Files are walked in chapter_metadata array
  * order, and an exact duplicate path is counted once. page_start is the joined
- * index page of that file. A row is updated only when the sum of those counts
- * equals max [[pdfpage:N]] in manual_search_index. Any other row is skipped.
+ * index page of that file. A row is updated when the sum of those counts
+ * equals max [[pdfpage:N]] in manual_search_index, or when the index is known
+ * to be clipped and the sum is still at least that max (pages before the clip
+ * use the same offsets). A sum below the index max is skipped. An unclipped
+ * sum above the max is skipped.
  *
  * Dry-run is the default. Nothing is written unless --apply is passed.
  * Do not run --apply against production unless you intend to update
@@ -24,12 +27,19 @@
  * Live reads need SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
  * counts.json is the CEO measurement: files[].pi is the pdf.js page count,
  * files[].pr is the retired cleartext /Count parser, files[].p is the storage path.
- * --index-max is a JSON array of { id, max_page }.
+ * --index-max is a JSON array of { id, max_page, clipped?, chars? }.
+ * clipped true, or chars >= 1499000, accepts a row whose pdf.js sum is above
+ * max_page. An explicit clipped false does not. Live reads detect the clip
+ * from manual_search_index.index_clipped, or from search_text length when
+ * that column is not there yet.
  */
 
 import { readFileSync } from 'node:fs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+
+/** Same threshold as 20261011_000912_manual_search_index_clip.sql. */
+export const INDEX_CLIPPED_CHAR_LENGTH = 1_499_000;
 
 globalThis.pdfjsWorker ??= pdfjsWorker;
 
@@ -98,14 +108,34 @@ export function metadataWithPageCounts(metadata, counts) {
 }
 
 /**
- * @returns {'match' | 'mismatch' | 'skipped'}
+ * Explicit index_clipped wins. When the column is absent, a stored text at
+ * the 1,500,000-character slice (Postgres char_length can be a few code
+ * points under that) is the pre-marker clip.
+ * @param {unknown} text
+ * @param {unknown} columnFlag
+ */
+export function indexRowClipped(text, columnFlag) {
+  if (columnFlag === true) return true;
+  if (columnFlag === false) return false;
+  return String(text || '').length >= INDEX_CLIPPED_CHAR_LENGTH;
+}
+
+/**
+ * @returns {'match' | 'clipped' | 'mismatch' | 'skipped'}
  */
 export function backfillStatus(opts) {
-  const { pageSum, maxPage, countedFiles, expectedFiles } = opts;
+  const { pageSum, maxPage, countedFiles, expectedFiles, clipped } = opts;
   if (expectedFiles != null && countedFiles !== expectedFiles) return 'skipped';
   if (maxPage == null || countedFiles < 1 || pageSum == null) return 'skipped';
-  if (pageSum !== maxPage) return 'mismatch';
-  return 'match';
+  if (pageSum < maxPage) return 'mismatch';
+  if (pageSum === maxPage) return 'match';
+  if (clipped) return 'clipped';
+  return 'mismatch';
+}
+
+/** match and clipped both write chapter_metadata. mismatch and skipped do not. */
+export function backfillWrites(status) {
+  return status === 'match' || status === 'clipped';
 }
 
 function argValue(name) {
@@ -123,10 +153,22 @@ function loadCountsFile(file) {
   return byId;
 }
 
+function replayClipped(row) {
+  if (row.clipped === true) return true;
+  if (row.clipped === false) return false;
+  const chars = row.chars == null ? null : Number(row.chars);
+  return chars != null && chars >= INDEX_CLIPPED_CHAR_LENGTH;
+}
+
 function loadIndexMax(file) {
   const rows = JSON.parse(readFileSync(file, 'utf8'));
   const byId = new Map();
-  for (const row of rows) byId.set(Number(row.id), row.max_page == null ? null : Number(row.max_page));
+  for (const row of rows) {
+    byId.set(Number(row.id), {
+      maxPage: row.max_page == null ? null : Number(row.max_page),
+      clipped: replayClipped(row),
+    });
+  }
   return byId;
 }
 
@@ -197,7 +239,9 @@ async function replay(countsFile, indexMaxFile) {
       if (file.pr == null || file.pr === 'ERR') parserKnown = false;
       else parserSum += Number(file.pr);
     }
-    const maxPage = maxes.has(id) ? maxes.get(id) : null;
+    const bound = maxes.has(id) ? maxes.get(id) : null;
+    const maxPage = bound ? bound.maxPage : null;
+    const clipped = bound ? bound.clipped : false;
     const status = missingPi
       ? 'skipped'
       : backfillStatus({
@@ -205,9 +249,11 @@ async function replay(countsFile, indexMaxFile) {
           maxPage,
           countedFiles: files.length,
           expectedFiles: files.length,
+          clipped,
         });
     const note = [
       missingPi ? `${missingPi} files without pi` : '',
+      status === 'clipped' ? 'clipped index; pages before the clip still line up' : '',
       parserKnown && parserSum !== pageSum ? `cleartext parser sum ${parserSum}` : '',
     ]
       .filter(Boolean)
@@ -243,14 +289,15 @@ async function live(countsFile, apply) {
   );
   const manuals = await manualsRes.json();
   const ids = manuals.map((row) => Number(row.id)).filter((id) => id > 0);
-  const indexRes = await supabaseFetch(
-    url,
-    key,
-    `/rest/v1/manual_search_index?select=manual_id,search_text&manual_id=in.(${ids.join(',')})`,
-    { headers: { Accept: 'application/json' } },
-  );
+  const indexRows = await loadIndexRows(url, key, ids);
   const indexes = new Map();
-  for (const row of await indexRes.json()) indexes.set(Number(row.manual_id), String(row.search_text || ''));
+  for (const row of indexRows) {
+    const text = String(row.search_text || '');
+    indexes.set(Number(row.manual_id), {
+      text,
+      clipped: indexRowClipped(text, row.index_clipped),
+    });
+  }
 
   const report = [];
   for (const manual of manuals) {
@@ -273,7 +320,9 @@ async function live(countsFile, apply) {
       }
     }
     const pageSum = failed ? null : fileCounts.reduce((sum, part) => sum + part.pageCount, 0);
-    const maxPage = maxStampPage(indexes.get(id) || '');
+    const index = indexes.get(id);
+    const maxPage = maxStampPage(index?.text || '');
+    const clipped = index ? index.clipped : false;
     let countsSum = null;
     let parserSum = null;
     let parserKnown = true;
@@ -304,12 +353,17 @@ async function live(countsFile, apply) {
           maxPage,
           countedFiles: fileCounts.length,
           expectedFiles: paths.length,
+          clipped,
         });
-    const note = [failed, differ.length ? `${differ.length} files differ from counts.json` : ''].filter(Boolean).join('; ');
+    const note = [
+      failed,
+      status === 'clipped' ? 'clipped index; pages before the clip still line up' : '',
+      differ.length ? `${differ.length} files differ from counts.json` : '',
+    ].filter(Boolean).join('; ');
     const line = { id, status, files: paths.length, pageSum, maxPage, countsSum, parserSum, note };
     report.push(line);
     printRow(line);
-    if (apply && status === 'match') {
+    if (apply && backfillWrites(status)) {
       const next = metadataWithPageCounts(manual.chapter_metadata, fileCounts);
       const patch = await supabaseFetch(url, key, `/rest/v1/manuals?id=eq.${id}`, {
         method: 'PATCH',
@@ -323,10 +377,26 @@ async function live(countsFile, apply) {
   return report;
 }
 
+async function loadIndexRows(url, key, ids) {
+  const wide = `/rest/v1/manual_search_index?select=manual_id,search_text,index_clipped,indexed_page_max&manual_id=in.(${ids.join(',')})`;
+  try {
+    const res = await supabaseFetch(url, key, wide, { headers: { Accept: 'application/json' } });
+    return await res.json();
+  } catch (err) {
+    const message = err instanceof Error ? err.message : '';
+    if (!/index_clipped|indexed_page_max|column/i.test(message)) throw err;
+    const narrow = `/rest/v1/manual_search_index?select=manual_id,search_text&manual_id=in.(${ids.join(',')})`;
+    const res = await supabaseFetch(url, key, narrow, { headers: { Accept: 'application/json' } });
+    return await res.json();
+  }
+}
+
 function summarize(report) {
-  const tally = { match: 0, mismatch: 0, skipped: 0 };
+  const tally = { match: 0, clipped: 0, mismatch: 0, skipped: 0 };
   for (const row of report) tally[row.status] += 1;
-  console.log(`rows ${report.length}  match ${tally.match}  mismatch ${tally.mismatch}  skipped ${tally.skipped}`);
+  console.log(
+    `rows ${report.length}  match ${tally.match}  clipped ${tally.clipped}  mismatch ${tally.mismatch}  skipped ${tally.skipped}`,
+  );
   if (!process.argv.includes('--apply')) console.log('dry-run: no chapter_metadata was written');
 }
 

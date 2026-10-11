@@ -17,8 +17,9 @@ import {
   reindexManualPageRange,
   searchTextWriteRefusal,
   shouldKeepExistingSearchText,
+  upsertManualSearchIndex,
 } from './manual-search-index.ts';
-import { MANUAL_SEARCH_PDF_MAX_BYTES } from './manual-pdf-text.ts';
+import { MANUAL_SEARCH_PDF_MAX_BYTES, storeIndexText } from './manual-pdf-text.ts';
 import { buildTextPdf } from './manual-pdf-fixtures.ts';
 import { MANUAL_FIXTURE_PATH } from './manuals.ts';
 import { containsTextImatch } from './email-match.ts';
@@ -140,6 +141,32 @@ test('reindex keeps a richer manual_search_index row instead of writing a worse 
   assert.equal(result.skipped, 'kept_existing_index');
   assert.equal(result.chars, existing.trim().length);
   assert.equal(upserts, 0);
+});
+
+test('index upsert records the clip and retries when the columns are missing', async () => {
+  const page1 = '[[pdfpage:1]] hello';
+  const stored = storeIndexText(`${page1}\f[[pdfpage:2]] world past the cap`, page1.length + 4);
+  assert.equal(stored.clipped, true);
+  assert.equal(stored.indexedPageMax, 1);
+  const calls: Array<Record<string, unknown>> = [];
+  const db = {
+    from() {
+      return {
+        upsert(payload: Record<string, unknown>) {
+          calls.push(payload);
+          if (calls.length === 1) return { error: { message: 'column index_clipped does not exist' } };
+          return { error: null };
+        },
+      };
+    },
+  };
+  const saved = await upsertManualSearchIndex(db as never, 1, stored.text, stored);
+  assert.equal(saved.ok, true);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].index_clipped, true);
+  assert.equal(calls[0].indexed_page_max, 1);
+  assert.equal(Object.hasOwn(calls[1], 'index_clipped'), false);
+  assert.equal(calls[1].search_text, stored.text);
 });
 
 test('stamped page merge is idempotent and ignores unstamped text', () => {
@@ -313,6 +340,7 @@ function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: st
   let saved = '';
   let downloaded = 0;
   let chapterMetadata: unknown = null;
+  let lastUpsert: Record<string, unknown> | null = null;
   const client = {
     storage: {
       from() {
@@ -349,8 +377,9 @@ function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: st
           chapterMetadata = payload?.chapter_metadata ?? null;
           return this;
         },
-        upsert(payload: { search_text?: string }) {
+        upsert(payload: Record<string, unknown>) {
           upserts += 1;
+          lastUpsert = payload;
           saved = String(payload?.search_text || '');
           return { error: null };
         },
@@ -371,6 +400,9 @@ function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: st
     get chapterMetadata() {
       return chapterMetadata;
     },
+    get lastUpsert() {
+      return lastUpsert;
+    },
   };
 }
 
@@ -386,6 +418,8 @@ test('folder manuals concatenate every PDF and continue physical page stamps', a
   const indexed = await indexManualSearchText(harness.client, manual);
   assert.equal(indexed.ok, true);
   assert.equal(indexed.files, 2);
+  assert.equal(harness.lastUpsert?.index_clipped, false);
+  assert.equal(harness.lastUpsert?.indexed_page_max, 3);
   assert.match(harness.saved, /\[\[pdfpage:1\]\] intro reservoir/);
   assert.match(harness.saved, /\[\[pdfpage:2\]\] error forty three/);
   assert.match(harness.saved, /\[\[pdfpage:3\]\] optical collimator/);

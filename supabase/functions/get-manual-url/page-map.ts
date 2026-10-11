@@ -1,8 +1,10 @@
 export {
   annotateChaptersWithPageMap,
   buildJoinedPageMap,
+  gateJoinedPageMap,
   indexPathKey,
   joinedMapFromChapters,
+  joinedPageMapAllowed,
   resolveJoinedPage,
   viewerTargetForJoinedPage,
   type JoinedPagePart,
