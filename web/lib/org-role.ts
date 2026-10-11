@@ -118,6 +118,30 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 /**
+ * The org role from rows already read: the caller's user_profiles row (role),
+ * the organization_memberships row for this user and org, and the
+ * organizations row (created_by). getOrgRole and the nav identity provider
+ * both use this, so the header's role matches the server check exactly.
+ */
+export function orgRoleFromRows(
+  userId: string,
+  profile: unknown,
+  membership: unknown,
+  org: unknown
+): OrgRole {
+  const id = String(userId || '').trim();
+  const profileRow = asRecord(profile);
+  const membershipRow = asRecord(membership);
+  const orgRow = asRecord(org);
+  const createdBy = orgRow?.created_by == null ? null : String(orgRow.created_by);
+  return {
+    role: membershipRow ? membershipRoleForOrgPowers(membershipRow.role == null ? null : String(membershipRow.role)) : null,
+    isFounder: !!id && (sameUser(id, createdBy) || (membershipRow ? rowFounderFlag(membershipRow) : false)),
+    isPlatformAdmin: normalizeOrgRole(profileRow?.role == null ? null : String(profileRow.role)) === 'admin',
+  };
+}
+
+/**
  * Membership role, founder, and platform admin for one user in one org.
  * orgId null still resolves platform admin and returns no org role.
  */
@@ -152,17 +176,7 @@ export async function getOrgRole(
       return { ok: false, status: 503, error: ORG_ROLE_LOOKUP_ERROR };
     }
 
-    const profileRow = asRecord(profile.data);
-    const membershipRow = asRecord(membership.data);
-    const orgRow = asRecord(org.data);
-    const createdBy = orgRow?.created_by == null ? null : String(orgRow.created_by);
-
-    return {
-      ok: true,
-      role: membershipRow ? membershipRoleForOrgPowers(membershipRow.role == null ? null : String(membershipRow.role)) : null,
-      isFounder: sameUser(id, createdBy) || (membershipRow ? rowFounderFlag(membershipRow) : false),
-      isPlatformAdmin: normalizeOrgRole(profileRow?.role == null ? null : String(profileRow.role)) === 'admin',
-    };
+    return { ok: true, ...orgRoleFromRows(id, profile.data, membership.data, org.data) };
   } catch {
     return { ok: false, status: 503, error: ORG_ROLE_LOOKUP_ERROR };
   }
