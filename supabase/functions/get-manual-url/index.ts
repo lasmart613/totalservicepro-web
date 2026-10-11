@@ -22,9 +22,12 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   chaptersFromMetadata,
+  indexOrderPdfPaths,
   isFolderManual,
   resolveManualPdfOpen,
 } from "./chapters.ts";
+import { annotateChaptersWithPageMap, type JoinedPagePart } from "./page-map.ts";
+import { countPdfPages } from "./pdf-page-count.ts";
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -442,6 +445,116 @@ function chaptersFromPaths(paths: string[]): Array<{
         : (parent ? `${parent}: ${base}` : base);
       return { order: i + 1, title, storage_path: p };
     });
+}
+
+type PageCountSlot = { etag: string; pages: number | null };
+const pdfPageCountCache = new Map<string, PageCountSlot>();
+
+function storageObjectEndpoint(supabaseUrl: string, objectPath: string): string {
+  const path = cleanPath(objectPath);
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  return `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/manuals/${encoded}`;
+}
+
+async function headStorageObject(
+  supabaseUrl: string,
+  serviceKey: string,
+  objectPath: string,
+): Promise<{ ok: boolean; etag: string }> {
+  try {
+    const res = await fetch(storageObjectEndpoint(supabaseUrl, objectPath), {
+      method: "HEAD",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+      },
+    });
+    const etag = res.headers.get("etag") || res.headers.get("last-modified") || "";
+    return { ok: res.ok, etag };
+  } catch {
+    return { ok: false, etag: "" };
+  }
+}
+
+async function cachedPdfPageCount(
+  supabaseUrl: string,
+  serviceKey: string,
+  objectPath: string,
+): Promise<number | null> {
+  const path = cleanPath(objectPath);
+  if (!path) return null;
+  const head = await headStorageObject(supabaseUrl, serviceKey, path);
+  if (head.ok && head.etag) {
+    const hit = pdfPageCountCache.get(path);
+    if (hit && hit.etag === head.etag) return hit.pages;
+  }
+  const dl = await downloadStorageObject(supabaseUrl, serviceKey, path);
+  if (!dl.bytes || !dl.bytes.length) return null;
+  const pages = countPdfPages(dl.bytes);
+  if (head.etag) pdfPageCountCache.set(path, { etag: head.etag, pages });
+  return pages;
+}
+
+async function mapPool<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  if (!items.length) return out;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      out[index] = await fn(items[index]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
+function indexerPathOrder(paths: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+  for (const path of paths) {
+    if (!path || seen.has(path)) continue;
+    seen.add(path);
+    unique.push(path);
+  }
+  return unique.sort((a, b) =>
+    a.localeCompare(b, undefined, { numeric: true, sensitivity: "variant" })
+  );
+}
+
+/**
+ * Attach pageStart/pageCount for a multi-file manual. Any unreadable file
+ * omits the map. Counts are cached in this isolate by path + etag.
+ */
+async function annotateFolderChapters<T extends { storage_path: string }>(
+  supabaseUrl: string,
+  serviceKey: string,
+  chapters: readonly T[],
+  metadata: unknown,
+  parentPath: string,
+): Promise<{ chapters: T[]; joinedPageCount: number | null }> {
+  if (chapters.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  try {
+    const fromMeta = indexOrderPdfPaths(metadata, parentPath);
+    const paths = fromMeta.length
+      ? fromMeta
+      : indexerPathOrder(chapters.map((chapter) => chapter.storage_path));
+    const counts = await mapPool(paths, 4, (path) =>
+      cachedPdfPageCount(supabaseUrl, serviceKey, path)
+    );
+    const parts: JoinedPagePart[] = paths.map((storagePath, index) => ({
+      storagePath,
+      pageCount: counts[index],
+    }));
+    return annotateChaptersWithPageMap(chapters, parts);
+  } catch (e) {
+    console.warn("folder page map failed", e);
+    return { chapters: chapters.slice(), joinedPageCount: null };
+  }
 }
 
 async function downloadStorageObject(
@@ -985,13 +1098,22 @@ Deno.serve(async (req) => {
         chapters = chaptersFromPaths(paths);
       }
 
+      const mapped = await annotateFolderChapters(
+        supabaseUrl,
+        serviceKey,
+        chapters,
+        man?.chapter_metadata,
+        parentPath,
+      );
+
       return json(200, {
         ...readMeta,
         source: "list_chapters",
         manual_id: manualId,
         prefix: parentPath,
-        chapters,
-        count: chapters.length,
+        chapters: mapped.chapters,
+        count: mapped.chapters.length,
+        ...(mapped.joinedPageCount ? { joined_page_count: mapped.joinedPageCount } : {}),
         entry_file_path: man?.entry_file_path || null,
         title: man?.title || null,
       });
@@ -1089,6 +1211,15 @@ Deno.serve(async (req) => {
     // Edge stream proxy is kept as fallback — it historically advertised Accept-Ranges
     // without honoring client Range requests, which broke large manuals into "1 page".
     if (!preferBase64 && manualId && sp && isPdfPath(sp)) {
+      const mappedChapters = await annotateFolderChapters(
+        supabaseUrl,
+        serviceKey,
+        chaptersForFolder,
+        man?.chapter_metadata,
+        parentPath,
+      );
+      chaptersForFolder = mappedChapters.chapters;
+      const joinedPageCount = mappedChapters.joinedPageCount;
       const chaptersOut = chaptersForFolder.length ? chaptersForFolder : undefined;
       const prefixOut = parentPath && !isPdfPath(parentPath) ? parentPath : undefined;
       try {
@@ -1106,6 +1237,7 @@ Deno.serve(async (req) => {
             note: "Signed storage URL (Range requests enabled)",
             chapters: chaptersOut,
             count: chaptersForFolder.length || undefined,
+            ...(joinedPageCount ? { joined_page_count: joinedPageCount } : {}),
             prefix: prefixOut,
             title: man?.title || null,
           });
@@ -1137,6 +1269,7 @@ Deno.serve(async (req) => {
         note: "Streaming chapter via short ticket",
         chapters: chaptersOut,
         count: chaptersForFolder.length || undefined,
+        ...(joinedPageCount ? { joined_page_count: joinedPageCount } : {}),
         prefix: prefixOut,
         title: man?.title || null,
       });

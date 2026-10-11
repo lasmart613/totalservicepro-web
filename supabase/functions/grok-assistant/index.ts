@@ -49,6 +49,7 @@ import {
   alignReplyToCitationPage,
   answerDeclinesManualCitation,
   reconcilePhysicalPage,
+  rememberManualIndex,
   resolveQuotedCitationPage,
   type CatalogCiteRow,
   type CitationAttributionScope,
@@ -1882,6 +1883,7 @@ async function searchIndexedManualText(
   const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', id).maybeSingle()
   if (error || !data?.search_text) return null
   const full = String(data.search_text)
+  rememberManualIndex(id, full)
   // Model names in the manual label (M22) are not fault codes. The question and
   // extracted fault codes still are: they are in the query, not in this list.
   const labelCodes = ignoreCodes ?? faultCodeTokens(label)
@@ -2042,7 +2044,11 @@ async function loadSiblingCatalog(
     if (!idx?.error && Array.isArray(idx.data)) {
       for (const row of idx.data) {
         const id = Number(row.manual_id)
-        if (id > 0 && row.search_text) indexes[id] = String(row.search_text)
+        if (id > 0 && row.search_text) {
+          const text = String(row.search_text)
+          indexes[id] = text
+          rememberManualIndex(id, text)
+        }
       }
     }
   }

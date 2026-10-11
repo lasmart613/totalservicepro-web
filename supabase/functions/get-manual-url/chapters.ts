@@ -10,6 +10,10 @@ export type ManualChapterRef = {
   order: number;
   title: string;
   storage_path: string;
+  /** First joined index page in this file. Omitted when the map cannot be built. */
+  pageStart?: number;
+  /** pdf.js page count for this file. Omitted when the map cannot be built. */
+  pageCount?: number;
 };
 
 export function isFolderManual(value: unknown): boolean {
@@ -213,6 +217,29 @@ export function chapterDisplayRank(chapter: { title: string; storage_path: strin
   // A code that is not a known service-manual family (HA9P5320-5Z) sits with the drawings.
   if (partNumberCore(stripPdf(fileName)) && documentKind(fileName, parent) === "Drawing") return 2;
   return 0;
+}
+
+/**
+ * PDF paths in chapter_metadata array order, the order the search index
+ * concatenates files. Display rank and the stored `order` field are ignored.
+ * Exact-path duplicates are dropped. A caller that has no metadata should
+ * sort storage paths with numeric localeCompare instead.
+ */
+export function indexOrderPdfPaths(metadata: unknown, parentPath: string): string[] {
+  if (!Array.isArray(metadata) || !metadata.length) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of metadata) {
+    if (!item || typeof item !== "object") continue;
+    const raw = (item as { storage_path?: unknown; path?: unknown }).storage_path
+      ?? (item as { path?: unknown }).path
+      ?? "";
+    const storagePath = joinChapterPath(parentPath, raw);
+    if (!isPdfPath(storagePath) || seen.has(storagePath)) continue;
+    seen.add(storagePath);
+    out.push(storagePath);
+  }
+  return out;
 }
 
 function joinChapterPath(parentPath: string, raw: unknown): string {

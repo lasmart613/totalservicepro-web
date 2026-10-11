@@ -95,7 +95,7 @@ test('a folder row with entry_file_path returns every chapter and still opens th
       FOLDER_CHAPTERS.map((chapter) => chapter.storage_path).sort(),
     );
   }
-  // Stored order numbers stay put. Page numbering is a later change.
+  // Stored order numbers stay put. Joined pageStart is a separate field.
   assert.equal(fromFolder.chapters.find((chapter) => chapter.storage_path.endsWith('7111-80-2520_03.pdf'))?.order, 10);
   assert.equal(fromFolder.chapters.find((chapter) => chapter.storage_path.endsWith('7122-99-0110_05.pdf'))?.order, 21);
 });
