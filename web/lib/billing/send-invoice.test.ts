@@ -322,4 +322,90 @@ describe('send invoice', { concurrency: false }, () => {
       fetchLog.restore();
     }
   });
+
+  test('checkout keeps the database slot and a failure before checkout releases it', async () => {
+    resetDocumentSendRateLimit();
+    const rows: { id: number; documentType: string }[] = [];
+    const calls: string[] = [];
+    let next = 1;
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [invoiceRow()],
+    });
+    const rpc = async (fn: string, args: Record<string, unknown>) => {
+      calls.push(fn);
+      if (fn === 'take_document_send_slot') {
+        const same = rows.filter((row) => row.documentType === String(args.p_document_type));
+        if (same.length >= DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR) {
+          return {
+            data: {
+              ok: false,
+              scope: 'document',
+              message: 'This document has reached the limit of 5 emails per hour. Try again later.',
+            },
+            error: null,
+          };
+        }
+        const id = next++;
+        rows.push({ id, documentType: String(args.p_document_type) });
+        return { data: { ok: true, id, stamp: id }, error: null };
+      }
+      if (fn === 'release_document_send_slot') {
+        const id = Number(args.p_slot_id);
+        const index = rows.findIndex((row) => row.id === id);
+        if (index >= 0) rows.splice(index, 1);
+        return { data: null, error: null };
+      }
+      return { data: null, error: { code: 'PGRST202', message: 'Could not find the function' } };
+    };
+    Object.assign(db, { rpc });
+    const checkout = checkoutSpy();
+    let providerStatus = 502;
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify(providerStatus === 200 ? { id: 'msg-1' } : { message: 'provider down' }), {
+        status: providerStatus,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const deps = {
+          userClient: db as never,
+          adminClient: db as never,
+          createCheckout: checkout.createCheckout as never,
+        };
+        for (let n = 0; n < DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR; n++) {
+          const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), deps);
+          assert.equal(res.status, 502, `checkout kept ${n + 1}`);
+        }
+        assert.equal(rows.length, DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR);
+        assert.equal(calls.filter((fn) => fn === 'release_document_send_slot').length, 0);
+        assert.equal(checkout.calls.length, DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR);
+        const blocked = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), deps);
+        const blockedJson = await blocked.json();
+        assert.equal(blocked.status, 429);
+        assert.equal(blockedJson.rateLimited, true);
+        assert.equal(checkout.calls.length, DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR);
+        assert.equal(fetchLog.calls, DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR);
+
+        rows.splice(0, rows.length);
+        calls.length = 0;
+        providerStatus = 502;
+        const released = await runSendInvoice(request({ invoice_id: 42, include_payment_link: false }), deps);
+        assert.equal(released.status, 502);
+        assert.equal(calls.filter((fn) => fn === 'release_document_send_slot').length, 1);
+        assert.equal(rows.length, 0);
+        providerStatus = 200;
+        for (let n = 0; n < DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR; n++) {
+          const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: false }), deps);
+          assert.equal(res.status, 200, `released retry ${n + 1}`);
+        }
+        const capped = await runSendInvoice(request({ invoice_id: 42, include_payment_link: false }), deps);
+        assert.equal(capped.status, 429);
+      });
+    } finally {
+      fetchLog.restore();
+    }
+  });
 });

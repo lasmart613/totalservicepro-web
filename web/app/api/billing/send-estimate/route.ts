@@ -35,7 +35,11 @@ import {
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
 import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
-import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import {
+  releaseDocumentSendSlot,
+  takeDocumentSendSlot,
+  type HeldDocumentSendSlot,
+} from '@/lib/billing/send-rate-limit';
 
 /** Same body for a missing estimate and an estimate owned by another shop. */
 const ESTIMATE_NOT_FOUND = 'Estimate not found.';
@@ -66,8 +70,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps = {}) {
-  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
-    null;
+  let heldSlot: HeldDocumentSendSlot | null = null;
+  let limitClient: SupabaseClient | null = null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -112,6 +116,7 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
 
     const admin =
       deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+    limitClient = admin;
 
     const loaded = await loadOwnedDocument({
       userClient: supabase,
@@ -185,15 +190,25 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
       );
     }
 
-    const sendLimit = takeDocumentSendSlot({
+    const sendLimit = await takeDocumentSendSlot({
       organizationId: callerOrgId,
       documentId: estimateId,
       documentType: 'estimate',
+      client: limitClient,
     });
     if (!sendLimit.ok) {
+      if (sendLimit.scope === 'unavailable') {
+        return respond({ error: sendLimit.message, emailSent: false }, 503);
+      }
       return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
-    heldSlot = { organizationId: callerOrgId, documentId: estimateId, stamp: sendLimit.stamp };
+    heldSlot = {
+      organizationId: callerOrgId,
+      documentId: estimateId,
+      stamp: sendLimit.stamp,
+      slotId: sendLimit.slotId,
+      backend: sendLimit.backend,
+    };
 
     const techName = await readTechName(supabase, user.id);
     const company =
@@ -295,7 +310,7 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
 
     if (!delivery.ok) {
       if (heldSlot) {
-        releaseDocumentSendSlot({ ...heldSlot, documentType: 'estimate' });
+        await releaseDocumentSendSlot({ ...heldSlot, documentType: 'estimate', client: limitClient });
         heldSlot = null;
       }
       return respond({ ok: false, emailSent: false, error: delivery.error }, 502, [recipient.email]);
@@ -324,7 +339,9 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
       [recipient.email]
     );
   } catch (e: any) {
-    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'estimate' });
+    if (heldSlot) {
+      await releaseDocumentSendSlot({ ...heldSlot, documentType: 'estimate', client: limitClient });
+    }
     console.error('send-estimate', e);
     return respond({ error: e?.message || 'Server error' }, 500);
   }
