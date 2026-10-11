@@ -1,7 +1,8 @@
 /**
  * Android WebView session helpers.
- * The shell injects TSPAndroid/<version> on the user agent and exposes
- * window.Android.saveSession / getStoredSession / clearSession.
+ * The shell injects TSPAndroid/<version> on the user agent.
+ * https pages post saveSession, clearSession, and getStoredSession to tspNative.
+ * The JavascriptInterface does not return the session.
  */
 
 import { PRODUCTION_SITE_ORIGIN } from './site-origin.ts';

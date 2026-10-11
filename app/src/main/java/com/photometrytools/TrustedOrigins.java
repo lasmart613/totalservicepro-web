@@ -12,10 +12,11 @@ import java.util.Locale;
  * https://repairplanet.net (and www). Netlify is a deploy alias, not a host
  * this app needs to embed.
  *
- * <p>{@code yljztfajyvjzqikxdddf.supabase.co} is the project's auth and file
+ * <p>{@code yljztfajyvjzqikxdddf.supabase.co} is the project's auth and API
  * host. It is not a page that receives the session or the JS bridge. Main-frame
- * navigations to it leave the WebView. A subframe may load that exact host
- * so a manual file from this project can render.
+ * navigations to it leave the WebView. Subframes on that host are cancelled:
+ * the page calls Supabase with fetch, not with an iframe. {@code data:} and
+ * {@code blob:} subframes are cancelled for the same reason.
  */
 public final class TrustedOrigins {
     public static final String HOST_REPAIRPLANET = "repairplanet.net";
@@ -73,14 +74,27 @@ public final class TrustedOrigins {
     /**
      * Subframe navigations that may stay inside the WebView. Everything else
      * is cancelled. This does not grant session injection.
+     * First-party https pages and bundled assets may load. data:, blob:, and
+     * the Supabase host may not: those frames would see addJavascriptInterface.
      */
     public static boolean subframeMayLoad(String url) {
-        if (allowsUrl(url) || isBundledAsset(url)) return true;
+        if (isBundledAsset(url)) return true;
         Uri uri = parse(url);
         if (uri == null || uri.getScheme() == null) return false;
-        String scheme = uri.getScheme().toLowerCase(Locale.US);
-        return "about".equals(scheme) || "data".equals(scheme)
-                || "blob".equals(scheme) || "javascript".equals(scheme);
+        return subframeAllowed(uri.getScheme(), uri.getHost());
+    }
+
+    /**
+     * Scheme and host as {@link Uri#getScheme()} and {@link Uri#getHost()}
+     * return them. Host is null for data: and blob: URLs.
+     */
+    public static boolean subframeAllowed(String scheme, String host) {
+        if (scheme == null) return false;
+        String normalized = scheme.toLowerCase(Locale.US);
+        if ("https".equals(normalized)) {
+            return HOST_REPAIRPLANET.equals(host) || HOST_WWW.equals(host);
+        }
+        return "about".equals(normalized) || "javascript".equals(normalized);
     }
 
     public static boolean isAuthCallback(String url) {

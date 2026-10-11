@@ -28,8 +28,19 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   assert.match(callback, /totalservicepro:\/\/auth-callback/);
   const bridge = readFileSync(join(here, '../components/AndroidSessionBridge.tsx'), 'utf8');
   assert.match(bridge, /Android\.saveSession|saveSession/);
-  assert.match(bridge, /getStoredSession/);
   assert.match(bridge, /clearSession/);
+  assert.match(bridge, /tspNative/);
+  assert.match(bridge, /m:\s*'getStoredSession'/);
+  assert.match(bridge, /__tspRestoreAndroidSession/);
+  assert.doesNotMatch(bridge, /getStoredSession\s*\(/);
+  const shell = readFileSync(
+    join(here, '../../app/src/main/java/com/photometrytools/MainActivity.java'),
+    'utf8'
+  );
+  assert.doesNotMatch(shell, /public String getStoredSession/);
+  assert.doesNotMatch(shell, /host\.getStoredSession/);
+  assert.match(shell, /"getStoredSession"/);
+  assert.match(shell, /isMainFrame/);
   const providers = readFileSync(join(here, '../components/providers.tsx'), 'utf8');
   assert.match(providers, /AndroidSessionBridge/);
 });

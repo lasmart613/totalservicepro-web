@@ -6,8 +6,12 @@ import { normalizeAndroidSession, persistableAndroidSession } from '@/lib/androi
 
 type AndroidBridge = {
   saveSession?: (json: string) => void;
-  getStoredSession?: () => string;
   clearSession?: () => void;
+};
+
+type TspNativeChannel = {
+  postMessage: (message: string) => void;
+  onmessage: ((event: { data?: string }) => void) | null;
 };
 
 function androidBridge(): AndroidBridge | null {
@@ -15,6 +19,49 @@ function androidBridge(): AndroidBridge | null {
   const bridge = (window as Window & { Android?: AndroidBridge }).Android;
   if (!bridge || typeof bridge.saveSession !== 'function') return null;
   return bridge;
+}
+
+function tspNative(): TspNativeChannel | null {
+  if (typeof window === 'undefined') return null;
+  const channel = (window as Window & { tspNative?: TspNativeChannel }).tspNative;
+  if (!channel || typeof channel.postMessage !== 'function') return null;
+  return channel;
+}
+
+function postToOriginLockedBridge(payload: Record<string, unknown>): boolean {
+  const channel = tspNative();
+  if (!channel) return false;
+  try {
+    channel.postMessage(JSON.stringify(payload));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function requestStoredSession(): Promise<string | null> {
+  const channel = tspNative();
+  if (!channel) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const previous = channel.onmessage;
+    const timer = window.setTimeout(() => {
+      channel.onmessage = previous;
+      resolve(null);
+    }, 1500);
+    channel.onmessage = (event) => {
+      window.clearTimeout(timer);
+      channel.onmessage = previous;
+      const data = typeof event?.data === 'string' ? event.data : '';
+      resolve(data.includes('access_token') ? data : null);
+    };
+    try {
+      channel.postMessage(JSON.stringify({ m: 'getStoredSession' }));
+    } catch {
+      window.clearTimeout(timer);
+      channel.onmessage = previous;
+      resolve(null);
+    }
+  });
 }
 
 async function applyTokens(
@@ -47,14 +94,17 @@ export function AndroidSessionBridge() {
     const restore = async (raw?: unknown) => {
       const { data } = await supabase.auth.getSession();
       if (data.session?.access_token) {
-        try {
-          bridge?.saveSession?.(JSON.stringify(data.session));
-        } catch {
-          /* ignore */
+        const json = JSON.stringify(data.session);
+        if (!postToOriginLockedBridge({ m: 'saveSession', json })) {
+          try {
+            bridge?.saveSession?.(json);
+          } catch {
+            /* ignore */
+          }
         }
         return true;
       }
-      const stored = raw ?? bridge?.getStoredSession?.();
+      const stored = raw ?? (await requestStoredSession());
       if (!stored) return false;
       return applyTokens(supabase, stored);
     };
@@ -67,12 +117,17 @@ export function AndroidSessionBridge() {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!bridge) return;
+      if (!bridge && !tspNative()) return;
       try {
         if (session?.access_token) {
-          bridge.saveSession?.(JSON.stringify(session));
+          const json = JSON.stringify(session);
+          if (!postToOriginLockedBridge({ m: 'saveSession', json })) {
+            bridge.saveSession?.(json);
+          }
         } else if (event === 'SIGNED_OUT') {
-          bridge.clearSession?.();
+          if (!postToOriginLockedBridge({ m: 'clearSession' })) {
+            bridge.clearSession?.();
+          }
         }
       } catch {
         /* ignore */

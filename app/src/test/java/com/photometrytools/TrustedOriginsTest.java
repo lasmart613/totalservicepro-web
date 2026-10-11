@@ -40,4 +40,23 @@ public class TrustedOriginsTest {
         assertFalse(TrustedOrigins.allows("https", "repairplanet.net."));
         assertFalse(TrustedOrigins.allows("https", "RepairPlanet.net"));
     }
+
+    @Test
+    public void subframesRejectDataBlobAndSupabase() {
+        assertTrue(TrustedOrigins.subframeAllowed("https", "repairplanet.net"));
+        assertTrue(TrustedOrigins.subframeAllowed("https", "www.repairplanet.net"));
+        assertTrue(TrustedOrigins.subframeAllowed("HTTPS", "repairplanet.net"));
+        assertTrue(TrustedOrigins.subframeAllowed("about", null));
+        assertTrue(TrustedOrigins.subframeAllowed("javascript", null));
+        assertTrue(TrustedOrigins.isBundledAsset("file:///android_asset/pdf_viewer.html"));
+        assertFalse(TrustedOrigins.subframeAllowed("https", "yljztfajyvjzqikxdddf.supabase.co"));
+        assertFalse(TrustedOrigins.subframeAllowed("data", null));
+        assertFalse(TrustedOrigins.subframeAllowed("blob", null));
+        assertFalse(TrustedOrigins.subframeAllowed("blob", "repairplanet.net"));
+        assertFalse(TrustedOrigins.subframeAllowed("http", "repairplanet.net"));
+        assertFalse(TrustedOrigins.subframeAllowed("https", "evil.repairplanet.net"));
+        assertFalse(TrustedOrigins.subframeAllowed(null, "repairplanet.net"));
+        assertFalse(TrustedOrigins.isBundledAsset("https://repairplanet.net/"));
+        assertFalse(TrustedOrigins.isBundledAsset("file:///sdcard/secret.html"));
+    }
 }

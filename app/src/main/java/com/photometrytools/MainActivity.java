@@ -65,6 +65,7 @@ import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -173,6 +174,8 @@ public class MainActivity extends AppCompatActivity {
     private String acceptedAuthNavigation;
     private boolean closedForExternalAuth;
     private volatile String mainFrameUrl;
+    /** Set only while tspNative is dispatching a main-frame message. */
+    private final ThreadLocal<Boolean> originLockedCaller = new ThreadLocal<>();
     private boolean recoveringRenderer;
     private boolean backCallbackInstalled;
 
@@ -282,17 +285,23 @@ public class MainActivity extends AppCompatActivity {
         return true;
     };
 
+    /**
+     * Injected into every frame, which cannot be told apart here.
+     * https pages call tspNative instead. These methods run only for a bundled
+     * file page, and none of them return a session or token.
+     * {@code postOrgApi} returns org-switch JSON; the bearer is an argument.
+     */
     public class WebAppInterface {
 
         @JavascriptInterface
         public void showToast(String msg) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show());
         }
 
         @JavascriptInterface
         public void saveSession(String sessionJson) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             storedSession = sessionJson;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
@@ -301,14 +310,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public String getStoredSession() {
-            if (!originAllowsBridge()) return null;
-            return storedSession;
-        }
-
-        @JavascriptInterface
         public void clearSession() {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             storedSession = null;
             biometricEnabled = false;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -320,7 +323,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void setBiometricEnabled(boolean enabled) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             biometricEnabled = enabled;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
@@ -330,25 +333,25 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public boolean isBiometricEnabled() {
-            if (!originAllowsBridge()) return false;
+            if (!javascriptInterfaceAllowed()) return false;
             return biometricEnabled;
         }
 
         @JavascriptInterface
         public boolean canUseBiometric() {
-            if (!originAllowsBridge()) return false;
+            if (!javascriptInterfaceAllowed()) return false;
             return canAuthenticateWithBiometrics();
         }
 
         @JavascriptInterface
         public void setPremiumStatus(boolean premium) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             // Ads removed from this build. Paid "no ads" is already true.
         }
 
         @JavascriptInterface
         public void launchBillingFlow(String sku) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> loadProductionOrAsset("/plans", "paywall.html"));
         }
 
@@ -358,7 +361,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public String postOrgApi(String path, String organizationId, String bearer) {
-            if (!originAllowsBridge()) return orgApiError("Not allowed");
+            if (!javascriptInterfaceAllowed()) return orgApiError("Not allowed");
             if (!"/api/org/switch".equals(path) && !"/api/org/leave".equals(path)) {
                 return orgApiError("Not allowed");
             }
@@ -401,7 +404,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void openUrl(String url) {
-            if (!originAllowsBridge() || url == null) return;
+            if (!javascriptInterfaceAllowed() || url == null) return;
             runOnUiThread(() -> {
                 try {
                     // geo: is handled inside navigateInWebView, which returns true so this
@@ -419,7 +422,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printReport(String html, String jobName) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 WebView pdfWebView = new WebView(MainActivity.this);
                 WebSettings settings = pdfWebView.getSettings();
@@ -481,7 +484,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void speak(String text) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> speakWithDeviceTts(text));
         }
 
@@ -492,7 +495,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void speakAnswer(String text, String voiceId, String engine, String accessToken) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> startGrokAnswer(text, voiceId, engine, accessToken));
         }
 
@@ -502,7 +505,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void interruptSpeech() {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 speechGeneration++;
                 stopGrokPlayer();
@@ -513,13 +516,13 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void stopSpeaking() {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> stopAnswer(true));
         }
 
         @JavascriptInterface
         public void startVoiceRecognition() {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 stopAnswer(true);
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
@@ -537,7 +540,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void stopVoiceRecognition() {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> stopListening(true));
         }
 
@@ -547,13 +550,13 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void onCitationObserved(String manualId, String page) {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             Log.i(TAG, "assistant:citation-open manualId=" + manualId + " page=" + page);
         }
 
         @JavascriptInterface
         public void goBack() {
-            if (!originAllowsBridge()) return;
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 if (webView != null && webView.canGoBack()) webView.goBack();
             });
@@ -640,6 +643,7 @@ public class MainActivity extends AppCompatActivity {
         webView.addJavascriptInterface(new WebAppInterface(), "Android");
         webView.addJavascriptInterface(new PrintBridge(webView, false), "TSPPrint");
         installOriginLockedListener(webView);
+        installDocumentStartShim(webView);
 
         if (!backCallbackInstalled) {
             backCallbackInstalled = true;
@@ -1201,6 +1205,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
+     * JavascriptInterface cannot see the calling frame. https pages must use
+     * tspNative. File pages stay on this object because a WebMessageListener
+     * origin list cannot name file:// without allowing every origin.
+     */
+    private boolean javascriptInterfaceAllowed() {
+        if (Boolean.TRUE.equals(originLockedCaller.get())) return true;
+        return TrustedOrigins.isBundledAsset(urlOnUiThread(webView));
+    }
+
+    /**
      * Print popups are about:blank documents owned by a session page.
      * A popup whose own URL is some other origin does not get the bridge.
      */
@@ -1244,20 +1258,38 @@ public class MainActivity extends AppCompatActivity {
                         if (sourceOrigin == null || !TrustedOrigins.isFirstPartyAppPage(sourceOrigin.toString())) {
                             return;
                         }
-                        onOriginLockedMessage(view, message.getData());
+                        onOriginLockedMessage(view, message.getData(), replyProxy);
                     });
         } catch (RuntimeException e) {
             Log.w(TAG, "WebMessageListener unavailable", e);
         }
     }
 
-    private void onOriginLockedMessage(WebView source, String data) {
+    private void installDocumentStartShim(WebView target) {
+        if (target == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
+        Set<String> origins = new HashSet<>();
+        origins.add("https://" + TrustedOrigins.HOST_REPAIRPLANET);
+        origins.add("https://" + TrustedOrigins.HOST_WWW);
+        try {
+            WebViewCompat.addDocumentStartJavaScript(target, ORIGIN_SHIM_JS, origins);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Document-start shim unavailable", e);
+        }
+    }
+
+    private void onOriginLockedMessage(WebView source, String data, JavaScriptReplyProxy replyProxy) {
         if (data == null || data.isEmpty()) return;
         runOnUiThread(() -> {
             if (!originAllowsBridge()) return;
+            originLockedCaller.set(Boolean.TRUE);
             try {
                 org.json.JSONObject obj = new org.json.JSONObject(data);
                 String method = obj.optString("m", "");
+                if ("getStoredSession".equals(method)) {
+                    replyToPage(replyProxy, storedSession == null ? "" : storedSession);
+                    return;
+                }
                 WebAppInterface bridge = new WebAppInterface();
                 if ("showToast".equals(method)) bridge.showToast(obj.optString("msg", ""));
                 else if ("saveSession".equals(method)) bridge.saveSession(obj.optString("json", ""));
@@ -1280,39 +1312,56 @@ public class MainActivity extends AppCompatActivity {
                 else if ("printPage".equals(method)) printWebView(source != null ? source : webView, data, source != null && source != webView);
             } catch (Exception e) {
                 Log.w(TAG, "tspNative message rejected", e);
+            } finally {
+                originLockedCaller.remove();
             }
         });
     }
 
+    private void replyToPage(JavaScriptReplyProxy replyProxy, String body) {
+        if (replyProxy == null || body == null) return;
+        try {
+            replyProxy.postMessage(body);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "tspNative reply failed", e);
+        }
+    }
+
+    /**
+     * Replaces window.Android on https://repairplanet.net and www before page
+     * scripts run. The replacement posts to tspNative and never reads the
+     * JavascriptInterface. File pages do not receive this script.
+     */
+    private static final String ORIGIN_SHIM_JS =
+            "(function(){window.__tspOriginShim=true;"
+                    + "function post(o){try{if(window.tspNative&&window.tspNative.postMessage)window.tspNative.postMessage(JSON.stringify(o));}catch(e){}}"
+                    + "window.Android={"
+                    + "showToast:function(m){post({m:'showToast',msg:m});},"
+                    + "saveSession:function(j){post({m:'saveSession',json:j});},"
+                    + "getStoredSession:function(){return null;},"
+                    + "clearSession:function(){post({m:'clearSession'});},"
+                    + "setBiometricEnabled:function(v){post({m:'setBiometricEnabled',on:!!v});},"
+                    + "isBiometricEnabled:function(){return false;},"
+                    + "canUseBiometric:function(){return false;},"
+                    + "setPremiumStatus:function(){},"
+                    + "launchBillingFlow:function(s){post({m:'launchBillingFlow',sku:s});},"
+                    + "openUrl:function(u){post({m:'openUrl',url:u});},"
+                    + "postOrgApi:function(){return '{\\\"ok\\\":false,\\\"error\\\":\\\"Not allowed\\\"}';},"
+                    + "printReport:function(h,n){post({m:'printReport',html:h,jobName:n});},"
+                    + "speak:function(t){post({m:'speak',text:t});},"
+                    + "speakAnswer:function(t,v,e,a){post({m:'speakAnswer',text:t,voiceId:v,engine:e,token:a});},"
+                    + "interruptSpeech:function(){post({m:'interruptSpeech'});},"
+                    + "stopSpeaking:function(){post({m:'stopSpeaking'});},"
+                    + "startVoiceRecognition:function(){post({m:'startVoiceRecognition'});},"
+                    + "stopVoiceRecognition:function(){post({m:'stopVoiceRecognition'});},"
+                    + "onCitationObserved:function(id,p){post({m:'onCitationObserved',manualId:id,page:p});},"
+                    + "goBack:function(){post({m:'goBack'});}"
+                    + "};})();";
+
     private void injectOriginLockedShim(WebView view) {
         if (view == null) return;
-        view.evaluateJavascript(
-                "(function(){if(window.__tspOriginShim||!window.tspNative)return;"
-                        + "window.__tspOriginShim=true;var host=window.Android;"
-                        + "function post(o){try{window.tspNative.postMessage(JSON.stringify(o));}catch(e){}}"
-                        + "window.Android={"
-                        + "showToast:function(m){post({m:'showToast',msg:m});},"
-                        + "saveSession:function(j){post({m:'saveSession',json:j});},"
-                        + "getStoredSession:function(){try{return host&&host.getStoredSession?host.getStoredSession():null;}catch(e){return null;}},"
-                        + "clearSession:function(){post({m:'clearSession'});},"
-                        + "setBiometricEnabled:function(v){post({m:'setBiometricEnabled',on:!!v});},"
-                        + "isBiometricEnabled:function(){try{return !!(host&&host.isBiometricEnabled&&host.isBiometricEnabled());}catch(e){return false;}},"
-                        + "canUseBiometric:function(){try{return !!(host&&host.canUseBiometric&&host.canUseBiometric());}catch(e){return false;}},"
-                        + "setPremiumStatus:function(){},"
-                        + "launchBillingFlow:function(s){post({m:'launchBillingFlow',sku:s});},"
-                        + "openUrl:function(u){post({m:'openUrl',url:u});},"
-                        + "postOrgApi:function(p,id,t){try{return host&&host.postOrgApi?host.postOrgApi(p,id,t):'{\\\"ok\\\":false}';}catch(e){return '{\\\"ok\\\":false}';}},"
-                        + "printReport:function(h,n){post({m:'printReport',html:h,jobName:n});},"
-                        + "speak:function(t){post({m:'speak',text:t});},"
-                        + "speakAnswer:function(t,v,e,a){post({m:'speakAnswer',text:t,voiceId:v,engine:e,token:a});},"
-                        + "interruptSpeech:function(){post({m:'interruptSpeech'});},"
-                        + "stopSpeaking:function(){post({m:'stopSpeaking'});},"
-                        + "startVoiceRecognition:function(){post({m:'startVoiceRecognition'});},"
-                        + "stopVoiceRecognition:function(){post({m:'stopVoiceRecognition'});},"
-                        + "onCitationObserved:function(id,p){post({m:'onCitationObserved',manualId:id,page:p});},"
-                        + "goBack:function(){post({m:'goBack'});}"
-                        + "};})();",
-                null);
+        if (!TrustedOrigins.isFirstPartyAppPage(view.getUrl())) return;
+        view.evaluateJavascript(ORIGIN_SHIM_JS, null);
     }
 
     private boolean acceptsImages(WebChromeClient.FileChooserParams params) {
@@ -2154,6 +2203,7 @@ public class MainActivity extends AppCompatActivity {
         child.setBackgroundColor(Color.WHITE);
         child.addJavascriptInterface(new PrintBridge(child, true), "TSPPrint");
         installOriginLockedListener(child);
+        installDocumentStartShim(child);
         child.setWebViewClient(new WebViewClient() {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
@@ -2384,8 +2434,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Bound as TSPPrint. The popup gets this bridge only, so a print document
-     * cannot call session or billing methods. The main page keeps Android.printReport.
+     * Bound as TSPPrint. Returns nothing. The popup needs it for about:blank
+     * documents that are not an allowed WebMessageListener origin. On the main
+     * WebView it runs only for bundled file pages; https pages print through tspNative.
      */
     private final class PrintBridge {
         private final WebView target;
@@ -2398,7 +2449,11 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printPage(String jobName) {
-            if (!originAllowsPrint(target)) return;
+            if (disposeAfterPrint) {
+                if (!originAllowsPrint(target)) return;
+            } else if (!TrustedOrigins.isBundledAsset(urlOnUiThread(webView))) {
+                return;
+            }
             runOnUiThread(() -> printWebView(target, jobName, disposeAfterPrint));
         }
     }

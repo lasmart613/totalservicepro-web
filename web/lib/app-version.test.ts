@@ -65,6 +65,9 @@ test('bundled manuals stay in-app with VBeam OP vs Perfecta and find', () => {
   assert.doesNotMatch(list, /DEV MODE/);
   assert.doesNotMatch(list, /createSignedUrl/);
   assert.match(viewer, /Find in manual/);
+  assert.match(viewer, /src="pdf\.min\.js"/);
+  assert.match(viewer, /workerSrc = 'pdf\.worker\.min\.js'/);
+  assert.doesNotMatch(viewer, /cdnjs\.cloudflare|cdn\.jsdelivr|unpkg\.com/);
   assert.match(viewer, /findNext|findPrev/);
   assert.match(viewer, /tspLoadServiceAccess|service-company-gate/);
   assert.doesNotMatch(viewer, /download.*manual|saveAs/i);
@@ -74,4 +77,14 @@ test('bundled manuals stay in-app with VBeam OP vs Perfecta and find', () => {
   const ai = readFileSync(join(here, '../../app/src/main/assets/ai_assistant.html'), 'utf8');
   assert.match(ai, /Service Company only/);
   assert.match(ai, /tspLoadServiceAccess/);
+  const estimate = readFileSync(join(here, '../../app/src/main/assets/estimate_generator.html'), 'utf8');
+  assert.match(estimate, /src="html2pdf\.bundle\.min\.js"/);
+  assert.doesNotMatch(estimate, /cdnjs\.cloudflare|cdn\.jsdelivr|unpkg\.com/);
+  const pdfJs = readFileSync(join(here, '../../app/src/main/assets/pdf.min.js'), 'utf8');
+  const pdfWorker = readFileSync(join(here, '../../app/src/main/assets/pdf.worker.min.js'), 'utf8');
+  const html2pdf = readFileSync(join(here, '../../app/src/main/assets/html2pdf.bundle.min.js'), 'utf8');
+  assert.match(pdfJs, /pdfjsLib/);
+  assert.match(pdfJs, /3\.11\.174/);
+  assert.match(pdfWorker, /WorkerMessageHandler/);
+  assert.match(html2pdf, /html2pdf/);
 });
