@@ -137,9 +137,60 @@ export function storedPageCount(value: unknown): number | undefined {
   return Math.floor(n)
 }
 
-/** manuals.page_count when present, otherwise the highest [[pdfpage:N]] stamp. */
+/** Highest [[pdfpage:N]] stamp. manuals has no page_count column. */
 export function effectivePageCount(pageCount: unknown, indexText?: string): number | undefined {
   return storedPageCount(pageCount) ?? (indexText ? maxStampPage(indexText) : undefined)
+}
+
+/**
+ * The model said this fact is not in the manual. A refusal must not carry a citation chip.
+ * A real answer that says "do not use" or "do not expose" is not a refusal.
+ */
+export function answerDeclinesManualCitation(text: string): boolean {
+  const raw = String(text || '')
+    .replace(/\[\[cite:[^\]]*\]\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (!raw) return false
+  if (
+    /\b(?:do not|does not|don't|doesn't|cannot|can't|could not|couldn't)\s+(?:contain|include|list|provide|mention|describe|define|show)\b/i.test(
+      raw
+    )
+  ) {
+    return true
+  }
+  if (/\b(?:no|not any)\s+(?:information|reference|mention|description|details)\b/i.test(raw)) return true
+  if (
+    /\bnot (?:included|found|present|listed|described|defined|in the (?:retrieved |provided |selected )?passages|in the (?:selected |provided |operator )?manual)\b/i.test(
+      raw
+    )
+  ) {
+    return true
+  }
+  if (/\b(?:passages|sections|manual)\b[^.]{0,80}\b(?:do not|does not|don't|doesn't)\b/i.test(raw)) return true
+  return false
+}
+
+/** Printed footer such as "Page 54 of 178" or "Page 2 of 5". Not a physical PDF index. */
+export function printedPageLabel(pageText: string): number | undefined {
+  const match = String(pageText || '').match(/\b(?:page|p[áa]gina|seite)\s+(\d{1,4})\s+of\s+\d{1,4}\b/i)
+  if (!match) return undefined
+  const n = Number(match[1])
+  if (!Number.isFinite(n) || n < 1 || n > 9999) return undefined
+  return Math.floor(n)
+}
+
+/**
+ * When the reply names the printed footer on the cited PDF page, rewrite that
+ * mention to the physical page the chip uses.
+ */
+export function alignReplyToCitationPage(answer: string, pdfPage: number | undefined, indexText: string): string {
+  if (pdfPage == null || pdfPage < 1) return String(answer || '')
+  const body = indexPageBody(indexText, pdfPage) || ''
+  const printed = printedPageLabel(body)
+  if (printed == null || printed === pdfPage) return String(answer || '')
+  const re = new RegExp(`\\b(pages?|pp?\\.)\\s+${printed}(?!\\d)(?:\\s+of\\s+\\d{1,4})?`, 'gi')
+  return String(answer || '').replace(re, (_all, word: string) => `${word} ${pdfPage}`)
 }
 
 function asReportedPage(value: unknown): number | undefined {
