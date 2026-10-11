@@ -38,7 +38,7 @@ import {
   type CustomerActionKind,
   type LineItem,
 } from '@/lib/billing/save-helpers';
-import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
+import { listManufacturerChoices, listModelChoices, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import {
   DEFAULT_EQUIPMENT_TYPE,
