@@ -298,11 +298,13 @@ test('server routes call the authorizers and do not trust a client role on found
   assert.match(founder, /hasServiceRole/);
   assert.doesNotMatch(founder, /body\.role/);
   assert.ok(
-    founder.indexOf('const decision = decideFounderLink') <
-      founder.indexOf('applyComplimentarySignupFields(patch'),
+    founder.indexOf('const decision = decideFounderLink') > 0 &&
+      founder.indexOf('const decision = decideFounderLink') <
+        founder.indexOf('await grantSignupTrialIfEligible(admin'),
     'complimentary premium runs only after the caller is the org creator'
   );
-  assert.match(founder, /priorPremium/);
+  const trial = readFileSync(join(here, './signup-trial.ts'), 'utf8');
+  assert.match(trial, /'prior_premium'/);
   assert.match(claim, /authorizeInviteAccept/);
   assert.match(role, /decideMemberRoleChange/);
   assert.match(signup, /signupAssignsTenant/);
