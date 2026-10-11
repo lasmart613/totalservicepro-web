@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  exactPartNumberImatch,
   findManualIdsByBodyText,
   manualPartNumberTokens,
   partNumberNarrowQuery,
@@ -102,14 +103,87 @@ test('hyphenated part number goes to plainto_tsquery as typed, not split at the 
   assert.equal(indexCalls().length, 1);
 });
 
-test('8501-00-1800 returns every row FTS finds for the raw number (rows 1, 2, 8)', async () => {
-  const { db } = fakeDb((call) =>
-    call.textSearch?.query === '8501-00-1800'
-      ? { data: [{ manual_id: 1 }, { manual_id: 2 }, { manual_id: 8 }, { manual_id: 1 }], error: null }
-      : { data: [{ manual_id: 7 }, { manual_id: 22 }], error: null },
-  );
+/** Raw-number FTS rows (loose) vs. the same query filtered to the number as written (exact). */
+function looseThenExact(loose: number[], exact: number[] | { error: string }) {
+  return (call: Call): Result => {
+    if (call.textSearch?.options?.type !== 'plain') return { data: [{ manual_id: 7 }, { manual_id: 22 }], error: null };
+    if (!call.filters.length) return { data: loose.map((manual_id) => ({ manual_id })), error: null };
+    if (!Array.isArray(exact)) return { data: null, error: { message: exact.error } };
+    return { data: exact.map((manual_id) => ({ manual_id })), error: null };
+  };
+}
+
+/** Postgres [[:alnum:]] has no JS equivalent; imatch is case-insensitive. */
+function asJs(pattern: string) {
+  return new RegExp(pattern.replaceAll('[:alnum:]', 'A-Za-z0-9'), 'i');
+}
+
+test('8501-00-1800: an exact hit (row 1) drops the loose partials (rows 2, 8)', async () => {
+  const { db, indexCalls } = fakeDb(looseThenExact([1, 2, 8, 1], [1, 1]));
+  const found = await search(db, '8501-00-1800');
+  assert.deepEqual(found.ids, ['1']);
+  const exact = indexCalls()[1];
+  assert.deepEqual(exact.textSearch, {
+    column: 'search_tsv',
+    query: '8501-00-1800',
+    options: { type: 'plain', config: 'simple' },
+  });
+  assert.deepEqual(exact.filters, [['search_text', 'imatch', exactPartNumberImatch('8501-00-1800')]]);
+  assert.equal(indexCalls().length, 2);
+});
+
+test('no exact hit keeps every loose row (rows 1, 2, 8)', async () => {
+  const { db } = fakeDb(looseThenExact([1, 2, 8], []));
   const found = await search(db, '8501-00-1800');
   assert.deepEqual(found.ids, ['1', '2', '8']);
+});
+
+test('a single loose hit is returned without the exact query', async () => {
+  const { db, indexCalls } = fakeDb(looseThenExact([1, 1], [1]));
+  const found = await search(db, '7111-00-2709');
+  assert.deepEqual(found.ids, ['1']);
+  assert.equal(indexCalls().length, 1);
+});
+
+test('an exact-query error falls back to the loose rows', async () => {
+  const { db } = fakeDb(looseThenExact([1, 2, 8], { error: 'canceling statement due to statement timeout' }));
+  const found = await search(db, '8501-00-1800');
+  assert.deepEqual(found.ids, ['1', '2', '8']);
+});
+
+test('exact hits still go through the published filter; all unpublished keeps the loose published rows', async () => {
+  const published = [
+    { id: 1, published: true },
+    { id: 2, published: true },
+    { id: 8, published: true },
+    { id: 764, published: false },
+  ];
+  let found = await search(fakeDb(looseThenExact([1, 2, 764], [1, 764]), published).db, '8501-00-1800');
+  assert.deepEqual(found.ids, ['1']);
+  found = await search(fakeDb(looseThenExact([2, 8, 764], [764]), published).db, '8501-00-1800');
+  assert.deepEqual(found.ids, ['2', '8']);
+});
+
+test('every part number in the query must appear as written', async () => {
+  const { db, indexCalls } = fakeDb(looseThenExact([1, 2], [2]));
+  const found = await search(db, 'DP35-0643-906 8501-00-1800');
+  assert.deepEqual(found.ids, ['2']);
+  assert.deepEqual(
+    indexCalls()[1].filters.map((f) => f[2]),
+    [exactPartNumberImatch('DP35-0643-906'), exactPartNumberImatch('8501-00-1800')],
+  );
+});
+
+test('exactPartNumberImatch matches the number standing alone, not inside a longer one', () => {
+  const re = asJs(exactPartNumberImatch('8501-00-1800'));
+  for (const text of ['8501-00-1800', 'lamp 8501-00-1800 kit', 'P/N (8501-00-1800).', 'x\n8501-00-1800\n']) {
+    assert.match(text, re, text);
+  }
+  for (const text of ['18501-00-1800', '8501-00-18001', '8501-00-1800A', '8501 00 1800', '8501-00 -1800']) {
+    assert.doesNotMatch(text, re, text);
+  }
+  assert.match('dp35-0643-906 rev b', asJs(exactPartNumberImatch('DP35-0643-906')));
+  assert.doesNotMatch('DP35-0643-9060', asJs(exactPartNumberImatch('DP35-0643-906')));
 });
 
 test('raw FTS miss falls back to a literal match narrowed by the GIN index', async () => {

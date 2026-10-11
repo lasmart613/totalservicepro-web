@@ -944,6 +944,15 @@ export function partNumberNarrowQuery(partNumbers: string[]): string {
   return lexemes.join(' & ');
 }
 
+/**
+ * Postgres regex for a part number standing on its own: not glued to another
+ * letter or digit on either side, so `7111-00-2709` does not hit
+ * `17111-00-27091`. Case-insensitive through imatch.
+ */
+export function exactPartNumberImatch(token: string): string {
+  return `(^|[^[:alnum:]])${containsTextImatch(token)}($|[^[:alnum:]])`;
+}
+
 function idsFromRows(rows: unknown): string[] {
   const ids: string[] = [];
   for (const row of (Array.isArray(rows) ? rows : []) as Array<{ manual_id?: unknown }>) {
@@ -984,6 +993,23 @@ export async function findManualIdsByBodyText(
       .textSearch('search_tsv', raw, { type: 'plain', config: 'simple' });
     if (!viaRaw.error) {
       const ids = idsFromRows(viaRaw.data);
+      if (ids.length > 1) {
+        // plainto_tsquery ANDs the groups ('7111' & '-00' & '-2709'), so a
+        // manual with '-00' and the other groups scattered also matches.
+        // When some manuals hold the number as written, show only those.
+        let exact = db
+          .from('manual_search_index')
+          .select('manual_id')
+          .textSearch('search_tsv', raw, { type: 'plain', config: 'simple' });
+        for (const token of partNumbers) {
+          exact = exact.filter('search_text', 'imatch', exactPartNumberImatch(token));
+        }
+        const viaExact = await exact;
+        if (!viaExact.error) {
+          const exactIds = await keepPublishedManualIds(db, idsFromRows(viaExact.data));
+          if (exactIds.length) return { ids: exactIds, available: true };
+        }
+      }
       if (ids.length) return { ids: await keepPublishedManualIds(db, ids), available: true };
 
       // Literal fallback, narrowed by the GIN index first. A seq-scan regex
