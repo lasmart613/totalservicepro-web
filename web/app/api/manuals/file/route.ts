@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { MANUAL_PATH_NOT_COVERED, manualPathCovered, normalizeStoragePath, storageResponseIsMissing } from '@/lib/manual-file';
 import { pdfInlineHeaders } from '@/lib/manuals';
 import { mayOpenManual, mayViewAiScopedManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
@@ -73,12 +74,27 @@ function isPdfPath(path: string): boolean {
 }
 
 function cleanStoragePath(input: unknown): string {
-  return String(input || '')
-    .trim()
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/\/+$/, '')
-    .replace(/[?#].*$/, '');
+  return normalizeStoragePath(String(input || '').replace(/[?#].*$/, ''));
+}
+
+function catalogCoversPath(
+  catalog: {
+    storage_path?: string | null;
+    entry_file_path?: string | null;
+    chapter_metadata?: unknown;
+    is_folder?: unknown;
+  } | null,
+  requested: unknown,
+): boolean {
+  if (!catalog) return false;
+  return manualPathCovered({
+    storagePath: requested,
+    rowStoragePath: catalog.storage_path,
+    entryFilePath: catalog.entry_file_path,
+    chapterMetadata: catalog.chapter_metadata,
+    isFolder: catalog.is_folder,
+    parentPath: catalog.storage_path,
+  });
 }
 
 async function loadCatalogRow(
@@ -116,7 +132,10 @@ function resolveCatalogPdfPath(
   requested?: string | null
 ): string | null {
   const asked = cleanStoragePath(requested);
-  if (isPdfPath(asked)) return asked;
+  if (asked) {
+    if (!isPdfPath(asked) || !catalogCoversPath(catalog, asked)) return null;
+    return asked;
+  }
   // Prefer explicit entry_file_path over chapter_metadata[0] (alphabetical / order quirks).
   const entry = cleanStoragePath(catalog?.entry_file_path);
   if (isPdfPath(entry)) return entry;
@@ -250,6 +269,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    if (storagePath) {
+      const reader = hasServiceRole() ? getSupabaseAdmin() : caller.supabase;
+      const scoped = await loadCatalogRow(
+        reader,
+        manualId ?? null,
+        manualId == null ? storagePath : null,
+      );
+      if (scoped && !catalogCoversPath(scoped, storagePath)) {
+        return NextResponse.json({ error: MANUAL_PATH_NOT_COVERED }, { status: 403 });
+      }
+    }
+
     const resolved = await resolveSignedUrl({
       supabaseUrl: caller.supabaseUrl,
       anon: caller.anon,
@@ -258,6 +289,12 @@ export async function POST(req: NextRequest) {
       storagePath,
     });
     if (!resolved.url) {
+      if (resolved.json?.error === 'file_missing') {
+        return NextResponse.json({ error: 'file_missing' }, { status: 404 });
+      }
+      if (resolved.json?.error === MANUAL_PATH_NOT_COVERED) {
+        return NextResponse.json({ error: MANUAL_PATH_NOT_COVERED }, { status: 403 });
+      }
       const catalogStream = await streamAiCatalogPdf({
         role: profile?.role,
         orgType,
@@ -272,8 +309,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (
+      resolved.json?.render === 'download' ||
+      (resolved.json?.file_kind && resolved.json.file_kind !== 'pdf')
+    ) {
+      return NextResponse.json(
+        {
+          error: 'not_a_pdf',
+          file_kind: resolved.json.file_kind || null,
+          file_type: resolved.json.file_type || null,
+        },
+        { status: 415 }
+      );
+    }
+
     const pdfRes = await fetch(resolved.url);
     if (!pdfRes.ok || !pdfRes.body) {
+      const errText = pdfRes.ok ? '' : await pdfRes.text().catch(() => '');
+      if (storageResponseIsMissing(pdfRes.status, errText) || /file_missing/i.test(errText)) {
+        return NextResponse.json({ error: 'file_missing' }, { status: 404 });
+      }
       return NextResponse.json({ error: 'Manual file is unavailable' }, { status: 502 });
     }
 

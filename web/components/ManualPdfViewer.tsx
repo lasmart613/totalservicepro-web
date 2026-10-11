@@ -20,6 +20,11 @@ import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import { fittedPageBoxHeight, viewerCitedPageNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
+import {
+  MANUAL_FILE_MISSING,
+  manualDownloadSentence,
+  manualFileKind,
+} from '@/lib/manual-file';
 import { useT } from '@/lib/fa/locale';
 
 function sameStoragePath(a?: string | null, b?: string | null): boolean {
@@ -179,8 +184,27 @@ async function fetchPdfBytes(opts: {
   });
   if (res.ok) return await res.arrayBuffer();
   const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (json.error === 'file_missing' || res.status === 404) throw new Error(MANUAL_FILE_MISSING);
   throw new Error(json.error || 'Could not load the manual in the app viewer');
 }
+
+function fileNameFromPath(path: string): string {
+  const base = String(path || '').split('?')[0].split('/').pop() || 'manual';
+  return base.replace(/[?#].*$/, '') || 'manual';
+}
+
+type ManualDownload = {
+  title?: string;
+  storage_path?: string;
+  file_type?: string;
+};
+
+type FileOffer = {
+  url: string;
+  fileName: string;
+  message: string;
+  fileType: string;
+};
 
 type FindBox = { x: number; y: number; w: number; h: number };
 
@@ -351,7 +375,10 @@ export function ManualPdfViewer({
   const [languageCode, setLanguageCode] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!embedded);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
+  const [downloads, setDownloads] = useState<ManualDownload[]>([]);
   const [showChapters, setShowChapters] = useState(false);
+  const [showDownloads, setShowDownloads] = useState(false);
+  const [fileOffer, setFileOffer] = useState<FileOffer | null>(null);
   /** Local page inside the opened chapter. undefined keeps initialPage as-is. null: joined page is past the folder. */
   const [folderLocalPage, setFolderLocalPage] = useState<number | null | undefined>(undefined);
   /** Joined index page when the open file is the chapter that contains it. */
@@ -424,16 +451,37 @@ export function ManualPdfViewer({
     ): Promise<{ chapters: ManualChapter[]; openedPath: string | null }> => {
       setLoading(true);
       setError(null);
+      setFileOffer(null);
       setProgress(10);
-      const { json, token } = await fetchManualUrl({
+      const { ok, status, json, token } = await fetchManualUrl({
         manual_id: payload.manualId,
         storage_path: storagePath || payload.storagePath,
       });
       setProgress(35);
+      if (!ok) {
+        if (json?.error === 'file_missing' || status === 404) throw new Error(MANUAL_FILE_MISSING);
+        throw new Error(String(json?.error || 'Could not open manual'));
+      }
       const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
       if (showManualChaptersButton(nextChapters)) setChapters(nextChapters);
+      if (Array.isArray(json.downloads)) setDownloads(json.downloads as ManualDownload[]);
       const openedPath = String(json.storage_path || storagePath || payload.storagePath || '') || null;
       if (opts?.metadataOnly) {
+        return { chapters: nextChapters, openedPath };
+      }
+      const fileKind = String(json.file_kind || '');
+      if (json.render === 'download' || (fileKind && fileKind !== 'pdf')) {
+        const url = String(json.url || '');
+        if (!url) throw new Error(MANUAL_FILE_MISSING);
+        const fileType = String(json.file_type || '');
+        setFileOffer({
+          url,
+          fileName: fileNameFromPath(String(json.storage_path || openedPath || '')),
+          message: manualDownloadSentence(fileKind || manualFileKind(fileType)),
+          fileType,
+        });
+        setLoading(false);
+        setProgress(100);
         return { chapters: nextChapters, openedPath };
       }
 
@@ -755,6 +803,36 @@ export function ManualPdfViewer({
     return () => window.removeEventListener('keydown', onKey);
   }, [goToPage, page]);
 
+  async function openDownload(storagePath: string) {
+    if (!storagePath) return;
+    try {
+      setLoading(true);
+      setError(null);
+      setFileOffer(null);
+      const { ok, status, json } = await fetchManualUrl({
+        manual_id: manualId,
+        storage_path: storagePath,
+      });
+      if (!ok || !json.url) {
+        if (json?.error === 'file_missing' || status === 404) throw new Error(MANUAL_FILE_MISSING);
+        throw new Error(String(json?.error || 'Could not open manual'));
+      }
+      const fileKind = String(json.file_kind || manualFileKind(String(json.file_type || storagePath)));
+      const fileType = String(json.file_type || '');
+      setFileOffer({
+        url: String(json.url),
+        fileName: fileNameFromPath(String(json.storage_path || storagePath)),
+        message: manualDownloadSentence(fileKind),
+        fileType,
+      });
+      setShowDownloads(false);
+      setLoading(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Could not open manual');
+      setLoading(false);
+    }
+  }
+
   async function openChapter(ch: ManualChapter) {
     if (!ch.storage_path) return;
     try {
@@ -889,6 +967,16 @@ export function ManualPdfViewer({
               📚 Chapters
             </button>
           )}
+          {downloads.length > 0 && (
+            <button
+              type="button"
+              aria-label="Other files"
+              className="rounded-md border border-[#FBBF24] bg-[rgba(251,191,36,0.25)] px-2.5 py-1.5 text-[13px] text-[#fbbf24]"
+              onClick={() => setShowDownloads((v) => !v)}
+            >
+              {t('Other files')}
+            </button>
+          )}
         </div>
       </div>
 
@@ -968,7 +1056,21 @@ export function ManualPdfViewer({
               </div>
             </div>
           )}
-          {error && !loading && (
+          {error === MANUAL_FILE_MISSING && !loading && (
+            <div
+              role="alert"
+              data-testid="manual-file-missing"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10"
+            >
+              <div className="text-lg font-bold text-[#E5E7EB] max-w-md">{t(MANUAL_FILE_MISSING)}</div>
+              {!embedded && (
+                <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
+                  {sourceUrl ? 'Back home' : 'Back to library'}
+                </Link>
+              )}
+            </div>
+          )}
+          {error && error !== MANUAL_FILE_MISSING && !loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
               <div className="text-lg font-bold text-red-400">Could not open manual</div>
               <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>
@@ -977,6 +1079,62 @@ export function ManualPdfViewer({
                   {sourceUrl ? 'Back home' : 'Back to library'}
                 </Link>
               )}
+            </div>
+          )}
+          {fileOffer && !loading && !error && (
+            <div
+              data-testid="manual-download"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-4 px-6 text-center z-10"
+            >
+              <div className="text-lg font-bold text-[#E5E7EB] max-w-md">
+                {fileOffer.message.includes('{type}')
+                  ? t(fileOffer.message).replace('{type}', (fileOffer.fileType || 'FILE').toUpperCase())
+                  : t(fileOffer.message)}
+              </div>
+              <a
+                href={fileOffer.url}
+                download={fileOffer.fileName}
+                rel="noopener noreferrer"
+                className="btn btn-primary text-sm px-4 py-2"
+              >
+                {t('Download file')}
+              </a>
+              {pageCount > 0 && (
+                <button
+                  type="button"
+                  className="text-sm text-[#fbbf24] underline"
+                  onClick={() => setFileOffer(null)}
+                >
+                  {t('Back to the PDF')}
+                </button>
+              )}
+            </div>
+          )}
+          {showDownloads && downloads.length > 0 && (
+            <div className="absolute inset-0 z-10 bg-[#0f172a] p-6 overflow-auto">
+              <div className="max-w-xl mx-auto">
+                <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">{t('Other files')}</h2>
+                <div className="grid gap-2">
+                  {downloads.map((item, i) => {
+                    const kind = manualFileKind(item.file_type || item.storage_path || '');
+                    const sentence = manualDownloadSentence(kind);
+                    const label = sentence.includes('{type}')
+                      ? t(sentence).replace('{type}', (item.file_type || 'FILE').toUpperCase())
+                      : t(sentence);
+                    return (
+                      <button
+                        key={`${item.storage_path || i}`}
+                        type="button"
+                        onClick={() => void openDownload(item.storage_path || '')}
+                        className="text-left rounded-lg border border-[#374151] bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)]"
+                      >
+                        <div className="text-sm">{item.title || item.storage_path}</div>
+                        <div className="text-[11px] text-[#9CA3AF] mt-1">{label}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
           {showChapters && chapters.length > 0 && (

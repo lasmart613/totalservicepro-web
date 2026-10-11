@@ -219,6 +219,9 @@ test('the viewer shows Chapters only when more than one chapter comes back', () 
   assert.match(viewer, /📚 Chapters/);
   const edge = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
   const resolveAt = edge.indexOf('resolveManualPdfOpen(');
-  const folderGuard = edge.indexOf('if (sp && !isPdfPath(sp))', resolveAt);
+  const folderGuard = edge.indexOf('if (sp && !isStoredFilePath(sp))', resolveAt);
   assert.ok(resolveAt > 0 && folderGuard > resolveAt);
+  const signAt = edge.indexOf('createSignedUrl', folderGuard);
+  const probeAt = edge.indexOf('probeStorageObject(', folderGuard);
+  assert.ok(probeAt > folderGuard && signAt > probeAt);
 });
