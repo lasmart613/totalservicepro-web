@@ -114,7 +114,13 @@ test('legal pages are server-rendered, skip RequireAuth, and name the real delet
   assert.match(privacy, /Netlify/);
   assert.match(privacy, /G-GNBJQ2DMQB/);
   assert.match(privacy, /business cards/i);
+  assert.match(privacy, /only when you choose to scan/);
+  assert.match(privacy, /recognized on the device/);
   assert.match(privacy, /optical character\s+recognition/);
+  assert.match(privacy, /fields you confirm are saved/);
+  assert.match(privacy, /card\s+image is not uploaded and is not kept/);
+  assert.doesNotMatch(privacy, /does not scan business cards/);
+  assert.match(privacy, /image you pick is the image we keep/);
   assert.match(privacy, /do not sell personal information/i);
   assert.match(privacy, /under 13/);
   assert.match(privacy, /href="\/delete-account"/);

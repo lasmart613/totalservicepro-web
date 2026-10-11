@@ -80,24 +80,28 @@ export default function PrivacyPolicyPage() {
         records.
       </p>
 
-      <h3>Photos and camera</h3>
+      <h3>Photos</h3>
       <p>
-        When you pick a file, we store that image. Examples are an organization logo, a profile
-        photo, an equipment photo, a parts image, and marketplace listing photos. Logos and
-        similar uploads go to Supabase Storage. A signature is stored on the profile.
-      </p>
-      <p>
-        The Android app does not declare a camera permission and does not run its own camera.
-        If you use the system photo picker, you can take a picture and then choose that file.
-        You start that step.
+        When you choose an image to keep with a record, we store that file. On the website and
+        in the Android app this includes an organization logo, a profile photo, an equipment
+        photo, a parts image, and marketplace listing photos. Logos and similar uploads go to
+        Supabase Storage. A signature you draw is stored on the profile. These files are separate
+        from a business-card scan: the image you pick is the image we keep.
       </p>
 
-      <h3>Business cards</h3>
+      <h3>Camera and business cards</h3>
       <p>
-        {LEGAL_PRODUCT} does not scan business cards and does not run optical character
-        recognition on photos of cards. Names, emails, and phone numbers on a customer or
-        organization record are information someone types or saves. We do not send card photos
-        to an OCR service.
+        The mobile apps can scan a business card to fill a customer record. The camera is used
+        only when you choose to scan. Card text is recognized on the device. It is not sent to a
+        cloud optical character recognition service. You review the fields, such as name, company,
+        phone, email, and address, and you can edit them. Only the fields you confirm are saved
+        to your customer records. Those confirmed fields are stored with the customer. The card
+        image is not uploaded and is not kept. If you cancel before you confirm, nothing from
+        that card is saved.
+      </p>
+      <p>
+        If a confirmed save cannot finish immediately, the confirmed fields can stay on the phone
+        until they sync. The card image is not part of that waiting copy.
       </p>
 
       <h3>Purchases</h3>
