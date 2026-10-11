@@ -14,6 +14,12 @@ import { safeRedirectPath } from './lib/safe-redirect'
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl
 
+  // Digital Asset Links is a static public file. Never redirect or rewrite it,
+  // including when the Host is www (Android 11 and below verifies every host).
+  if (pathname === '/.well-known/assetlinks.json' || pathname.startsWith('/.well-known/')) {
+    return NextResponse.next()
+  }
+
   // Dead sibling of /service-requests (marketplace hub card uses the live path)
   if (pathname === '/marketplace/service-requests') {
     const dest = request.nextUrl.clone()
@@ -40,7 +46,8 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip CDN/static files so /ads.txt, /robots.txt, /sitemap.xml are never rewritten
-    '/((?!_next/static|_next/image|favicon.ico|ads\\.txt|robots\\.txt|sitemap\\.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|txt|xml)$).*)',
+    // Skip CDN/static files so /ads.txt, /robots.txt, /sitemap.xml, and
+    // /.well-known/* (assetlinks.json) are never rewritten.
+    '/((?!_next/static|_next/image|favicon.ico|ads\\.txt|robots\\.txt|sitemap\\.xml|\\.well-known(?:/|$)|.*\\.(?:svg|png|jpg|jpeg|gif|webp|txt|xml)$).*)',
   ],
 }

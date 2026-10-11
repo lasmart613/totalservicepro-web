@@ -19,7 +19,10 @@
   # @netlify/plugin-nextjs still runs on Netlify's system Node (22) when the
   # build Node is below 22.12 — NODE_VERSION does not move that plugin step.
   NODE_VERSION = "20.20.2"
-  SECRETS_SCAN_OMIT_PATHS = "lib/supabase/client.ts,web/lib/supabase/client.ts"
+  SECRETS_SCAN_OMIT_PATHS = "lib/supabase/client.ts,web/lib/supabase/client.ts,public/.well-known/assetlinks.json,web/public/.well-known/assetlinks.json"
+  # Public Android signing-cert SHA-256. Not a secret. Smart detection treats
+  # certificate-like strings as secrets; safelist this fingerprint.
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -47,6 +50,17 @@
   [headers.values]
     Content-Type = "application/xml; charset=utf-8"
     X-Content-Type-Options = "nosniff"
+
+# Android Digital Asset Links. Must be 200 application/json with no redirect.
+# www.repairplanet.net → apex is Netlify's primary-domain redirect (Domain
+# management), not a rule in this file. That redirect runs before site
+# redirects, so this file cannot exempt /.well-known/assetlinks.json on www
+# while repairplanet.net is the primary domain. This file has no redirects
+# table and the repo has no _redirects file.
+[[headers]]
+  for = "/.well-known/assetlinks.json"
+  [headers.values]
+    Content-Type = "application/json"
 
 [[headers]]
   for = "/"
