@@ -11,7 +11,14 @@ test('admin portal loads role without embedding organizations from user_profiles
   const helper = readFileSync(join(here, '../lib/profile-nav.ts'), 'utf8');
   assert.match(layout, /loadOwnNavProfile/);
   assert.doesNotMatch(layout, /organizations\(/);
-  assert.match(header, /loadOwnNavProfile/);
+  // The header's profile now comes from NavIdentityProvider → loadNavIdentity,
+  // which reads user_profiles and organizations separately (no embed).
+  const provider = readFileSync(join(here, '../components/NavIdentityProvider.tsx'), 'utf8');
+  const identity = readFileSync(join(here, '../lib/nav-identity.ts'), 'utf8');
+  assert.match(header, /useNavIdentity\(\{ header: true \}\)/);
+  assert.match(provider, /loadNavIdentity\(supabase, uid\)/);
+  const profileCols = identity.slice(identity.indexOf('NAV_PROFILE_COLUMNS = ['), identity.indexOf('] as const;'));
+  assert.doesNotMatch(profileCols, /organizations/);
   assert.doesNotMatch(helper, /\.select\([^)]*organizations/);
 });
 
