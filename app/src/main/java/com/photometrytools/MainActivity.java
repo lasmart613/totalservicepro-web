@@ -17,7 +17,14 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.os.Environment;
+import android.os.Message;
+import android.os.ParcelFileDescriptor;
+import android.print.PageRange;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -26,6 +33,7 @@ import android.speech.tts.UtteranceProgressListener;
 import android.util.Base64;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
@@ -126,6 +134,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private BottomNavigationView bottomNav;
+    private final ArrayList<WebView> printPopups = new ArrayList<>();
     private TextToSpeech textToSpeech;
     private SpeechRecognizer speechRecognizer;
     private boolean ttsReady = false;
@@ -516,6 +525,10 @@ public class MainActivity extends AppCompatActivity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        // Live /reports/[id] prints with window.open('') + document.write + print.
+        // Without these, window.open returns null and the page reports a blocked pop-up.
+        settings.setSupportMultipleWindows(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
         settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.2-beta");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
@@ -524,10 +537,12 @@ public class MainActivity extends AppCompatActivity {
         cookies.setAcceptThirdPartyCookies(webView, true);
 
         webView.addJavascriptInterface(new WebAppInterface(), "Android");
+        webView.addJavascriptInterface(new PrintBridge(webView, false), "TSPPrint");
 
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
+                if (closeTopPrintPreview()) return;
                 if (webView != null && webView.canGoBack()) {
                     webView.goBack();
                 } else {
@@ -556,6 +571,16 @@ public class MainActivity extends AppCompatActivity {
                     MainActivity.this.filePathCallback = null;
                     return false;
                 }
+            }
+
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                return openPopupWindow(view, resultMsg);
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                if (window != null && window != webView) disposePrintPopup(window);
             }
         });
 
@@ -619,6 +644,7 @@ public class MainActivity extends AppCompatActivity {
                 injectStoredSession(view);
                 injectCitationOpenBridge(view);
                 injectOnlineVoice(view, url);
+                injectPrintHook(view);
             }
 
             @Override
@@ -1511,6 +1537,353 @@ public class MainActivity extends AppCompatActivity {
                 null);
     }
 
+    /**
+     * window.print() is a no-op in WebView. Override it on each document so
+     * the live site's Print buttons reach PrintManager. Blank popups
+     * (window.open('') + document.write + print) also get the override
+     * reapplied after document.write, which can replace the child document.
+     * Real http(s) window.open targets are not printed here.
+     */
+    private static final String PRINT_HOOK_JS =
+            "(function(){"
+                    + "function hookPrint(win){"
+                    + "if(!win)return;"
+                    + "try{win.print=function(){"
+                    + "var title='';"
+                    + "try{title=(win.document&&win.document.title)||'';}catch(e){}"
+                    + "try{if(win.__tspPrintTimer){win.clearInterval(win.__tspPrintTimer);win.__tspPrintTimer=0;}}catch(e){}"
+                    + "try{if(win.TSPPrint&&win.TSPPrint.printPage)win.TSPPrint.printPage(String(title));}catch(e){}"
+                    + "};}catch(e){}"
+                    + "}"
+                    + "function arm(win){"
+                    + "hookPrint(win);"
+                    + "try{"
+                    + "if(win.__tspPrintTimer)return;"
+                    + "var tries=0;"
+                    + "win.__tspPrintTimer=win.setInterval(function(){"
+                    + "tries++;hookPrint(win);"
+                    + "if(tries>25){try{win.clearInterval(win.__tspPrintTimer);}catch(e){}win.__tspPrintTimer=0;}"
+                    + "},100);"
+                    + "}catch(e){}"
+                    + "}"
+                    + "arm(window);"
+                    + "if(window.__tspOpenWrapped)return;"
+                    + "window.__tspOpenWrapped=true;"
+                    + "var nativeOpen=window.open;"
+                    + "if(typeof nativeOpen!=='function')return;"
+                    + "window.open=function(url,target,features){"
+                    + "var child;try{child=nativeOpen.call(window,url,target,features);}catch(e){return null;}"
+                    + "var blank=(url==null||url===''||String(url)==='about:blank');"
+                    + "if(!child||!blank)return child;"
+                    + "function rearm(){"
+                    + "try{if(child.__tspPrintTimer)child.clearInterval(child.__tspPrintTimer);}catch(e){}"
+                    + "try{child.__tspPrintTimer=0;}catch(e){}"
+                    + "arm(child);"
+                    + "}"
+                    + "rearm();"
+                    + "try{"
+                    + "var doc=child.document;"
+                    + "if(doc&&!doc.__tspWriteWrapped){"
+                    + "doc.__tspWriteWrapped=true;"
+                    + "var origWrite=doc.write&&doc.write.bind(doc);"
+                    + "var origWriteln=doc.writeln&&doc.writeln.bind(doc);"
+                    + "var origClose=doc.close&&doc.close.bind(doc);"
+                    + "var origOpen=doc.open&&doc.open.bind(doc);"
+                    + "if(origWrite)doc.write=function(){var r;try{r=origWrite.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "if(origWriteln)doc.writeln=function(){var r;try{r=origWriteln.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "if(origClose)doc.close=function(){var r;try{r=origClose.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "if(origOpen)doc.open=function(){var r;try{r=origOpen.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "}"
+                    + "}catch(e){}"
+                    + "return child;"
+                    + "};"
+                    + "})();";
+
+    private void injectPrintHook(WebView view) {
+        if (view == null) return;
+        view.evaluateJavascript(PRINT_HOOK_JS, null);
+    }
+
+    /**
+     * target=_blank links carry the URL on the hit test. Script window.open('')
+     * does not, so those become a child WebView that can be printed.
+     * Returning false makes window.open return null ("Pop-up blocked").
+     */
+    private boolean openPopupWindow(WebView opener, Message resultMsg) {
+        if (resultMsg == null) return false;
+        WebView.HitTestResult hit = opener == null ? null : opener.getHitTestResult();
+        String extra = hit == null ? null : hit.getExtra();
+        if (isDirectNavigationUrl(extra)) {
+            navigateInWebView(extra);
+            return false;
+        }
+        WebView child = createPrintPopupWebView();
+        Object transportObj = resultMsg.obj;
+        if (!(transportObj instanceof WebView.WebViewTransport)) {
+            disposePrintPopup(child);
+            return false;
+        }
+        ((WebView.WebViewTransport) transportObj).setWebView(child);
+        resultMsg.sendToTarget();
+        return true;
+    }
+
+    private boolean isDirectNavigationUrl(String url) {
+        if (url == null || url.isEmpty()) return false;
+        String lower = url.toLowerCase(Locale.US);
+        return lower.startsWith("https://") || lower.startsWith("http://")
+                || lower.startsWith("mailto:") || lower.startsWith("tel:")
+                || lower.startsWith("geo:") || lower.startsWith("intent:")
+                || lower.startsWith("market:");
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private WebView createPrintPopupWebView() {
+        WebView child = new WebView(this);
+        WebSettings settings = child.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        settings.setSupportMultipleWindows(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        if (webView != null) {
+            settings.setUserAgentString(webView.getSettings().getUserAgentString());
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            settings.setSafeBrowsingEnabled(true);
+        }
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(child, true);
+        child.setBackgroundColor(Color.WHITE);
+        child.addJavascriptInterface(new PrintBridge(child, true), "TSPPrint");
+        child.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                Uri uri = request == null ? null : request.getUrl();
+                return handlePopupNavigation(view, uri);
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                injectPrintHook(view);
+            }
+        });
+        child.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                return openPopupWindow(view, resultMsg);
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                disposePrintPopup(window);
+            }
+        });
+        attachPrintPopup(child);
+        return child;
+    }
+
+    private boolean handlePopupNavigation(WebView popup, Uri uri) {
+        if (uri == null) return false;
+        String scheme = uri.getScheme();
+        if (scheme == null) return false;
+        String lower = scheme.toLowerCase(Locale.US);
+        if ("about".equals(lower) || "data".equals(lower) || "blob".equals(lower) || "javascript".equals(lower)) {
+            return false;
+        }
+        String url = uri.toString();
+        runOnUiThread(() -> {
+            navigateInWebView(url);
+            disposePrintPopup(popup);
+        });
+        return true;
+    }
+
+    /**
+     * The child stays attached at full size so createPrintDocumentAdapter has
+     * a laid-out document, but behind the main page until we know it is a
+     * preview. Print runs at ~400ms; previews never call print, so they are
+     * brought forward after that window. Invoice and estimate previews use
+     * the same window.open + document.write path and must stay visible.
+     */
+    private void attachPrintPopup(WebView child) {
+        ConstraintLayout root = findViewById(R.id.main);
+        if (root == null) return;
+        child.setTag(new PopupState());
+        int id = View.generateViewId();
+        child.setId(id);
+        child.setFocusable(false);
+        child.setFocusableInTouchMode(false);
+        child.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        root.addView(child, 0, new ConstraintLayout.LayoutParams(0, 0));
+        ConstraintSet set = new ConstraintSet();
+        set.clone(root);
+        set.connect(id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP);
+        set.connect(id, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM);
+        set.connect(id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START);
+        set.connect(id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END);
+        set.applyTo(root);
+        printPopups.add(child);
+        restackPrintPopups();
+        child.postDelayed(() -> revealPrintPopupIfPreview(child), 1500);
+    }
+
+    private void revealPrintPopupIfPreview(WebView child) {
+        if (isDestroyed() || child.getParent() == null) return;
+        if (!(child.getTag() instanceof PopupState)) return;
+        PopupState state = (PopupState) child.getTag();
+        if (state.printRequested || state.revealed) return;
+        state.revealed = true;
+        child.setFocusable(true);
+        child.setFocusableInTouchMode(true);
+        child.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        restackPrintPopups();
+    }
+
+    private void restackPrintPopups() {
+        if (webView != null) webView.bringToFront();
+        for (int i = 0; i < printPopups.size(); i++) {
+            WebView child = printPopups.get(i);
+            if (child.getTag() instanceof PopupState && ((PopupState) child.getTag()).revealed) {
+                child.bringToFront();
+            }
+        }
+        if (bottomNav != null && bottomNav.getVisibility() == View.VISIBLE) {
+            bottomNav.bringToFront();
+        }
+    }
+
+    private boolean closeTopPrintPreview() {
+        for (int i = printPopups.size() - 1; i >= 0; i--) {
+            WebView child = printPopups.get(i);
+            if (!(child.getTag() instanceof PopupState)) continue;
+            PopupState state = (PopupState) child.getTag();
+            if (state.revealed && !state.printRequested) {
+                disposePrintPopup(child);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final Object POPUP_DESTROYED = new Object();
+
+    private void disposePrintPopup(WebView child) {
+        if (child == null || child.getTag() == POPUP_DESTROYED) return;
+        child.setTag(POPUP_DESTROYED);
+        printPopups.remove(child);
+        if (child.getParent() instanceof ViewGroup) {
+            ((ViewGroup) child.getParent()).removeView(child);
+        }
+        try {
+            child.stopLoading();
+            child.setWebChromeClient(null);
+            child.setWebViewClient(null);
+            child.destroy();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void printWebView(WebView target, String jobName, boolean disposeAfterPrint) {
+        if (target == null || target.getTag() == POPUP_DESTROYED || isFinishing() || isDestroyed()) return;
+        if (target.getTag() instanceof PopupState) {
+            PopupState state = (PopupState) target.getTag();
+            if (state.printRequested) return;
+            state.printRequested = true;
+        }
+        String name = PrintJobs.jobNameFromTitle(jobName);
+        PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
+        if (printManager == null) {
+            Toast.makeText(this, "Printing is not available on this device.", Toast.LENGTH_LONG).show();
+            if (disposeAfterPrint) disposePrintPopup(target);
+            return;
+        }
+        PrintAttributes attributes = new PrintAttributes.Builder()
+                .setMediaSize(PrintAttributes.MediaSize.NA_LETTER)
+                .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+                .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                .build();
+        PrintDocumentAdapter adapter = target.createPrintDocumentAdapter(name);
+        if (disposeAfterPrint) {
+            adapter = new FinishingPrintAdapter(adapter, () -> runOnUiThread(() -> {
+                if (!isDestroyed()) disposePrintPopup(target);
+            }));
+        }
+        try {
+            printManager.print(name, adapter, attributes);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Print failed", e);
+            Toast.makeText(this, "Print failed.", Toast.LENGTH_LONG).show();
+            if (disposeAfterPrint) disposePrintPopup(target);
+        }
+    }
+
+    private static final class PopupState {
+        boolean printRequested;
+        boolean revealed;
+    }
+
+    /**
+     * Bound as TSPPrint. The popup gets this bridge only, so a print document
+     * cannot call session or billing methods. The main page keeps Android.printReport.
+     */
+    private final class PrintBridge {
+        private final WebView target;
+        private final boolean disposeAfterPrint;
+
+        PrintBridge(WebView target, boolean disposeAfterPrint) {
+            this.target = target;
+            this.disposeAfterPrint = disposeAfterPrint;
+        }
+
+        @JavascriptInterface
+        public void printPage(String jobName) {
+            runOnUiThread(() -> printWebView(target, jobName, disposeAfterPrint));
+        }
+    }
+
+    /** Holds the child WebView until the spooler finishes, then drops it. */
+    private static final class FinishingPrintAdapter extends PrintDocumentAdapter {
+        private final PrintDocumentAdapter delegate;
+        private final Runnable onFinish;
+
+        FinishingPrintAdapter(PrintDocumentAdapter delegate, Runnable onFinish) {
+            this.delegate = delegate;
+            this.onFinish = onFinish;
+        }
+
+        @Override
+        public void onStart() {
+            delegate.onStart();
+        }
+
+        @Override
+        public void onLayout(PrintAttributes oldAttributes, PrintAttributes newAttributes,
+                             CancellationSignal cancellationSignal, LayoutResultCallback callback,
+                             Bundle extras) {
+            delegate.onLayout(oldAttributes, newAttributes, cancellationSignal, callback, extras);
+        }
+
+        @Override
+        public void onWrite(PageRange[] pages, ParcelFileDescriptor destination,
+                            CancellationSignal cancellationSignal, WriteResultCallback callback) {
+            delegate.onWrite(pages, destination, cancellationSignal, callback);
+        }
+
+        @Override
+        public void onFinish() {
+            try {
+                delegate.onFinish();
+            } finally {
+                if (onFinish != null) onFinish.run();
+            }
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -1527,6 +1900,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        for (int i = printPopups.size() - 1; i >= 0; i--) {
+            disposePrintPopup(printPopups.get(i));
+        }
         stopAnswer(false);
         if (speechRecognizer != null) {
             try { speechRecognizer.destroy(); } catch (Exception ignored) {}

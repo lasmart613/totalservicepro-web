@@ -4,6 +4,8 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 -keep class com.photometrytools.MainActivity$WebAppInterface { *; }
+-keep class com.photometrytools.MainActivity$PrintBridge { *; }
+-keep class com.photometrytools.MainActivity$FinishingPrintAdapter { *; }
 -keepclassmembers class com.photometrytools.MainActivity {
     public void showToast(java.lang.String);
     public java.lang.String getAccessToken();
