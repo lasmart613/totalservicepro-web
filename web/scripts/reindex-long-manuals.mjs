@@ -18,9 +18,10 @@
  * refusal when the stored md5 changed. The page loop itself is not held
  * inside a database transaction.
  *
- * Apply these files on yljztfajyvjzqikxdddf before --apply, in order:
- *   web/supabase/migrations/20261011_000911_manual_search_index_clip.sql
- *   web/supabase/migrations/20261011_000912_manual_search_index_chunks.sql
+ * 20261011_000911_manuals_published.sql is already applied. Apply these
+ * files on yljztfajyvjzqikxdddf before --apply, in order:
+ *   web/supabase/migrations/20261011_000912_manual_search_index_clip.sql
+ *   web/supabase/migrations/20261011_000913_manual_search_index_chunks.sql
  * Redeploy the get-manual-url and grok-assistant edge functions after the
  * SQL, then run this script. This script does not apply SQL and does not
  * deploy.

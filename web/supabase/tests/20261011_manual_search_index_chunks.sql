@@ -1,4 +1,4 @@
--- Local proof for 20261011_000912_manual_search_index_chunks.sql.
+-- Local proof for 20261011_000913_manual_search_index_chunks.sql.
 -- Empty Postgres only. Refuses to run when public.manuals already exists.
 -- The body is one transaction and ends in ROLLBACK. It does not write a
 -- database that outlives this session.
@@ -42,8 +42,8 @@ INSERT INTO public.manual_search_index (manual_id, search_text) VALUES
   (1, '[[pdfpage:2]] alpha'),
   (72, '[[pdfpage:517]] kept');
 
-\i web/supabase/migrations/20261011_000911_manual_search_index_clip.sql
-\i web/supabase/migrations/20261011_000912_manual_search_index_chunks.sql
+\i web/supabase/migrations/20261011_000912_manual_search_index_clip.sql
+\i web/supabase/migrations/20261011_000913_manual_search_index_chunks.sql
 
 DO $$
 BEGIN
@@ -170,9 +170,9 @@ BEGIN
   END;
 END $$;
 
-\i web/supabase/migrations/20261011_000912_manual_search_index_chunks.sql
+\i web/supabase/migrations/20261011_000913_manual_search_index_chunks.sql
 
-\i web/supabase/migrations/20261011_000912_manual_search_index_chunks_rollback.sql
+\i web/supabase/migrations/20261011_000913_manual_search_index_chunks_rollback.sql
 
 DO $$
 BEGIN

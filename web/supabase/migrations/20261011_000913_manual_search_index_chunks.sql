@@ -20,8 +20,9 @@
 -- to p_expected_md5, and refuses the write when they differ. Empty storage
 -- is md5 NULL on both sides. EXECUTE is service_role only.
 --
--- Apply 20261011_000911_manual_search_index_clip.sql first. This file
--- inserts index_clipped and indexed_page_max.
+-- Apply 20261011_000912_manual_search_index_clip.sql first. That file
+-- adds index_clipped and indexed_page_max. 20261011_000911_manuals_published.sql
+-- is already applied and is a different change.
 --
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 -- The migration runner applies this file as one transaction. Safe to re-run.

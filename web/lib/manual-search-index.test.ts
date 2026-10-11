@@ -691,6 +691,117 @@ test('md5 guard refuses a changed index and will not clip a multi-chunk write', 
   assert.equal(upserts, 0);
 });
 
+test('chunk upsert drops chunk_index only for undefined_column', async () => {
+  const calls: Array<Record<string, unknown>> = [];
+  const denied = {
+    from() {
+      return {
+        upsert(payload: Record<string, unknown>) {
+          calls.push(payload);
+          return { error: { code: '42501', message: 'permission denied for column chunk_index' } };
+        },
+      };
+    },
+  };
+  const blocked = await upsertManualSearchIndex(denied as never, 1, '[[pdfpage:1]] hello');
+  assert.equal(blocked.ok, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].chunk_index, 0);
+
+  const missing = {
+    from() {
+      return {
+        upsert(payload: Record<string, unknown>) {
+          calls.push(payload);
+          if (payload.chunk_index !== undefined) {
+            return {
+              error: {
+                code: '42703',
+                message: 'column "chunk_index" of relation "manual_search_index" does not exist',
+              },
+            };
+          }
+          return { error: null };
+        },
+      };
+    },
+  };
+  const saved = await upsertManualSearchIndex(missing as never, 1, '[[pdfpage:1]] hello');
+  assert.equal(saved.ok, true);
+  assert.equal(calls[2].chunk_index, undefined);
+  assert.equal(calls[2].search_text, '[[pdfpage:1]] hello');
+});
+
+test('reindex refuses a chunk_index read that is not undefined_column', async () => {
+  const existing = `${'troubleshooting '.repeat(40)}`;
+  const harness = reindexHarness({ existing });
+  let indexSingles = 0;
+  const client = {
+    storage: harness.client.storage,
+    from(table: string) {
+      const chain = {
+        select() {
+          return chain;
+        },
+        eq() {
+          return chain;
+        },
+        order: async () => ({
+          data: null,
+          error: { code: '42501', message: 'permission denied for column chunk_index' },
+        }),
+        maybeSingle: async () => {
+          if (table === 'manual_search_index') indexSingles += 1;
+          return { data: table === 'manual_search_index' ? { search_text: existing } : null, error: null };
+        },
+        upsert() {
+          return { error: null };
+        },
+      };
+      return chain;
+    },
+  };
+  const refused = await reindexManualPageRange(client as never, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 1 });
+  assert.equal(refused.ok, false);
+  assert.match(refused.error || '', /could not read the existing row/);
+  assert.equal(indexSingles, 0);
+  assert.equal(harness.stage.size, 0);
+
+  const fallback = {
+    storage: harness.client.storage,
+    from(table: string) {
+      const chain = {
+        select() {
+          return chain;
+        },
+        eq() {
+          return chain;
+        },
+        order: async () => ({
+          data: null,
+          error: {
+            code: '42703',
+            message: 'column "chunk_index" of relation "manual_search_index" does not exist',
+          },
+        }),
+        maybeSingle: async () => ({
+          data: table === 'manual_search_index' ? { search_text: existing } : null,
+          error: null,
+        }),
+        upsert() {
+          return { error: null };
+        },
+      };
+      return chain;
+    },
+  };
+  const result = await reindexManualPageRange(fallback as never, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.done, false);
+  const staged = JSON.parse([...harness.stage.values()][0]);
+  assert.equal(staged.expectedMd5, indexTextMd5([existing]));
+});
+
 test('page 1 of a reindex stores the md5 of the index it must replace', async () => {
   const existing = Array.from({ length: 3 }, (_, i) => `[[pdfpage:${i + 1}]] old ${i + 1}`).join('\f');
   const harness = reindexHarness({ existing });
@@ -704,11 +815,11 @@ test('page 1 of a reindex stores the md5 of the index it must replace', async ()
 
 test('chunk migration keeps the lock timeout and the md5 replace function', () => {
   const migration = readFileSync(
-    join(here, '../supabase/migrations/20261011_000912_manual_search_index_chunks.sql'),
+    join(here, '../supabase/migrations/20261011_000913_manual_search_index_chunks.sql'),
     'utf8',
   );
   const rollback = readFileSync(
-    join(here, '../supabase/migrations/20261011_000912_manual_search_index_chunks_rollback.sql'),
+    join(here, '../supabase/migrations/20261011_000913_manual_search_index_chunks_rollback.sql'),
     'utf8',
   );
   const edge = readFileSync(join(here, '../../supabase/functions/grok-assistant/index.ts'), 'utf8');
@@ -731,9 +842,16 @@ test('chunk migration keeps the lock timeout and the md5 replace function', () =
   assert.doesNotMatch(rollback, /\bCOMMIT\b/);
   assert.doesNotMatch(rollback, /CONCURRENTLY/);
   assert.match(edge, /loadJoinedSearchText/);
-  assert.match(edge, /chunk_index/);
-  assert.match(manualUrl, /chunk_index/);
+  assert.match(edge, /catalogManualIsPublished/);
+  assert.match(edge, /reportedMissingColumn\(ordered\.error, 'chunk_index'\)/);
+  assert.match(edge, /reportedMissingColumn\(idx\.error, 'chunk_index'\)/);
+  assert.doesNotMatch(edge, /\/chunk_index\/i/);
+  assert.match(manualUrl, /isMissingColumn\(listed\?\.error, "chunk_index"\)/);
   assert.match(manualUrl, /boundFromIndexRows/);
+  const indexer = readFileSync(join(here, 'manual-search-index.ts'), 'utf8');
+  assert.match(indexer, /isMissingColumn\(ordered\.error, 'chunk_index'\)/);
+  assert.match(indexer, /isMissingColumn\(error, 'chunk_index'\)/);
+  assert.match(migration, /20261011_000912_manual_search_index_clip\.sql/);
 
   const script = readFileSync(join(here, '../scripts/reindex-long-manuals.mjs'), 'utf8');
   assert.match(script, /reindexManualPageRange/);
@@ -741,6 +859,8 @@ test('chunk migration keeps the lock timeout and the md5 replace function', () =
   assert.match(script, /1621/);
   assert.match(script, /1207/);
   assert.match(script, /--apply/);
+  assert.match(script, /20261011_000912_manual_search_index_clip\.sql/);
+  assert.match(script, /20261011_000913_manual_search_index_chunks\.sql/);
   const dry = spawnSync(process.execPath, ['scripts/reindex-long-manuals.mjs'], {
     cwd: join(here, '..'),
     encoding: 'utf8',

@@ -844,7 +844,7 @@ export async function upsertManualSearchIndex(
   let payload = { ...full };
   let result = await db.from('manual_search_index').upsert(payload, { onConflict });
   let error = result?.error;
-  if (error && /chunk_index/i.test(String(error.message || ''))) {
+  if (error && isMissingColumn(error, 'chunk_index')) {
     const { chunk_index: _chunk, ...rest } = full;
     payload = { ...rest };
     onConflict = 'manual_id';

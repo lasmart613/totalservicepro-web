@@ -1,4 +1,4 @@
--- Rollback for 20261011_000912_manual_search_index_chunks.sql.
+-- Rollback for 20261011_000913_manual_search_index_chunks.sql.
 -- Deletes chunk_index > 0 (the text past the first 1,500,000 characters)
 -- and restores the one-row primary key. Chunk 0 is kept.
 --
