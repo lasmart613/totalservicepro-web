@@ -20,6 +20,7 @@ import { loginDest } from '@/lib/no-org-route';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import { loginMagicLinkRedirect, recoveryRedirect } from '@/lib/auth-link-route';
+import { googleOAuthRedirectTo, isTspAndroidWebView } from '@/lib/android-session';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -360,9 +361,12 @@ function LoginInner() {
     setLoading(true);
     try {
       const origin = clientAuthOrigin();
-      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(
-        safeRedirectPath(nextPath || '/', origin)
-      )}`;
+      const redirectTo = googleOAuthRedirectTo(
+        origin,
+        nextPath || '/',
+        searchParams,
+        isTspAndroidWebView()
+      );
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

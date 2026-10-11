@@ -1,6 +1,6 @@
 /**
  * Total Service Pro — active-org switcher for Android WebView HTML.
- * Uses the same organization_memberships + RPCs as the website.
+ * Reads organization_memberships. Switch and leave go through /api/org/switch and /api/org/leave.
  * Jobs stay scoped to user_profiles.organization_id (the active shop).
  */
 (function () {
@@ -71,22 +71,54 @@
     return { memberships: memberships, activeId: activeId };
   }
 
-  async function switchOrg(organizationId) {
+  function apiOrigin() {
+    try {
+      if (location.protocol === 'https:' || location.protocol === 'http:') return location.origin;
+    } catch (e) {}
+    return 'https://repairplanet.net';
+  }
+
+  async function postOrg(path, organizationId) {
     const sb = client();
     if (!sb) throw new Error('Not signed in');
-    const { error } = await sb.rpc('switch_active_organization', {
-      p_organization_id: Number(organizationId),
+    const { data: sessionData } = await sb.auth.getSession();
+    const token = sessionData && sessionData.session && sessionData.session.access_token;
+    if (!token) throw new Error('Not signed in');
+    let filePage = false;
+    try { filePage = location.protocol === 'file:'; } catch (e) {}
+    if (filePage && typeof Android !== 'undefined' && Android.postOrgApi) {
+      let json = {};
+      try {
+        json = JSON.parse(Android.postOrgApi(path, String(organizationId), token) || '{}');
+      } catch (e) {
+        throw new Error('Could not update this company');
+      }
+      if (!json || json.ok === false) {
+        throw new Error((json && json.error) || 'Could not update this company');
+      }
+      return json;
+    }
+    const res = await fetch(apiOrigin() + path, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + token,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ organizationId: organizationId }),
     });
-    if (error) throw error;
+    const json = await res.json().catch(function () { return {}; });
+    if (!res.ok || json.ok === false) {
+      throw new Error(json.error || 'Could not update this company');
+    }
+    return json;
+  }
+
+  async function switchOrg(organizationId) {
+    await postOrg('/api/org/switch', organizationId);
   }
 
   async function leaveOrg(organizationId) {
-    const sb = client();
-    if (!sb) throw new Error('Not signed in');
-    const { error } = await sb.rpc('leave_organization', {
-      p_organization_id: Number(organizationId),
-    });
-    if (error) throw error;
+    await postOrg('/api/org/leave', organizationId);
   }
 
   function render(mount, state) {

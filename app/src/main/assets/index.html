@@ -584,7 +584,7 @@
     </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase.js"></script>
 <script>
     const supabaseClient = supabase.createClient(
         'https://yljztfajyvjzqikxdddf.supabase.co',
@@ -837,17 +837,47 @@
             const firstName = document.getElementById('firstName').value.trim();
             const lastName  = document.getElementById('lastName').value.trim();
             if (!firstName || !lastName) return messageEl.textContent = 'First and last name required';
-            const { data: signUpData, error } = await supabaseClient.auth.signUp({
-                email, password,
-                options: { data: { first_name: firstName, last_name: lastName } }
-            });
-            if (error) {
-                messageEl.textContent = error.message;
-            } else if (signUpData.session) {
-                // Email confirmation is off — user is logged in immediately
+            const origin = (location.protocol === 'https:' || location.protocol === 'http:')
+                ? location.origin : 'https://repairplanet.net';
+            let signUpJson = {};
+            try {
+                const signUpRes = await fetch(origin + '/api/auth/signup', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: email,
+                        password: password,
+                        firstName: firstName,
+                        lastName: lastName,
+                        emailRedirectTo: 'https://repairplanet.net/auth/callback?next=' + encodeURIComponent('/onboarding')
+                    })
+                });
+                signUpJson = await signUpRes.json().catch(function () { return {}; });
+                if (!signUpRes.ok || signUpJson.ok === false) {
+                    messageEl.textContent = signUpJson.error || 'Could not create the account.';
+                    return;
+                }
+            } catch (err) {
+                messageEl.textContent = 'Could not reach sign-up. Check your connection.';
+                return;
+            }
+            if (signUpJson.session && signUpJson.session.access_token) {
+                const sessionPayload = {
+                    access_token: signUpJson.session.access_token,
+                    refresh_token: signUpJson.session.refresh_token || '',
+                    currentSession: {
+                        access_token: signUpJson.session.access_token,
+                        refresh_token: signUpJson.session.refresh_token || ''
+                    }
+                };
                 try {
-                    if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(signUpData.session));
-                    // Enable biometric if the checkbox was checked in the form
+                    await supabaseClient.auth.setSession({
+                        access_token: signUpJson.session.access_token,
+                        refresh_token: signUpJson.session.refresh_token || ''
+                    });
+                } catch (e) {}
+                try {
+                    if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(sessionPayload));
                     const bioChk = document.getElementById('enableBiometric');
                     if (typeof Android !== 'undefined' && bioChk && bioChk.checked && typeof Android.setBiometricEnabled === 'function') {
                         if (!Android.isBiometricEnabled()) {
@@ -856,22 +886,10 @@
                         }
                     }
                 } catch(e) {}
-                // Create minimal user_profiles row so onboarding check works
-                try {
-                    await supabaseClient.from('user_profiles').upsert({
-                        id: signUpData.user.id,
-                        first_name: firstName,
-                        last_name: lastName,
-                        email: signUpData.user.email,
-                        role: 'engineer',
-                        onboarding_completed: false
-                    }, { onConflict: 'id' });
-                } catch(e) {}
                 messageEl.textContent = '';
                 closeLoginPopup();
                 await updateAuthUI();
             } else {
-                // Email confirmation is on — tell user to check email
                 messageEl.textContent = 'Account created! Check your email to confirm before logging in.';
             }
         } else {

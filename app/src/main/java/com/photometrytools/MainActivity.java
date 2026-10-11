@@ -17,7 +17,15 @@ import android.net.NetworkInfo;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.CancellationSignal;
 import android.os.Environment;
+import android.provider.MediaStore;
+import android.os.Message;
+import android.os.ParcelFileDescriptor;
+import android.print.PageRange;
+import android.print.PrintAttributes;
+import android.print.PrintDocumentAdapter;
+import android.print.PrintManager;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -26,6 +34,7 @@ import android.speech.tts.UtteranceProgressListener;
 import android.util.Base64;
 import android.util.Log;
 import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.URLUtil;
@@ -33,6 +42,7 @@ import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
@@ -46,8 +56,18 @@ import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
+import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.content.FileProvider;
+import androidx.core.view.WindowInsetsControllerCompat;
+import androidx.webkit.JavaScriptReplyProxy;
+import androidx.webkit.WebViewCompat;
+import androidx.webkit.WebViewFeature;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
@@ -58,10 +78,16 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Executor;
 
 /**
@@ -78,6 +104,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_SESSION_KEY = "storedSession";
     private static final String PREFS_LAST_URL = "last_url";
     private static final String PREFS_BIOMETRIC_KEY = "biometricEnabled";
+    private static final String PREFS_AUTH_NONCE = "pending_auth_nonce";
+    private static final String PREFS_AUTH_STATE = "pending_auth_state";
+    private static final String PREFS_AUTH_EXPIRY = "pending_auth_expiry";
     private static final int RECORD_AUDIO_PERMISSION_CODE = 2108;
 
     private static final Map<String, String> ASSET_TO_PATH = new HashMap<>();
@@ -120,6 +149,7 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private BottomNavigationView bottomNav;
+    private final ArrayList<WebView> printPopups = new ArrayList<>();
     private TextToSpeech textToSpeech;
     private SpeechRecognizer speechRecognizer;
     private boolean ttsReady = false;
@@ -139,15 +169,38 @@ public class MainActivity extends AppCompatActivity {
     private BiometricPrompt biometricPrompt;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<Intent> fileChooserLauncher;
+    private Uri pendingCameraUri;
     private String pendingLaunchUrl = null;
+    private String acceptedAuthNavigation;
+    private boolean closedForExternalAuth;
+    private volatile String mainFrameUrl;
+    /** Set only while tspNative is dispatching a main-frame message. */
+    private final ThreadLocal<Boolean> originLockedCaller = new ThreadLocal<>();
+    private boolean recoveringRenderer;
+    private boolean backCallbackInstalled;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
+        View root = findViewById(R.id.main);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+        WindowInsetsControllerCompat insetsController =
+                WindowCompat.getInsetsController(getWindow(), root);
+        insetsController.setAppearanceLightStatusBars(false);
+        insetsController.setAppearanceLightNavigationBars(false);
 
         captureLaunchIntent(getIntent());
+        if (closedForExternalAuth) {
+            finish();
+            return;
+        }
 
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         storedSession = prefs.getString(PREFS_SESSION_KEY, null);
@@ -161,6 +214,12 @@ public class MainActivity extends AppCompatActivity {
                 new ActivityResultContracts.StartActivityForResult(),
                 result -> {
                     Uri[] uris = WebChromeClient.FileChooserParams.parseResult(result.getResultCode(), result.getData());
+                    if ((uris == null || uris.length == 0)
+                            && result.getResultCode() == RESULT_OK
+                            && pendingCameraUri != null) {
+                        uris = new Uri[]{pendingCameraUri};
+                    }
+                    pendingCameraUri = null;
                     if (filePathCallback != null) {
                         filePathCallback.onReceiveValue(uris);
                         filePathCallback = null;
@@ -226,15 +285,23 @@ public class MainActivity extends AppCompatActivity {
         return true;
     };
 
+    /**
+     * Injected into every frame, which cannot be told apart here.
+     * https pages call tspNative instead. These methods run only for a bundled
+     * file page, and none of them return a session or token.
+     * {@code postOrgApi} returns org-switch JSON; the bearer is an argument.
+     */
     public class WebAppInterface {
 
         @JavascriptInterface
         public void showToast(String msg) {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show());
         }
 
         @JavascriptInterface
         public void saveSession(String sessionJson) {
+            if (!javascriptInterfaceAllowed()) return;
             storedSession = sessionJson;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
@@ -243,12 +310,8 @@ public class MainActivity extends AppCompatActivity {
         }
 
         @JavascriptInterface
-        public String getStoredSession() {
-            return storedSession;
-        }
-
-        @JavascriptInterface
         public void clearSession() {
+            if (!javascriptInterfaceAllowed()) return;
             storedSession = null;
             biometricEnabled = false;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -260,6 +323,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void setBiometricEnabled(boolean enabled) {
+            if (!javascriptInterfaceAllowed()) return;
             biometricEnabled = enabled;
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
@@ -269,27 +333,78 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public boolean isBiometricEnabled() {
+            if (!javascriptInterfaceAllowed()) return false;
             return biometricEnabled;
         }
 
         @JavascriptInterface
         public boolean canUseBiometric() {
+            if (!javascriptInterfaceAllowed()) return false;
             return canAuthenticateWithBiometrics();
         }
 
         @JavascriptInterface
         public void setPremiumStatus(boolean premium) {
+            if (!javascriptInterfaceAllowed()) return;
             // Ads removed from this build. Paid "no ads" is already true.
         }
 
         @JavascriptInterface
         public void launchBillingFlow(String sku) {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> loadProductionOrAsset("/plans", "paywall.html"));
+        }
+
+        /**
+         * Offline file pages cannot POST to repairplanet.net (no CORS, and file
+         * URL access stays locked). Switch and leave go through this instead.
+         */
+        @JavascriptInterface
+        public String postOrgApi(String path, String organizationId, String bearer) {
+            if (!javascriptInterfaceAllowed()) return orgApiError("Not allowed");
+            if (!"/api/org/switch".equals(path) && !"/api/org/leave".equals(path)) {
+                return orgApiError("Not allowed");
+            }
+            if (organizationId == null || organizationId.trim().isEmpty() || organizationId.length() > 64) {
+                return orgApiError("organizationId is required");
+            }
+            if (bearer == null || bearer.isEmpty() || bearer.indexOf('\r') >= 0 || bearer.indexOf('\n') >= 0
+                    || bearer.length() > 8192) {
+                return orgApiError("Not signed in");
+            }
+            HttpURLConnection conn = null;
+            try {
+                org.json.JSONObject payload = new org.json.JSONObject();
+                payload.put("organizationId", organizationId.trim());
+                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+                conn = (HttpURLConnection) new URL(PRODUCTION_ORIGIN + path).openConnection();
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(20000);
+                conn.setInstanceFollowRedirects(false);
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Authorization", "Bearer " + bearer);
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Accept", "application/json");
+                conn.getOutputStream().write(body);
+                int status = conn.getResponseCode();
+                if (status >= 300 && status < 400) return orgApiError("Could not update this company");
+                InputStream stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                String text = readLimited(stream);
+                if (text == null || text.isEmpty() || text.charAt(0) != '{') {
+                    return orgApiError("Could not update this company");
+                }
+                return text;
+            } catch (Exception e) {
+                return orgApiError("Could not update this company");
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         }
 
         @JavascriptInterface
         public void openUrl(String url) {
-            if (url == null) return;
+            if (!javascriptInterfaceAllowed() || url == null) return;
             runOnUiThread(() -> {
                 try {
                     // geo: is handled inside navigateInWebView, which returns true so this
@@ -307,6 +422,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void printReport(String html, String jobName) {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 WebView pdfWebView = new WebView(MainActivity.this);
                 WebSettings settings = pdfWebView.getSettings();
@@ -368,6 +484,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void speak(String text) {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> speakWithDeviceTts(text));
         }
 
@@ -378,6 +495,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void speakAnswer(String text, String voiceId, String engine, String accessToken) {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> startGrokAnswer(text, voiceId, engine, accessToken));
         }
 
@@ -387,6 +505,7 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void interruptSpeech() {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 speechGeneration++;
                 stopGrokPlayer();
@@ -397,11 +516,13 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void stopSpeaking() {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> stopAnswer(true));
         }
 
         @JavascriptInterface
         public void startVoiceRecognition() {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 stopAnswer(true);
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
@@ -419,6 +540,7 @@ public class MainActivity extends AppCompatActivity {
 
         @JavascriptInterface
         public void stopVoiceRecognition() {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> stopListening(true));
         }
 
@@ -428,11 +550,13 @@ public class MainActivity extends AppCompatActivity {
          */
         @JavascriptInterface
         public void onCitationObserved(String manualId, String page) {
+            if (!javascriptInterfaceAllowed()) return;
             Log.i(TAG, "assistant:citation-open manualId=" + manualId + " page=" + page);
         }
 
         @JavascriptInterface
         public void goBack() {
+            if (!javascriptInterfaceAllowed()) return;
             runOnUiThread(() -> {
                 if (webView != null && webView.canGoBack()) webView.goBack();
             });
@@ -483,6 +607,12 @@ public class MainActivity extends AppCompatActivity {
     private void loadApp() {
         ensureDeviceTts();
         webView = findViewById(R.id.webView);
+        bindWebView(webView);
+        webView.loadUrl(chooseStartUrl());
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private void bindWebView(WebView webView) {
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
@@ -499,7 +629,11 @@ public class MainActivity extends AppCompatActivity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.1-beta");
+        // Live /reports/[id] prints with window.open('') + document.write + print.
+        // Without these, window.open returns null and the page reports a blocked pop-up.
+        settings.setSupportMultipleWindows(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.2-beta");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -507,10 +641,16 @@ public class MainActivity extends AppCompatActivity {
         cookies.setAcceptThirdPartyCookies(webView, true);
 
         webView.addJavascriptInterface(new WebAppInterface(), "Android");
+        webView.addJavascriptInterface(new PrintBridge(webView, false), "TSPPrint");
+        installOriginLockedListener(webView);
+        installDocumentStartShim(webView);
 
+        if (!backCallbackInstalled) {
+            backCallbackInstalled = true;
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
+                if (closeTopPrintPreview()) return;
                 if (webView != null && webView.canGoBack()) {
                     webView.goBack();
                 } else {
@@ -523,22 +663,47 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+        }
 
         webView.setWebChromeClient(new WebChromeClient() {
             @Override
             public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> filePathCallback,
                                              FileChooserParams fileChooserParams) {
+                if (!originAllowsBridge()) {
+                    filePathCallback.onReceiveValue(null);
+                    return false;
+                }
                 if (MainActivity.this.filePathCallback != null) {
                     MainActivity.this.filePathCallback.onReceiveValue(null);
                 }
                 MainActivity.this.filePathCallback = filePathCallback;
+                pendingCameraUri = null;
                 try {
-                    fileChooserLauncher.launch(fileChooserParams.createIntent());
+                    Intent content = fileChooserParams.createIntent();
+                    Intent chooser = Intent.createChooser(content, "Upload");
+                    if (acceptsImages(fileChooserParams)) {
+                        Intent capture = cameraCaptureIntent();
+                        if (capture != null) {
+                            chooser.putExtra(Intent.EXTRA_INITIAL_INTENTS, new Intent[]{capture});
+                        }
+                    }
+                    fileChooserLauncher.launch(chooser);
                     return true;
                 } catch (Exception e) {
                     MainActivity.this.filePathCallback = null;
+                    pendingCameraUri = null;
                     return false;
                 }
+            }
+
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                return openPopupWindow(view, resultMsg);
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                if (window != null && window != webView) disposePrintPopup(window);
             }
         });
 
@@ -548,7 +713,13 @@ public class MainActivity extends AppCompatActivity {
                     || (name != null && name.toLowerCase(Locale.US).endsWith(".pdf"))
                     || (url != null && url.toLowerCase(Locale.US).contains(".pdf"));
             if (pdf) {
-                if (url != null && isManualHost(url)) {
+                String current = webView.getUrl();
+                boolean alreadyViewing = current != null && (current.contains("/manuals")
+                        || current.contains("pdf_viewer"));
+                if (alreadyViewing) {
+                    return;
+                }
+                if (url != null && TrustedOrigins.allowsUrl(url)) {
                     Toast.makeText(MainActivity.this,
                             "Manuals stay in the in-app viewer — download is disabled.",
                             Toast.LENGTH_LONG).show();
@@ -568,29 +739,67 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if (uri != null && isGeoUrl(uri.toString())) {
-                    openGeoOrMaps(uri.toString());
-                    return true;
+                if (uri == null) return false;
+                String url = uri.toString();
+                if (!request.isForMainFrame()) {
+                    if (isGeoUrl(url)) {
+                        openGeoOrMaps(url);
+                        return true;
+                    }
+                    return !TrustedOrigins.subframeMayLoad(url);
                 }
-                return uri != null && !navigateInWebView(uri.toString());
+                return overrideMainFrame(view, url);
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
-                if (isGeoUrl(url)) {
-                    openGeoOrMaps(url);
-                    return true;
+                return overrideMainFrame(view, url);
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (url == null) return;
+                String shown = view.getUrl();
+                if (shown != null && TrustedOrigins.isSessionPage(shown) && !shown.equals(url)
+                        && !TrustedOrigins.isSessionPage(url)) {
+                    return;
                 }
-                return !navigateInWebView(url);
+                mainFrameUrl = url;
+                if (handEmailLinkToBrowser(url)) {
+                    view.stopLoading();
+                    return;
+                }
+                if (TrustedOrigins.isSessionPage(url) || isInlineDocumentUrl(url)) return;
+                if (url.equals(acceptedAuthNavigation)) return;
+                view.stopLoading();
+                openOutside(url);
             }
 
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
-                updateBottomNavVisibilityAndSelection(url);
+                String main = view.getUrl();
+                if (url != null && main != null && !url.equals(main)) return;
+                String page = main != null ? main : url;
+                mainFrameUrl = page;
+                updateBottomNavVisibilityAndSelection(page);
+                if (page != null && page.equals(acceptedAuthNavigation)) acceptedAuthNavigation = null;
+                if (!TrustedOrigins.isSessionPage(page)) return;
                 injectStoredSession(view);
                 injectCitationOpenBridge(view);
-                injectOnlineVoice(view, url);
+                injectOnlineVoice(view, page);
+                injectPrintHook(view);
+                injectOriginLockedShim(view);
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+                    if (view == webView) recoverFromRendererCrash();
+                    else disposePrintPopup(view);
+                });
+                return true;
             }
 
             @Override
@@ -602,13 +811,10 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        bottomNav = findViewById(R.id.bottom_navigation);
+        if (bottomNav == null) bottomNav = findViewById(R.id.bottom_navigation);
         if (bottomNav != null) {
             bottomNav.setOnItemSelectedListener(navListener);
         }
-
-        String start = chooseStartUrl();
-        webView.loadUrl(start);
     }
 
     private String chooseStartUrl() {
@@ -619,7 +825,7 @@ public class MainActivity extends AppCompatActivity {
         }
         String last = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREFS_LAST_URL, null);
         if (isNetworkAvailable()) {
-            if (last != null && isAllowedWebUrl(last) && !looksLikePdfDownload(last)) {
+            if (last != null && TrustedOrigins.isFirstPartyAppPage(last) && !looksLikePdfDownload(last)) {
                 return last;
             }
             return PRODUCTION_ORIGIN + "/";
@@ -637,55 +843,73 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    /** @return true if the URL was handled inside the WebView (or we navigated). */
+    /** @return true when openUrl should not start a second intent. */
     private boolean navigateInWebView(String url) {
+        if (webView == null || url == null) return true;
+        if (!overrideMainFrame(webView, url)) webView.loadUrl(url);
+        return true;
+    }
+
+    /**
+     * @return true when the WebView must not load this main-frame URL.
+     * First-party https pages and bundled assets stay. Auth starts a Custom Tab
+     * bound to a one-time nonce. Every other host leaves the WebView.
+     */
+    private boolean overrideMainFrame(WebView view, String url) {
         if (url == null) return true;
-        String lower = url.toLowerCase(Locale.US);
         if (isGeoUrl(url)) {
-            // One launch. Returning true tells openUrl not to start the intent again.
             openGeoOrMaps(url);
             return true;
         }
-        if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")) {
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-            } catch (Exception ignored) {
-            }
-            return false;
+        String lower = url.toLowerCase(Locale.US);
+        if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")
+                || lower.startsWith("intent:") || lower.startsWith("market:")) {
+            openOutside(url);
+            return true;
         }
+        if (handEmailLinkToBrowser(url)) return true;
         if (lower.startsWith("totalservicepro://")) {
-            captureLaunchIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-            applyPendingLaunch();
-            return true;
-        }
-        if (lower.startsWith("intent:") || lower.startsWith("market:")) return false;
-        if (lower.contains("play.google.com/store") || lower.contains("apps.apple.com")) {
-            Toast.makeText(this, "The mobile apps are coming soon — they are not in the stores yet.",
-                    Toast.LENGTH_LONG).show();
-            return false;
-        }
-        if (looksLikePdfDownload(url) && isManualHost(url)) {
-            webView.loadUrl(PRODUCTION_ORIGIN + "/manuals/view");
-            return true;
-        }
-        if (url.startsWith("file:///android_asset/")) {
-            String mapped = mapAssetUrlToProduction(url);
-            if (mapped != null && isNetworkAvailable()) {
-                webView.loadUrl(mapped);
+            Uri uri = Uri.parse(url);
+            if (!allowCredentialCallback(uri)) {
+                if (view != null) view.loadUrl(homeUrl());
                 return true;
             }
-            webView.loadUrl(url);
+            String dest = productionAuthCallbackUrl(uri);
+            acceptedAuthNavigation = dest;
+            rememberSessionFromAuthUri(uri);
+            if (view != null) view.loadUrl(dest);
             return true;
         }
-        if (isAllowedWebUrl(url)) {
-            webView.loadUrl(url);
+        if (TrustedOrigins.isAuthCallback(url) && callbackCarriesCredential(Uri.parse(url))) {
+            if (url.equals(acceptedAuthNavigation)) {
+                acceptedAuthNavigation = null;
+                return false;
+            }
+            Uri uri = Uri.parse(url);
+            if (!allowCredentialCallback(uri)) return true;
+            rememberSessionFromAuthUri(uri);
+            return false;
+        }
+        if (TrustedOrigins.isAuthStart(url)) {
+            beginAuthAndOpenCustomTab(url);
             return true;
         }
-        try {
-            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
-        } catch (Exception ignored) {
+        if (TrustedOrigins.isBundledAsset(url)) {
+            if (isNetworkAvailable()) {
+                if (view != null) view.loadUrl(mapAssetUrlToProduction(url));
+                return true;
+            }
+            return false;
         }
-        return false;
+        if (TrustedOrigins.isFirstPartyAppPage(url)) {
+            if (looksLikePdfDownload(url) && TrustedOrigins.allowsUrl(url)) {
+                if (view != null) view.loadUrl(PRODUCTION_ORIGIN + "/manuals/view");
+                return true;
+            }
+            return false;
+        }
+        openOutside(url);
+        return true;
     }
 
     private boolean isGeoUrl(String url) {
@@ -775,33 +999,17 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private boolean isAllowedWebUrl(String url) {
+    private void openCustomTab(String url) {
         try {
-            Uri uri = Uri.parse(url);
-            String host = uri.getHost();
-            if (host == null) return false;
-            host = host.toLowerCase(Locale.US);
-            return host.equals("repairplanet.net")
-                    || host.endsWith(".repairplanet.net")
-                    || host.endsWith("supabase.co")
-                    || host.endsWith("stripe.com")
-                    || host.endsWith("netlify.app")
-                    || host.endsWith("googleapis.com")
-                    || host.endsWith("gstatic.com")
-                    || host.endsWith("google.com");
-        } catch (Exception e) {
-            return false;
-        }
-    }
-
-    private boolean isManualHost(String url) {
-        try {
-            String host = Uri.parse(url).getHost();
-            if (host == null) return false;
-            host = host.toLowerCase(Locale.US);
-            return host.contains("supabase.co") || host.contains("repairplanet.net");
-        } catch (Exception e) {
-            return false;
+            CustomTabsIntent tabs = new CustomTabsIntent.Builder().setShowTitle(true).build();
+            tabs.intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+            tabs.launchUrl(this, Uri.parse(url));
+        } catch (RuntimeException e) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (RuntimeException ignored) {
+                showToast("Could not open link");
+            }
         }
     }
 
@@ -817,7 +1025,408 @@ public class MainActivity extends AppCompatActivity {
         return param != null ? base + "?" + param : base;
     }
 
+    private boolean isInlineDocumentUrl(String url) {
+        if (url == null) return false;
+        String lower = url.toLowerCase(Locale.US);
+        return lower.startsWith("about:") || lower.startsWith("data:")
+                || lower.startsWith("blob:") || lower.startsWith("javascript:");
+    }
+
+    private String homeUrl() {
+        if (isNetworkAvailable()) return PRODUCTION_ORIGIN + "/";
+        return localAssetUrl("index.html");
+    }
+
+    /**
+     * Email, magic-link, and password-reset URLs that do not match the login
+     * this app started. The default browser is chosen with an http probe so
+     * the verified https App Link does not open this app again.
+     */
+    private boolean handEmailLinkToBrowser(String url) {
+        if (!AuthLinks.shouldOpenInBrowser(url, loadPendingAuth(), System.currentTimeMillis())) return false;
+        openInExternalBrowser(url);
+        if (webView == null) closedForExternalAuth = true;
+        return true;
+    }
+
+    private void openInExternalBrowser(String url) {
+        showToast("Opening in your browser");
+        String browser = defaultBrowserPackage();
+        if (browser == null) {
+            showToast("Could not open link");
+            return;
+        }
+        try {
+            Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            view.addCategory(Intent.CATEGORY_BROWSABLE);
+            view.setPackage(browser);
+            view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(view);
+        } catch (RuntimeException e) {
+            showToast("Could not open link");
+        }
+    }
+
+    private String defaultBrowserPackage() {
+        try {
+            Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("http://example.com/"));
+            probe.addCategory(Intent.CATEGORY_BROWSABLE);
+            android.content.pm.ResolveInfo preferred = getPackageManager().resolveActivity(
+                    probe, PackageManager.MATCH_DEFAULT_ONLY);
+            String chosen = browserPackage(preferred);
+            if (chosen != null) return chosen;
+            java.util.List<android.content.pm.ResolveInfo> all = getPackageManager().queryIntentActivities(probe, 0);
+            for (int i = 0; i < all.size(); i++) {
+                chosen = browserPackage(all.get(i));
+                if (chosen != null) return chosen;
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private String browserPackage(android.content.pm.ResolveInfo info) {
+        if (info == null || info.activityInfo == null) return null;
+        String pkg = info.activityInfo.packageName;
+        if (pkg == null || pkg.equals(getPackageName()) || "android".equals(pkg)) return null;
+        return pkg;
+    }
+
+    private static String orgApiError(String message) {
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject();
+            obj.put("ok", false);
+            obj.put("error", message);
+            return obj.toString();
+        } catch (org.json.JSONException e) {
+            return "{\"ok\":false,\"error\":\"Could not update this company\"}";
+        }
+    }
+
+    private static String readLimited(InputStream in) throws java.io.IOException {
+        if (in == null) return "";
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte[] tmp = new byte[4096];
+        int total = 0;
+        int n;
+        while ((n = in.read(tmp)) >= 0 && total < 65536) {
+            int take = Math.min(n, 65536 - total);
+            buf.write(tmp, 0, take);
+            total += take;
+        }
+        return new String(buf.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    private void openOutside(String url) {
+        if (url == null || url.isEmpty()) return;
+        Uri uri = Uri.parse(url);
+        String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.US);
+        if ("https".equals(scheme) || "http".equals(scheme)) {
+            openCustomTab(url);
+            return;
+        }
+        try {
+            startExternal(url);
+        } catch (RuntimeException ignored) {
+            showToast("Could not open link");
+        }
+    }
+
+    private void beginAuthAndOpenCustomTab(String url) {
+        String nonce = newNonce();
+        String state = null;
+        try {
+            state = Uri.parse(url).getQueryParameter("state");
+        } catch (RuntimeException ignored) {
+        }
+        long expiry = System.currentTimeMillis() + AuthHandoff.TTL_MS;
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putString(PREFS_AUTH_NONCE, nonce)
+                .putString(PREFS_AUTH_STATE, state == null ? "" : state)
+                .putLong(PREFS_AUTH_EXPIRY, expiry)
+                .apply();
+        openCustomTab(AuthHandoff.withNonceOnRedirect(url, nonce));
+    }
+
+    private String newNonce() {
+        return AuthHandoff.newNonce(new SecureRandom());
+    }
+
+    private AuthHandoff.Pending loadPendingAuth() {
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        String nonce = prefs.getString(PREFS_AUTH_NONCE, "");
+        if (nonce == null || nonce.isEmpty()) return null;
+        return new AuthHandoff.Pending(nonce, prefs.getString(PREFS_AUTH_STATE, ""),
+                prefs.getLong(PREFS_AUTH_EXPIRY, 0L));
+    }
+
+    private void clearPendingAuth() {
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .remove(PREFS_AUTH_NONCE)
+                .remove(PREFS_AUTH_STATE)
+                .remove(PREFS_AUTH_EXPIRY)
+                .apply();
+    }
+
+    /** Single-use. A callback with a code or tokens must match the login this app started. */
+    private boolean allowCredentialCallback(Uri uri) {
+        if (uri == null || !callbackCarriesCredential(uri)) return false;
+        boolean ok = AuthHandoff.matches(loadPendingAuth(),
+                callbackParam(uri, "tsp_nonce"),
+                callbackParam(uri, "state"),
+                System.currentTimeMillis());
+        clearPendingAuth();
+        return ok;
+    }
+
+    private boolean callbackCarriesCredential(Uri uri) {
+        return callbackParam(uri, "access_token") != null || callbackParam(uri, "code") != null;
+    }
+
+    private String callbackParam(Uri uri, String name) {
+        if (uri == null || name == null) return null;
+        try {
+            String query = uri.getQueryParameter(name);
+            if (query != null && !query.isEmpty()) return query;
+            String fragment = uri.getFragment();
+            if (fragment == null || fragment.isEmpty()) return null;
+            String fromFragment = Uri.parse("https://repairplanet.net/?" + fragment).getQueryParameter(name);
+            return fromFragment == null || fromFragment.isEmpty() ? null : fromFragment;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private boolean originAllowsBridge() {
+        return TrustedOrigins.isSessionPage(urlOnUiThread(webView));
+    }
+
+    /**
+     * JavascriptInterface cannot see the calling frame. https pages must use
+     * tspNative. File pages stay on this object because a WebMessageListener
+     * origin list cannot name file:// without allowing every origin.
+     */
+    private boolean javascriptInterfaceAllowed() {
+        if (Boolean.TRUE.equals(originLockedCaller.get())) return true;
+        return TrustedOrigins.isBundledAsset(urlOnUiThread(webView));
+    }
+
+    /**
+     * Print popups are about:blank documents owned by a session page.
+     * A popup whose own URL is some other origin does not get the bridge.
+     */
+    private boolean originAllowsPrint(WebView target) {
+        String url = urlOnUiThread(target);
+        if (TrustedOrigins.isSessionPage(url)) return true;
+        if (target == null || target == webView || !isInlineDocumentUrl(url)) return false;
+        return TrustedOrigins.isSessionPage(urlOnUiThread(webView));
+    }
+
+    private String urlOnUiThread(WebView target) {
+        final String[] holder = new String[1];
+        if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+            holder[0] = target != null ? target.getUrl() : mainFrameUrl;
+            return holder[0];
+        }
+        CountDownLatch latch = new CountDownLatch(1);
+        runOnUiThread(() -> {
+            holder[0] = target != null ? target.getUrl() : mainFrameUrl;
+            latch.countDown();
+        });
+        try {
+            if (!latch.await(750, TimeUnit.MILLISECONDS)) return null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+        return holder[0];
+    }
+
+    private void installOriginLockedListener(WebView target) {
+        if (target == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        Set<String> origins = new HashSet<>();
+        origins.add("https://" + TrustedOrigins.HOST_REPAIRPLANET);
+        origins.add("https://" + TrustedOrigins.HOST_WWW);
+        try {
+            WebViewCompat.addWebMessageListener(target, "tspNative", origins,
+                    (view, message, sourceOrigin, isMainFrame, replyProxy) -> {
+                        if (!isMainFrame || message == null) return;
+                        if (sourceOrigin == null || !TrustedOrigins.isFirstPartyAppPage(sourceOrigin.toString())) {
+                            return;
+                        }
+                        onOriginLockedMessage(view, message.getData(), replyProxy);
+                    });
+        } catch (RuntimeException e) {
+            Log.w(TAG, "WebMessageListener unavailable", e);
+        }
+    }
+
+    private void installDocumentStartShim(WebView target) {
+        if (target == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
+        Set<String> origins = new HashSet<>();
+        origins.add("https://" + TrustedOrigins.HOST_REPAIRPLANET);
+        origins.add("https://" + TrustedOrigins.HOST_WWW);
+        try {
+            WebViewCompat.addDocumentStartJavaScript(target, ORIGIN_SHIM_JS, origins);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Document-start shim unavailable", e);
+        }
+    }
+
+    private void onOriginLockedMessage(WebView source, String data, JavaScriptReplyProxy replyProxy) {
+        if (data == null || data.isEmpty()) return;
+        runOnUiThread(() -> {
+            if (!originAllowsBridge()) return;
+            originLockedCaller.set(Boolean.TRUE);
+            try {
+                org.json.JSONObject obj = new org.json.JSONObject(data);
+                String method = obj.optString("m", "");
+                if ("getStoredSession".equals(method)) {
+                    replyToPage(replyProxy, storedSession == null ? "" : storedSession);
+                    return;
+                }
+                WebAppInterface bridge = new WebAppInterface();
+                if ("showToast".equals(method)) bridge.showToast(obj.optString("msg", ""));
+                else if ("saveSession".equals(method)) bridge.saveSession(obj.optString("json", ""));
+                else if ("clearSession".equals(method)) bridge.clearSession();
+                else if ("setBiometricEnabled".equals(method)) bridge.setBiometricEnabled(obj.optBoolean("on", false));
+                else if ("launchBillingFlow".equals(method)) bridge.launchBillingFlow(obj.optString("sku", ""));
+                else if ("openUrl".equals(method)) bridge.openUrl(obj.optString("url", ""));
+                else if ("printReport".equals(method)) bridge.printReport(obj.optString("html", ""), obj.optString("jobName", ""));
+                else if ("speak".equals(method)) bridge.speak(obj.optString("text", ""));
+                else if ("speakAnswer".equals(method)) bridge.speakAnswer(
+                        obj.optString("text", ""), obj.optString("voiceId", ""),
+                        obj.optString("engine", ""), obj.optString("token", ""));
+                else if ("interruptSpeech".equals(method)) bridge.interruptSpeech();
+                else if ("stopSpeaking".equals(method)) bridge.stopSpeaking();
+                else if ("startVoiceRecognition".equals(method)) bridge.startVoiceRecognition();
+                else if ("stopVoiceRecognition".equals(method)) bridge.stopVoiceRecognition();
+                else if ("onCitationObserved".equals(method)) bridge.onCitationObserved(
+                        obj.optString("manualId", ""), obj.optString("page", ""));
+                else if ("goBack".equals(method)) bridge.goBack();
+                else if ("printPage".equals(method)) printWebView(source != null ? source : webView, data, source != null && source != webView);
+            } catch (Exception e) {
+                Log.w(TAG, "tspNative message rejected", e);
+            } finally {
+                originLockedCaller.remove();
+            }
+        });
+    }
+
+    private void replyToPage(JavaScriptReplyProxy replyProxy, String body) {
+        if (replyProxy == null || body == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
+        try {
+            replyProxy.postMessage(body);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "tspNative reply failed", e);
+        }
+    }
+
+    /**
+     * Replaces window.Android on https://repairplanet.net and www before page
+     * scripts run. The replacement posts to tspNative and never reads the
+     * JavascriptInterface. File pages do not receive this script.
+     */
+    private static final String ORIGIN_SHIM_JS =
+            "(function(){window.__tspOriginShim=true;"
+                    + "function post(o){try{if(window.tspNative&&window.tspNative.postMessage)window.tspNative.postMessage(JSON.stringify(o));}catch(e){}}"
+                    + "window.Android={"
+                    + "showToast:function(m){post({m:'showToast',msg:m});},"
+                    + "saveSession:function(j){post({m:'saveSession',json:j});},"
+                    + "getStoredSession:function(){return null;},"
+                    + "clearSession:function(){post({m:'clearSession'});},"
+                    + "setBiometricEnabled:function(v){post({m:'setBiometricEnabled',on:!!v});},"
+                    + "isBiometricEnabled:function(){return false;},"
+                    + "canUseBiometric:function(){return false;},"
+                    + "setPremiumStatus:function(){},"
+                    + "launchBillingFlow:function(s){post({m:'launchBillingFlow',sku:s});},"
+                    + "openUrl:function(u){post({m:'openUrl',url:u});},"
+                    + "postOrgApi:function(){return '{\\\"ok\\\":false,\\\"error\\\":\\\"Not allowed\\\"}';},"
+                    + "printReport:function(h,n){post({m:'printReport',html:h,jobName:n});},"
+                    + "speak:function(t){post({m:'speak',text:t});},"
+                    + "speakAnswer:function(t,v,e,a){post({m:'speakAnswer',text:t,voiceId:v,engine:e,token:a});},"
+                    + "interruptSpeech:function(){post({m:'interruptSpeech'});},"
+                    + "stopSpeaking:function(){post({m:'stopSpeaking'});},"
+                    + "startVoiceRecognition:function(){post({m:'startVoiceRecognition'});},"
+                    + "stopVoiceRecognition:function(){post({m:'stopVoiceRecognition'});},"
+                    + "onCitationObserved:function(id,p){post({m:'onCitationObserved',manualId:id,page:p});},"
+                    + "goBack:function(){post({m:'goBack'});}"
+                    + "};})();";
+
+    private void injectOriginLockedShim(WebView view) {
+        if (view == null) return;
+        if (!TrustedOrigins.isFirstPartyAppPage(view.getUrl())) return;
+        view.evaluateJavascript(ORIGIN_SHIM_JS, null);
+    }
+
+    private boolean acceptsImages(WebChromeClient.FileChooserParams params) {
+        if (params == null) return false;
+        String[] types = params.getAcceptTypes();
+        if (types == null) return false;
+        for (String type : types) {
+            if (type == null) continue;
+            String lower = type.trim().toLowerCase(Locale.US);
+            if (lower.startsWith("image/") || "image".equals(lower)) return true;
+        }
+        return false;
+    }
+
+    private Intent cameraCaptureIntent() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            File photo = new File(dir, "capture-" + System.currentTimeMillis() + ".jpg");
+            Uri output = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", photo);
+            Intent capture = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            if (capture.resolveActivity(getPackageManager()) == null) return null;
+            capture.putExtra(MediaStore.EXTRA_OUTPUT, output);
+            capture.setClipData(android.content.ClipData.newRawUri("capture", output));
+            capture.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            pendingCameraUri = output;
+            return capture;
+        } catch (RuntimeException e) {
+            pendingCameraUri = null;
+            return null;
+        }
+    }
+
+    private void recoverFromRendererCrash() {
+        if (recoveringRenderer || isDestroyed()) return;
+        recoveringRenderer = true;
+        try {
+            for (int i = printPopups.size() - 1; i >= 0; i--) disposePrintPopup(printPopups.get(i));
+            ConstraintLayout root = findViewById(R.id.main);
+            WebView dead = webView;
+            if (root == null || dead == null) return;
+            int index = root.indexOfChild(dead);
+            android.view.ViewGroup.LayoutParams params = dead.getLayoutParams();
+            root.removeView(dead);
+            WebView fresh = new WebView(this);
+            fresh.setId(R.id.webView);
+            if (index < 0) root.addView(fresh, params);
+            else root.addView(fresh, index, params);
+            webView = fresh;
+            try {
+                dead.destroy();
+            } catch (RuntimeException ignored) {
+            }
+            bindWebView(fresh);
+            String next = chooseStartUrl();
+            if (!TrustedOrigins.isSessionPage(next)) next = homeUrl();
+            fresh.loadUrl(next);
+        } finally {
+            recoveringRenderer = false;
+        }
+    }
+
     private void injectStoredSession(WebView view) {
+        if (view == null || !TrustedOrigins.isSessionPage(view.getUrl())) return;
         if (storedSession == null || storedSession.isEmpty()) return;
         String payload = persistableSessionJson(storedSession);
         if (payload == null) payload = storedSession;
@@ -863,13 +1472,20 @@ public class MainActivity extends AppCompatActivity {
         if (uri == null) return;
         String scheme = uri.getScheme();
         if (scheme == null) return;
-        if ("totalservicepro".equalsIgnoreCase(scheme)) {
-            pendingLaunchUrl = productionAuthCallbackUrl(uri);
+        if (handEmailLinkToBrowser(uri.toString())) return;
+        if (TrustedOrigins.isAuthCallback(uri.toString()) && callbackCarriesCredential(uri)) {
+            if (!allowCredentialCallback(uri)) return;
+            if ("totalservicepro".equalsIgnoreCase(scheme)) {
+                pendingLaunchUrl = productionAuthCallbackUrl(uri);
+            } else {
+                pendingLaunchUrl = uri.toString();
+            }
+            acceptedAuthNavigation = pendingLaunchUrl;
             rememberSessionFromAuthUri(uri);
             return;
         }
-        if (("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
-                && isAllowedWebUrl(uri.toString())
+        if ("https".equalsIgnoreCase(scheme)
+                && TrustedOrigins.isFirstPartyAppPage(uri.toString())
                 && !looksLikePdfDownload(uri.toString())) {
             pendingLaunchUrl = uri.toString();
         }
@@ -1442,6 +2058,445 @@ public class MainActivity extends AppCompatActivity {
                 null);
     }
 
+    /**
+     * window.print() is a no-op in WebView. Override it on each document so
+     * the live site's Print buttons reach PrintManager. Blank popups
+     * (window.open('') + document.write + print) also get the override
+     * reapplied after document.write, which can replace the child document.
+     * Real http(s) window.open targets are not printed here.
+     */
+    private static final String PRINT_HOOK_JS =
+            "(function(){"
+                    + "function hookPrint(win){"
+                    + "if(!win)return;"
+                    + "function reportNumber(){"
+                    + "try{"
+                    + "var path=(location&&location.pathname)||'';"
+                    + "var id=path.match(/\\/reports\\/([^\\/?#]+)/);"
+                    + "if(id&&id[1]&&id[1]!=='new')return decodeURIComponent(id[1]);"
+                    + "var labels=document.querySelectorAll('label');"
+                    + "for(var i=0;i<labels.length;i++){"
+                    + "var text=(labels[i].innerText||'').replace(/\\s+/g,' ').trim();"
+                    + "if(!text||text.length>48)continue;"
+                    + "var input=labels[i].querySelector('input');"
+                    + "if(!input&&labels[i].htmlFor)input=document.getElementById(labels[i].htmlFor);"
+                    + "if(!input||!(input.value||'').trim())continue;"
+                    + "if(/report|informe|rapport|bericht|relat|rapporto|דוח|گزارش|تقرير|#/i.test(text))return input.value.trim();"
+                    + "}"
+                    + "var marked=document.querySelector('input[placeholder*=\"SR-\"]');"
+                    + "if(marked&&(marked.value||'').trim())return marked.value.trim();"
+                    + "}catch(e){}"
+                    + "return '';"
+                    + "}"
+                    + "try{win.print=function(){"
+                    + "var payload={title:'',reportNumber:'',path:''};"
+                    + "try{payload.title=(win.document&&win.document.title)||'';}catch(e){}"
+                    + "try{payload.reportNumber=reportNumber();}catch(e){}"
+                    + "try{payload.path=(win.location&&win.location.pathname)||'';}catch(e){}"
+                    + "try{if(win.__tspPrintTimer){win.clearInterval(win.__tspPrintTimer);win.__tspPrintTimer=0;}}catch(e){}"
+                    + "var body=JSON.stringify(payload);"
+                    + "try{if(win.tspNative&&win.tspNative.postMessage){win.tspNative.postMessage(JSON.stringify({m:'printPage',title:payload.title,reportNumber:payload.reportNumber,path:payload.path}));return;}}catch(e){}"
+                    + "try{if(win.TSPPrint&&win.TSPPrint.printPage)win.TSPPrint.printPage(body);}catch(e){}"
+                    + "};}catch(e){}"
+                    + "}"
+                    + "function arm(win){"
+                    + "hookPrint(win);"
+                    + "try{"
+                    + "if(win.__tspPrintTimer)return;"
+                    + "var tries=0;"
+                    + "win.__tspPrintTimer=win.setInterval(function(){"
+                    + "tries++;hookPrint(win);"
+                    + "if(tries>25){try{win.clearInterval(win.__tspPrintTimer);}catch(e){}win.__tspPrintTimer=0;}"
+                    + "},100);"
+                    + "}catch(e){}"
+                    + "}"
+                    + "arm(window);"
+                    + "if(window.__tspOpenWrapped)return;"
+                    + "window.__tspOpenWrapped=true;"
+                    + "var nativeOpen=window.open;"
+                    + "if(typeof nativeOpen!=='function')return;"
+                    + "window.open=function(url,target,features){"
+                    + "var child;try{child=nativeOpen.call(window,url,target,features);}catch(e){return null;}"
+                    + "var blank=(url==null||url===''||String(url)==='about:blank');"
+                    + "if(!child||!blank)return child;"
+                    + "function rearm(){"
+                    + "try{if(child.__tspPrintTimer)child.clearInterval(child.__tspPrintTimer);}catch(e){}"
+                    + "try{child.__tspPrintTimer=0;}catch(e){}"
+                    + "arm(child);"
+                    + "}"
+                    + "rearm();"
+                    + "try{"
+                    + "var doc=child.document;"
+                    + "if(doc&&!doc.__tspWriteWrapped){"
+                    + "doc.__tspWriteWrapped=true;"
+                    + "var origWrite=doc.write&&doc.write.bind(doc);"
+                    + "var origWriteln=doc.writeln&&doc.writeln.bind(doc);"
+                    + "var origClose=doc.close&&doc.close.bind(doc);"
+                    + "var origOpen=doc.open&&doc.open.bind(doc);"
+                    + "if(origWrite)doc.write=function(){var r;try{r=origWrite.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "if(origWriteln)doc.writeln=function(){var r;try{r=origWriteln.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "if(origClose)doc.close=function(){var r;try{r=origClose.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "if(origOpen)doc.open=function(){var r;try{r=origOpen.apply(null,arguments);}finally{rearm();}return r;};"
+                    + "}"
+                    + "}catch(e){}"
+                    + "return child;"
+                    + "};"
+                    + "})();";
+
+    private void injectPrintHook(WebView view) {
+        if (view == null) return;
+        view.evaluateJavascript(PRINT_HOOK_JS, null);
+    }
+
+    /**
+     * target=_blank links carry the URL on the hit test. Script window.open('')
+     * does not, so those become a child WebView that can be printed.
+     * Returning false makes window.open return null ("Pop-up blocked").
+     */
+    private boolean openPopupWindow(WebView opener, Message resultMsg) {
+        if (resultMsg == null) return false;
+        WebView.HitTestResult hit = opener == null ? null : opener.getHitTestResult();
+        String extra = hit == null ? null : hit.getExtra();
+        if (isDirectNavigationUrl(extra)) {
+            navigateInWebView(extra);
+            return false;
+        }
+        WebView child = createPrintPopupWebView();
+        Object transportObj = resultMsg.obj;
+        if (!(transportObj instanceof WebView.WebViewTransport)) {
+            disposePrintPopup(child);
+            return false;
+        }
+        ((WebView.WebViewTransport) transportObj).setWebView(child);
+        resultMsg.sendToTarget();
+        return true;
+    }
+
+    private boolean isDirectNavigationUrl(String url) {
+        if (url == null || url.isEmpty()) return false;
+        String lower = url.toLowerCase(Locale.US);
+        return lower.startsWith("https://") || lower.startsWith("http://")
+                || lower.startsWith("mailto:") || lower.startsWith("tel:")
+                || lower.startsWith("geo:") || lower.startsWith("intent:")
+                || lower.startsWith("market:");
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private WebView createPrintPopupWebView() {
+        WebView child = new WebView(this);
+        WebSettings settings = child.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setUseWideViewPort(true);
+        settings.setLoadWithOverviewMode(true);
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+        settings.setSupportMultipleWindows(true);
+        settings.setJavaScriptCanOpenWindowsAutomatically(true);
+        if (webView != null) {
+            settings.setUserAgentString(webView.getSettings().getUserAgentString());
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            settings.setSafeBrowsingEnabled(true);
+        }
+        CookieManager cookies = CookieManager.getInstance();
+        cookies.setAcceptCookie(true);
+        cookies.setAcceptThirdPartyCookies(child, true);
+        child.setBackgroundColor(Color.WHITE);
+        child.addJavascriptInterface(new PrintBridge(child, true), "TSPPrint");
+        installOriginLockedListener(child);
+        installDocumentStartShim(child);
+        child.setWebViewClient(new WebViewClient() {
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                if (request == null || request.getUrl() == null) return false;
+                String url = request.getUrl().toString();
+                if (!request.isForMainFrame()) {
+                    if (isGeoUrl(url)) {
+                        openGeoOrMaps(url);
+                        return true;
+                    }
+                    return !TrustedOrigins.subframeMayLoad(url);
+                }
+                return handlePopupNavigation(view, request.getUrl());
+            }
+
+            @Override
+            public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                return handlePopupNavigation(view, url == null ? null : Uri.parse(url));
+            }
+
+            @Override
+            public void onPageStarted(WebView view, String url, Bitmap favicon) {
+                super.onPageStarted(view, url, favicon);
+                if (url == null) return;
+                String shown = view.getUrl();
+                if (shown != null && (TrustedOrigins.isSessionPage(shown) || isInlineDocumentUrl(shown))
+                        && !shown.equals(url)
+                        && !TrustedOrigins.isSessionPage(url)
+                        && !isInlineDocumentUrl(url)) {
+                    return;
+                }
+                if (TrustedOrigins.isSessionPage(url) || isInlineDocumentUrl(url)) return;
+                view.stopLoading();
+                runOnUiThread(() -> {
+                    navigateInWebView(url);
+                    disposePrintPopup(view);
+                });
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                String main = view.getUrl();
+                if (url != null && main != null && !url.equals(main)) return;
+                String page = main != null ? main : url;
+                if (TrustedOrigins.isSessionPage(page) || isInlineDocumentUrl(page)) {
+                    injectPrintHook(view);
+                }
+            }
+
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> disposePrintPopup(view));
+                return true;
+            }
+        });
+        child.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onCreateWindow(WebView view, boolean isDialog, boolean isUserGesture, Message resultMsg) {
+                return openPopupWindow(view, resultMsg);
+            }
+
+            @Override
+            public void onCloseWindow(WebView window) {
+                disposePrintPopup(window);
+            }
+        });
+        attachPrintPopup(child);
+        return child;
+    }
+
+    private boolean handlePopupNavigation(WebView popup, Uri uri) {
+        if (uri == null) return false;
+        String scheme = uri.getScheme();
+        if (scheme == null) return false;
+        String lower = scheme.toLowerCase(Locale.US);
+        if ("about".equals(lower) || "data".equals(lower) || "blob".equals(lower) || "javascript".equals(lower)) {
+            return false;
+        }
+        String url = uri.toString();
+        runOnUiThread(() -> {
+            navigateInWebView(url);
+            disposePrintPopup(popup);
+        });
+        return true;
+    }
+
+    /**
+     * The child stays attached at full size so createPrintDocumentAdapter has
+     * a laid-out document, but behind the main page until we know it is a
+     * preview. Print runs at ~400ms; previews never call print, so they are
+     * brought forward after that window. Invoice and estimate previews use
+     * the same window.open + document.write path and must stay visible.
+     */
+    private void attachPrintPopup(WebView child) {
+        ConstraintLayout root = findViewById(R.id.main);
+        if (root == null) return;
+        child.setTag(new PopupState());
+        int id = View.generateViewId();
+        child.setId(id);
+        child.setFocusable(false);
+        child.setFocusableInTouchMode(false);
+        child.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+        root.addView(child, 0, new ConstraintLayout.LayoutParams(0, 0));
+        ConstraintSet set = new ConstraintSet();
+        set.clone(root);
+        set.connect(id, ConstraintSet.TOP, ConstraintSet.PARENT_ID, ConstraintSet.TOP);
+        set.connect(id, ConstraintSet.BOTTOM, ConstraintSet.PARENT_ID, ConstraintSet.BOTTOM);
+        set.connect(id, ConstraintSet.START, ConstraintSet.PARENT_ID, ConstraintSet.START);
+        set.connect(id, ConstraintSet.END, ConstraintSet.PARENT_ID, ConstraintSet.END);
+        set.applyTo(root);
+        printPopups.add(child);
+        restackPrintPopups();
+        child.postDelayed(() -> revealPrintPopupIfPreview(child), 1500);
+    }
+
+    private void revealPrintPopupIfPreview(WebView child) {
+        if (isDestroyed() || child.getParent() == null) return;
+        if (!(child.getTag() instanceof PopupState)) return;
+        PopupState state = (PopupState) child.getTag();
+        if (state.printRequested || state.revealed) return;
+        state.revealed = true;
+        child.setFocusable(true);
+        child.setFocusableInTouchMode(true);
+        child.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_YES);
+        restackPrintPopups();
+    }
+
+    private void restackPrintPopups() {
+        if (webView != null) webView.bringToFront();
+        for (int i = 0; i < printPopups.size(); i++) {
+            WebView child = printPopups.get(i);
+            if (child.getTag() instanceof PopupState && ((PopupState) child.getTag()).revealed) {
+                child.bringToFront();
+            }
+        }
+        if (bottomNav != null && bottomNav.getVisibility() == View.VISIBLE) {
+            bottomNav.bringToFront();
+        }
+    }
+
+    private boolean closeTopPrintPreview() {
+        for (int i = printPopups.size() - 1; i >= 0; i--) {
+            WebView child = printPopups.get(i);
+            if (!(child.getTag() instanceof PopupState)) continue;
+            PopupState state = (PopupState) child.getTag();
+            if (state.revealed && !state.printRequested) {
+                disposePrintPopup(child);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static final Object POPUP_DESTROYED = new Object();
+
+    private void disposePrintPopup(WebView child) {
+        if (child == null || child.getTag() == POPUP_DESTROYED) return;
+        child.setTag(POPUP_DESTROYED);
+        printPopups.remove(child);
+        if (child.getParent() instanceof ViewGroup) {
+            ((ViewGroup) child.getParent()).removeView(child);
+        }
+        try {
+            child.stopLoading();
+            child.setWebChromeClient(null);
+            child.setWebViewClient(null);
+            child.destroy();
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private void printWebView(WebView target, String jobName, boolean disposeAfterPrint) {
+        if (target == null || target.getTag() == POPUP_DESTROYED || isFinishing() || isDestroyed()) return;
+        if (target.getTag() instanceof PopupState) {
+            PopupState state = (PopupState) target.getTag();
+            if (state.printRequested) return;
+            state.printRequested = true;
+        }
+        String title = jobName;
+        String reportNumber = null;
+        String path = null;
+        if (jobName != null && jobName.startsWith("{")) {
+            try {
+                org.json.JSONObject payload = new org.json.JSONObject(jobName);
+                if (payload.has("m") && payload.has("title")) {
+                    title = payload.optString("title", "");
+                    reportNumber = payload.optString("reportNumber", "");
+                    path = payload.optString("path", "");
+                } else if (payload.has("title") || payload.has("reportNumber") || payload.has("path")) {
+                    title = payload.optString("title", "");
+                    reportNumber = payload.optString("reportNumber", "");
+                    path = payload.optString("path", "");
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        String name = PrintJobs.jobName(title, reportNumber, path, System.currentTimeMillis(), TimeZone.getDefault());
+        PrintManager printManager = (PrintManager) getSystemService(PRINT_SERVICE);
+        if (printManager == null) {
+            Toast.makeText(this, "Printing is not available on this device.", Toast.LENGTH_LONG).show();
+            if (disposeAfterPrint) disposePrintPopup(target);
+            return;
+        }
+        PrintAttributes attributes = new PrintAttributes.Builder()
+                .setMediaSize(PrintAttributes.MediaSize.NA_LETTER)
+                .setColorMode(PrintAttributes.COLOR_MODE_COLOR)
+                .setMinMargins(PrintAttributes.Margins.NO_MARGINS)
+                .build();
+        PrintDocumentAdapter adapter = target.createPrintDocumentAdapter(name);
+        if (disposeAfterPrint) {
+            adapter = new FinishingPrintAdapter(adapter, () -> runOnUiThread(() -> {
+                if (!isDestroyed()) disposePrintPopup(target);
+            }));
+        }
+        try {
+            printManager.print(name, adapter, attributes);
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Print failed", e);
+            Toast.makeText(this, "Print failed.", Toast.LENGTH_LONG).show();
+            if (disposeAfterPrint) disposePrintPopup(target);
+        }
+    }
+
+    private static final class PopupState {
+        boolean printRequested;
+        boolean revealed;
+    }
+
+    /**
+     * Bound as TSPPrint. Returns nothing. The popup needs it for about:blank
+     * documents that are not an allowed WebMessageListener origin. On the main
+     * WebView it runs only for bundled file pages; https pages print through tspNative.
+     */
+    private final class PrintBridge {
+        private final WebView target;
+        private final boolean disposeAfterPrint;
+
+        PrintBridge(WebView target, boolean disposeAfterPrint) {
+            this.target = target;
+            this.disposeAfterPrint = disposeAfterPrint;
+        }
+
+        @JavascriptInterface
+        public void printPage(String jobName) {
+            if (disposeAfterPrint) {
+                if (!originAllowsPrint(target)) return;
+            } else if (!TrustedOrigins.isBundledAsset(urlOnUiThread(webView))) {
+                return;
+            }
+            runOnUiThread(() -> printWebView(target, jobName, disposeAfterPrint));
+        }
+    }
+
+    /** Holds the child WebView until the spooler finishes, then drops it. */
+    private static final class FinishingPrintAdapter extends PrintDocumentAdapter {
+        private final PrintDocumentAdapter delegate;
+        private final Runnable onFinish;
+
+        FinishingPrintAdapter(PrintDocumentAdapter delegate, Runnable onFinish) {
+            this.delegate = delegate;
+            this.onFinish = onFinish;
+        }
+
+        @Override
+        public void onStart() {
+            delegate.onStart();
+        }
+
+        @Override
+        public void onLayout(PrintAttributes oldAttributes, PrintAttributes newAttributes,
+                             CancellationSignal cancellationSignal, LayoutResultCallback callback,
+                             Bundle extras) {
+            delegate.onLayout(oldAttributes, newAttributes, cancellationSignal, callback, extras);
+        }
+
+        @Override
+        public void onWrite(PageRange[] pages, ParcelFileDescriptor destination,
+                            CancellationSignal cancellationSignal, WriteResultCallback callback) {
+            delegate.onWrite(pages, destination, cancellationSignal, callback);
+        }
+
+        @Override
+        public void onFinish() {
+            try {
+                delegate.onFinish();
+            } finally {
+                if (onFinish != null) onFinish.run();
+            }
+        }
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
@@ -1458,6 +2513,9 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        for (int i = printPopups.size() - 1; i >= 0; i--) {
+            disposePrintPopup(printPopups.get(i));
+        }
         stopAnswer(false);
         if (speechRecognizer != null) {
             try { speechRecognizer.destroy(); } catch (Exception ignored) {}

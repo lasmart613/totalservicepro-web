@@ -538,7 +538,7 @@
     </div>
     <div class="about-row">
         <span class="about-key">Version</span>
-        <span class="about-val gold" id="aboutVersion">0.5.1-beta</span>
+        <span class="about-val gold" id="aboutVersion">0.5.2-beta</span>
     </div>
     <div class="about-row">
         <span class="about-key">Build</span>
@@ -619,7 +619,7 @@
 
 <div class="toast" id="toast"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="supabase.js"></script>
 <script src="grok-voice.js"></script>
 <script>
     // ═══════════════════════════════════════════════════
@@ -1103,7 +1103,7 @@
     }
 
     function checkForUpdates() {
-        const versionName = window.TSP_ANDROID_VERSION_NAME || '0.5.1-beta';
+        const versionName = window.TSP_ANDROID_VERSION_NAME || '0.5.2-beta';
         showToast('You\'re on the latest version (' + versionName + ')', 'success');
     }
 

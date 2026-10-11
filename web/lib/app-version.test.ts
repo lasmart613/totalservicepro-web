@@ -13,15 +13,18 @@ test('product version is the live-customer beta line', () => {
   assert.equal(versionLabel(), '0.5.0-beta');
 });
 
-test('Android gradle version is 0.5.1-beta / 7 and loads production', () => {
+test('Android gradle version is 0.5.2-beta / 44 and loads production', () => {
   const gradle = readFileSync(join(here, '../../app/build.gradle'), 'utf8');
-  assert.match(gradle, /versionCode\s+7/);
-  assert.match(gradle, /versionName\s+"0\.5\.1-beta"/);
+  assert.match(gradle, /versionCode\s+44/);
+  assert.match(gradle, /versionName\s+"0\.5\.2-beta"/);
   assert.doesNotMatch(gradle, /play-services-ads/);
   const main = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/MainActivity.java'), 'utf8');
   assert.match(main, /https:\/\/repairplanet\.net/);
   assert.match(main, /PRODUCTION_ORIGIN/);
-  assert.match(main, /TSPAndroid\/0\.5\.1-beta/);
+  assert.match(main, /TSPAndroid\/0\.5\.2-beta/);
+  assert.match(main, /CustomTabsIntent/);
+  const origins = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/TrustedOrigins.java'), 'utf8');
+  assert.match(origins, /accounts\.google\.com/);
   assert.match(main, /totalservicepro:\/\//);
   assert.match(main, /__tspRestoreAndroidSession/);
   assert.doesNotMatch(main, /MobileAds|AdView|play-services-ads/);
@@ -30,12 +33,16 @@ test('Android gradle version is 0.5.1-beta / 7 and loads production', () => {
   assert.match(manifest, /usesCleartextTraffic="false"/);
   assert.match(manifest, /android:scheme="totalservicepro"/);
   assert.match(manifest, /android:host="repairplanet\.net"/);
+  const autoVerify = manifest.split('android:autoVerify="true"')[1]?.split('</intent-filter>')[0] || '';
+  assert.match(autoVerify, /android:host="repairplanet\.net"/);
+  assert.doesNotMatch(autoVerify, /www\.repairplanet\.net/);
+  assert.match(manifest, /android:host="www\.repairplanet\.net"/);
   const assets = readFileSync(join(here, '../../app/src/main/assets/app-version.js'), 'utf8');
-  assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.1-beta'/);
-  assert.match(assets, /TSP_ANDROID_VERSION_CODE = 7/);
+  assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.2-beta'/);
+  assert.match(assets, /TSP_ANDROID_VERSION_CODE = 44/);
   const settings = readFileSync(join(here, '../../app/src/main/assets/settings.html'), 'utf8');
   assert.match(settings, /id="aboutVersion"/);
-  assert.match(settings, /0\.5\.1-beta/);
+  assert.match(settings, /0\.5\.2-beta/);
   const webSettings = readFileSync(join(here, '../app/settings/page.tsx'), 'utf8');
   assert.match(webSettings, /\{APP_VERSION\}/);
 });
@@ -58,6 +65,9 @@ test('bundled manuals stay in-app with VBeam OP vs Perfecta and find', () => {
   assert.doesNotMatch(list, /DEV MODE/);
   assert.doesNotMatch(list, /createSignedUrl/);
   assert.match(viewer, /Find in manual/);
+  assert.match(viewer, /src="pdf\.min\.js"/);
+  assert.match(viewer, /workerSrc = 'pdf\.worker\.min\.js'/);
+  assert.doesNotMatch(viewer, /cdnjs\.cloudflare|cdn\.jsdelivr|unpkg\.com/);
   assert.match(viewer, /findNext|findPrev/);
   assert.match(viewer, /tspLoadServiceAccess|service-company-gate/);
   assert.doesNotMatch(viewer, /download.*manual|saveAs/i);
@@ -67,4 +77,14 @@ test('bundled manuals stay in-app with VBeam OP vs Perfecta and find', () => {
   const ai = readFileSync(join(here, '../../app/src/main/assets/ai_assistant.html'), 'utf8');
   assert.match(ai, /Service Company only/);
   assert.match(ai, /tspLoadServiceAccess/);
+  const estimate = readFileSync(join(here, '../../app/src/main/assets/estimate_generator.html'), 'utf8');
+  assert.match(estimate, /src="html2pdf\.bundle\.min\.js"/);
+  assert.doesNotMatch(estimate, /cdnjs\.cloudflare|cdn\.jsdelivr|unpkg\.com/);
+  const pdfJs = readFileSync(join(here, '../../app/src/main/assets/pdf.min.js'), 'utf8');
+  const pdfWorker = readFileSync(join(here, '../../app/src/main/assets/pdf.worker.min.js'), 'utf8');
+  const html2pdf = readFileSync(join(here, '../../app/src/main/assets/html2pdf.bundle.min.js'), 'utf8');
+  assert.match(pdfJs, /pdfjsLib/);
+  assert.match(pdfJs, /3\.11\.174/);
+  assert.match(pdfWorker, /WorkerMessageHandler/);
+  assert.match(html2pdf, /html2pdf/);
 });

@@ -2,6 +2,10 @@
 .gradle/
 build/
 local.properties
+keystore.properties
+*.jks
+*.keystore
+upload-keystore-credentials.txt
 *.iml
 
 # Android Studio

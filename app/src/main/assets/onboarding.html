@@ -15,7 +15,7 @@
             } catch(e) {}
         })();
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="supabase.js"></script>
     <script>
         var supabaseClient = supabase.createClient(
             'https://yljztfajyvjzqikxdddf.supabase.co',
@@ -308,39 +308,68 @@
                 logo_url: logoUrl || null,
             };
 
-            const createdNewOrg = !orgId;
-            if (orgId) {
-                await supabaseClient.from('organizations').update(orgData).eq('id', orgId);
-            } else {
-                orgData.created_by = currentUser.id;
-                const { data: org } = await supabaseClient.from('organizations').insert(orgData).select('id').single();
-                if (org) orgId = org.id;
-            }
-
-            if (createdNewOrg && orgId) {
-                try {
-                    const memRes = await supabaseClient.from('organization_memberships').insert({
-                        user_id: currentUser.id,
-                        organization_id: orgId,
-                        role: 'company_admin',
-                        is_home: true,
-                    });
-                    if (memRes && memRes.error) console.warn('home membership insert', memRes.error.message);
-                } catch (memErr) { console.warn('home membership insert', memErr); }
-            }
-
-            // Update user profile
-            await supabaseClient.from('user_profiles').upsert({
-                id: currentUser.id,
-                first_name: fn,
-                last_name: ln,
-                email: currentUser.email,
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session && session.access_token;
+            if (!token) throw new Error('Not signed in');
+            const origin = (location.protocol === 'https:' || location.protocol === 'http:')
+                ? location.origin : 'https://repairplanet.net';
+            const profileBody = {
+                firstName: fn,
+                lastName: ln,
                 phone: document.getElementById('techPhone').value.trim() || null,
-                job_title: document.getElementById('jobTitle').value.trim() || null,
-                organization_id: orgId || null,
-                onboarding_completed: true,
-                onboarding_completed_at: new Date().toISOString(),
-            }, { onConflict: 'id' });
+                jobTitle: document.getElementById('jobTitle').value.trim() || null,
+                onboardingCompleted: true
+            };
+            const founderBody = orgId
+                ? { organizationId: orgId, profile: profileBody }
+                : {
+                    pending: {
+                        kind: 'company',
+                        name: companyName,
+                        firstName: fn,
+                        lastName: ln,
+                        email: currentUser.email,
+                        phone: orgData.phone,
+                        address: orgData.address,
+                        city: orgData.city,
+                        state: orgData.state,
+                        website: orgData.website,
+                        role: 'company_admin',
+                        orgType: 'service_company'
+                    },
+                    profile: profileBody
+                };
+            const founderRes = await fetch(origin + '/api/org/founder', {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify(founderBody)
+            });
+            const founderJson = await founderRes.json().catch(function () { return {}; });
+            if (!founderRes.ok || founderJson.ok === false) {
+                throw new Error(founderJson.error || 'Could not finish organization setup.');
+            }
+            orgId = founderJson.organizationId || orgId;
+            if (orgId) {
+                const profileFields = {
+                    name: companyName,
+                    address: orgData.address,
+                    city: orgData.city,
+                    state: orgData.state,
+                    phone: orgData.phone,
+                    website: orgData.website,
+                    supported_brands: orgData.supported_brands,
+                    logo_url: logoUrl || null
+                };
+                const profileRes = await fetch(origin + '/api/org/profile', {
+                    method: 'POST',
+                    headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+                    body: JSON.stringify(profileFields)
+                });
+                const profileJson = await profileRes.json().catch(function () { return {}; });
+                if (!profileRes.ok || profileJson.ok === false) {
+                    throw new Error(profileJson.error || 'Organization linked, but company details did not save.');
+                }
+            }
 
             // Update Supabase auth user metadata
             await supabaseClient.auth.updateUser({

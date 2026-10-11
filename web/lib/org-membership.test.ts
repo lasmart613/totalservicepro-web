@@ -248,12 +248,13 @@ test('claim does not skip founders who have a pending invite to another shop', (
   assert.doesNotMatch(source, /alreadyFounder && \(existingProf\?\.organization_id/);
 });
 
-test('Android WebView switcher uses the same memberships RPCs as the website', () => {
+test('Android WebView switcher uses the same membership routes as the website', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const js = readFileSync(join(here, '../../app/src/main/assets/org-switcher.js'), 'utf8');
   assert.match(js, /organization_memberships/);
-  assert.match(js, /switch_active_organization/);
-  assert.match(js, /leave_organization/);
+  assert.match(js, /\/api\/org\/switch/);
+  assert.match(js, /\/api\/org\/leave/);
+  assert.match(js, /Bearer/);
   assert.match(js, /Working as/);
 });
 

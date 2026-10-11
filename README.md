@@ -1,6 +1,6 @@
 # Photometry Tools - Version 1.1
 
-Current soft beta: web **0.5.0-beta**. Android `versionName` **0.5.1-beta**, `versionCode` 7. Web Settings shows `0.5.0-beta`. Android About shows `0.5.1-beta`, aligned with iOS PhotometryTools MARKETING 0.5.0. No paid ads.
+Current soft beta: web **0.5.0-beta**. Android `versionName` **0.5.2-beta**, `versionCode` 44 (above the July 2026 review note of code 43 and the later reset to 7). Web Settings shows `0.5.0-beta`. Android About shows `0.5.2-beta`. No paid ads.
 
 Professional Android app for photometry calculations with integrated service manual viewer.
 
@@ -127,7 +127,8 @@ Output: `app/build/outputs/apk/release/app-release.apk`
 - [ ] Cloud sync for user preferences
 
 ## Version History
-- **0.5.1-beta** (current Android) — `versionName` `0.5.1-beta`, `versionCode` 7. Zapp voice speaks through Supabase `grok-tts` and falls back to device speech. User-Agent token is `TSPAndroid/0.5.1-beta`. Web `APP_VERSION` stays `0.5.0-beta`.
+- **0.5.2-beta** (current Android) — `versionName` `0.5.2-beta`, `versionCode` 44, `targetSdk` 36. Google sign-in opens in a Custom Tab. User-Agent token is `TSPAndroid/0.5.2-beta`. Web `APP_VERSION` stays `0.5.0-beta`.
+- **0.5.1-beta** — `versionName` `0.5.1-beta`, `versionCode` 7. Zapp voice speaks through Supabase `grok-tts` and falls back to device speech.
 - **0.5.0-beta** — Marketing version aligned with iOS PhotometryTools (MARKETING 0.5.0 / build 2; web Settings shows `0.5.0-beta`). Android was `versionName` `0.5.0-beta`, `versionCode` 6.
 - **v1.1** - Added Service Manuals feature with Lumenis AcuPulse
 - **v1.0** - Initial release with 4 photometry calculators
