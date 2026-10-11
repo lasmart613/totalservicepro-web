@@ -1091,19 +1091,28 @@ export type Database = {
       }
       manual_search_index: {
         Row: {
+          chunk_index: number
+          index_clipped: boolean
           indexed_at: string
+          indexed_page_max: number | null
           manual_id: number
           search_text: string
           search_tsv: unknown
         }
         Insert: {
+          chunk_index?: number
+          index_clipped?: boolean
           indexed_at?: string
+          indexed_page_max?: number | null
           manual_id: number
           search_text?: string
           search_tsv?: never
         }
         Update: {
+          chunk_index?: number
+          index_clipped?: boolean
           indexed_at?: string
+          indexed_page_max?: number | null
           manual_id?: number
           search_text?: string
           search_tsv?: never
@@ -1112,7 +1121,7 @@ export type Database = {
           {
             foreignKeyName: "manual_search_index_manual_id_fkey"
             columns: ["manual_id"]
-            isOneToOne: true
+            isOneToOne: false
             referencedRelation: "manuals"
             referencedColumns: ["id"]
           },
@@ -3082,6 +3091,16 @@ export type Database = {
           }
       get_my_org_id: { Args: never; Returns: number }
       is_admin: { Args: never; Returns: boolean }
+      replace_manual_search_index: {
+        Args: {
+          p_chunks: string[]
+          p_clipped: boolean[]
+          p_expected_md5: string | null
+          p_manual_id: number
+          p_page_max: (number | null)[]
+        }
+        Returns: boolean
+      }
       search_manual_catalog: { Args: { q: string }; Returns: { manual_id: number }[] }
     }
     Enums: {

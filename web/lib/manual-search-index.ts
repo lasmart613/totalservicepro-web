@@ -3,19 +3,23 @@
  * public.manual_search_index. Do not import from client components.
  */
 
+import { createHash } from 'node:crypto';
 import {
+  chunkIndexText,
   extractPdfPageSlice,
+  joinIndexChunks,
   looksLikePdf,
   manualPdfByteLimitError,
   singleLetterTokenRatio,
   stampPdfPages,
-  storeIndexText,
+  summarizeIndexChunks,
+  type IndexChunk,
   type PdfPageText,
   type StoredIndexText,
 } from './manual-pdf-text.ts';
 import { containsTextImatch } from './email-match.ts';
 import { chapterMetadataWithPageCounts } from './manual-page-map.ts';
-import { isPublishedColumnMissing } from './manual-published.ts';
+import { isMissingColumn, isPublishedColumnMissing } from './manual-published.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -77,6 +81,7 @@ type StorageClient = {
 
 type TableClient = {
   from: (table: string) => any;
+  rpc?: (fn: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }>;
 };
 
 function truthyFlag(value: unknown): boolean {
@@ -193,6 +198,7 @@ export async function extractManualBodyText(
   files: number;
   fileCounts: IndexedPdfPart[];
   clip?: StoredIndexText;
+  chunks?: IndexChunk[];
   skipped?: string;
   fatal?: string;
 }> {
@@ -226,8 +232,9 @@ export async function extractManualBodyText(
     }
   }
   if (!files) return { text: '', files: 0, fileCounts, skipped: 'no_extractable_text' };
-  const stored = storeIndexText(chunks.join('\f'));
-  return { text: stored.text, files, fileCounts, clip: stored };
+  const storedChunks = chunkIndexText(chunks.join('\f'));
+  const stored = summarizeIndexChunks(storedChunks);
+  return { text: stored.text, files, fileCounts, clip: stored, chunks: storedChunks };
 }
 
 /** Store pdf.js page_count and page_start on the folder's chapter_metadata. */
@@ -278,7 +285,7 @@ export function mergeStampedManualPages(
   if (!max) return '';
   const pages: PdfPageText[] = [];
   for (let page = 1; page <= max; page++) pages.push({ page, text: map.get(page) || '' });
-  return storeIndexText(stampPdfPages(pages)).text;
+  return joinIndexChunks(chunkIndexText(stampPdfPages(pages)));
 }
 
 export type ManualPageReindexResult = {
@@ -307,6 +314,8 @@ type ReindexStage = {
   path?: string;
   parts?: StagePart[];
   pages: Record<string, string>;
+  /** md5 of the joined index when this reindex started at page 1. Null when there was no row. */
+  expectedMd5?: string | null;
 };
 
 function stagePageMap(stage: ReindexStage | null): Map<number, string> {
@@ -329,28 +338,34 @@ function stampedPageMap(existing: string): Map<number, string> {
   return map;
 }
 
+export type AssembledIndex = StoredIndexText & { chunks: IndexChunk[] };
+
 /**
- * Build the stamped row from a finished stage. A blank new page keeps text
- * the existing row already has for that physical page.
- * `clipped` is true when the 1,500,000-character cap dropped a tail.
+ * Build the stamped index from a finished stage. A blank new page keeps text
+ * the existing row already has for that physical page. Pages already in the
+ * index past totalPages are not carried forward: a reindex that started at
+ * page 1 must not merge an old tail back in (manual 72 stored 519 stamps for
+ * a 517-page PDF). A staged page past totalPages still extends the total.
+ * Text past 1,500,000 characters is split on page boundaries. Stamps stay
+ * continuous. `clipped` is true only when a single page was sliced.
  */
 export function assembleReindexedManualStored(
   staged: Map<number, string>,
   totalPages: number,
   existing: string
-): StoredIndexText {
+): AssembledIndex {
   const prev = stampedPageMap(existing);
   let total = Math.max(0, Math.floor(Number(totalPages) || 0));
-  for (const page of prev.keys()) if (page > total) total = page;
   for (const page of staged.keys()) if (page > total) total = page;
-  if (!total) return { text: '', clipped: false, indexedPageMax: null };
+  if (!total) return { text: '', clipped: false, indexedPageMax: null, chunks: [] };
   const pages: PdfPageText[] = [];
   for (let page = 1; page <= total; page++) {
     const fresh = (staged.get(page) || '').trim();
     const old = (prev.get(page) || '').trim();
     pages.push({ page, text: fresh || old });
   }
-  return storeIndexText(stampPdfPages(pages));
+  const chunks = chunkIndexText(stampPdfPages(pages));
+  return { ...summarizeIndexChunks(chunks), chunks };
 }
 
 export function assembleReindexedManual(
@@ -570,8 +585,12 @@ async function extractManualPageSlice(
 /**
  * Rewrite one manuals.id search row from physical PDF pages.
  * Folder manuals concatenate every PDF; stamps continue across files.
- * Chunks are staged in the manuals bucket and the search row is written once,
- * after every page has been extracted. A lower-quality result is refused.
+ * Pages are staged in the manuals bucket and the search rows are written once,
+ * after every page has been extracted. Text past 1,500,000 characters is
+ * stored as chunk_index 0, 1, ... with continuous [[pdfpage:N]] stamps.
+ * The first call (page 1) records md5 of the joined index. The final write
+ * calls replace_manual_search_index, which locks that manual and refuses
+ * the write when the stored md5 changed. A lower-quality result is refused.
  * Does not attach a collection. Call again with nextPage until done. pageCount is capped at 40.
  */
 export async function reindexManualPageRange(
@@ -600,6 +619,14 @@ export async function reindexManualPageRange(
   if (pageFrom > 1) {
     stage = await readReindexStage(client.storage, catalogId);
     if (!stage) return empty('Refused to write a partial index: staging data for earlier pages is missing.');
+  }
+  let expectedMd5: string | null | undefined;
+  if (pageFrom === 1) {
+    const prior = await readExistingSearchText(client, catalogId);
+    if (!prior.ok) return empty(prior.error);
+    expectedMd5 = prior.md5;
+  } else if (stage && Object.prototype.hasOwnProperty.call(stage, 'expectedMd5')) {
+    expectedMd5 = stage.expectedMd5 ?? null;
   }
   const known = pageFrom > 1 && stage?.parts?.length ? stage.parts : null;
   const paths = known ? known.map((part) => part.path) : await resolveManualPdfPaths(client.storage, manual);
@@ -630,6 +657,7 @@ export async function reindexManualPageRange(
     path,
     parts: sliced.parts,
     pages,
+    ...(expectedMd5 !== undefined ? { expectedMd5 } : {}),
   };
   const stagedError = await writeReindexStage(client.storage, nextStage);
   if (stagedError) return { ...empty(stagedError), path, totalPages: sliced.total };
@@ -654,7 +682,8 @@ export async function reindexManualPageRange(
   const merged = assembleReindexedManualStored(map, sliced.total, existing.text);
   const refusal = searchTextWriteRefusal(existing.text, merged.text);
   if (refusal) return { ...empty(refusal), path, totalPages: sliced.total, chars: merged.text.length };
-  const saved = await upsertManualSearchIndex(client, catalogId, merged.text, merged);
+  const guardMd5 = expectedMd5 !== undefined ? expectedMd5 : existing.md5;
+  const saved = await writeManualSearchIndex(client, catalogId, merged.chunks, guardMd5);
   if (!saved.ok) return { ...empty(saved.error || 'upsert failed'), path, totalPages: sliced.total };
   await persistChapterPageCounts(
     client,
@@ -673,7 +702,7 @@ export async function reindexManualPageRange(
     totalPages: sliced.total,
     nextPage: null,
     done: true,
-    chars: merged.length,
+    chars: merged.text.length,
     path,
   };
 }
@@ -689,7 +718,15 @@ export function shouldKeepExistingSearchText(
   return searchTextWriteRefusal(prev, next) != null;
 }
 
-type ExistingSearchRead = { ok: true; text: string } | { ok: false; error: string };
+type ExistingSearchRead =
+  | { ok: true; text: string; chunks: string[]; md5: string | null }
+  | { ok: false; error: string };
+
+/** md5 of chunk texts joined with a form feed. No rows is null, matching string_agg of zero rows. */
+export function indexTextMd5(chunks: readonly string[]): string | null {
+  if (!chunks.length) return null;
+  return createHash('md5').update(chunks.join('\f'), 'utf8').digest('hex');
+}
 
 function existingRowReadError(detail: string): ExistingSearchRead {
   const message = detail.trim() || 'read failed';
@@ -699,19 +736,90 @@ function existingRowReadError(detail: string): ExistingSearchRead {
   };
 }
 
+function chunksFromIndexRows(rows: Array<{ search_text?: unknown; chunk_index?: unknown }>): string[] {
+  return [...rows]
+    .sort((a, b) => (Number(a.chunk_index) || 0) - (Number(b.chunk_index) || 0))
+    .map((row) => (row?.search_text == null ? '' : String(row.search_text)));
+}
+
 /** Fail closed: a read error must not look like an empty row that can be overwritten. */
 async function readExistingSearchText(db: TableClient, manualId: number): Promise<ExistingSearchRead> {
   try {
+    const wide = db.from('manual_search_index').select('search_text,chunk_index').eq('manual_id', manualId);
+    if (wide && typeof wide.order === 'function') {
+      const ordered = await wide.order('chunk_index', { ascending: true });
+      if (!ordered?.error && Array.isArray(ordered.data)) {
+        const chunks = chunksFromIndexRows(ordered.data);
+        return { ok: true, chunks, text: chunks.join('\f'), md5: indexTextMd5(chunks) };
+      }
+      if (ordered?.error && !isMissingColumn(ordered.error, 'chunk_index')) {
+        return existingRowReadError(String(ordered.error.message || 'read failed'));
+      }
+    }
     const { data, error } = await db
       .from('manual_search_index')
       .select('search_text')
       .eq('manual_id', manualId)
       .maybeSingle();
     if (error) return existingRowReadError(error.message || 'read failed');
-    return { ok: true, text: data?.search_text ? String(data.search_text) : '' };
+    if (!data) return { ok: true, chunks: [], text: '', md5: null };
+    const text = data.search_text == null ? '' : String(data.search_text);
+    return { ok: true, chunks: [text], text, md5: indexTextMd5([text]) };
   } catch (err) {
     return existingRowReadError(err instanceof Error ? err.message : 'read failed');
   }
+}
+
+function rpcFunctionMissing(message: string): boolean {
+  return /replace_manual_search_index/i.test(message)
+    && /schema cache|does not exist|could not find the function|not found/i.test(message);
+}
+
+/**
+ * Replace every chunk of one manual. Uses replace_manual_search_index when
+ * that function exists so the md5 check, delete, and insert are one transaction.
+ * A missing function still writes a single chunk. Several chunks are not
+ * clipped into the old one-row column.
+ */
+export async function writeManualSearchIndex(
+  db: TableClient,
+  manualId: string | number,
+  chunks: readonly IndexChunk[],
+  expectedMd5: string | null,
+): Promise<{ ok: boolean; error?: string }> {
+  const id = asManualCatalogId(manualId);
+  if (id == null) return { ok: false, error: 'manual_id must be a bigint catalog id' };
+  const rows = chunks.length
+    ? chunks
+    : [{ chunkIndex: 0, text: '', clipped: false, indexedPageMax: null }];
+  if (typeof db.rpc === 'function') {
+    const rpc = await db.rpc('replace_manual_search_index', {
+      p_manual_id: id,
+      p_chunks: rows.map((row) => row.text),
+      p_clipped: rows.map((row) => row.clipped === true),
+      p_page_max: rows.map((row) => (row.indexedPageMax == null ? null : row.indexedPageMax)),
+      p_expected_md5: expectedMd5,
+    });
+    if (!rpc?.error) {
+      if (rpc?.data === false) {
+        return {
+          ok: false,
+          error: 'Refused to replace the manual index: stored text changed during reindex (md5).',
+        };
+      }
+      return { ok: true };
+    }
+    const message = String(rpc.error.message || '');
+    if (!rpcFunctionMissing(message)) return { ok: false, error: message || 'replace failed' };
+  }
+  if (rows.length > 1) {
+    return {
+      ok: false,
+      error:
+        'Refused to clip the manual index: replace_manual_search_index is unavailable, so text past 1,500,000 characters was not written.',
+    };
+  }
+  return upsertManualSearchIndex(db, id, rows[0].text, rows[0], rows[0].chunkIndex);
 }
 
 export async function upsertManualSearchIndex(
@@ -719,25 +827,35 @@ export async function upsertManualSearchIndex(
   manualId: string | number,
   searchText: string,
   clip?: StoredIndexText | null,
+  chunkIndex = 0,
 ): Promise<{ ok: boolean; error?: string }> {
   const id = asManualCatalogId(manualId);
   if (id == null) return { ok: false, error: 'manual_id must be a bigint catalog id' };
   const indexedAt = new Date().toISOString();
-  const payload = {
+  const full: Record<string, unknown> = {
     manual_id: id,
+    chunk_index: Math.max(0, Math.floor(Number(chunkIndex) || 0)),
     search_text: searchText,
     indexed_at: indexedAt,
     index_clipped: clip?.clipped === true,
     indexed_page_max: clip?.indexedPageMax ?? null,
   };
-  const first = await db.from('manual_search_index').upsert(payload, { onConflict: 'manual_id' });
-  let error = first?.error;
+  let onConflict = 'manual_id,chunk_index';
+  let payload = { ...full };
+  let result = await db.from('manual_search_index').upsert(payload, { onConflict });
+  let error = result?.error;
+  if (error && /chunk_index/i.test(String(error.message || ''))) {
+    const { chunk_index: _chunk, ...rest } = full;
+    payload = { ...rest };
+    onConflict = 'manual_id';
+    result = await db.from('manual_search_index').upsert(payload, { onConflict });
+    error = result?.error;
+  }
   if (error && /index_clipped|indexed_page_max/i.test(String(error.message || ''))) {
-    const fallback = await db.from('manual_search_index').upsert(
-      { manual_id: id, search_text: searchText, indexed_at: indexedAt },
-      { onConflict: 'manual_id' },
-    );
-    error = fallback?.error;
+    const { index_clipped: _clipped, indexed_page_max: _max, ...rest } = payload;
+    payload = { ...rest };
+    result = await db.from('manual_search_index').upsert(payload, { onConflict });
+    error = result?.error;
   }
   if (error) return { ok: false, error: error.message || 'upsert failed' };
   return { ok: true };
@@ -767,7 +885,10 @@ export async function indexManualSearchText(
       skipped: 'kept_existing_index',
     };
   }
-  const saved = await upsertManualSearchIndex(client, catalogId, extracted.text || '', extracted.clip);
+  const chunks = extracted.chunks?.length
+    ? extracted.chunks
+    : [{ chunkIndex: 0, text: extracted.text || '', clipped: false, indexedPageMax: null }];
+  const saved = await writeManualSearchIndex(client, catalogId, chunks, existing.md5);
   if (!extracted.text) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || saved.error };
   }

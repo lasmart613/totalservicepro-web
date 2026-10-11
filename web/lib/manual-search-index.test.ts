@@ -11,6 +11,7 @@ import {
   indexManualSearchText,
   assembleReindexedManual,
   extractQualityImproves,
+  indexTextMd5,
   manualPdfByteLimitError,
   mergeStampedManualPages,
   pdfPathsForManual,
@@ -18,8 +19,10 @@ import {
   searchTextWriteRefusal,
   shouldKeepExistingSearchText,
   upsertManualSearchIndex,
+  writeManualSearchIndex,
 } from './manual-search-index.ts';
 import { MANUAL_SEARCH_PDF_MAX_BYTES, storeIndexText } from './manual-pdf-text.ts';
+import { spawnSync } from 'node:child_process';
 import { buildTextPdf } from './manual-pdf-fixtures.ts';
 import { MANUAL_FIXTURE_PATH } from './manuals.ts';
 import { containsTextImatch } from './email-match.ts';
@@ -184,6 +187,26 @@ test('stamped page merge is idempotent and ignores unstamped text', () => {
   assert.match(blanked, /\[\[pdfpage:3\]\] CW Laser Power Too High/);
   const kept = assembleReindexedManual(new Map([[1, 'cover'], [3, '']]), 4, second);
   assert.match(kept, /\[\[pdfpage:3\]\] CW Laser Power Too High/);
+});
+
+test('a page-1 reindex drops index pages past the new total', () => {
+  const existing = Array.from({ length: 519 }, (_, i) => `[[pdfpage:${i + 1}]] old ${i + 1}`).join('\f');
+  const staged = new Map();
+  for (let page = 1; page <= 517; page++) staged.set(page, `new ${page}`);
+  const next = assembleReindexedManual(staged, 517, existing);
+  const stamps = [...next.matchAll(/\[\[pdfpage:(\d+)\]\]/g)].map((match) => Number(match[1]));
+  assert.equal(stamps.length, 517);
+  assert.equal(Math.max(...stamps), 517);
+  assert.equal(stamps.includes(518), false);
+  assert.equal(stamps.includes(519), false);
+  assert.match(next, /\[\[pdfpage:517\]\] new 517/);
+  assert.doesNotMatch(next, /old 519/);
+
+  const extended = assembleReindexedManual(new Map([[1, 'new one'], [6, 'six']]), 4, existing);
+  assert.match(extended, /\[\[pdfpage:6\]\] six/);
+  assert.match(extended, /\[\[pdfpage:2\]\] old 2/);
+  assert.doesNotMatch(extended, /\[\[pdfpage:9\]\]/);
+  assert.equal((extended.match(/\[\[pdfpage:/g) || []).length, 6);
 });
 
 function reindexHarness(opts?: { failPdf?: boolean; existing?: string }) {
@@ -615,4 +638,123 @@ test('a manual_search_index read error fails closed and does not upsert', async 
   assert.match(ranged.error || '', /could not read the existing row/);
   assert.match(ranged.error || '', /timeout reading manual_search_index/);
   assert.equal(upserts, 0);
+});
+
+test('md5 guard refuses a changed index and will not clip a multi-chunk write', async () => {
+  let upserts = 0;
+  const expected = indexTextMd5(['[[pdfpage:519]] tail']);
+  const db = {
+    rpc(_name, args) {
+      assert.equal(args.p_manual_id, 72);
+      assert.equal(args.p_expected_md5, expected);
+      return { data: false, error: null };
+    },
+    from() {
+      return {
+        upsert() {
+          upserts += 1;
+          return { error: null };
+        },
+      };
+    },
+  };
+  const refused = await writeManualSearchIndex(
+    db,
+    72,
+    [{ chunkIndex: 0, text: '[[pdfpage:517]] end', clipped: false, indexedPageMax: 517 }],
+    expected,
+  );
+  assert.equal(refused.ok, false);
+  assert.match(refused.error || '', /md5/);
+  assert.equal(upserts, 0);
+
+  const missing = await writeManualSearchIndex(
+    {
+      from() {
+        return {
+          upsert() {
+            upserts += 1;
+            return { error: null };
+          },
+        };
+      },
+    },
+    1,
+    [
+      { chunkIndex: 0, text: '[[pdfpage:1]] a', clipped: false, indexedPageMax: 1 },
+      { chunkIndex: 1, text: '[[pdfpage:2]] b', clipped: false, indexedPageMax: 2 },
+    ],
+    null,
+  );
+  assert.equal(missing.ok, false);
+  assert.match(missing.error || '', /Refused to clip/);
+  assert.equal(upserts, 0);
+});
+
+test('page 1 of a reindex stores the md5 of the index it must replace', async () => {
+  const existing = Array.from({ length: 3 }, (_, i) => `[[pdfpage:${i + 1}]] old ${i + 1}`).join('\f');
+  const harness = reindexHarness({ existing });
+  const result = await reindexManualPageRange(harness.client, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.done, false);
+  const staged = JSON.parse([...harness.stage.values()][0]);
+  assert.equal(staged.expectedMd5, indexTextMd5([existing]));
+  assert.equal(harness.upserts, 0);
+});
+
+test('chunk migration keeps the lock timeout and the md5 replace function', () => {
+  const migration = readFileSync(
+    join(here, '../supabase/migrations/20261011_000912_manual_search_index_chunks.sql'),
+    'utf8',
+  );
+  const rollback = readFileSync(
+    join(here, '../supabase/migrations/20261011_000912_manual_search_index_chunks_rollback.sql'),
+    'utf8',
+  );
+  const edge = readFileSync(join(here, '../../supabase/functions/grok-assistant/index.ts'), 'utf8');
+  const manualUrl = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
+  assert.match(migration, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(migration, /chunk_index/);
+  assert.match(migration, /SELECT DISTINCT i\.manual_id/);
+  assert.match(migration, /replace_manual_search_index/);
+  assert.match(migration, /pg_advisory_xact_lock/);
+  assert.match(migration, /set_config\('lock_timeout', '5s', true\)/);
+  assert.match(migration, /IS DISTINCT FROM p_expected_md5/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.replace_manual_search_index/);
+  assert.match(migration, /service_role/);
+  assert.doesNotMatch(migration, /\bCOMMIT\b/);
+  assert.doesNotMatch(migration, /CONCURRENTLY/);
+  assert.match(rollback, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(rollback, /DELETE FROM public\.manual_search_index WHERE chunk_index > 0/);
+  assert.match(rollback, /DROP COLUMN IF EXISTS chunk_index/);
+  assert.match(rollback, /PRIMARY KEY \(manual_id\)/);
+  assert.doesNotMatch(rollback, /\bCOMMIT\b/);
+  assert.doesNotMatch(rollback, /CONCURRENTLY/);
+  assert.match(edge, /loadJoinedSearchText/);
+  assert.match(edge, /chunk_index/);
+  assert.match(manualUrl, /chunk_index/);
+  assert.match(manualUrl, /boundFromIndexRows/);
+
+  const script = readFileSync(join(here, '../scripts/reindex-long-manuals.mjs'), 'utf8');
+  assert.match(script, /reindexManualPageRange/);
+  assert.match(script, /1157/);
+  assert.match(script, /1621/);
+  assert.match(script, /1207/);
+  assert.match(script, /--apply/);
+  const dry = spawnSync(process.execPath, ['scripts/reindex-long-manuals.mjs'], {
+    cwd: join(here, '..'),
+    encoding: 'utf8',
+  });
+  assert.equal(dry.status, 0);
+  assert.match(dry.stdout, /manual 1 indexed_page_max 1157/);
+  assert.match(dry.stdout, /manual 9 indexed_page_max 1621/);
+  assert.match(dry.stdout, /manual 73 indexed_page_max 1207/);
+  assert.match(dry.stdout, /Dry run/);
+  const refused = spawnSync(process.execPath, ['scripts/reindex-long-manuals.mjs', '--apply'], {
+    cwd: join(here, '..'),
+    encoding: 'utf8',
+    env: { ...process.env, SUPABASE_URL: '', SUPABASE_SERVICE_ROLE_KEY: '', NEXT_PUBLIC_SUPABASE_URL: '' },
+  });
+  assert.notEqual(refused.status, 0);
+  assert.match(`${refused.stdout}\n${refused.stderr}`, /SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY/);
 });

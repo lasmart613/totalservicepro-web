@@ -1873,7 +1873,7 @@ function excerptIndexedManualText(
 /**
  * Same rule as web isPublishedColumnMissing: only Postgres undefined_column
  * (42703) whose message names the column as a word. 42702 and 42501 do not
- * qualify, even when the message says "published".
+ * qualify, even when the message says "published" or "chunk_index".
  */
 function reportedMissingColumn(
   error: { code?: string | null; message?: string | null } | null | undefined,
@@ -1892,6 +1892,35 @@ async function catalogManualIsPublished(db: any, id: number): Promise<boolean> {
   return data.published !== false
 }
 
+/**
+ * Join chunk_index rows with a form feed so [[pdfpage:N]] stays continuous.
+ * Fall back to the single-row read only when chunk_index is undefined_column
+ * (42703) or the client has no order(). Any other error hides the index.
+ */
+async function loadJoinedSearchText(db: any, manualId: number): Promise<string> {
+  try {
+    const wide = db.from('manual_search_index').select('search_text,chunk_index').eq('manual_id', manualId)
+    if (wide && typeof wide.order === 'function') {
+      const ordered = await wide.order('chunk_index', { ascending: true })
+      if (!ordered?.error && Array.isArray(ordered.data)) {
+        if (!ordered.data.length) return ''
+        return ordered.data
+          .slice()
+          .sort((a: { chunk_index?: unknown }, b: { chunk_index?: unknown }) =>
+            (Number(a?.chunk_index) || 0) - (Number(b?.chunk_index) || 0))
+          .map((row: { search_text?: unknown }) => (row?.search_text == null ? '' : String(row.search_text)))
+          .join('\f')
+      }
+      if (ordered?.error && !reportedMissingColumn(ordered.error, 'chunk_index')) return ''
+    }
+  } catch {
+    // Citation tests expose maybeSingle and no order().
+  }
+  const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', manualId).maybeSingle()
+  if (error || !data?.search_text) return ''
+  return String(data.search_text)
+}
+
 async function searchIndexedManualText(
   db: any,
   manualId: number | null,
@@ -1903,9 +1932,8 @@ async function searchIndexedManualText(
   const id = asManualId(manualId)
   if (id == null) return null
   if (!(await catalogManualIsPublished(db, id))) return null
-  const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', id).maybeSingle()
-  if (error || !data?.search_text) return null
-  const full = String(data.search_text)
+  const full = await loadJoinedSearchText(db, id)
+  if (!full) return null
   rememberManualIndex(id, full)
   // Model names in the manual label (M22) are not fault codes. The question and
   // extracted fault codes still are: they are in the query, not in this list.
@@ -2103,12 +2131,29 @@ async function loadSiblingCatalog(
   const indexes: Record<number, string> = {}
   const ids = [...new Set(rows.map((row) => Number(row.id)).filter((id) => id > 0))]
   if (ids.length) {
-    const idx = await db.from('manual_search_index').select('manual_id,search_text').in('manual_id', ids)
+    let query = db.from('manual_search_index').select('manual_id,search_text,chunk_index').in('manual_id', ids)
+    if (query && typeof query.order === 'function') query = query.order('chunk_index', { ascending: true })
+    let idx = await query
+    if (idx?.error && reportedMissingColumn(idx.error, 'chunk_index')) {
+      idx = await db.from('manual_search_index').select('manual_id,search_text').in('manual_id', ids)
+    }
     if (!idx?.error && Array.isArray(idx.data)) {
+      const byId = new Map<number, Array<{ search_text?: unknown; chunk_index?: unknown }>>()
       for (const row of idx.data) {
         const id = Number(row.manual_id)
-        if (id > 0 && row.search_text) {
-          const text = String(row.search_text)
+        if (id > 0) {
+          const list = byId.get(id) || []
+          list.push(row)
+          byId.set(id, list)
+        }
+      }
+      for (const [id, parts] of byId) {
+        const text = parts
+          .slice()
+          .sort((a, b) => (Number(a.chunk_index) || 0) - (Number(b.chunk_index) || 0))
+          .map((row) => (row.search_text == null ? '' : String(row.search_text)))
+          .join('\f')
+        if (text) {
           indexes[id] = text
           rememberManualIndex(id, text)
         }

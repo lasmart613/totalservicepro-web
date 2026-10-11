@@ -7,8 +7,10 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  chunkIndexText,
   clipManualSearchText,
   extractPdfPages,
+  joinIndexChunks,
   storeIndexText,
   extractPdfSearchText,
   looksLikePdf,
@@ -178,4 +180,29 @@ test('the index clip marker is the tail the character cap dropped', () => {
   assert.equal(fit.clipped, false);
   assert.equal(fit.indexedPageMax, 2);
   assert.equal(fit.text, full);
+});
+
+test('chunks split on page boundaries and keep [[pdfpage:N]] continuous', () => {
+  const pages = [1, 2, 3, 4, 5].map((page) => `[[pdfpage:${page}]] ${'x'.repeat(10)}`);
+  const text = pages.join('\f');
+  const chunks = chunkIndexText(text, 60);
+  assert.ok(chunks.length >= 2);
+  for (const chunk of chunks) {
+    assert.ok(chunk.text.length <= 60);
+    assert.equal(chunk.clipped, false);
+  }
+  assert.equal(joinIndexChunks(chunks), text);
+  const stamps = joinIndexChunks(chunks).match(/\[\[pdfpage:(\d+)\]\]/g) || [];
+  assert.deepEqual(stamps, ['[[pdfpage:1]]', '[[pdfpage:2]]', '[[pdfpage:3]]', '[[pdfpage:4]]', '[[pdfpage:5]]']);
+  assert.equal(chunks[0].indexedPageMax, 2);
+
+  const huge = `[[pdfpage:1]] ${'y'.repeat(80)}`;
+  const cut = chunkIndexText(`${huge}\f[[pdfpage:2]] tail`, 40);
+  assert.equal(cut.length, 2);
+  assert.equal(cut[0].clipped, true);
+  assert.equal(cut[0].text.length, 40);
+  assert.equal(cut[0].indexedPageMax, 1);
+  assert.equal(cut[1].clipped, false);
+  assert.equal(cut[1].text, '[[pdfpage:2]] tail');
+  assert.equal(cut[1].indexedPageMax, 2);
 });

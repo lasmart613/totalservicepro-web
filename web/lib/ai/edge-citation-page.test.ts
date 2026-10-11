@@ -457,3 +457,31 @@ test('Lumenis M22 is a model name, so fluence calibration does not cite the cove
   );
   assert.equal(forced[0].page, 1);
 });
+
+test('chunked index rows keep a later [[pdfpage:N]] cite', async () => {
+  const edge = await loadEdge();
+  const early = `[[pdfpage:1018]] intro reservoir ${'word '.repeat(20)}`;
+  const later = `[[pdfpage:1403]] unique tailpage marker ${'calibration procedure '.repeat(12)}`;
+  const db = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          order: async () => ({
+            data: [
+              { search_text: early, chunk_index: 0 },
+              { search_text: later, chunk_index: 1 },
+            ],
+            error: null,
+          }),
+          maybeSingle: async () => ({ data: { search_text: early }, error: null }),
+        }),
+      }),
+    }),
+  };
+  const indexed = await edge.searchIndexedManualText(db, 9, 'unique tailpage marker', 'Long Manual');
+  assert.ok(indexed);
+  assert.equal(indexed.page, 1403);
+  assert.match(indexed.indexText || '', /\[\[pdfpage:1018\]\]/);
+  assert.match(indexed.indexText || '', /\[\[pdfpage:1403\]\] unique tailpage marker/);
+  assert.ok((indexed.indexText || '').indexOf('[[pdfpage:1018]]') < (indexed.indexText || '').indexOf('[[pdfpage:1403]]'));
+});
