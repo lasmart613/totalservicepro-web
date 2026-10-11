@@ -308,3 +308,9 @@ test('god catalog form requires equipment type and does not commit PDFs', () => 
   assert.match(api, /indexManualSearchText/);
   assert.doesNotMatch(page, /sample-service-manual|\.pdf'/);
 });
+
+test('VBeam Perfecta-family spines read "VBeam II" (line 2 parenthetical omitted: does not fit)', () => {
+  const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  assert.match(page, /v-\?beam\.\*perfecta\/i\.test\(spine\)\) return 'VBeam II';/);
+  assert.doesNotMatch(page, /VBEAM PF/);
+});

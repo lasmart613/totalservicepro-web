@@ -822,7 +822,8 @@ export default function ManualsLibrary() {
 
     // Model shortcuts (no brand)
     if (/fels[-\s]?25a|intelliguide/i.test(spine) || /fels[-\s]?25a|intelliguide/i.test(fullTitle)) return 'FELS-25A';
-    if (/v-?beam.*perfecta/i.test(spine)) return 'VBEAM PF';
+    // Larry: "VBeam II"; the "(Perfecta, Aesthetica, Platinum)" line 2 is ~155px vs the 100px spine column, so it is omitted.
+    if (/v-?beam.*perfecta/i.test(spine)) return 'VBeam II';
     if (/gentlemax\s*pro/i.test(spine)) return 'GENTLEMAX PRO';
     if (/excel\s*hr/i.test(spine)) return 'EXCEL HR';
     if (/litho\s*evo/i.test(spine)) return 'LITHO EVO';
