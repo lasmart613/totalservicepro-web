@@ -65,6 +65,11 @@ export function selectColumns(list: string): string[] {
 
 type Found = { file: string; kind: string; columns: string };
 
+/** Non-literal manuals selects the guard cannot check. Must stay empty. */
+const unchecked: string[] = [];
+/** Per file: how many `columns:` entries fed a .select(x.columns). */
+const columnsEntries = new Map<string, number>();
+
 function collectManualsSelects(files: string[]): Found[] {
   const found: Found[] = [];
   const lit = '(`[^`]*`|\'[^\']*\'|"[^"]*")';
@@ -80,6 +85,36 @@ function collectManualsSelects(files: string[]): Found[] {
     for (const m of src.matchAll(new RegExp(`\\.from\\(\\s*['"]manuals['"]\\s*\\)\\s*\\.select\\(\\s*${lit}`, 'g'))) {
       if (inHelper(m.index ?? -1)) continue;
       add('from(manuals).select', m[1]);
+    }
+    // .select(NAME) / .select(x.columns): a non-literal argument.
+    let selectsColumnsField = false;
+    for (const m of src.matchAll(/\.from\(\s*['"]manuals['"]\s*\)\s*\.select\(\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\s*[,)]/g)) {
+      if (inHelper(m.index ?? -1)) continue;
+      const arg = m[1];
+      if (/\.columns$/.test(arg)) {
+        // Checked through the `columns:` entries below.
+        selectsColumnsField = true;
+        continue;
+      }
+      if (arg.includes('.')) {
+        unchecked.push(`${file}: .from('manuals').select(${arg}) is not a const or a columns: entry`);
+        continue;
+      }
+      // Bare identifier: must be a const in this file.
+      found.push({ file, kind: `select(${arg})`, columns: resolveTemplate(`\${${arg}}`, src, file) });
+    }
+    // `columns: <string or CONST>` entries feeding .select(x.columns), e.g.
+    // grok-assistant's selectManualRows attempts.
+    if (selectsColumnsField) {
+      const entries = [
+        ...src.matchAll(new RegExp(`\\bcolumns:\\s*(${lit.slice(1, -1)}|[A-Z_][A-Z0-9_]*)\\s*[,}]`, 'g')),
+      ];
+      columnsEntries.set(file, entries.length);
+      for (const e of entries) {
+        const raw = e[1];
+        const text = /^[`'"]/.test(raw) ? raw.slice(1, -1) : `\${${raw}}`;
+        found.push({ file, kind: 'columns: entry', columns: resolveTemplate(text, src, file) });
+      }
     }
     // queryManual(client, "<columns>", ...) — first string argument. The
     // definition's parameter list has no string literal, so it is skipped.
@@ -113,6 +148,12 @@ test('edge functions select only real manuals columns, including every queryManu
   const files = edgeSources(functionsRoot);
   assert.ok(files.length > 0);
   const found = collectManualsSelects(files);
+
+  assert.deepEqual(unchecked, []);
+  // grok-assistant's selectManualRows passes attempt.columns; its entries must be found.
+  const grok = [...columnsEntries.entries()].find(([file]) => /grok-assistant[\\/]index\.ts$/.test(file));
+  assert.ok(grok && grok[1] > 0, 'found zero columns: entries in grok-assistant');
+  assert.ok(found.some((f) => f.kind === 'select(CATALOG_CITE_COLUMNS)'), 'bare-identifier select not resolved');
 
   const queryManualCalls = found.filter((f) => f.kind === 'queryManual');
   assert.ok(queryManualCalls.length > 0, 'found zero queryManual( calls — the extractor is broken');
