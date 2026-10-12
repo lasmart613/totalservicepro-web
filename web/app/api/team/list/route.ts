@@ -5,15 +5,30 @@ import { isPendingTeamInvite } from '@/lib/org-membership';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
 import { loadAuthEmailsByUserId } from '@/lib/team-profile';
 import { rowFounderFlag } from '@/lib/team-remove';
+import { isTeamInviteManager, rosterForCaller } from '@/lib/team-list-access';
 
 /**
  * GET /api/team/list
  * Returns all user_profiles for the caller's organization (service role).
  * Client RLS often only allows reading your own profile row — this is the reliable roster.
+ *
+ * The caller needs a membership in that org. Member emails and invites (with
+ * their emails) go only to invite managers (engineer_invitations RLS:
+ * company_admin / owner / service_manager). Others get names and roles.
  */
+type TeamListDeps = {
+  hasServiceRole?: () => boolean;
+  userClient?: any;
+  admin?: any;
+};
+
 export async function GET(req: NextRequest) {
+  return runTeamList(req);
+}
+
+export async function runTeamList(req: NextRequest, deps: TeamListDeps = {}) {
   try {
-    if (!hasServiceRole()) {
+    if (!(deps.hasServiceRole ?? hasServiceRole)()) {
       return NextResponse.json(
         { error: 'Server missing SUPABASE_SERVICE_ROLE_KEY', members: [] },
         { status: 500 }
@@ -28,10 +43,12 @@ export async function GET(req: NextRequest) {
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const userClient = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const userClient =
+      deps.userClient ??
+      createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
 
     const {
       data: { user },
@@ -51,7 +68,27 @@ export async function GET(req: NextRequest) {
     }
 
     const orgId = profile.organization_id;
-    const admin = getSupabaseAdmin();
+    const admin = deps.admin ?? getSupabaseAdmin();
+
+    // A profile pointer can outlive a deleted membership: require the row.
+    const { data: myMembership, error: membershipErr } = await admin
+      .from('organization_memberships')
+      .select('role')
+      .eq('user_id', user.id)
+      .eq('organization_id', orgId)
+      .limit(1);
+    if (membershipErr) {
+      return NextResponse.json({ error: 'Could not verify membership.', members: [] }, { status: 503 });
+    }
+    const myRow = Array.isArray(myMembership) ? myMembership[0] : null;
+    if (!myRow) {
+      return NextResponse.json({ error: 'Not a member of this organization', members: [] }, { status: 403 });
+    }
+    const manager = isTeamInviteManager({
+      member: true,
+      membershipRole: myRow.role,
+      profileRole: profile.role,
+    });
 
     const teamSelectFull =
       'id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed, organization_id';
@@ -144,29 +181,35 @@ export async function GET(req: NextRequest) {
       return next;
     });
 
-    // All invites for this org (history + pending) — client RLS often hides these
-    const { data: allInvites } = await admin
-      .from('engineer_invitations')
-      .select('id, email, role, first_name, last_name, created_at, expires_at, accepted, accepted_at')
-      .eq('organization_id', orgId)
-      .order('created_at', { ascending: false })
-      .limit(50);
-
-    const invites = allInvites || [];
+    // All invites for this org (history + pending) — client RLS often hides these.
+    // Invite managers only, like the engineer_invitations SELECT policy.
+    let invites: any[] = [];
+    if (manager) {
+      const { data: allInvites } = await admin
+        .from('engineer_invitations')
+        .select('id, email, role, first_name, last_name, created_at, expires_at, accepted, accepted_at')
+        .eq('organization_id', orgId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      invites = allInvites || [];
+    }
 
     // Pending is only an open, unaccepted invite. Accepted, expired, and
     // revoked rows stay on invite history. Someone already on the roster
     // with setup unfinished is a team member, not a pending invite.
     const pendingInvites = invites.filter((inv) => isPendingTeamInvite(inv));
 
+    const roster = rosterForCaller(members || [], { manager, callerId: user.id });
+
     return NextResponse.json({
       ok: true,
       organization_id: orgId,
       organizationCreatedBy,
-      members: members || [],
+      canSeeEmails: manager,
+      members: roster,
       pendingInvites,
       invites,
-      count: (members || []).length,
+      count: roster.length,
       pendingCount: pendingInvites.length,
     });
   } catch (e: any) {
