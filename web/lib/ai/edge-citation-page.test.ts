@@ -57,7 +57,7 @@ let edgePromise: Promise<Edge> | null = null;
 function loadEdge(): Promise<Edge> {
   if (edgePromise) return edgePromise;
   const dir = mkdtempSync(join(tmpdir(), 'grok-edge-'));
-  for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts', 'citation-scope.ts']) {
+  for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts', 'citation-scope.ts', 'ai-access.ts']) {
     copyFileSync(join(FN_DIR, f), join(dir, f));
   }
   let src = readFileSync(join(FN_DIR, 'index.ts'), 'utf8');
