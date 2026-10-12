@@ -2,12 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { setActiveOrganization, upsertMembership } from '@/lib/org-membership-server';
+import { loadFounderClaimState } from '@/lib/founder-claim';
 import { refuseClaimOrgAutoCreate } from '@/lib/claim-signup-metadata';
 import {
   organizationInsertFromPending,
   type PendingSignup,
 } from '@/lib/pending-signup';
-import { decideFounderLink } from '@/lib/tenant-lockdown';
+import { decideFounderLink, founderClaimAllowed } from '@/lib/tenant-lockdown';
 import {
   grantSignupTrialIfEligible,
   isTrialGrantedAtMissing,
@@ -162,6 +163,20 @@ export async function POST(req: NextRequest) {
     });
     if (!decision.ok) {
       return NextResponse.json({ error: decision.error }, { status: decision.status });
+    }
+
+    // Existing org: created_by alone doesn't make the caller its founder (a
+    // removed tech is still created_by on the clinics they added). Same rule as
+    // org_unclaimed_new in 000916.
+    if (existingForGrant) {
+      const claim = await loadFounderClaimState(admin, orgId, user.id);
+      const allowed = founderClaimAllowed({
+        ...claim,
+        orgCreatedAt: (existingForGrant as { created_at?: string | null }).created_at ?? null,
+      });
+      if (!allowed.ok) {
+        return NextResponse.json({ error: allowed.error }, { status: allowed.status });
+      }
     }
 
     // Existing org: one trial ever (trial_granted_at), and only while the org
