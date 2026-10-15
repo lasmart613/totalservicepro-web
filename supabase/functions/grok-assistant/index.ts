@@ -2703,10 +2703,14 @@ serve(async (req) => {
         })
         citationLine = formatCitationLine(manualCitations, manualLabel)
       }
+      // A refusal carries no chips at all: the client must not rebuild one from
+      // prose like "page 71 / section 4.2" (q25 showed a pageless §4.2 chip).
+      let replyDeclined = false
       const settleReply = (replyText: string): { text: string; declined: boolean } => {
         if (answerDeclinesManualCitation(replyText)) {
           manualCitations = []
           citationLine = ''
+          replyDeclined = true
           return { text: stripRefusalCitations(replyText), declined: true }
         }
         const scopedId = asManualId(manualMeta?.id)
@@ -2719,6 +2723,7 @@ serve(async (req) => {
         if (answerDeclinesManualCitation(aligned)) {
           manualCitations = []
           citationLine = ''
+          replyDeclined = true
           return { text: stripRefusalCitations(aligned), declined: true }
         }
         return { text: aligned, declined: false }
@@ -2733,6 +2738,7 @@ serve(async (req) => {
         matchTokens,
         citations: manualCitations,
         ...(selectedPageCount ? { pageCount: selectedPageCount } : {}),
+        ...(replyDeclined ? { declined: true } : {}),
       })
       if (wantPdfs) {
         const collectionFiles = pickCollectionAttachments(
