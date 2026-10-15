@@ -567,6 +567,9 @@ export function citationsForAssistantReply(
 ): ManualCitation[] {
   const obj = meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : {};
   if (obj.generalGuidance === true) return [];
+  // The server refused to cite this manual: no chips, not even a section or page
+  // rebuilt from the refusal's own wording ("page 71 / section 4.2").
+  if (obj.declined === true) return [];
   const fromMeta = citationsFromMeta(meta, fallbackManualId ?? null);
   const metaId = Number(obj.manualId);
   const fallbackId = Number(fallbackManualId);
