@@ -962,16 +962,45 @@
         return fallback[gender] || fallback.male;
     }
 
+    function grokVoiceBlocked(token) {
+        if (window.__tspGrokVoiceForbidden) return true;
+        try {
+            if (typeof Android !== 'undefined' && Android.isGrokVoiceForbidden && Android.isGrokVoiceForbidden(token || '')) {
+                window.__tspGrokVoiceForbidden = true;
+                return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function noteGrokVoiceForbidden(token) {
+        if (window.__tspGrokVoiceForbidden) return;
+        window.__tspGrokVoiceForbidden = true;
+        const notice = (window.TSPGrokVoice && TSPGrokVoice.FORBIDDEN_NOTICE)
+            || 'Grok voice is available to service-company accounts; using device voice.';
+        if (typeof Android !== 'undefined' && Android.noteGrokVoiceForbidden) {
+            Android.noteGrokVoiceForbidden(token || '');
+            return;
+        }
+        if (typeof Android !== 'undefined' && Android.showToast) Android.showToast(notice);
+    }
+
     async function refreshGrokVoicePicker() {
+        if (grokVoiceBlocked('')) return;
         if (!window.TSPGrokVoice || !GROK_TTS_URL) return;
         try {
             const sess = await supabaseClient.auth.getSession();
             const token = sess && sess.data && sess.data.session && sess.data.session.access_token;
-            if (!token) return;
+            if (!token || grokVoiceBlocked(token)) return;
             const resp = await fetch(GROK_TTS_URL, {
                 method: 'GET',
                 headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
             });
+            if (resp.status === 403) {
+                const denied = await resp.json().catch(() => null);
+                if (TSPGrokVoice.isRepairAiForbidden(403, denied)) noteGrokVoiceForbidden(token);
+                return;
+            }
             if (!resp.ok) return;
             const data = await resp.json();
             const list = TSPGrokVoice.parseVoiceList(data);

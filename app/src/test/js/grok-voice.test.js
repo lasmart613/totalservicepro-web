@@ -110,6 +110,22 @@ test('HTTP 429 daily and burst limits are the device-fallback case', () => {
     assert.equal(voice.isGrokVoiceLimit(503, { error: 'usage_unavailable' }), false);
 });
 
+test('HTTP 403 repair_ai_forbidden is one device fallback, not a 401 or a cap', () => {
+    assert.equal(voice.isRepairAiForbidden(403, { error: 'repair_ai_forbidden' }), true);
+    assert.equal(voice.isRepairAiForbidden(403, { code: 'repair_ai_forbidden' }), true);
+    assert.equal(voice.isRepairAiForbidden(403, { error: 'Forbidden' }), false);
+    assert.equal(voice.isRepairAiForbidden(403, null), false);
+    assert.equal(voice.isRepairAiForbidden(401, { error: 'repair_ai_forbidden' }), false);
+    assert.equal(voice.isRepairAiForbidden(401, { error: 'Unauthorized' }), false);
+    assert.equal(voice.isRepairAiForbidden(429, { error: 'daily_limit_reached' }), false);
+    assert.equal(voice.isRepairAiForbidden(429, { error: 'rate_limited' }), false);
+    assert.equal(
+        voice.FORBIDDEN_NOTICE,
+        'Grok voice is available to service-company accounts; using device voice.'
+    );
+    assert.equal(voice.isGrokVoiceLimit(403, { error: 'repair_ai_forbidden' }), false);
+});
+
 test('HTTP 503 usage_unavailable is a device fallback, not the limit notice', () => {
     assert.equal(voice.isUsageUnavailable(503, { error: 'usage_unavailable' }), true);
     assert.equal(voice.isUsageUnavailable(503, { error: 'AI not configured' }), false);
@@ -253,6 +269,24 @@ test('bundled assistant speaks through grok-tts and still talks on a 429', () =>
     assert.match(shell, /omitVoice/);
     assert.match(shell, /"invalid_voice"\.equals\(kind\) && !omitVoice/);
     assert.match(shell, /if \(!omitVoice\) payload\.put\("voice_id", GrokSpeech\.normalizeVoiceId\(voiceId\)\)/);
+    assert.match(speech, /repair_ai_forbidden/);
+    assert.match(speech, /return "forbidden"/);
+    assert.match(speech, /Grok voice is available to service-company accounts; using device voice\./);
+    const request = shell.slice(shell.indexOf('private void requestGrokTts'), shell.indexOf('private void fallbackToDevice'));
+    assert.ok(request.indexOf('"forbidden".equals(kind)') < request.indexOf('"invalid_voice".equals(kind)'));
+    assert.ok(request.indexOf('grokVoiceBlock.blocked(token)') < request.indexOf('openConnection'));
+    assert.match(shell, /noteGrokVoiceForbidden/);
+    assert.match(shell, /isGrokVoiceForbidden/);
+    assert.match(shell, /grokVoiceBlock\.clear\(\)/);
+    assert.match(shell, /window\.__tspGrokVoiceForbidden=true/);
+    const play = html.slice(html.indexOf('async function playGrokTts'), html.indexOf('async function zapSpeak'));
+    assert.ok(play.indexOf('isRepairAiForbidden') < play.indexOf('isGrokVoiceLimit'));
+    assert.ok(play.indexOf("return 'forbidden'") < play.indexOf('isInvalidVoiceId'));
+    const zap = html.slice(html.indexOf('async function zapSpeak'), html.indexOf('function stopAudio'));
+    assert.ok(zap.indexOf("result === 'forbidden'") < zap.indexOf('Grok voice unavailable'));
+    assert.match(zap, /result === 'limited'/);
+    assert.match(zap, /Grok voice limit reached today/);
+    assert.match(html, /grokVoiceBlocked/);
     const viewer = fs.readFileSync(path.join(__dirname, '../../main/assets/pdf_viewer.html'), 'utf8');
     assert.match(viewer, /Back to answer/);
     assert.match(viewer, /openedFromAssistant/);
@@ -269,4 +303,9 @@ test('bundled assistant speaks through grok-tts and still talks on a 429', () =>
     const onlineSrc = fs.readFileSync(path.join(__dirname, '../../main/assets/online-voice.js'), 'utf8');
     assert.match(onlineSrc, /migrateStoredVoice/);
     assert.doesNotMatch(onlineSrc, /["']sage["']/i);
+    assert.match(settings, /isRepairAiForbidden/);
+    assert.match(settings, /grokVoiceBlocked/);
+    assert.match(onlineSrc, /isRepairAiForbidden/);
+    assert.match(onlineSrc, /grokVoiceBlocked/);
+    assert.match(onlineSrc, /if \(!resp\.ok\) return null/);
 });

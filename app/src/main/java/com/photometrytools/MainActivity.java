@@ -66,6 +66,7 @@ import androidx.core.view.WindowInsetsCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.webkit.JavaScriptReplyProxy;
+import androidx.webkit.ScriptHandler;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
@@ -314,11 +315,36 @@ public class MainActivity extends AppCompatActivity {
             if (!javascriptInterfaceAllowed()) return;
             storedSession = null;
             biometricEnabled = false;
+            grokVoiceBlock.clear();
+            runOnUiThread(MainActivity.this::publishGrokVoiceAllowed);
             getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                     .edit()
                     .remove(PREFS_SESSION_KEY)
                     .putBoolean(PREFS_BIOMETRIC_KEY, false)
                     .apply();
+        }
+
+        /**
+         * GET /grok-tts returned 403 repair_ai_forbidden. Remember it for this
+         * sign-in and show the notice once. Later speech uses device TTS.
+         */
+        @JavascriptInterface
+        public void noteGrokVoiceForbidden(String accessToken) {
+            if (!javascriptInterfaceAllowed()) return;
+            final String token = (accessToken == null || accessToken.trim().isEmpty())
+                    ? storedAccessToken()
+                    : accessToken.trim();
+            runOnUiThread(() -> announceGrokVoiceForbidden(token));
+        }
+
+        /** True after this sign-in already received repair_ai_forbidden. */
+        @JavascriptInterface
+        public boolean isGrokVoiceForbidden(String accessToken) {
+            if (!javascriptInterfaceAllowed()) return false;
+            final String token = (accessToken == null || accessToken.trim().isEmpty())
+                    ? storedAccessToken()
+                    : accessToken.trim();
+            return grokVoiceBlock.blocked(token);
         }
 
         @JavascriptInterface
@@ -1302,6 +1328,9 @@ public class MainActivity extends AppCompatActivity {
                 else if ("speakAnswer".equals(method)) bridge.speakAnswer(
                         obj.optString("text", ""), obj.optString("voiceId", ""),
                         obj.optString("engine", ""), obj.optString("token", ""));
+                else if ("noteGrokVoiceForbidden".equals(method)) {
+                    bridge.noteGrokVoiceForbidden(obj.optString("token", ""));
+                }
                 else if ("interruptSpeech".equals(method)) bridge.interruptSpeech();
                 else if ("stopSpeaking".equals(method)) bridge.stopSpeaking();
                 else if ("startVoiceRecognition".equals(method)) bridge.startVoiceRecognition();
@@ -1351,6 +1380,8 @@ public class MainActivity extends AppCompatActivity {
                     + "printReport:function(h,n){post({m:'printReport',html:h,jobName:n});},"
                     + "speak:function(t){post({m:'speak',text:t});},"
                     + "speakAnswer:function(t,v,e,a){post({m:'speakAnswer',text:t,voiceId:v,engine:e,token:a});},"
+                    + "noteGrokVoiceForbidden:function(t){post({m:'noteGrokVoiceForbidden',token:t||''});},"
+                    + "isGrokVoiceForbidden:function(){return window.__tspGrokVoiceForbidden===true;},"
                     + "interruptSpeech:function(){post({m:'interruptSpeech'});},"
                     + "stopSpeaking:function(){post({m:'stopSpeaking'});},"
                     + "startVoiceRecognition:function(){post({m:'startVoiceRecognition'});},"
@@ -1664,13 +1695,13 @@ public class MainActivity extends AppCompatActivity {
         }
         answerSpeaking = true;
         signalAssistantVoice(true);
-        if (GrokSpeech.isDeviceEngine(engine)) {
-            speakWithDeviceTts(spoken);
-            return;
-        }
         final String token = (accessToken == null || accessToken.trim().isEmpty())
                 ? storedAccessToken()
                 : accessToken.trim();
+        if (GrokSpeech.isDeviceEngine(engine) || grokVoiceBlock.blocked(token)) {
+            speakWithDeviceTts(spoken);
+            return;
+        }
         new Thread(() -> requestGrokTts(spoken, voiceId, token, gen, false, false), "grok-tts").start();
     }
 
@@ -1683,6 +1714,10 @@ public class MainActivity extends AppCompatActivity {
         if (gen != speechGeneration) return;
         if (token == null || token.isEmpty()) {
             runOnUiThread(() -> fallbackToDevice(text, gen, false));
+            return;
+        }
+        if (grokVoiceBlock.blocked(token)) {
+            runOnUiThread(() -> fallbackForbidden(text, gen, false));
             return;
         }
         HttpURLConnection conn = null;
@@ -1712,6 +1747,13 @@ public class MainActivity extends AppCompatActivity {
             Log.i(TAG, "grok-tts status=" + status + " kind=" + kind);
             if ("audio".equals(kind)) {
                 runOnUiThread(() -> playGrokAudio(body, text, gen));
+                return;
+            }
+            if ("forbidden".equals(kind)) {
+                runOnUiThread(() -> {
+                    boolean announce = grokVoiceBlock.remember(token);
+                    fallbackForbidden(text, gen, announce);
+                });
                 return;
             }
             if ("invalid_voice".equals(kind) && !omitVoice) {
@@ -1750,6 +1792,63 @@ public class MainActivity extends AppCompatActivity {
                 Toast.LENGTH_LONG
         ).show();
         speakWithDeviceTts(text);
+    }
+
+    private final GrokSpeech.SessionBlock grokVoiceBlock = new GrokSpeech.SessionBlock();
+    /** Document-start flag so the next page does not call grok-tts again. */
+    private ScriptHandler grokForbiddenScript;
+
+    private void announceGrokVoiceForbidden(String token) {
+        if (!grokVoiceBlock.remember(token)) return;
+        publishGrokVoiceForbidden();
+        Toast.makeText(MainActivity.this, GrokSpeech.FORBIDDEN_NOTICE, Toast.LENGTH_LONG).show();
+    }
+
+    /** Device TTS for this answer. The service-company notice is shown at most once. */
+    private void fallbackForbidden(String text, int gen, boolean announce) {
+        if (gen != speechGeneration) return;
+        if (announce) {
+            publishGrokVoiceForbidden();
+            Toast.makeText(MainActivity.this, GrokSpeech.FORBIDDEN_NOTICE, Toast.LENGTH_LONG).show();
+        }
+        speakWithDeviceTts(text);
+    }
+
+    private void publishGrokVoiceForbidden() {
+        installGrokForbiddenDocumentStart();
+        notifyVoiceJs("window.__tspGrokVoiceForbidden=true;");
+    }
+
+    private void publishGrokVoiceAllowed() {
+        removeGrokForbiddenDocumentStart();
+        notifyVoiceJs("window.__tspGrokVoiceForbidden=false;");
+    }
+
+    private void installGrokForbiddenDocumentStart() {
+        if (grokForbiddenScript != null || webView == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) return;
+        Set<String> origins = new HashSet<>();
+        origins.add("https://" + TrustedOrigins.HOST_REPAIRPLANET);
+        origins.add("https://" + TrustedOrigins.HOST_WWW);
+        try {
+            grokForbiddenScript = WebViewCompat.addDocumentStartJavaScript(
+                    webView,
+                    "window.__tspGrokVoiceForbidden=true;",
+                    origins);
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Grok voice block script unavailable", e);
+        }
+    }
+
+    private void removeGrokForbiddenDocumentStart() {
+        ScriptHandler script = grokForbiddenScript;
+        grokForbiddenScript = null;
+        if (script == null) return;
+        try {
+            script.remove();
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Grok voice block script remove failed", e);
+        }
     }
 
     private void playGrokAudio(byte[] audio, String fallbackText, int gen) {

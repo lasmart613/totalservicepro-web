@@ -10,6 +10,9 @@ final class GrokSpeech {
     static final String LIMIT_NOTICE = "Grok voice limit reached today";
     static final String FALLBACK_NOTICE = "Grok voice unavailable — using device voice";
     static final String SHORTENED_NOTICE = "Shortened the answer for Grok voice";
+    static final String FORBIDDEN_NOTICE =
+            "Grok voice is available to service-company accounts; using device voice.";
+    static final String FORBIDDEN_ERROR = "repair_ai_forbidden";
     static final int MAX_CHARS = 4000;
 
     /** xAI TTS voices. Eve is the documented default. */
@@ -46,12 +49,14 @@ final class GrokSpeech {
      * limited: 429 daily_limit_reached or rate_limited (the limit notice).
      * too_long: 400/413 text_too_long, retry once shorter.
      * invalid_voice: 400 invalid_voice_id, retry once with voice_id omitted.
-     * failed: everything else, including 503 usage_unavailable and upstream_rate_limited.
+     * forbidden: 403 repair_ai_forbidden. One notice, then device TTS. Do not retry.
+     * failed: everything else, including 401 and 503 usage_unavailable.
      */
     static String classify(int status, String contentType, byte[] body) {
         if (status >= 200 && status < 300 && looksLikeAudio(contentType, body)) return "audio";
         String code = jsonStringField(body, "error");
         if (code.isEmpty()) code = jsonStringField(body, "code");
+        if (status == 403 && FORBIDDEN_ERROR.equals(code)) return "forbidden";
         if (status == 429 && ("daily_limit_reached".equals(code) || "rate_limited".equals(code))) {
             return "limited";
         }
@@ -59,6 +64,46 @@ final class GrokSpeech {
         if ((status == 400 || status == 413) && "text_too_long".equals(code)) return "too_long";
         if (status == 413 && code.isEmpty()) return "too_long";
         return "failed";
+    }
+
+    /** JWT {@code sub}. Empty when the token is not a readable access token. */
+    static String subject(String accessToken) {
+        if (accessToken == null) return "";
+        String[] parts = accessToken.split("\\.");
+        if (parts.length < 2) return "";
+        byte[] data = decodeBase64Url(parts[1]);
+        if (data == null) return "";
+        String sub = jsonStringField(data, "sub");
+        return sub == null ? "" : sub;
+    }
+
+    /**
+     * Remembers a repair_ai_forbidden response for one signed-in user.
+     * A later call for that user does not hit grok-tts again. Sign-out clears it.
+     */
+    static final class SessionBlock {
+        private String blockedUserId;
+
+        synchronized void clear() {
+            blockedUserId = null;
+        }
+
+        synchronized boolean blocked(String accessToken) {
+            return blockedUserId != null && blockedUserId.equals(userKey(accessToken));
+        }
+
+        /** @return true only the first time this user is blocked, so the notice shows once */
+        synchronized boolean remember(String accessToken) {
+            String key = userKey(accessToken);
+            if (key.equals(blockedUserId)) return false;
+            blockedUserId = key;
+            return true;
+        }
+
+        private static String userKey(String accessToken) {
+            String id = subject(accessToken);
+            return id.isEmpty() ? "*" : id;
+        }
     }
 
     static int maxCharacters(byte[] body) {
@@ -108,5 +153,42 @@ final class GrokSpeech {
         int end = start;
         while (end < json.length() && Character.isDigit(json.charAt(end))) end++;
         return json.substring(start, end);
+    }
+
+    private static byte[] decodeBase64Url(String value) {
+        if (value == null || value.isEmpty()) return null;
+        StringBuilder alphabet = new StringBuilder(value.length() + 3);
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '-') alphabet.append('+');
+            else if (c == '_') alphabet.append('/');
+            else alphabet.append(c);
+        }
+        int remainder = alphabet.length() % 4;
+        if (remainder != 0) {
+            for (int i = 0; i < 4 - remainder; i++) alphabet.append('=');
+        }
+        int[] table = new int[128];
+        java.util.Arrays.fill(table, -1);
+        String digits = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        for (int i = 0; i < digits.length(); i++) table[digits.charAt(i)] = i;
+        int buffer = 0;
+        int bits = 0;
+        java.util.ArrayList<Byte> bytes = new java.util.ArrayList<>();
+        String data = alphabet.toString();
+        for (int i = 0; i < data.length(); i++) {
+            char c = data.charAt(i);
+            if (c == '=') break;
+            if (c >= 128 || table[c] < 0) return null;
+            buffer = (buffer << 6) | table[c];
+            bits += 6;
+            if (bits >= 8) {
+                bits -= 8;
+                bytes.add((byte) ((buffer >> bits) & 0xFF));
+            }
+        }
+        byte[] out = new byte[bytes.size()];
+        for (int i = 0; i < bytes.size(); i++) out[i] = bytes.get(i);
+        return out;
     }
 }

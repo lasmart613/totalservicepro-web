@@ -1120,16 +1120,45 @@
         sel.value = match ? wanted : (voices[0] ? voices[0].id : 'eve');
     }
 
+    function grokVoiceBlocked(token) {
+        if (window.__tspGrokVoiceForbidden) return true;
+        try {
+            if (typeof Android !== 'undefined' && Android.isGrokVoiceForbidden && Android.isGrokVoiceForbidden(token || '')) {
+                window.__tspGrokVoiceForbidden = true;
+                return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function noteGrokVoiceForbidden(token) {
+        if (window.__tspGrokVoiceForbidden) return;
+        window.__tspGrokVoiceForbidden = true;
+        const notice = (window.TSPGrokVoice && TSPGrokVoice.FORBIDDEN_NOTICE)
+            || 'Grok voice is available to service-company accounts; using device voice.';
+        if (typeof Android !== 'undefined' && Android.noteGrokVoiceForbidden) {
+            Android.noteGrokVoiceForbidden(token || '');
+            return;
+        }
+        if (typeof Android !== 'undefined' && Android.showToast) Android.showToast(notice);
+    }
+
     async function refreshGrokVoices() {
+        if (grokVoiceBlocked('')) return;
         if (!window.TSPGrokVoice || !GROK_TTS_URL) return;
         try {
             const { data: { session } } = await supabaseClient.auth.getSession();
             const token = session?.access_token || '';
-            if (!token) return;
+            if (!token || grokVoiceBlocked(token)) return;
             const resp = await fetch(GROK_TTS_URL, {
                 method: 'GET',
                 headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
             });
+            if (resp.status === 403) {
+                const denied = await resp.json().catch(() => null);
+                if (TSPGrokVoice.isRepairAiForbidden(403, denied)) noteGrokVoiceForbidden(token);
+                return;
+            }
             if (!resp.ok) return;
             const data = await resp.json();
             const list = TSPGrokVoice.parseVoiceList(data);
@@ -1479,13 +1508,15 @@
     }
 
     /**
-     * POST grok-tts. Returns 'played', 'limited' (device TTS + limit notice), or 'failed'.
+     * POST grok-tts. Returns 'played', 'limited' (device TTS + limit notice),
+     * 'forbidden' (one service-company notice, then device TTS, no retry), or 'failed'.
      * HTTP 400 and 413 text_too_long shorten the text and retry once.
      * HTTP 400 invalid_voice_id retries once with voice_id omitted.
      * HTTP 503 usage_unavailable is 'failed': device TTS, same as other non-audio errors.
      */
     async function playGrokTts(text, token, voiceId, gen, retried, omitVoice) {
         if (gen !== speechGen) return 'failed';
+        if (grokVoiceBlocked(token)) return 'forbidden';
         const voiceApi = window.TSPGrokVoice;
         const spoken = voiceApi ? voiceApi.clipSpeechText(text, voiceApi.MAX_TTS_CHARS) : text;
         const body = voiceApi
@@ -1515,6 +1546,10 @@
             return playAudioBlob(blob, gen);
         }
         const errBody = await readTtsError(resp);
+        if (voiceApi && voiceApi.isRepairAiForbidden(resp.status, errBody)) {
+            noteGrokVoiceForbidden(token);
+            return 'forbidden';
+        }
         if (voiceApi && voiceApi.isGrokVoiceLimit(resp.status, errBody)) {
             return 'limited';
         }
@@ -1546,13 +1581,18 @@
         }
         markSpeaking();
         const prefs = getAIPrefs();
-        if (prefs.zappVoiceEngine === 'device') {
+        if (prefs.zappVoiceEngine === 'device' || grokVoiceBlocked(token)) {
             speakWithDevice(spoken, gen);
             return;
         }
         const result = await playGrokTts(spoken, token, prefs.zappVoice, gen, false);
         if (gen !== speechGen) return;
         if (result === 'played') return;
+        if (result === 'forbidden') {
+            markSpeaking();
+            speakWithDevice(spoken, gen);
+            return;
+        }
         if (result === 'limited') {
             showToast('Grok voice limit reached today');
             markSpeaking();
