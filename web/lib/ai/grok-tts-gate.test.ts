@@ -86,7 +86,8 @@ test('one shared rule: grok-assistant re-exports it and it matches web/lib/roles
 
 test('grok-tts source: gate runs right after sign-in, before usage reads and xAI calls', () => {
   const auth = tts.indexOf('await supabaseAuth.auth.getUser()');
-  const gate = tts.indexOf('const gate = repairAiDecision(await loadAiCaller(db, uid))');
+  const gate = tts.indexOf('const gate = repairAiDecision(aiCaller)');
+  assert.ok(tts.indexOf('const aiCaller = await loadAiCaller(db, uid)') < gate);
   assert.ok(auth > 0 && gate > auth);
   assert.ok(gate < tts.indexOf("if (req.method === 'GET')"), 'voice list is gated too');
   assert.ok(gate < tts.indexOf('await countUsage('), 'before per-minute and daily cap reads');
