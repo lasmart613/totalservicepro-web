@@ -24,22 +24,31 @@ const tables: Record<string, Row[]> = {
     { id: 'noorg', organization_id: null },
     { id: 'removed', organization_id: 10 },
     { id: 'svcowner', organization_id: 10 },
+    { id: 'freecap', organization_id: 10 },
+    { id: 'premcap', organization_id: 40 },
   ],
   organization_memberships: [
     { user_id: 'tech', organization_id: 10, role: 'fse' },
     { user_id: 'clinic', organization_id: 20, role: 'owner' },
     { user_id: 'supplier', organization_id: 30, role: 'parts_supplier' },
     { user_id: 'svcowner', organization_id: 10, role: 'owner' },
+    { user_id: 'freecap', organization_id: 10, role: 'fse' },
+    { user_id: 'premcap', organization_id: 40, role: 'fse' },
   ],
   organizations: [
     { id: 10, type: 'service_company' },
     { id: 20, type: 'customer' },
     { id: 30, type: 'parts_supplier' },
+    // Company Premium: no per-user subscription, the org plan sets the cap.
+    { id: 40, type: 'service_company', is_premium: true, subscription_tier: 'premium', plan: 'premium' },
   ],
   subscriptions: [],
-  api_usage: [],
+  // 5 voice requests today each: the free daily cap (5) is used up, premium (50) is not.
+  api_usage: ['freecap', 'premcap'].flatMap((user_id) =>
+    Array.from({ length: 5 }, (_, i) => ({ id: `${user_id}-${i}`, user_id, request_type: 'grok_tts', created_at: new Date().toISOString() })),
+  ),
 }
-const tokens: Record<string, string> = { 'tok-tech': 'tech', 'tok-clinic': 'clinic', 'tok-supplier': 'supplier', 'tok-noorg': 'noorg', 'tok-removed': 'removed', 'tok-svcowner': 'svcowner' }
+const tokens: Record<string, string> = { 'tok-tech': 'tech', 'tok-clinic': 'clinic', 'tok-supplier': 'supplier', 'tok-noorg': 'noorg', 'tok-removed': 'removed', 'tok-svcowner': 'svcowner', 'tok-freecap': 'freecap', 'tok-premcap': 'premcap' }
 const reads: string[] = []
 let xaiCalls = 0
 
@@ -107,7 +116,8 @@ async function expectCase(name: string, token: string, method: 'GET' | 'POST', s
   try { data = JSON.parse(text) } catch { /* audio */ }
   const usageRead = reads.includes('api_usage')
   const denied = status !== 200
-  const ok = res.status === status && (!error || data?.error === error) && (!denied || (xaiCalls === before && !usageRead))
+  const gateDenied = status === 401 || status === 403
+  const ok = res.status === status && (!error || data?.error === error) && (!gateDenied || (xaiCalls === before && !usageRead)) && (!denied || xaiCalls === before)
   if (!ok) failed++
   console.log(`${ok ? 'PASS' : 'FAIL'} ${name}: ${res.status} ${data?.error ?? '(audio/ok)'} xai=${xaiCalls - before} usageRead=${usageRead}`)
 }
@@ -121,6 +131,8 @@ await expectCase('no org denied', 'tok-noorg', 'POST', 403, 'repair_ai_forbidden
 await expectCase('removed member (profile org kept, membership gone) denied', 'tok-removed', 'POST', 403, 'repair_ai_forbidden')
 // A service company's owner keeps Repair AI (clinic and supplier owners stay denied above).
 await expectCase('service-company owner speaks', 'tok-svcowner', 'POST', 200)
+await expectCase('free user in free service org at 5/day: daily cap 429', 'tok-freecap', 'POST', 429)
+await expectCase('free user in Premium service org at 5/day: org plan lifts cap to 50', 'tok-premcap', 'POST', 200)
 await expectCase('bad token still 401', 'tok-nobody', 'POST', 401)
 await expectCase('missing Authorization header 401', '', 'POST', 401)
 
