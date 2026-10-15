@@ -28,48 +28,17 @@
 
 import { normalizeManualPath } from './manual-scope.ts';
 
-import type { OrgPlanRow } from '../_shared/repair-ai.ts';
-
 // The caller gate lives in ../_shared/repair-ai.ts so grok-tts uses the same rule.
 export {
   canAccessRepairAi,
+  effectiveAiTier,
   loadAiCaller,
+  orgPlanTier,
   repairAiDecision,
   type AiAccessDecision,
   type AiCaller,
   type OrgPlanRow,
 } from '../_shared/repair-ai.ts';
-
-function norm(value: unknown): string {
-  return String(value || '').toLowerCase().trim();
-}
-
-const PAID = ['premium', 'team', 'enterprise'];
-const TOP = ['team', 'enterprise'];
-
-/** web/lib/org-plan.ts currentOrgPlan, gated by orgIsPaid (expired complimentary is free). */
-export function orgPlanTier(org: OrgPlanRow | null | undefined, now: Date = new Date()): 'free' | 'premium' | 'team' | 'enterprise' {
-  if (!org) return 'free';
-  const tier = norm(org.subscription_tier);
-  const plan = norm(org.plan);
-  const named = PAID.includes(tier) || PAID.includes(plan);
-  const until = org.premium_until ? Date.parse(String(org.premium_until)) : NaN;
-  const expired = Number.isFinite(until) && until <= now.getTime();
-  const paid = expired ? named : org.is_premium === true || named;
-  if (!paid) return 'free';
-  if (TOP.includes(tier)) return tier as 'team' | 'enterprise';
-  if (TOP.includes(plan)) return plan as 'team' | 'enterprise';
-  return 'premium';
-}
-
-const TIER_RANK: Record<string, number> = { free: 0, premium: 1, team: 2, enterprise: 3 };
-
-/** Higher of the user's own subscription tier and the org plan. */
-export function effectiveAiTier(userTier: string, org: OrgPlanRow | null | undefined, now: Date = new Date()): string {
-  const u = norm(userTier) || 'free';
-  const o = orgPlanTier(org, now);
-  return (TIER_RANK[o] ?? 0) > (TIER_RANK[u] ?? 0) ? o : u;
-}
 
 export function cleanStoragePath(input: unknown): string {
   return normalizeManualPath(input);

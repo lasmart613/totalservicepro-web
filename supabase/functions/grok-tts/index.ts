@@ -33,7 +33,7 @@ import {
   VOICES_REQUEST_TYPE,
   VOICES_REQUESTS_PER_MINUTE,
 } from './contract.ts'
-import { loadAiCaller, repairAiDecision } from '../_shared/repair-ai.ts'
+import { effectiveAiTier, loadAiCaller, repairAiDecision } from '../_shared/repair-ai.ts'
 
 const XAI_TTS_URL = 'https://api.x.ai/v1/tts'
 const XAI_VOICES_URL = 'https://api.x.ai/v1/tts/voices'
@@ -109,7 +109,8 @@ serve(async (req) => {
     const uid = user.id
 
     // Same Repair AI rule as grok-assistant: service-company members only.
-    const gate = repairAiDecision(await loadAiCaller(db, uid))
+    const aiCaller = await loadAiCaller(db, uid)
+    const gate = repairAiDecision(aiCaller)
     if (!gate.ok) return json(gate.status, { error: gate.error, message: gate.message })
     xaiKey = Deno.env.get('XAI_API_KEY') ?? ''
     if (!xaiKey) return json(500, { error: 'AI not configured' })
@@ -190,8 +191,11 @@ serve(async (req) => {
     const parsed = parseTtsBody(body)
     if (!parsed.ok) return json(parsed.error.status, parsed.error.body)
 
-    const { data: sub } = await db.from('subscriptions').select('tier,status,expires_at').eq('user_id', uid).single()
-    const tier = effectiveTier(sub as { tier?: string | null; status?: string | null; expires_at?: string | null } | null)
+    // .maybeSingle(): no subscriptions row is the free tier (no 406).
+    const { data: sub } = await db.from('subscriptions').select('tier,status,expires_at').eq('user_id', uid).maybeSingle()
+    const userTier = effectiveTier(sub as { tier?: string | null; status?: string | null; expires_at?: string | null } | null)
+    // Same as grok-assistant: the higher of the user's own tier and the org plan (company Premium).
+    const tier = effectiveAiTier(userTier, aiCaller.org)
     const limit = dailyVoiceLimit(tier)
     const today = new Date()
     today.setHours(0, 0, 0, 0)
