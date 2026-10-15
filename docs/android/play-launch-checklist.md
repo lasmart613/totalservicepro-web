@@ -1,6 +1,6 @@
 # Total Service Pro — Google Play launch checklist
 
-Android package `com.photometrytools`. This build is `versionName` **0.5.2-beta**, `versionCode` **44**, `targetSdk` **36**. Web `APP_VERSION` stays **0.5.0-beta**. Nothing in this file is a Play Console upload.
+Android package `com.photometrytools`. This build is `versionName` **0.5.3-beta**, `versionCode` **45**, `targetSdk` **36**. Web `APP_VERSION` stays **0.5.0-beta**. Nothing in this file is a Play Console upload.
 
 Policy pages checked 11 Oct 2026:
 
@@ -40,7 +40,7 @@ What you can do:
 
 Google sign-in opens in the browser, then returns to the app. Maps links open the Maps app. The microphone is used only when you start voice mode.
 
-This is a beta (0.5.2-beta).
+This is a beta (0.5.3-beta).
 ```
 
 Do not paste the old README claims about AdMob or bundled Candela manuals. The current manifest has no ads SDK, and the manual library is the live catalog.
@@ -65,8 +65,8 @@ Answer the form from what the app actually does. "Collected" means it leaves the
 | Name, email, phone, job title | Yes | Supabase (account and profile) | Account and team | Required to use the signed-in product |
 | Organization, customers, tickets, estimates, invoices, reports | Yes | Supabase | The service workflow | Created by the user |
 | Auth session (access and refresh token) | Yes, stored on device | Sent back to Supabase and repairplanet.net as Bearer | Stay signed in | Required |
-| Photos / files picked in the page | Yes, when the user submits one | Supabase Storage (logos and similar uploads) | Company logo and page file inputs. A picture taken with the system camera stays on the device until that submit | User chooses the file |
-| Camera | Not a declared permission. Do not declare `CAMERA` or business-card OCR | The system camera app (`ACTION_IMAGE_CAPTURE`) is offered beside the gallery when a file input accepts images. This app has no camera API and no OCR | Attach a photo the user chose to take | User initiated |
+| Photos / files picked in the page | Yes, when the user submits one | Supabase Storage (logos and similar uploads) | Company logo and page file inputs. A picture taken for a form stays on the device until that submit. A business-card scan is recognized on-device and that image is not uploaded | User chooses the file |
+| Camera / card scan | Not a declared permission. OCR runs on-device. The card image is not uploaded | The system camera app (`ACTION_IMAGE_CAPTURE`) takes the photo. ML Kit's bundled text model reads it on the device, then the image is deleted. Confirmed contact fields are saved to Supabase only after the user taps Save | Scan a business card into customer fields, or attach a photo the user chose to take | User initiated |
 | Microphone / voice | Yes when voice mode is on | On-device speech recognition. The transcript is sent to the assistant. Grok voice sends the answer **text** to Supabase `grok-tts`, which calls xAI. The raw mic audio is not uploaded for Grok. | Read an answer aloud and dictate a question | User starts voice mode |
 | Audio playback | The spoken answer is fetched as audio from `grok-tts` | xAI generates that audio on the server | Playback | Only in Grok voice mode |
 | Approximate or precise location | No location permission | A typed address can open `geo:` or Google Maps. The app does not read GPS. | Open a ticket address | User taps the address |
@@ -103,7 +103,7 @@ From the source manifest, plus permissions the Play Billing library merges:
 | `com.android.vending.BILLING` | Yes (financial) | Merged from the Billing library. Subscriptions |
 | `com.photometrytools.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | No | AndroidX library signature permission |
 
-`CAMERA` is not declared. Photo capture uses the system camera app through `ACTION_IMAGE_CAPTURE` and `FileProvider`. The image leaves the device only when the user submits the form. There is no business-card OCR in this app. Do not declare OCR or `CAMERA` on the Data safety form.
+`CAMERA` is not declared. Photo capture uses the system camera app through `ACTION_IMAGE_CAPTURE` and `FileProvider`. Business-card OCR runs on-device with ML Kit's bundled text model (`com.google.mlkit:text-recognition`). The card image is not uploaded; it is deleted after recognition. Confirmed fields are written to Supabase only after the user taps Save. Do not declare the `CAMERA` permission. On the Data safety form, describe card-scan images as processed on-device and not collected. Fields the user saves are the customer data already declared above.
 
 `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` are not declared. Biometric login uses the system biometric prompt and does not add a permission of its own.
 
