@@ -119,8 +119,8 @@ await expectCase('clinic owner voice list denied', 'tok-clinic', 'GET', 403, 're
 await expectCase('parts supplier denied', 'tok-supplier', 'POST', 403, 'repair_ai_forbidden')
 await expectCase('no org denied', 'tok-noorg', 'POST', 403, 'repair_ai_forbidden')
 await expectCase('removed member (profile org kept, membership gone) denied', 'tok-removed', 'POST', 403, 'repair_ai_forbidden')
-// Same as web/lib/roles.ts canAccessRepairAi: role 'owner' is owner-side even in a service org.
-await expectCase('service-company member with role owner denied (matches web)', 'tok-svcowner', 'POST', 403, 'repair_ai_forbidden')
+// A service company's owner keeps Repair AI (clinic and supplier owners stay denied above).
+await expectCase('service-company owner speaks', 'tok-svcowner', 'POST', 200)
 await expectCase('bad token still 401', 'tok-nobody', 'POST', 401)
 await expectCase('missing Authorization header 401', '', 'POST', 401)
 

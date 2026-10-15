@@ -40,11 +40,13 @@ const db = fakeDb({
     { id: 'supplier', organization_id: 30 },
     { id: 'noorg', organization_id: null },
     { id: 'removed', organization_id: 10 },
+    { id: 'svcowner', organization_id: 10 },
   ],
   organization_memberships: [
     { user_id: 'tech', organization_id: 10, role: 'fse' },
     { user_id: 'clinic', organization_id: 20, role: 'owner' },
     { user_id: 'supplier', organization_id: 30, role: 'parts_supplier' },
+    { user_id: 'svcowner', organization_id: 10, role: 'owner' },
   ],
   organizations: [
     { id: 10, type: 'service_company' },
@@ -55,6 +57,7 @@ const db = fakeDb({
 
 test('grok-tts gate: service-company member allowed; clinic, supplier, no org, removed member denied', async () => {
   assert.deepEqual(repairAiDecision(await loadAiCaller(db, 'tech')), { ok: true });
+  assert.deepEqual(repairAiDecision(await loadAiCaller(db, 'svcowner')), { ok: true });
   for (const uid of ['clinic', 'supplier', 'noorg', 'removed']) {
     const d = repairAiDecision(await loadAiCaller(db, uid));
     assert.equal(d.ok, false, uid);
@@ -65,10 +68,10 @@ test('grok-tts gate: service-company member allowed; clinic, supplier, no org, r
   }
 });
 
-test('role owner: denied in every org type, same as the web gate (no service-company owners exist on prod)', () => {
-  for (const t of ['service_company', 'customer', 'laser_clinic', 'parts_supplier']) {
-    assert.equal(canAccessRepairAi('owner', t), false, t);
-    assert.equal(webCanAccessRepairAi('owner', t), false, t);
+test('role owner: allowed for service companies, denied for clinic, rental, reseller and supplier orgs (web agrees)', () => {
+  for (const [t, want] of [['service_company', true], ['service', true], ['customer', false], ['laser_clinic', false], ['laser_rental', false], ['laser_reseller', false], ['parts_supplier', false], ['vendor', false], [null, false]] as const) {
+    assert.equal(canAccessRepairAi('owner', t), want, String(t));
+    assert.equal(webCanAccessRepairAi('owner', t), want, String(t));
   }
 });
 
