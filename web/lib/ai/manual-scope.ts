@@ -645,14 +645,43 @@ function pageHasQueryFaultCode(hay: string, code: string): number {
   const text = String(hay || '').toLowerCase();
   const lettered = /[a-z]/i.test(token);
   const short = !lettered && !token.includes('.') && token.replace(/\D/g, '').length < 3;
+  const table = short && FAULT_TABLE_RE.test(text);
   for (const match of text.matchAll(re)) {
     const at = match.index ?? 0;
     if (!lettered && gluedManualNumber(text, token, at)) continue;
     if (!short) return at;
+    const after = text.slice(at + token.length, at + token.length + 40);
+    // "13 ERROR CODES AND WARNINGS" is the chapter heading that names the table, not row 13.
+    if (/^\s*(?:errors?|faults?|alarms?)\s+(?:codes?|messages?|lists?|and\b|&)/.test(after)) continue;
     const window = text.slice(Math.max(0, at - 40), at + token.length + 24);
     if (/\b(?:faults?|errors?|alarms?)\b/i.test(window)) return at;
+    // A row of a fault table on this page: "13 Temperature too low ...".
+    if (table && faultTableRow(text, at, after)) return at;
   }
   return -1;
+}
+
+/** The code on this page is only a bare table row ("13 Temperature too low"), not "Error 13". */
+function faultCodeOnlyAsRow(hay: string, at: number, code: string): boolean {
+  const token = String(code || '').toLowerCase();
+  if (/[a-z.]/.test(token) || token.replace(/\D/g, '').length >= 3) return false;
+  const window = hay.slice(Math.max(0, at - 40), at + token.length + 24);
+  return !/\b(?:faults?|errors?|alarms?)\b/i.test(window);
+}
+
+/** A fault/error table on this page ("No. Error message Cause Remedy", "Error Code List"). */
+const FAULT_TABLE_RE =
+  /\b(?:no\.?|code)\s+(?:error|fault|alarm)\s+(?:message|description|name|text)|\b(?:error|fault|alarm)\s+(?:codes?|messages?|lists?)\b/i;
+
+/** The number starts a table row: a word follows, and it is not a value, a unit, or a page. */
+function faultTableRow(text: string, at: number, after: string): boolean {
+  const word = /^\s([a-z][a-z-]{2,})\b/.exec(after);
+  if (!word) return false;
+  if (HEADING_UNITS.has(word[1]) || /^(?:seconds?|minutes?|hours?|days?|times|pulses?|shots?)$/.test(word[1])) return false;
+  const pre = text.slice(Math.max(0, at - 16), at);
+  // "1.5 13 20" is a column of values, not a row start.
+  if (/\d[.,]?\s?$/.test(pre)) return false;
+  return !/(?:[:=~±<>/-]|\b(?:to|of|than|page|pages|p\.|up|max\.?|min\.?))\s*$/.test(pre);
 }
 
 const CHAPTER_LANG_CODES: Record<string, string> = {
@@ -832,19 +861,22 @@ export function excerptFaultCodeAnchor(
   if (!codes.length) return -1;
   const aboutParts = queryAboutParts(query);
   const aboutDiagram = queryAboutDiagram(query);
-  const hits: Array<{ at: number; score: number; parts: boolean; diagram: boolean }> = [];
+  const hits: Array<{ at: number; row: boolean; score: number; parts: boolean; diagram: boolean }> = [];
   for (const span of spans) {
     const page = hay.slice(span.start, span.end);
     let at = -1;
+    let row = false;
     for (const code of codes) {
       const hit = pageHasQueryFaultCode(page, code);
       if (hit < 0) continue;
       at = span.start + hit;
+      row = faultCodeOnlyAsRow(page.toLowerCase(), hit, code);
       break;
     }
     if (at < 0) continue;
     hits.push({
       at,
+      row,
       score: scoreByStart.get(span.start) ?? 0,
       parts: isSparePartsPage(page),
       diagram: isDiagramOrSchematicPage(page),
@@ -854,7 +886,9 @@ export function excerptFaultCodeAnchor(
   let pool = hits;
   if (!aboutParts && pool.some((hit) => !hit.parts)) pool = pool.filter((hit) => !hit.parts);
   if (!aboutDiagram && pool.some((hit) => !hit.diagram)) pool = pool.filter((hit) => !hit.diagram);
-  pool.sort((a, b) => b.score - a.score || b.at - a.at);
+  // Equal scores prefer the later page, except two bare table rows: the main
+  // fault table comes before a later sub-error table that reuses the number.
+  pool.sort((a, b) => b.score - a.score || (a.row && b.row ? a.at - b.at : b.at - a.at));
   return pool[0].at;
 }
 
@@ -1068,11 +1102,39 @@ const HEADING_UNITS = new Set([
   'ma', 'kw', 'in', 'ft', 'joule', 'joules', 'watt', 'watts', 'volt', 'volts', 'amp', 'amps',
 ]);
 
+/** A unit after a number ("12.7 J/cm", "120 Vdc", "15 mJ") marks a value, not a heading. */
+const HEADING_UNIT_RE =
+  /^(?:[kmµun]?(?:j|w|v|a|hz|s|g|l)|°[cf]?|%|psi|bar|[km]?pa|rpm|vac|vdc|ohms?|lpm|ppm|db)(?:\/[a-z0-9²³]+)*$/i;
+
+/** First ~100 characters of a page, without the [[pdfpage:N]] stamp. */
+function pageHeadText(page: string): string {
+  return page.replace(/\[\[pdfpage:\d+\]\]/g, ' ').trim().slice(0, 100);
+}
+
+function headHasNumber(head: string, n: number): boolean {
+  if (!head || n < 0) return false;
+  return new RegExp(`(?:^|\\s)${n}(?:\\s|$)`).test(head);
+}
+
+/** Printed page numbers on this page: "Page 63 of 78", "Page 1 / 9", "p. 12". */
+function printedPageNumbers(page: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of page.matchAll(/\b(?:page|p\.)\s*(\d{1,4})(?:\s*(?:of|\/)\s*(\d{1,4}))?/gi)) {
+    out.add(String(Number(m[1])));
+    if (m[2]) out.add(String(Number(m[2])));
+  }
+  return out;
+}
+
 /**
  * Section label on the physical page that owns `anchor`.
  * Accepts a numbered heading ("13 Preventative", "5.5.4 Error Codes", "Section 8.4")
  * and a chapter heading that is not a see-also. Drops list items ("6)"), units
  * ("2 Hz"), part numbers ("7122-00-…"), and "see Chapter 26".
+ * "6.1. Error Message List" (trailing dot) is a heading. A bare number that is
+ * this page's physical or printed page ("SM LITHO 85", "Page 63 of 78"), a
+ * value next to a unit or after "up to" ("12.7 J/cm"), and a number before a
+ * code-like token ("83 CJ11") are not.
  * No label when nothing on this page looks like a heading.
  */
 export function sectionHeadingOnPage(raw: string, anchor: number): string | undefined {
@@ -1082,23 +1144,55 @@ export function sectionHeadingOnPage(raw: string, anchor: number): string | unde
   const start = startBound < 0 ? 0 : startBound + 1;
   const endBound = text.indexOf('\f', anchor);
   const end = endBound < 0 ? text.length : endBound;
-  const page = text.slice(start, end).replace(/\[\[pdfpage:\d+\]\]/g, ' ');
+  const rawPage = text.slice(start, end);
+  const stamp = /\[\[pdfpage:(\d{1,4})\]\]/.exec(rawPage);
+  const page = rawPage.replace(/\[\[pdfpage:\d+\]\]/g, ' ');
   const local = Math.max(0, anchor - start);
+  const pageNumbers = printedPageNumbers(page);
+  if (stamp) pageNumbers.add(String(Number(stamp[1])));
+  // A running page number near the top: the page before starts with N-1 or the
+  // page after starts with N+1 ("Instructions for Use 52", datasheet "1 ... 2").
+  const prevStart = start > 0 ? text.lastIndexOf('\f', Math.max(0, start - 2)) + 1 : -1;
+  const prevHead = prevStart >= 0 ? pageHeadText(text.slice(prevStart, start)) : '';
+  const nextHead = endBound < 0 ? '' : pageHeadText(text.slice(endBound + 1, endBound + 400));
+  const runningNumber = (n: number, at: number): boolean =>
+    at < 100 &&
+    (headHasNumber(prevHead, n - 1) || headHasNumber(nextHead, n + 1));
   type Hit = { at: number; label: string; chapter: boolean };
   const hits: Hit[] = [];
-  const numRe = /(?:^|\s)(\d{1,2}(?:\.\d{1,2}){0,3})([ \t]+)([A-Za-z][A-Za-z0-9/+-]*)/g;
+  const numRe = /(?:^|\s)(\d{1,2}(?:\.\d{1,2}){0,3})(\.?)([ \t]+)([A-Za-z][A-Za-z0-9/+-]*)/g;
   for (const match of page.matchAll(numRe)) {
     const num = match[1];
-    const gap = match[2];
-    const word = match[3];
+    const gap = match[3];
+    const word = match[4];
     // "43   Power" is a table column. A heading uses a single space.
     if (gap.length !== 1) continue;
-    if (word.length < 3 || HEADING_UNITS.has(word.toLowerCase())) continue;
+    if (word.length < 3 || HEADING_UNITS.has(word.toLowerCase()) || HEADING_UNIT_RE.test(word)) continue;
     if (!/^[A-Z]/.test(word)) continue;
+    const integer = !num.includes('.');
+    // "1. Attach the regulator" is a list step. "6. Spare Part ..." and
+    // "11. TROUBLESHOOTING" are headings: all caps or Title Case.
+    if (integer && match[2] === '.') {
+      const rest = page.slice((match.index ?? 0) + match[0].length, (match.index ?? 0) + match[0].length + 40);
+      const nextWord = /^\s+([A-Za-z][A-Za-z-]*)/.exec(rest)?.[1] || '';
+      const titled = /^[A-Z]/.test(nextWord);
+      if (!/^[A-Z]{3,}$/.test(word) && !titled) continue;
+    }
+    // "83 CJ11": a page number in front of a connector or part label.
+    if (integer && /\d/.test(word)) continue;
+    // "SM LITHO 85", "Page 63 of 78": the page number, not a section.
+    if (integer && pageNumbers.has(String(Number(num)))) continue;
     const at = (match.index ?? 0) + match[0].indexOf(num);
+    if (integer && runningNumber(Number(num), at)) continue;
     const pre = page.slice(Math.max(0, at - 24), at);
     if (/\b(?:pages?|pp?\.|p[áa]gina|seite)\s*$/i.test(pre)) continue;
-    if (/\b(?:faults?|errors?|alarms?)\b/i.test(pre)) continue;
+    // "Error 13 Temperature" is a code. "Error Code List 6.1. Error" ends a heading.
+    if (/\b(?:faults?|errors?|alarms?|m-code)(?:\s+(?:codes?|no\.?|number))?\s*[:#]?\s*(?:[a-z]?\d+(?:\.\d+)?\s*)?$/i.test(pre)) continue;
+    // "J/cm 2 Pulse": the superscript of a unit, not a heading.
+    const prevWord = /(\S+)\s*$/.exec(pre)?.[1] || '';
+    if (prevWord && (HEADING_UNITS.has(prevWord.toLowerCase()) || HEADING_UNIT_RE.test(prevWord) || /\/[a-z]+$/i.test(prevWord))) continue;
+    // A value ("up to 12.7", "max: 15", "of 78") or a figure/step number.
+    if (/(?:[:=~±<>]|\b(?:to|of|than|about|approx\.?|max\.?|min\.?|step|fig(?:ure)?\.?|table|item|no\.?))\s*$/i.test(pre)) continue;
     hits.push({ at, label: num, chapter: false });
   }
   const keyRe = /\b(section|sect\.?|chapter|ch\.)\s*(\d{1,2}(?:\.\d{1,2}){0,3})\b/gi;
