@@ -18,6 +18,7 @@ Deno.env.set('XAI_API_KEY', 'xai-test')
 type Row = Record<string, unknown>
 const SHARED = 'shared/Candela/GentleMAX Pro/GentleMAX Pro Service Manual.pdf'
 const PRIVATE_20 = 'orgs/20/private/Clinic Notes.pdf'
+const UNPUBLISHED = 'shared/quanta-system/litho-evo/DGM001435.pdf'
 const tables: Record<string, Row[]> = {
   user_profiles: [
     { id: 'tech', organization_id: 10, role: 'fse' },
@@ -42,6 +43,7 @@ const tables: Record<string, Row[]> = {
   manuals: [
     { id: 1086, title: 'GentleMAX Pro Service Manual', brand: 'Candela', model: 'GentleMAX Pro', storage_path: SHARED, published: true, is_folder: false },
     { id: 2001, title: 'Clinic Notes', brand: 'Candela', model: 'GentleMAX Pro', storage_path: PRIVATE_20, published: true, is_folder: false },
+    { id: 764, title: 'Litho EVO', brand: 'Quanta System', model: 'Litho EVO', storage_path: UNPUBLISHED, published: false, is_folder: false },
   ],
   manual_search_index: [
     { manual_id: 1086, chunk_index: 0, search_text: '[[page 12]] Lamp housing torque 4 Nm. Fault 1020 means handpiece temperature.' },
@@ -99,6 +101,12 @@ globalThis.fetch = (async (input: Request | URL | string, init?: RequestInit) =>
       modelCalls++
       const body = JSON.parse(String(init?.body || '{}'))
       lastSystem = String(body.messages?.[0]?.content || '')
+      const asked = JSON.stringify(body.messages?.slice(-1) || '')
+      if (/Bluetooth/.test(asked)) {
+        return json({ choices: [{ message: { role: 'assistant', content:
+          'The retrieved passages from the GentleMAX Pro Service Manual contain no Bluetooth pairing PIN.\n\n' +
+          '— Source: Candela GentleMAX Pro, p. 12, §8.2\n[[cite:id=1086&p=12&s=8.2&t=GentleMAX]]' } }] })
+      }
       return json({ choices: [{ message: { role: 'assistant', content: 'Torque the lamp housing to 4 Nm (page 12).' } }] })
     }
     if (url.pathname.endsWith('/documents/search')) return json({ matches: [] })
@@ -165,6 +173,27 @@ const ok = await expectCase('service member, shared catalog manual', 'tok-tech',
 )
 if (!ok.indexRead || !/Lamp housing torque 4 Nm/.test(lastSystem)) { failed++; console.log('FAIL shared manual: index text not in prompt') }
 await expectCase('service member, unscoped question', 'tok-tech', chat(), 200)
+// QA lows (d): no silent unscoped run for these.
+for (const [name, body] of [
+  ['unpublished manual id', { ...chat(764), manualPath: UNPUBLISHED }],
+  ['unpublished manual id only', chat(764)],
+  ['non-shared path, no id', { ...chat(), manualPath: 'org/2655/uploads/manual.pdf' }],
+] as Array<[string, Record<string, unknown>]>) {
+  const r = await expectCase(`service member, ${name}`, 'tok-tech', body, 403, (d) => d.error === 'manual_not_accessible')
+  if (r.indexRead || r.model) { failed++; console.log(`FAIL ${name}: index or model was reached`) }
+}
+await expectCase('service member, shared path with no id still answers', 'tok-tech', { ...chat(), manualPath: SHARED }, 200)
+// QA lows (b): a refusal attaches no chip.
+await expectCase(
+  'service member, refusal carries no chip',
+  'tok-tech',
+  { ...chat(1086), messages: [{ role: 'user', content: 'What is the Bluetooth pairing PIN?' }] },
+  200,
+  (d) => {
+    const c = d.choices?.[0]?.message?.content || ''
+    return /contain no Bluetooth/.test(c) && !/\[\[cite:/.test(c) && !/Source:/.test(c) && !(d._meta?.citations || []).length
+  }
+)
 await expectCase('service member, usage uses company Premium cap', 'tok-tech', { action: 'usage' }, 200, (d) =>
   d.text?.limit === 50 && d.tier === 'premium'
 )
