@@ -21,6 +21,7 @@ import {
   loadAiCaller,
   loadOwnedManuals,
   manualScopeAllowed,
+  requestedManualDecision,
   repairAiDecision,
   type AiCaller,
 } from './ai-access.ts'
@@ -56,6 +57,7 @@ import {
   passageOwnedBySelected,
   alignReplyToCitationPage,
   answerDeclinesManualCitation,
+  stripRefusalCitations,
   reconcilePhysicalPage,
   rememberManualIndex,
   resolveQuotedCitationPage,
@@ -2378,8 +2380,6 @@ serve(async (req) => {
         }
         if (hideUnpublished) {
           manualMeta = null
-          rawPath = ''
-          rawId = null
         }
         if (manualMeta) {
           if (!manualMeta.model && hintedModel) manualMeta.model = hintedModel
@@ -2395,13 +2395,22 @@ serve(async (req) => {
       // A selected manual must be in the caller's library (organization_manuals /
       // user_manuals) or the shared catalog, as in get-manual-url, before the
       // index is read or any PDF is attached.
-      if (manualMeta) {
+      // An unpublished id or a non-shared path that is not in the library is refused
+      // (403) rather than answered with no manual.
+      if (manualMeta || hideUnpublished || normalizeManualPath(rawPath)) {
         const owned = await loadOwnedManuals(db, uid, aiCaller?.orgId ?? null)
-        if (!manualScopeAllowed({ manualId: manualMeta.id ?? rawId, storagePath: manualMeta.storage_path || rawPath, owned }))
-          return new Response(
-            JSON.stringify({ error: 'manual_not_accessible', message: 'This manual is not in your library.' }),
-            { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          )
+        const scope = requestedManualDecision({
+          unpublished: hideUnpublished,
+          manualId: manualMeta ? manualMeta.id ?? rawId : rawId,
+          storagePath: manualMeta ? manualMeta.storage_path || rawPath : rawPath,
+          resolved: !!manualMeta,
+          owned,
+        })
+        if (!scope.ok)
+          return new Response(JSON.stringify({ error: scope.error, message: scope.message }), {
+            status: scope.status,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          })
       }
 
       const nonSys = messages.filter((m: any) => m.role !== 'system')
@@ -2698,7 +2707,7 @@ serve(async (req) => {
         if (answerDeclinesManualCitation(replyText)) {
           manualCitations = []
           citationLine = ''
-          return { text: replyText, declined: true }
+          return { text: stripRefusalCitations(replyText), declined: true }
         }
         const scopedId = asManualId(manualMeta?.id)
         const chip = manualCitations.find((c) => c.page && (scopedId == null || c.manualId === scopedId))
@@ -2710,7 +2719,7 @@ serve(async (req) => {
         if (answerDeclinesManualCitation(aligned)) {
           manualCitations = []
           citationLine = ''
-          return { text: aligned, declined: true }
+          return { text: stripRefusalCitations(aligned), declined: true }
         }
         return { text: aligned, declined: false }
       }

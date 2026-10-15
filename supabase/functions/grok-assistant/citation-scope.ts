@@ -146,7 +146,14 @@ const CLEAR_MANUAL_REFUSAL =
   /\b(?:do not|does not|don't|doesn't|cannot|can't|could not|couldn't)\s+(?:contain|include|list|provide|mention|show)\b/i
 const SUBJECT_MANUAL_REFUSAL =
   /\b(?:passages|sections|manuals?)\b[^.]{0,80}\b(?:do not|does not|don't|doesn't|cannot|can't)\s+(?:contain|include|list|provide|mention|describe|define|show)\b/i
-const NO_MANUAL_INFO = /\b(?:no|not any)\s+(?:information|reference|mention|description|details)\b/i
+const NO_MANUAL_INFO =
+  /\b(?:no|not any)\s+(?:information|references?|mentions?|description|details|data|(?:\w+\s+)?(?:specifications?|values?|settings?))\b/i
+/** "The retrieved passages ... contain no torque specifications" (q25). */
+const SUBJECT_CONTAINS_NO =
+  /\b(?:passages|sections|manuals?|content|text|pages?)\b[^.]{0,80}\b(?:contains?|includes?|lists?|provides?|gives?|mentions?|has|have)\s+no\b/i
+/** "... is not mentioned or documented anywhere in the provided sections" (q05). */
+const NOT_DOCUMENTED_IN =
+  /\bnot\s+(?:mentioned|documented|specified|covered|stated|given|listed|found|provided|included|described)\b[^.]{0,60}\b(?:in|within)\s+(?:the\s+|any\s+(?:of\s+the\s+)?)?(?:provided\s+|retrieved\s+|selected\s+|indexed\s+)?(?:passages|sections|manual|content|text|pages?|pdf)\b/i
 const NOT_IN_MANUAL =
   /\bnot (?:in the (?:retrieved |provided |selected )?passages|in the (?:selected |provided |operator |service )?manual)\b/i
 /** "not described" / "not listed" only count when the reply never gives a value or a step. */
@@ -180,6 +187,8 @@ function clearManualRefusal(sentence: string): boolean {
   return (
     CLEAR_MANUAL_REFUSAL.test(sentence) ||
     SUBJECT_MANUAL_REFUSAL.test(sentence) ||
+    SUBJECT_CONTAINS_NO.test(sentence) ||
+    NOT_DOCUMENTED_IN.test(sentence) ||
     NO_MANUAL_INFO.test(sentence) ||
     NOT_IN_MANUAL.test(sentence)
   )
@@ -201,6 +210,18 @@ export function answerDeclinesManualCitation(text: string): boolean {
   if (clearManualRefusal(first)) return true
   if (!hasSpecificValueOrStep(raw) && (clearManualRefusal(raw) || LOOSE_NOT_STATED.test(raw))) return true
   return false
+}
+
+/**
+ * A refusal carries no chip: drop [[cite:...]] markers and any "— Source: …" footer
+ * the model wrote itself (q25 ended with "— Source: …, p. 71, §4.2 [[cite:…]]").
+ */
+export function stripRefusalCitations(text: string): string {
+  return String(text || '')
+    .replace(/\[\[cite:[^\]]*\]\]/g, '')
+    .replace(/^[ \t]*(?:—|--|-)\s*Sources?:.*$/gim, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 /**

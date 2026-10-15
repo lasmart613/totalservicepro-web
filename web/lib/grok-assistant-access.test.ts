@@ -162,10 +162,13 @@ test('index.ts: gate runs right after auth, before subscriptions, manuals, index
 
 test('index.ts: manual scope check precedes PDF attach paths and the indexed text read', () => {
   const chat = src.slice(src.indexOf("if (body.action === 'chat') {"));
-  const scope = chat.indexOf('if (!manualScopeAllowed(');
+  const scope = chat.indexOf('const scope = requestedManualDecision(');
   const attach = chat.indexOf('await pdfPathsForChat(db, manualMeta)');
   const index = chat.indexOf('searchIndexedManualText(db, manualMeta.id');
   const citation = chat.indexOf('await citationScopeForChat(db');
   assert.ok(scope > 0 && scope < attach && scope < index && scope < citation);
-  assert.match(chat.slice(scope - 400, scope), /if \(manualMeta\) \{\s+const owned = await loadOwnedManuals\(db, uid, aiCaller\?\.orgId \?\? null\)/);
+  assert.match(
+    chat.slice(scope - 400, scope),
+    /if \(manualMeta \|\| hideUnpublished \|\| normalizeManualPath\(rawPath\)\) \{\s+const owned = await loadOwnedManuals\(db, uid, aiCaller\?\.orgId \?\? null\)/
+  );
 });
