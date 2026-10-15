@@ -209,3 +209,43 @@ export async function loadOwnedManuals(db: Db, userId: string, orgId: number | s
   await pull('user_manuals', 'user_id', userId);
   return out;
 }
+
+export type RequestedManualDecision =
+  | { ok: true }
+  | { ok: false; status: 403; error: 'manual_not_accessible'; message: string }
+
+/** A path, not a free-text alias: has a folder separator or ends in .pdf. */
+function looksLikeStoragePath(path: string): boolean {
+  return path.includes('/') || /\.pdf$/i.test(path)
+}
+
+/**
+ * Whether the requested manual may be used, before the index or any PDF is read.
+ * - An unpublished manual (by id or path) is refused, not answered unscoped.
+ * - A resolved manual must be owned (org or user library) or in the shared catalog.
+ * - A non-shared storage path that did not resolve to a manual must be in the
+ *   caller's library; otherwise refuse instead of running with no manual.
+ */
+export function requestedManualDecision(input: {
+  unpublished: boolean
+  manualId: unknown
+  storagePath: unknown
+  resolved: boolean
+  owned: OwnedManual[]
+}): RequestedManualDecision {
+  const deny: RequestedManualDecision = {
+    ok: false,
+    status: 403,
+    error: 'manual_not_accessible',
+    message: 'This manual is not in your library.',
+  }
+  if (input.unpublished) return deny
+  const path = cleanStoragePath(input.storagePath)
+  if (input.resolved) {
+    return manualScopeAllowed({ manualId: input.manualId, storagePath: path, owned: input.owned }) ? { ok: true } : deny
+  }
+  if (!path || !looksLikeStoragePath(path)) return { ok: true }
+  if (isSharedCatalogPath(path)) return { ok: true }
+  if (input.owned.some((o) => pathAllowed(o.storage_path, path))) return { ok: true }
+  return deny
+}
