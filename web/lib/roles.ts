@@ -146,6 +146,8 @@ export function canAccessManualsPage(role?: RoleLike, orgType?: OrgTypeLike): bo
  * Service Company only — Laser Owners and Parts Suppliers do not get this tile/route.
  */
 export function canAccessRepairAi(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  // A service company's owner keeps Repair AI; clinic/rental/reseller and supplier owners do not.
+  if (normalizeRole(role) === 'owner' && isServiceOrgType(orgType)) return true;
   return isServiceCompany(role, orgType);
 }
 

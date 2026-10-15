@@ -36,10 +36,12 @@ function norm(value: unknown): string {
   return String(value || '').toLowerCase().trim();
 }
 
-/** Exact copy of web/lib/roles.ts canAccessRepairAi (isServiceCompany). */
+/** Exact copy of web/lib/roles.ts canAccessRepairAi. */
 export function canAccessRepairAi(role?: string | null, orgType?: string | null): boolean {
   const r = norm(role);
   const t = norm(orgType);
+  // A service company's owner keeps Repair AI; clinic/rental/reseller and supplier owners do not.
+  if (r === 'owner' && (t === 'service_company' || t === 'service')) return true;
   const ownerish = r === 'owner' || r === 'customer' || OWNER_ORG_TYPES.includes(t);
   const supplier = r === 'parts_supplier' || r === 'supplier' || SUPPLIER_ORG_TYPES.includes(t);
   if (ownerish || supplier) return false;

@@ -133,9 +133,11 @@ test('clinic owner, supplier, no-org and stale-profile callers get 403; a servic
   assert.equal(effectiveAiTier('free', tech.org), 'premium', 'company Premium lifts the free cap');
 });
 
-test('the role comes from the membership, so an "owner" role in a service company stays out (web rule)', async () => {
-  assert.equal(repairAiDecision(await loadAiCaller(db, 'shopowner')).ok, false);
-  assert.equal(webCanAccessRepairAi('owner', 'service_company'), false);
+test('a service company owner (membership role "owner") keeps Repair AI, same as the web rule', async () => {
+  assert.deepEqual(repairAiDecision(await loadAiCaller(db, 'shopowner')), { ok: true });
+  assert.equal(webCanAccessRepairAi('owner', 'service_company'), true);
+  assert.equal(webCanAccessRepairAi('owner', 'laser_clinic'), false);
+  assert.equal(webCanAccessRepairAi('owner', 'parts_supplier'), false);
 });
 
 test('manual scope: own library by id or covering path, or shared catalog; nothing else', async () => {
