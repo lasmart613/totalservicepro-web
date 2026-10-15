@@ -282,14 +282,46 @@
         sel.value = voices.some(function (v) { return v.id === current; }) ? current : voices[0].id;
     }
 
+    function grokVoiceBlocked(token) {
+        if (window.__tspGrokVoiceForbidden) return true;
+        try {
+            if (window.Android && Android.isGrokVoiceForbidden && Android.isGrokVoiceForbidden(token || '')) {
+                window.__tspGrokVoiceForbidden = true;
+                return true;
+            }
+        } catch (e) {}
+        return false;
+    }
+
+    function noteGrokVoiceForbidden(token) {
+        if (window.__tspGrokVoiceForbidden) return;
+        window.__tspGrokVoiceForbidden = true;
+        var notice = (window.TSPGrokVoice && TSPGrokVoice.FORBIDDEN_NOTICE)
+            || 'Grok voice is available to service-company accounts; using device voice.';
+        if (window.Android && Android.noteGrokVoiceForbidden) {
+            Android.noteGrokVoiceForbidden(token || '');
+            return;
+        }
+        if (window.Android && Android.showToast) Android.showToast(notice);
+    }
+
     function refreshVoiceLabels() {
+        if (grokVoiceBlocked('')) return;
         var orig = window.__tspOrigFetch || window.fetch;
         var token = readToken();
-        if (!orig || !token) return;
+        if (!orig || !token || grokVoiceBlocked(token)) return;
         orig(ttsUrl(), {
             method: 'GET',
             headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' }
         }).then(function (resp) {
+            if (resp.status === 403) {
+                return resp.json().then(function (data) {
+                    if (window.TSPGrokVoice && TSPGrokVoice.isRepairAiForbidden(403, data)) {
+                        noteGrokVoiceForbidden(token);
+                    }
+                    return null;
+                }, function () { return null; });
+            }
             if (!resp.ok) return null;
             return resp.json();
         }).then(function (data) {

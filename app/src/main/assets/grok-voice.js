@@ -195,6 +195,15 @@
         return status === 400 && code === 'invalid_voice_id';
     }
 
+    /**
+     * Signed-in user is not in a service company. GET and POST both return this.
+     * Show the notice once and use device TTS. Do not retry.
+     */
+    function isRepairAiForbidden(status, body) {
+        var code = body && (body.error || body.code);
+        return status === 403 && code === 'repair_ai_forbidden';
+    }
+
     function asPositivePage(value) {
         var n = Number(String(value == null ? '' : value).trim());
         if (!isFinite(n) || n < 1 || n > 9999) return undefined;
@@ -292,6 +301,8 @@
         isGrokVoiceLimit: isGrokVoiceLimit,
         isUsageUnavailable: isUsageUnavailable,
         isInvalidVoiceId: isInvalidVoiceId,
+        isRepairAiForbidden: isRepairAiForbidden,
+        FORBIDDEN_NOTICE: 'Grok voice is available to service-company accounts; using device voice.',
         normalizeCitationTarget: normalizeCitationTarget,
         topCitation: topCitation,
         isOpenCommand: isOpenCommand
