@@ -22,11 +22,14 @@ const tables: Record<string, Row[]> = {
     { id: 'clinic', organization_id: 20 },
     { id: 'supplier', organization_id: 30 },
     { id: 'noorg', organization_id: null },
+    { id: 'removed', organization_id: 10 },
+    { id: 'svcowner', organization_id: 10 },
   ],
   organization_memberships: [
     { user_id: 'tech', organization_id: 10, role: 'fse' },
     { user_id: 'clinic', organization_id: 20, role: 'owner' },
     { user_id: 'supplier', organization_id: 30, role: 'parts_supplier' },
+    { user_id: 'svcowner', organization_id: 10, role: 'owner' },
   ],
   organizations: [
     { id: 10, type: 'service_company' },
@@ -36,7 +39,7 @@ const tables: Record<string, Row[]> = {
   subscriptions: [],
   api_usage: [],
 }
-const tokens: Record<string, string> = { 'tok-tech': 'tech', 'tok-clinic': 'clinic', 'tok-supplier': 'supplier', 'tok-noorg': 'noorg' }
+const tokens: Record<string, string> = { 'tok-tech': 'tech', 'tok-clinic': 'clinic', 'tok-supplier': 'supplier', 'tok-noorg': 'noorg', 'tok-removed': 'removed', 'tok-svcowner': 'svcowner' }
 const reads: string[] = []
 let xaiCalls = 0
 
@@ -96,7 +99,7 @@ async function expectCase(name: string, token: string, method: 'GET' | 'POST', s
   const before = xaiCalls
   const res = await realFetch(`http://127.0.0.1:${PORT}/`, {
     method,
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    headers: token ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
     ...(method === 'POST' ? { body: JSON.stringify({ text: 'Torque the lamp housing to 4 Nm.' }) } : {}),
   })
   const text = await res.text()
@@ -115,7 +118,11 @@ await expectCase('clinic owner (customer org) denied', 'tok-clinic', 'POST', 403
 await expectCase('clinic owner voice list denied', 'tok-clinic', 'GET', 403, 'repair_ai_forbidden')
 await expectCase('parts supplier denied', 'tok-supplier', 'POST', 403, 'repair_ai_forbidden')
 await expectCase('no org denied', 'tok-noorg', 'POST', 403, 'repair_ai_forbidden')
+await expectCase('removed member (profile org kept, membership gone) denied', 'tok-removed', 'POST', 403, 'repair_ai_forbidden')
+// Same as web/lib/roles.ts canAccessRepairAi: role 'owner' is owner-side even in a service org.
+await expectCase('service-company member with role owner denied (matches web)', 'tok-svcowner', 'POST', 403, 'repair_ai_forbidden')
 await expectCase('bad token still 401', 'tok-nobody', 'POST', 401)
+await expectCase('missing Authorization header 401', '', 'POST', 401)
 
 console.log(failed ? `${failed} FAILED` : 'ALL PASS')
 Deno.exit(failed ? 1 : 0)

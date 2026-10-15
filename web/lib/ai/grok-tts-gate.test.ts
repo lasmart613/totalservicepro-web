@@ -65,6 +65,13 @@ test('grok-tts gate: service-company member allowed; clinic, supplier, no org, r
   }
 });
 
+test('role owner: denied in every org type, same as the web gate (no service-company owners exist on prod)', () => {
+  for (const t of ['service_company', 'customer', 'laser_clinic', 'parts_supplier']) {
+    assert.equal(canAccessRepairAi('owner', t), false, t);
+    assert.equal(webCanAccessRepairAi('owner', t), false, t);
+  }
+});
+
 test('one shared rule: grok-assistant re-exports it and it matches web/lib/roles.ts', () => {
   assert.equal(assistantAccess.canAccessRepairAi, canAccessRepairAi);
   assert.equal(assistantAccess.repairAiDecision, repairAiDecision);
