@@ -25,11 +25,13 @@ const tables: Record<string, Row[]> = {
     { id: 'clinic', organization_id: 20, role: 'owner' },
     { id: 'supplier', organization_id: 30, role: 'parts_supplier' },
     { id: 'noorg', organization_id: null, role: 'fse' },
+    { id: 'svcowner', organization_id: 10, role: 'owner' },
   ],
   organization_memberships: [
     { user_id: 'tech', organization_id: 10, role: 'fse' },
     { user_id: 'clinic', organization_id: 20, role: 'owner' },
     { user_id: 'supplier', organization_id: 30, role: 'parts_supplier' },
+    { user_id: 'svcowner', organization_id: 10, role: 'owner' },
   ],
   organizations: [
     { id: 10, type: 'service_company', is_premium: true, subscription_tier: 'premium', plan: 'premium' },
@@ -50,7 +52,7 @@ const tables: Record<string, Row[]> = {
     { manual_id: 2001, chunk_index: 0, search_text: '[[page 1]] PRIVATE CLINIC TEXT' },
   ],
 }
-const tokens: Record<string, string> = { 'tok-tech': 'tech', 'tok-clinic': 'clinic', 'tok-supplier': 'supplier', 'tok-noorg': 'noorg' }
+const tokens: Record<string, string> = { 'tok-tech': 'tech', 'tok-clinic': 'clinic', 'tok-supplier': 'supplier', 'tok-noorg': 'noorg', 'tok-svcowner': 'svcowner' }
 const reads: string[] = []
 let modelCalls = 0
 let lastSystem = ''
@@ -173,6 +175,7 @@ const ok = await expectCase('service member, shared catalog manual', 'tok-tech',
 )
 if (!ok.indexRead || !/Lamp housing torque 4 Nm/.test(lastSystem)) { failed++; console.log('FAIL shared manual: index text not in prompt') }
 await expectCase('service member, unscoped question', 'tok-tech', chat(), 200)
+await expectCase('service-company owner, shared manual', 'tok-svcowner', chat(1086), 200)
 // QA lows (d): no silent unscoped run for these.
 for (const [name, body] of [
   ['unpublished manual id', { ...chat(764), manualPath: UNPUBLISHED }],

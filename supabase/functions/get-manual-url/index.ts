@@ -41,6 +41,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
+import { canAccessRepairAi } from "../_shared/repair-ai.ts";
 import {
   isMissingColumn,
   isPublishedColumnMissing,
@@ -149,23 +150,15 @@ function orgTypeFromProfile(profile: { organizations?: unknown } | null | undefi
   return String(t || "").trim().toLowerCase();
 }
 
-/** Keep aligned with web/lib/roles.ts canAccessRepairAi / isServiceCompany. */
+/**
+ * Same Repair AI rule as grok-assistant and grok-tts (../_shared/repair-ai.ts,
+ * which mirrors web/lib/roles.ts canAccessRepairAi): a service company's owner is
+ * allowed; clinic, rental, reseller and supplier owners are not.
+ */
 function isRepairAiCaller(role: unknown, orgType: unknown): boolean {
-  const r = String(role || "").trim().toLowerCase();
-  const o = String(orgType || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-  if (
-    r === "owner" ||
-    r === "customer" ||
-    r === "parts_supplier" ||
-    r === "supplier" ||
-    /^(laser_clinic|clinic|customer|owner|laser_rental|laser_reseller|rental|reseller)$/.test(o) ||
-    /^(vendor|supplier|parts_supplier)$/.test(o)
-  ) {
-    return false;
-  }
-  if (/^(service_company|service|rsp)$/.test(o)) return true;
-  return /^(admin|company_admin|technician|fse|engineer|dispatcher|billing_manager|scheduler|crm|service_manager)$/.test(
-    r,
+  return canAccessRepairAi(
+    role == null ? null : String(role),
+    orgType == null ? null : String(orgType).trim().toLowerCase().replace(/[\s-]+/g, "_"),
   );
 }
 
