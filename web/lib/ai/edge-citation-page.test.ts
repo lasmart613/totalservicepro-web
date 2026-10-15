@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -56,7 +56,11 @@ type Edge = {
 let edgePromise: Promise<Edge> | null = null;
 function loadEdge(): Promise<Edge> {
   if (edgePromise) return edgePromise;
-  const dir = mkdtempSync(join(tmpdir(), 'grok-edge-'));
+  const root = mkdtempSync(join(tmpdir(), 'grok-edge-'));
+  const dir = join(root, 'grok-assistant');
+  mkdirSync(dir);
+  mkdirSync(join(root, '_shared'));
+  copyFileSync(join(FN_DIR, '../_shared/repair-ai.ts'), join(root, '_shared', 'repair-ai.ts'));
   for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts', 'citation-scope.ts', 'ai-access.ts']) {
     copyFileSync(join(FN_DIR, f), join(dir, f));
   }

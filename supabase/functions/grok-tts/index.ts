@@ -33,6 +33,7 @@ import {
   VOICES_REQUEST_TYPE,
   VOICES_REQUESTS_PER_MINUTE,
 } from './contract.ts'
+import { loadAiCaller, repairAiDecision } from '../_shared/repair-ai.ts'
 
 const XAI_TTS_URL = 'https://api.x.ai/v1/tts'
 const XAI_VOICES_URL = 'https://api.x.ai/v1/tts/voices'
@@ -106,6 +107,10 @@ serve(async (req) => {
 
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
     const uid = user.id
+
+    // Same Repair AI rule as grok-assistant: service-company members only.
+    const gate = repairAiDecision(await loadAiCaller(db, uid))
+    if (!gate.ok) return json(gate.status, { error: gate.error, message: gate.message })
     xaiKey = Deno.env.get('XAI_API_KEY') ?? ''
     if (!xaiKey) return json(500, { error: 'AI not configured' })
 
