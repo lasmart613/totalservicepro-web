@@ -899,8 +899,9 @@ const pendingCreated = {
   email: INVITEE,
   organization_id: 9,
   accepted: false,
-  expires_at: '2026-10-16T00:00:00.000Z',
-  created_at: '2026-10-08T00:00:00.000Z',
+  // Relative: a fixed date expired at 2026-10-16T00:00Z and broke these tests.
+  expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+  created_at: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
   created_auth_user_id: 'auth-1',
   first_name: 'New',
   last_name: 'Person',
