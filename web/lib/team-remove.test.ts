@@ -379,12 +379,14 @@ async function postRemove(opts: {
   });
 }
 
-test('company admin, owner, and founder may remove; other roles may not', () => {
+test('only a current company admin or owner membership may remove; founder and creator flags do not count', () => {
   assert.equal(callerMayRemoveTeamMembers({ role: 'company_admin' }), true);
   assert.equal(callerMayRemoveTeamMembers({ role: 'admin' }), false);
   assert.equal(callerMayRemoveTeamMembers({ role: 'owner' }), true);
-  assert.equal(callerMayRemoveTeamMembers({ role: 'fse', isOrgCreator: true }), true);
-  assert.equal(callerMayRemoveTeamMembers({ role: 'fse', founder: true }), true);
+  // Creator / founder flags never grant removal on their own (current admin/owner membership only).
+  assert.equal(callerMayRemoveTeamMembers({ role: 'fse', isOrgCreator: true }), false);
+  assert.equal(callerMayRemoveTeamMembers({ role: 'fse', founder: true }), false);
+  assert.equal(callerMayRemoveTeamMembers({ role: null, isOrgCreator: true }), false);
   assert.equal(callerMayRemoveTeamMembers({ role: 'service_manager' }), false);
   assert.equal(callerMayRemoveTeamMembers({ role: 'fse' }), false);
   assert.equal(callerMayRemoveTeamMembers({ role: 'dispatcher' }), false);
@@ -607,15 +609,50 @@ test('DELETE /api/team/members/remove uses the same rules', async () => {
   );
 });
 
-test('a founder of the org can remove a member even when their role is not company_admin', async () => {
+test('the org creator with only an fse membership cannot remove members (no creator bypass)', async () => {
   const state = baseStore();
   state.orgs.find((row) => row.id === ORG)!.created_by = ADMIN;
   const caller = state.memberships.find((row) => row.user_id === ADMIN)!;
   caller.role = 'fse';
   caller.is_home = false;
   state.profiles.find((row) => row.id === ADMIN)!.role = 'fse';
+  const membershipsBefore = JSON.stringify(state.memberships);
   const result = await postRemove({ state });
-  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.status, 403, JSON.stringify(result.body));
+  assert.equal(result.body.code, 'not_admin');
+  assert.equal(result.rpcCalls.length, 0);
+  assert.equal(JSON.stringify(state.memberships), membershipsBefore);
+});
+
+test('the org creator with NO membership row gets 403 (POST and DELETE)', async () => {
+  for (const method of ['POST', 'DELETE'] as const) {
+    const state = baseStore();
+    state.orgs.find((row) => row.id === ORG)!.created_by = 'creator-1';
+    state.profiles.push({ id: 'creator-1', email: 'c@shop.test', organization_id: ORG, active_organization_id: ORG, role: 'company_admin', onboarding_completed: true } as never);
+    const result = await postRemove({ state, callerId: 'creator-1', method });
+    assert.equal(result.status, 403, `${method} ${JSON.stringify(result.body)}`);
+    assert.equal(result.rpcCalls.length, 0);
+  }
+});
+
+test('the org creator who was removed from the org gets 403', async () => {
+  const state = baseStore();
+  state.orgs.find((row) => row.id === ORG)!.created_by = ADMIN;
+  // ADMIN created the org, then was removed: membership row gone, profile still points here.
+  state.memberships = state.memberships.filter((row) => !(row.user_id === ADMIN && row.organization_id === ORG));
+  const result = await postRemove({ state, method: 'DELETE' });
+  assert.equal(result.status, 403, JSON.stringify(result.body));
+  assert.equal(result.rpcCalls.length, 0);
+});
+
+test('a current company_admin and a current owner membership may remove; a plain member may not', async () => {
+  for (const [role, want] of [['company_admin', 200], ['owner', 200], ['fse', 403], ['service_manager', 403]] as const) {
+    const state = baseStore();
+    state.orgs.find((row) => row.id === ORG)!.created_by = 'someone-else';
+    state.memberships.find((row) => row.user_id === ADMIN && row.organization_id === ORG)!.role = role;
+    const result = await postRemove({ state });
+    assert.equal(result.status, want, `${role} ${JSON.stringify(result.body)}`);
+  }
 });
 
 test('403 when the caller is not an admin of that org', async () => {
@@ -703,7 +740,7 @@ test('403 when the caller is founder of a different org', async () => {
   assert.equal(JSON.stringify(state.memberships), membershipsBefore);
 });
 
-test('a founder flag on the caller membership in this org can remove', async () => {
+test('a founder flag on an fse membership in this org does not grant removal', async () => {
   const state = baseStore();
   state.orgs.find((row) => row.id === ORG)!.created_by = 'someone-else';
   const here = state.memberships.find((row) => row.user_id === ADMIN && row.organization_id === ORG)!;
@@ -711,7 +748,8 @@ test('a founder flag on the caller membership in this org can remove', async () 
   here.is_founder = true;
   state.profiles.find((row) => row.id === ADMIN)!.is_founder = false;
   const result = await postRemove({ state });
-  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.status, 403, JSON.stringify(result.body));
+  assert.equal(result.rpcCalls.length, 0);
 });
 
 test('403 when the caller profile role is admin and they are not company_admin, owner, or founder', async () => {
