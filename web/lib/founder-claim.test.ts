@@ -83,14 +83,14 @@ test('loadFounderClaimState reads memberships and service links; errors become n
     organization_customers: [{ id: 1, customer_organization_id: 21 }],
   });
   assert.deepEqual(await loadFounderClaimState(admin, 21, 'removed-tech'), {
-    callerIsMember: false, orgHasMembers: false, orgHasServiceLink: true,
+    callerIsMember: false, orgHasMembers: false, orgHasServiceLink: true, creatorIsShopMember: false,
   });
   assert.deepEqual(await loadFounderClaimState(admin, 7, 'boss'), {
-    callerIsMember: true, orgHasMembers: true, orgHasServiceLink: false,
+    callerIsMember: true, orgHasMembers: true, orgHasServiceLink: false, creatorIsShopMember: false,
   });
   const broken = fakeAdmin({ organization_memberships: { error: 'boom' }, organization_customers: [] });
   assert.deepEqual(await loadFounderClaimState(broken, 7, 'boss'), {
-    callerIsMember: null, orgHasMembers: null, orgHasServiceLink: false,
+    callerIsMember: null, orgHasMembers: null, orgHasServiceLink: false, creatorIsShopMember: null,
   });
 });
 
@@ -110,4 +110,34 @@ test('legacy founder read still carries created_at for the claim check', async (
   const { FOUNDER_ORG_COLUMNS, FOUNDER_ORG_COLUMNS_LEGACY } = await import('./signup-trial.ts');
   assert.match(FOUNDER_ORG_COLUMNS, /\bcreated_at\b/);
   assert.match(FOUNDER_ORG_COLUMNS_LEGACY, /\bcreated_at\b/);
+});
+
+test('000917: founder claim on a customer org created by a shop user is refused', async () => {
+  const now = new Date('2026-10-15T12:00:00Z');
+  const fresh = new Date(now.getTime() - 60_000).toISOString();
+  const admin = fakeAdmin({
+    organization_memberships: [{ user_id: 'tech', organization_id: 4 }],
+    organization_customers: [],
+    organizations: [{ id: 4, type: 'service_company' }, { id: 70, type: 'customer' }],
+  });
+  const claim = await loadFounderClaimState(admin, 70, 'tech');
+  assert.deepEqual(claim, { callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false, creatorIsShopMember: true });
+  const refused = founderClaimAllowed({ ...claim, orgType: 'customer', orgCreatedAt: fresh, now });
+  assert.equal(refused.ok, false);
+  if (!refused.ok) assert.equal(refused.status, 403);
+  for (const t of ['laser_clinic', 'laser_rental', 'laser_reseller']) {
+    assert.equal(founderClaimAllowed({ ...claim, orgType: t, orgCreatedAt: fresh, now }).ok, false, t);
+  }
+  // Same shop user founding a new service company is still fine.
+  assert.equal(founderClaimAllowed({ ...claim, orgType: 'service_company', orgCreatedAt: fresh, now }).ok, true);
+  // A clinic owner signing up (in no shop) still claims their own new clinic.
+  const own = await loadFounderClaimState(fakeAdmin({ organization_memberships: [], organization_customers: [], organizations: [] }), 71, 'clinic-owner');
+  assert.equal(founderClaimAllowed({ ...own, orgType: 'laser_clinic', orgCreatedAt: fresh, now }).ok, true);
+  // Unknown shop state on a customer org fails closed.
+  assert.equal(founderClaimAllowed({ ...own, creatorIsShopMember: null, orgType: 'customer', orgCreatedAt: fresh, now }).ok, false);
+});
+
+test('founder route passes the org type into the claim check', () => {
+  const route = readFileSync(join(here, '../app/api/org/founder/route.ts'), 'utf8');
+  assert.match(route, /founderClaimAllowed\(\{\s*\.\.\.claim,\s*orgType,/);
 });

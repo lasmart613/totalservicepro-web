@@ -177,15 +177,17 @@ test('role change refuses escalation and platform admin; same-org equal rank is 
   assert.equal(trimmed.role, 'dispatcher');
 });
 
-test('member role authority is membership company_admin, owner, or founder — not platform admin', () => {
+test('member role authority is a current company_admin or owner membership — not founder, creator, or platform admin', () => {
   assert.equal(callerMayChangeMemberRole({ membershipRole: 'company_admin' }), true);
   assert.equal(callerMayChangeMemberRole({ membershipRole: 'owner' }), true);
   assert.equal(callerMayChangeMemberRole({ membershipRole: ' Owner ' }), true);
   assert.equal(callerMayChangeMemberRole({ membershipRole: 'admin' }), false);
   assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse' }), false);
   assert.equal(callerMayChangeMemberRole({ membershipRole: 'service_manager' }), false);
-  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse', founder: true }), true);
-  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse', isOrgCreator: true }), true);
+  // No creator / founder bypass: a current company_admin or owner membership only.
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse', founder: true }), false);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse', isOrgCreator: true }), false);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: null, isOrgCreator: true }), false);
 
   assert.equal(memberRoleTargetIsLocked({ membershipRole: 'owner' }), true);
   assert.equal(memberRoleTargetIsLocked({ membershipRole: 'fse', founder: true }), true);
