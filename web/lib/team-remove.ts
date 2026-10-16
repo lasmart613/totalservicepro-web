@@ -45,19 +45,17 @@ export function rowFounderFlag(row: object | null | undefined): boolean {
 }
 
 /**
- * Caller may remove members of this org from their membership in that org:
- * company_admin or owner. A founder flag on that same membership, or
- * organizations.created_by for this org, also qualifies. Do not pass a
- * profile founder flag or a flag from another org. A profile role of admin
- * is a platform role and must not be passed here.
+ * Caller may remove members of this org only from a CURRENT company_admin or
+ * owner membership row in that org. organizations.created_by and founder flags
+ * do not grant this on their own (a removed or never-joined creator is
+ * refused). A profile role of admin is a platform role and must not be passed
+ * here. founder / isOrgCreator are accepted for old callers and ignored.
  */
 export function callerMayRemoveTeamMembers(input: {
   role?: string | null;
   founder?: boolean | null;
   isOrgCreator?: boolean | null;
 }): boolean {
-  if (input.founder) return true;
-  if (input.isOrgCreator) return true;
   return MEMBERSHIP_REMOVE_ROLES.has(normalizeRole(input.role));
 }
 

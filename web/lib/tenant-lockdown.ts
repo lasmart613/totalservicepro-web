@@ -102,6 +102,8 @@ export function decideFounderLink(input: {
 /** How long a creator may claim an org nobody belongs to and no shop serves. */
 export const UNCLAIMED_ORG_WINDOW_MS = 24 * 60 * 60 * 1000;
 
+const CUSTOMER_SIDE_ORG_TYPES = new Set(['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']);
+
 /**
  * Founder link to an existing org (mirrors org_unclaimed_new in
  * 20261011_000916). created_by alone is not enough: a tech who added a customer
@@ -109,15 +111,28 @@ export const UNCLAIMED_ORG_WINDOW_MS = 24 * 60 * 60 * 1000;
  * make themselves the clinic's owner. Allowed when the caller is already a
  * member (re-link), or the org is brand new and unclaimed: under 24h old, no
  * members, and no organization_customers link. Unknown state fails closed.
+ * 000917: a customer-side org whose creator belongs to a service company
+ * (a shop user's added customer) is refused too (org_founder_claim_allowed).
  */
 export function founderClaimAllowed(input: {
   callerIsMember: boolean | null;
   orgHasMembers: boolean | null;
   orgHasServiceLink: boolean | null;
   orgCreatedAt?: string | null;
+  /** 000917: customer-side org created by a service-company member is never claimable. */
+  orgType?: string | null;
+  creatorIsShopMember?: boolean | null;
   now?: Date;
 }): { ok: true } | AuthzFailure {
   if (input.callerIsMember === true) return { ok: true };
+  const customerSide = CUSTOMER_SIDE_ORG_TYPES.has(String(input.orgType || '').trim().toLowerCase());
+  if (customerSide && input.creatorIsShopMember !== false) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'A customer added by a service company cannot be claimed this way. Ask the company for an owner invite.',
+    };
+  }
   const created = input.orgCreatedAt ? Date.parse(input.orgCreatedAt) : NaN;
   const now = (input.now ?? new Date()).getTime();
   const fresh = Number.isFinite(created) && now - created < UNCLAIMED_ORG_WINDOW_MS;
@@ -178,15 +193,17 @@ export function authorizeInviteAccept(input: {
 
 /**
  * Who may call POST /api/org/members/role.
- * Membership role in that org, or founder of that org. Never user_profiles.role.
- * Platform admin is not a membership authority.
+ * Only a CURRENT company_admin or owner membership row in that org. Being the
+ * org's creator (organizations.created_by) or carrying a founder flag does not
+ * grant this on its own: a creator who was removed, or never had a membership,
+ * is refused. Never user_profiles.role; platform admin is not a membership
+ * authority. founder / isOrgCreator are accepted for old callers and ignored.
  */
 export function callerMayChangeMemberRole(input: {
   membershipRole?: string | null;
   founder?: boolean | null;
   isOrgCreator?: boolean | null;
 }): boolean {
-  if (input.founder === true || input.isOrgCreator === true) return true;
   const role = normalizeRole(input.membershipRole);
   return role === 'company_admin' || role === 'owner';
 }
