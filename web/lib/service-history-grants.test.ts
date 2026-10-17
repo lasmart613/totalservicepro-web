@@ -105,17 +105,21 @@ test('grantServiceHistory calls the RPC with numeric ids and a bound client', as
   assert.match((await grantServiceHistory(denied, 2, 8)).error!, /only an owner or admin/);
 });
 
-test('revokeServiceHistory and loadSharedServiceHistory', async () => {
+test('revokeServiceHistory and loadSharedServiceHistory (paged, truncation visible)', async () => {
   const c = new FakeClient((fn) =>
     fn === 'revoke_service_history'
       ? { data: true, error: null }
-      : { data: [{ id: 'a', report_number: 'SR-1', comments: 'SECRET' }], error: null }
+      : { data: [{ id: 'a', report_number: 'SR-1', comments: 'SECRET', total_count: 3 }], error: null }
   );
   assert.deepEqual(await revokeServiceHistory(c, 7), { revoked: true, error: null });
-  const rows = await loadSharedServiceHistory(c, 2);
-  assert.deepEqual(rows, [{ id: 'a', report_number: 'SR-1' }]);
-  assert.deepEqual(c.calls[1], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: null }]);
-  assert.deepEqual(await loadSharedServiceHistory(c, ''), []);
+  const page = await loadSharedServiceHistory(c, 2, null, { limit: 1 });
+  assert.deepEqual(page, { rows: [{ id: 'a', report_number: 'SR-1' }], total: 3, truncated: true });
+  assert.deepEqual(c.calls[1], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: null, p_limit: 1, p_offset: 0 }]);
+  await loadSharedServiceHistory(c, 2, 5, { limit: 9999, offset: -3 });
+  assert.deepEqual(c.calls[2], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: 5, p_limit: 500, p_offset: 0 }]);
+  const last = await loadSharedServiceHistory(c, 2, null, { limit: 1, offset: 2 });
+  assert.equal(last.truncated, false);
+  assert.deepEqual(await loadSharedServiceHistory(c, ''), { rows: [], total: 0, truncated: false });
   const broken = new FakeClient(() => ({ data: null, error: { message: 'x' } }));
-  assert.deepEqual(await loadSharedServiceHistory(broken, 2), []);
+  assert.deepEqual(await loadSharedServiceHistory(broken, 2), { rows: [], total: 0, truncated: false });
 });
