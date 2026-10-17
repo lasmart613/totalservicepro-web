@@ -2,7 +2,12 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { requireGodCaller } from '@/lib/god-auth';
 import { fetchAllPages } from '@/lib/supabase/paginate';
-import { asManualCatalogId, indexManualSearchText, MANUAL_REINDEX_BATCH } from '@/lib/manual-search-index';
+import {
+  asManualCatalogId,
+  indexManualSearchText,
+  listIndexedManualIds,
+  MANUAL_REINDEX_BATCH,
+} from '@/lib/manual-search-index';
 import {
   grokAssistantUrl,
   MANUAL_XAI_ATTACH_BATCH,
@@ -64,10 +69,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: manErr.message || 'Could not list manuals' }, { status: 400 });
   }
 
-  const { data: indexedRows } = await admin.from('manual_search_index').select('manual_id');
-  const indexed = new Set(
-    (indexedRows || []).map((row: { manual_id?: unknown }) => String(row.manual_id || '').trim())
-  );
+  // Range-paged: a bare select stops at the PostgREST max rows (1,000), which
+  // hid indexed manuals past that point and made remaining never reach 0.
+  const indexedRead = await listIndexedManualIds(admin);
+  if (indexedRead.error) {
+    return NextResponse.json({ error: indexedRead.error }, { status: 400 });
+  }
+  const indexed = indexedRead.ids;
 
   const catalog = manuals || [];
   if (targetId != null && !catalog.some((m) => asManualCatalogId(m.id) === targetId)) {
@@ -83,7 +91,7 @@ export async function POST(req: NextRequest) {
     : catalog.filter((m) => {
         const id = asManualCatalogId(m.id);
         if (targetId != null) return id === targetId;
-        return force || !indexed.has(String(m.id));
+        return force || id == null || !indexed.has(id);
       });
   const batch = pending.slice(0, limit);
   const results = [];

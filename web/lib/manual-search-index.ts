@@ -20,6 +20,7 @@ import {
 import { containsTextImatch } from './email-match.ts';
 import { chapterMetadataWithPageCounts } from './manual-page-map.ts';
 import { isMissingColumn, isPublishedColumnMissing } from './manual-published.ts';
+import { fetchAllPages, SUPABASE_PAGE_SIZE } from './supabase/paginate.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -53,6 +54,59 @@ export function asManualCatalogId(value: unknown): number | null {
   if (!/^-?\d+$/.test(s)) return null;
   const n = Number(s);
   return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
+ * Every manual id that has at least one manual_search_index row.
+ *
+ * Range-paged. A bare select('manual_id') is capped by the PostgREST max rows
+ * setting (1,000 on Supabase), so once the index passed 1,000 rows the God
+ * reindex route saw only part of it and treated the rest as unindexed.
+ * Fails closed: a read error returns error, never a short set.
+ */
+export async function listIndexedManualIds(
+  db: Pick<TableClient, 'from'>,
+  pageSize: number = SUPABASE_PAGE_SIZE,
+): Promise<{ ids: Set<number>; rows: number; error?: string }> {
+  const { data, error } = await fetchAllPages<{ manual_id?: unknown }>(
+    async (from, to) =>
+      db
+        .from('manual_search_index')
+        .select('manual_id')
+        .order('manual_id', { ascending: true })
+        .order('chunk_index', { ascending: true })
+        .range(from, to),
+    pageSize,
+  );
+  if (error) {
+    return { ids: new Set(), rows: 0, error: error.message || 'Could not read manual_search_index' };
+  }
+  const ids = new Set<number>();
+  for (const row of data) {
+    const id = asManualCatalogId(row?.manual_id);
+    if (id != null) ids.add(id);
+  }
+  return { ids, rows: data.length };
+}
+
+/**
+ * Catalog rows with no manual_search_index row at all, lowest id first.
+ * Unpublished rows are left out unless includeUnpublished is set (search and
+ * the assistant never show them).
+ */
+export function manualsMissingSearchIndex<T extends { id?: unknown; published?: unknown }>(
+  catalog: readonly T[],
+  indexed: ReadonlySet<number>,
+  opts: { includeUnpublished?: boolean } = {},
+): T[] {
+  const out: Array<{ id: number; row: T }> = [];
+  for (const row of catalog) {
+    const id = asManualCatalogId(row?.id);
+    if (id == null || indexed.has(id)) continue;
+    if (!opts.includeUnpublished && row.published === false) continue;
+    out.push({ id, row });
+  }
+  return out.sort((a, b) => a.id - b.id).map((entry) => entry.row);
 }
 
 type StorageObject = {
