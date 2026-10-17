@@ -41,6 +41,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
+import { indexWriteInProgress } from "../_shared/index-pending.ts";
 import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
 import {
   isMissingColumn,
@@ -556,7 +557,7 @@ function boundFromIndexRows(
  * index_clipped / indexed_page_max across every chunk of the search index.
  * Clipped when any chunk was sliced. The page max is the highest stamp.
  * A missing column or a missing row leaves the max unknown so a stored map
- * is not dropped.
+ * is not dropped. So does a chunked write still in progress (partial rows).
  */
 async function loadIndexPageBound(
   admin: { from: (table: string) => any },
@@ -565,6 +566,7 @@ async function loadIndexPageBound(
   const unknown = { clipped: false, indexedPageMax: null as number | null };
   const id = asIndexManualId(manualId);
   if (id == null) return unknown;
+  if (await indexWriteInProgress(admin, id)) return unknown;
   try {
     let query = admin
       .from("manual_search_index")

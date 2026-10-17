@@ -49,6 +49,7 @@ import {
   type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
+import { pendingIndexIds } from '../_shared/index-pending.ts'
 import { extractFaultCodes, literalSubstringPattern, stripIlikeReserved } from './fault-codes.ts'
 import {
   attributeCitations,
@@ -1908,6 +1909,8 @@ async function catalogManualIsPublished(db: any, id: number): Promise<boolean> {
  * (42703) or the client has no order(). Any other error hides the index.
  */
 async function loadJoinedSearchText(db: any, manualId: number): Promise<string> {
+  const pending = await pendingIndexIds(db, [manualId])
+  if (!pending || pending.has(manualId)) return ''
   try {
     const wide = db.from('manual_search_index').select('search_text,chunk_index').eq('manual_id', manualId)
     if (wide && typeof wide.order === 'function') {
@@ -2140,12 +2143,14 @@ async function loadSiblingCatalog(
 
   const indexes: Record<number, string> = {}
   const ids = [...new Set(rows.map((row) => Number(row.id)).filter((id) => id > 0))]
-  if (ids.length) {
-    let query = db.from('manual_search_index').select('manual_id,search_text,chunk_index').in('manual_id', ids)
+  const pending = ids.length ? await pendingIndexIds(db, ids) : new Set<number>()
+  const readable = pending ? ids.filter((id) => !pending.has(id)) : []
+  if (readable.length) {
+    let query = db.from('manual_search_index').select('manual_id,search_text,chunk_index').in('manual_id', readable)
     if (query && typeof query.order === 'function') query = query.order('chunk_index', { ascending: true })
     let idx = await query
     if (idx?.error && reportedMissingColumn(idx.error, 'chunk_index')) {
-      idx = await db.from('manual_search_index').select('manual_id,search_text').in('manual_id', ids)
+      idx = await db.from('manual_search_index').select('manual_id,search_text').in('manual_id', readable)
     }
     if (!idx?.error && Array.isArray(idx.data)) {
       const byId = new Map<number, Array<{ search_text?: unknown; chunk_index?: unknown }>>()
