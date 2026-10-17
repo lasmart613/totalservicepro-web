@@ -42,6 +42,18 @@ export const MANUAL_SEARCH_PDF_MAX_BYTES = 200 * 1024 * 1024;
 export const PDF_INDEX_TEXT_MAX = 1_500_000;
 
 /**
+ * Chunk size for the chunked writer (append_manual_search_index_chunks,
+ * migration 000918). Every REST call runs under the authenticator role's
+ * 8 s statement_timeout, and each row's generated tsvector + GIN entries are
+ * computed inside the statement that writes it. One ~200,000-character chunk
+ * per call keeps each statement a small fraction of that budget (dense
+ * manuals 1195 and 1210 timed out writing 1,500,000-character chunks in one
+ * call). A single page longer than this still goes in one chunk of its own,
+ * and is only sliced past PDF_INDEX_TEXT_MAX as before.
+ */
+export const PDF_INDEX_APPEND_CHUNK_CHARS = 200_000;
+
+/**
  * Postgres char_length at or above this is the pre-marker 1,500,000-character
  * slice. JS `String.length` counts UTF-16 units, so a sliced index can be a
  * few code points under 1,500,000 (manual 73 is 1,499,994). The next full
@@ -269,14 +281,16 @@ export type IndexChunk = {
 };
 
 /**
- * Split prepared index text on form feeds so each chunk's length is <= max.
- * [[pdfpage:N]] stamps are not renumbered. A single page longer than max is
- * sliced and only that chunk is marked clipped.
+ * Split prepared index text on form feeds so each chunk's length is <= target
+ * (default: max). [[pdfpage:N]] stamps are not renumbered. A single page
+ * longer than target gets a chunk of its own; one longer than max is sliced
+ * and only that chunk is marked clipped.
  */
-export function chunkIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX): IndexChunk[] {
+export function chunkIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX, target = max): IndexChunk[] {
   const prepared = prepareManualSearchText(value);
   if (!prepared) return [];
-  const limit = Math.max(1, Math.floor(max));
+  const hard = Math.max(1, Math.floor(max));
+  const limit = Math.max(1, Math.min(hard, Math.floor(target)));
   const pages = prepared.split('\f');
   const groups: Array<{ parts: string[]; clipped: boolean }> = [];
   let parts: string[] = [];
@@ -288,9 +302,14 @@ export function chunkIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX): IndexC
     size = 0;
   };
   for (const page of pages) {
+    if (page.length > hard) {
+      flush();
+      groups.push({ parts: [page.slice(0, hard)], clipped: true });
+      continue;
+    }
     if (page.length > limit) {
       flush();
-      groups.push({ parts: [page.slice(0, limit)], clipped: true });
+      groups.push({ parts: [page], clipped: false });
       continue;
     }
     const next = parts.length ? size + 1 + page.length : page.length;

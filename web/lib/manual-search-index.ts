@@ -13,6 +13,8 @@ import {
   singleLetterTokenRatio,
   stampPdfPages,
   summarizeIndexChunks,
+  PDF_INDEX_APPEND_CHUNK_CHARS,
+  PDF_INDEX_TEXT_MAX,
   type IndexChunk,
   type PdfPageText,
   type StoredIndexText,
@@ -57,7 +59,8 @@ export function asManualCatalogId(value: unknown): number | null {
 }
 
 /**
- * Every manual id that has at least one manual_search_index row.
+ * Every manual id that has a complete manual_search_index: at least one row
+ * and no in-progress chunked write (manual_search_index_pending).
  *
  * Range-paged. A bare select('manual_id') is capped by the PostgREST max rows
  * setting (1,000 on Supabase), so once the index passed 1,000 rows the God
@@ -67,7 +70,7 @@ export function asManualCatalogId(value: unknown): number | null {
 export async function listIndexedManualIds(
   db: Pick<TableClient, 'from'>,
   pageSize: number = SUPABASE_PAGE_SIZE,
-): Promise<{ ids: Set<number>; rows: number; error?: string }> {
+): Promise<{ ids: Set<number>; rows: number; pending?: number; error?: string }> {
   const { data, error } = await fetchAllPages<{ manual_id?: unknown }>(
     async (from, to) =>
       db
@@ -81,12 +84,49 @@ export async function listIndexedManualIds(
   if (error) {
     return { ids: new Set(), rows: 0, error: error.message || 'Could not read manual_search_index' };
   }
+  const pending = await listPendingIndexIds(db);
+  if (pending.error) return { ids: new Set(), rows: 0, error: pending.error };
   const ids = new Set<number>();
   for (const row of data) {
     const id = asManualCatalogId(row?.manual_id);
-    if (id != null) ids.add(id);
+    if (id != null && !pending.ids.has(id)) ids.add(id);
   }
-  return { ids, rows: data.length };
+  return { ids, rows: data.length, pending: pending.ids.size };
+}
+
+function pendingTableMissing(error: { code?: unknown; message?: unknown } | null | undefined): boolean {
+  const text = `${error?.code || ''} ${error?.message || ''}`;
+  return /PGRST205|42P01|schema cache|does not exist/i.test(text) && /manual_search_index_pending|relation|table/i.test(text);
+}
+
+/**
+ * Manuals with a chunked index write in progress (manual_search_index_pending,
+ * migration 000918). Their rows are partial: every reader treats them as not
+ * indexed. A missing table (000918 not applied) means none. Any other read
+ * error is returned, so callers fail closed.
+ */
+export async function listPendingIndexIds(
+  db: Pick<TableClient, 'from'>,
+  only?: readonly number[],
+): Promise<{ ids: Set<number>; error?: string }> {
+  const ids = new Set<number>();
+  if (only && !only.length) return { ids };
+  try {
+    let query = db.from('manual_search_index_pending').select('manual_id');
+    if (only) query = only.length === 1 ? query.eq('manual_id', only[0]) : query.in('manual_id', [...only]);
+    const res = await query;
+    if (res?.error) {
+      if (pendingTableMissing(res.error)) return { ids };
+      return { ids, error: `manual_search_index_pending read failed: ${res.error.message || 'unknown'}` };
+    }
+    for (const row of Array.isArray(res?.data) ? res.data : []) {
+      const id = asManualCatalogId((row as { manual_id?: unknown })?.manual_id);
+      if (id != null && (!only || only.includes(id))) ids.add(id);
+    }
+    return { ids };
+  } catch (err) {
+    return { ids, error: `manual_search_index_pending read failed: ${err instanceof Error ? err.message : String(err)}` };
+  }
 }
 
 /**
@@ -955,17 +995,122 @@ export async function indexManualSearchText(
 
 /** Skipped reason when a manual gained index rows before an expect-empty write. */
 export const ALREADY_INDEXED = 'already_indexed';
+/** Skipped reason when another chunked write for the manual started < 10 min ago. */
+export const INDEX_WRITE_BUSY = 'index_write_busy';
+/** Retries of one append call cancelled by the 8 s statement_timeout. The row-count guard makes a retry safe. */
+export const APPEND_TIMEOUT_RETRIES = 2;
+
+function isStatementTimeout(message: string): boolean {
+  return /statement timeout|canceling statement/i.test(message);
+}
+
+function chunkedRpcMissing(message: string): boolean {
+  return /begin_manual_search_index_append/i.test(message)
+    && /schema cache|does not exist|could not find the function|not found/i.test(message);
+}
 
 /**
- * Index a manual that had no manual_search_index row, and write only if it
- * still has none. Used by scripts/index-missing-manuals.mjs and the scheduled
- * catch-up. Unlike indexManualSearchText it never replaces existing rows:
- * replace_manual_search_index is called with p_expected_md5 NULL, and the
- * function treats NULL as "storage must be empty" (md5 of zero rows is NULL,
- * compared with IS DISTINCT FROM). A row written after the caller listed the
- * manual makes the RPC return false, reported as already_indexed. There is no
- * upsert fallback: without the RPC the write is refused. A quick row check
- * before extraction skips the download when rows already exist.
+ * Re-split index chunks to ~PDF_INDEX_APPEND_CHUNK_CHARS for the chunked
+ * writer. A chunk that was a single sliced page (clipped) stays one chunk and
+ * keeps its flag. Stamps are not renumbered; chunk indexes are sequential.
+ */
+export function appendChunks(chunks: readonly IndexChunk[]): IndexChunk[] {
+  const out: IndexChunk[] = [];
+  for (const chunk of chunks) {
+    const pieces = chunk.clipped
+      ? [{ ...chunk }]
+      : chunkIndexText(chunk.text, PDF_INDEX_TEXT_MAX, PDF_INDEX_APPEND_CHUNK_CHARS);
+    if (!pieces.length) pieces.push({ chunkIndex: 0, text: chunk.text, clipped: chunk.clipped, indexedPageMax: chunk.indexedPageMax });
+    for (const piece of pieces) out.push({ ...piece, chunkIndex: out.length });
+  }
+  return out;
+}
+
+export type ChunkedWriteResult =
+  | { ok: true; chunks: number; calls: number }
+  | { ok: false; reason: string; rpcMissing?: boolean; cleanupError?: string };
+
+/**
+ * Expect-empty chunked write (migration 000918): begin (claims the manual,
+ * refuses when it already has a complete index or another writer is active),
+ * one append per chunk under the row-count guard, then finish. While the
+ * in-progress marker exists every reader treats the manual as not indexed.
+ * Any failure after begin aborts: the partial rows and the marker are
+ * deleted (the abort's own error is reported, never swallowed). An append
+ * cancelled by the REST statement_timeout is retried (APPEND_TIMEOUT_RETRIES).
+ */
+export async function writeChunkedManualSearchIndex(
+  db: TableClient,
+  manualId: number,
+  chunks: readonly IndexChunk[],
+): Promise<ChunkedWriteResult> {
+  if (typeof db.rpc !== 'function') return { ok: false, reason: 'Refused: chunked writes need the Supabase RPC client.' };
+  const rpc = db.rpc;
+  if (!chunks.length || chunks.length > 100) {
+    return { ok: false, reason: `Refused: ${chunks.length} chunks (the index allows 1 to 100).` };
+  }
+  let calls = 0;
+  const call = async (fn: string, args: Record<string, unknown>) => {
+    calls += 1;
+    try {
+      const res = await rpc(fn, args);
+      return { data: res?.data, error: res?.error ? String(res.error.message || 'unknown') : null };
+    } catch (err) {
+      return { data: undefined, error: err instanceof Error ? err.message : String(err) };
+    }
+  };
+
+  const begin = await call('begin_manual_search_index_append', { p_manual_id: manualId, p_total_chunks: chunks.length });
+  if (begin.error) return { ok: false, reason: begin.error, rpcMissing: chunkedRpcMissing(begin.error) };
+  const claim = (begin.data || {}) as { status?: unknown; token?: unknown };
+  if (claim.status === 'already_indexed') return { ok: false, reason: ALREADY_INDEXED };
+  if (claim.status === 'busy') return { ok: false, reason: INDEX_WRITE_BUSY };
+  const token = typeof claim.token === 'string' ? claim.token : '';
+  if (claim.status !== 'ok' || !token) return { ok: false, reason: `begin_manual_search_index_append returned ${JSON.stringify(begin.data)}` };
+
+  const abort = async (reason: string): Promise<ChunkedWriteResult> => {
+    const res = await call('abort_manual_search_index_append', { p_manual_id: manualId, p_token: token });
+    if (res.error) return { ok: false, reason, cleanupError: `abort failed: ${res.error}` };
+    if (res.data !== true) return { ok: false, reason, cleanupError: 'abort refused: the in-progress marker was replaced' };
+    return { ok: false, reason };
+  };
+
+  for (let i = 0; i < chunks.length; i += 1) {
+    const chunk = chunks[i];
+    let appended: { data: unknown; error: string | null } = { data: undefined, error: 'not attempted' };
+    for (let attempt = 0; attempt <= APPEND_TIMEOUT_RETRIES; attempt += 1) {
+      appended = await call('append_manual_search_index_chunks', {
+        p_manual_id: manualId,
+        p_token: token,
+        p_expected_rows: i,
+        p_chunks: [chunk.text],
+        p_clipped: [chunk.clipped === true],
+        p_page_max: [chunk.indexedPageMax == null ? null : chunk.indexedPageMax],
+      });
+      if (!appended.error || !isStatementTimeout(appended.error)) break;
+    }
+    if (appended.error) return abort(`append chunk ${i + 1}/${chunks.length} failed: ${appended.error}`);
+    if (appended.data !== true) return abort(`append chunk ${i + 1}/${chunks.length} refused (marker replaced or row count changed)`);
+  }
+  const finish = await call('finish_manual_search_index_append', { p_manual_id: manualId, p_token: token });
+  if (finish.error) return abort(`finish failed: ${finish.error}`);
+  if (finish.data !== true) return abort('finish refused (marker replaced or chunk missing)');
+  return { ok: true, chunks: chunks.length, calls };
+}
+
+/**
+ * Index a manual that has no complete manual_search_index, and write only if
+ * it still has none. Used by scripts/index-missing-manuals.mjs and the
+ * scheduled catch-up. It never replaces a complete index.
+ *
+ * Writes go through writeChunkedManualSearchIndex (~200,000 characters per
+ * call, under the 8 s REST statement_timeout) with an expect-empty claim;
+ * partial rows are invisible to readers until the last chunk lands, and a
+ * failure deletes them. Before migration 000918 is applied (no begin RPC) it
+ * falls back to one replace_manual_search_index call with p_expected_md5
+ * NULL (empty storage only). There is no upsert fallback: without an RPC the
+ * write is refused. A quick check before extraction skips the download when
+ * a complete index already exists.
  * An image-only PDF (opened by pdf.js, no text) stores one empty row, like
  * the God button, so it is not retried forever. A missing or unreadable file
  * writes nothing (no_pdf_downloaded / no_pdf_path).
@@ -982,7 +1127,13 @@ export async function indexMissingManualSearchText(
   }
   const before = await readExistingSearchText(client, catalogId);
   if (!before.ok) return { manualId, ok: false, chars: 0, files: 0, skipped: before.error };
-  if (before.chunks.length) return { manualId, ok: false, chars: 0, files: 0, skipped: ALREADY_INDEXED };
+  if (before.chunks.length) {
+    // Rows exist. They are a complete index unless a chunked write is in
+    // progress (or died); then begin decides (busy, or take over).
+    const pending = await listPendingIndexIds(client, [catalogId]);
+    if (pending.error) return { manualId, ok: false, chars: 0, files: 0, skipped: pending.error };
+    if (!pending.ids.has(catalogId)) return { manualId, ok: false, chars: 0, files: 0, skipped: ALREADY_INDEXED };
+  }
 
   const extracted = await extractManualBodyText(client.storage, manual);
   if (extracted.fatal) {
@@ -997,17 +1148,26 @@ export async function indexMissingManualSearchText(
   const chunks: readonly IndexChunk[] = extracted.chunks?.length
     ? extracted.chunks
     : [{ chunkIndex: 0, text: extracted.text || '', clipped: false, indexedPageMax: null }];
-  const rpc = await client.rpc('replace_manual_search_index', {
-    p_manual_id: catalogId,
-    p_chunks: chunks.map((row) => row.text),
-    p_clipped: chunks.map((row) => row.clipped === true),
-    p_page_max: chunks.map((row) => (row.indexedPageMax == null ? null : row.indexedPageMax)),
-    p_expected_md5: null,
-  });
-  if (rpc?.error) {
-    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: rpc.error.message || 'replace failed' };
+
+  const chunked = await writeChunkedManualSearchIndex(client, catalogId, appendChunks(chunks));
+  if (!chunked.ok) {
+    if (chunked.rpcMissing) {
+      const legacy = await client.rpc('replace_manual_search_index', {
+        p_manual_id: catalogId,
+        p_chunks: chunks.map((row) => row.text),
+        p_clipped: chunks.map((row) => row.clipped === true),
+        p_page_max: chunks.map((row) => (row.indexedPageMax == null ? null : row.indexedPageMax)),
+        p_expected_md5: null,
+      });
+      if (legacy?.error) {
+        return { manualId, ok: false, chars: 0, files: extracted.files, skipped: legacy.error.message || 'replace failed' };
+      }
+      if (legacy?.data === false) return { manualId, ok: false, chars: 0, files: extracted.files, skipped: ALREADY_INDEXED };
+    } else {
+      const skipped = chunked.cleanupError ? `${chunked.reason}; ${chunked.cleanupError}` : chunked.reason;
+      return { manualId, ok: false, chars: 0, files: extracted.files, skipped };
+    }
   }
-  if (rpc?.data === false) return { manualId, ok: false, chars: 0, files: extracted.files, skipped: ALREADY_INDEXED };
   if (!extracted.text) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || 'no_extractable_text' };
   }
@@ -1179,8 +1339,17 @@ export async function findManualIdsByBodyText(
   return { ids: await keepPublishedManualIds(db, idsFromRows(viaLike.data)), available: true };
 }
 
-/** Drop ids whose manuals.published is false. A missing column keeps the ids. */
+/**
+ * Drop ids whose manuals.published is false, and ids with an index write in
+ * progress. A missing published column keeps the ids.
+ */
 async function keepPublishedManualIds(db: TableClient, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  // A manual whose chunked index write is still in progress is not searchable.
+  const numericIds = ids.map((id) => asManualCatalogId(id)).filter((n): n is number => n != null);
+  const pending = await listPendingIndexIds(db, numericIds);
+  if (pending.error) return [];
+  if (pending.ids.size) ids = ids.filter((id) => !pending.ids.has(Number(id)));
   if (!ids.length) return [];
   const allowed = new Set<string>();
   for (let i = 0; i < ids.length; i += 200) {
