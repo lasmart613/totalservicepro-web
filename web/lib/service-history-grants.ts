@@ -9,6 +9,9 @@
  *
  * 000921: a shop linked through organization_customers sees only reports it
  * wrote; clinic owners/admins list and remove linked shops here too.
+ * service_company_name is the real organizations.name of the shop that wrote
+ * the report; report_company_name_text is the free text typed on the report
+ * header (may differ). Show the real name; label the header text as such.
  *
  * A serial match alone never grants access (H2).
  */
@@ -28,7 +31,10 @@ export const SHARED_HISTORY_COLUMNS = [
   'next_pm_due',
   'created_at',
   'finalized_at',
+  /** organizations.name of the shop that wrote the report (authoritative). */
   'service_company_name',
+  /** Free text typed on the report header (tech_company_name); not verified. */
+  'report_company_name_text',
   'service_organization_id',
   'customer_organization_id',
 ] as const;
@@ -81,6 +87,8 @@ export type SharedHistoryPage = {
   total: number;
   /** True when more rows exist past this page. */
   truncated: boolean;
+  /** True when offset is at or past the end (rows empty, total still set). */
+  pastEnd: boolean;
 };
 
 const PAGE_MAX = 500;
@@ -95,7 +103,7 @@ export async function loadSharedServiceHistory(
   equipmentId?: string | number | null,
   page: { limit?: number; offset?: number } = {}
 ): Promise<SharedHistoryPage> {
-  const empty: SharedHistoryPage = { rows: [], total: 0, truncated: false };
+  const empty: SharedHistoryPage = { rows: [], total: 0, truncated: false, pastEnd: false };
   const owner = orgId(ownerOrg);
   if (!owner) return empty;
   const limit = Math.min(Math.max(Math.trunc(page.limit ?? 200) || 1, 1), PAGE_MAX);
@@ -108,6 +116,18 @@ export async function loadSharedServiceHistory(
       p_offset: offset,
     });
     if (error || !Array.isArray(data)) return empty;
+    if (!data.length && offset > 0) {
+      // A page past the end has no rows to carry total_count: ask page 1 for it.
+      const first = await client.rpc('get_shared_service_history', {
+        p_owner_org: owner,
+        p_equipment_id: orgId(equipmentId ?? null),
+        p_limit: 1,
+        p_offset: 0,
+      });
+      const head = !first?.error && Array.isArray(first?.data) ? first.data[0] : null;
+      const total = head ? Number(head.total_count ?? 0) : 0;
+      return { rows: [], total, truncated: false, pastEnd: total > 0 };
+    }
     const total = data.length ? Number(data[0]?.total_count ?? data.length) : 0;
     // Defense in depth: keep only the documented safe columns.
     const rows = data.map((row: Record<string, unknown>) => {
@@ -115,7 +135,7 @@ export async function loadSharedServiceHistory(
       for (const k of SHARED_HISTORY_COLUMNS) if (k in row) out[k] = row[k];
       return out as SharedHistoryRow;
     });
-    return { rows, total, truncated: offset + rows.length < total };
+    return { rows, total, truncated: offset + rows.length < total, pastEnd: false };
   } catch (e) {
     console.warn('loadSharedServiceHistory', e);
     return empty;
@@ -127,7 +147,7 @@ export type LinkedShop = {
   shop_name: string | null;
   linked_at: string | null;
   first_service_date: string | null;
-  /** Set when the owner removed this shop and blocked it from re-linking. */
+  /** Set when the owner removed this shop and blocked it (and the clinic's creator) from re-linking. */
   removed_at: string | null;
 };
 
@@ -143,12 +163,16 @@ export async function listLinkedServiceShops(
   return { shops: Array.isArray(data) ? data : [], error: null };
 }
 
-/** Owner/admin removes a linked shop; by default the shop cannot re-link itself. */
+/**
+ * Owner/admin removes a linked shop. By default the shop (and the clinic's
+ * creator, from any shop) cannot re-link itself. revokeGrants also revokes the
+ * shop's active service-history grants from this facility in the same step.
+ */
 export async function removeLinkedServiceShop(
   client: RpcClient,
   ownerOrg: string | number,
   shopOrg: string | number,
-  opts: { block?: boolean } = {}
+  opts: { block?: boolean; revokeGrants?: boolean } = {}
 ): Promise<{ removed: boolean; error: string | null }> {
   const owner = orgId(ownerOrg);
   const shop = orgId(shopOrg);
@@ -157,6 +181,7 @@ export async function removeLinkedServiceShop(
     p_owner_org: owner,
     p_shop: shop,
     p_block: opts.block !== false,
+    p_revoke_grants: opts.revokeGrants === true,
   });
   if (error) return { removed: false, error: error.message || String(error) };
   return { removed: data === true, error: null };
