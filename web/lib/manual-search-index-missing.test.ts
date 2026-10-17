@@ -366,3 +366,15 @@ test('reindex route skips unpublished by default and orders by id as a tiebreake
   assert.match(route, /m\.published === false && !includeUnpublished/);
   assert.match(route, /select\('[^']*published'\)/);
 });
+
+test('a missing or unreadable PDF writes nothing (no permanent empty row)', async () => {
+  const s = scenario();
+  s.files['shared/new/m1757/manual.pdf'] = Buffer.from('<html>error page</html>');
+  const admin = fakeAdmin(s);
+  const gone = await indexMissingManualSearchText(admin, s.manuals.find((m) => m.id === 1758)!);
+  const notPdf = await indexMissingManualSearchText(admin, s.manuals.find((m) => m.id === 1757)!);
+  assert.equal(gone.skipped, 'no_pdf_downloaded');
+  assert.equal(notPdf.skipped, 'no_pdf_downloaded');
+  assert.equal(admin.calls.rpc.length, 0);
+  assert.ok(!s.index.some((r) => r.manual_id === 1757 || r.manual_id === 1758));
+});

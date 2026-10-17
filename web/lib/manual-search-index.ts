@@ -966,8 +966,9 @@ export const ALREADY_INDEXED = 'already_indexed';
  * manual makes the RPC return false, reported as already_indexed. There is no
  * upsert fallback: without the RPC the write is refused. A quick row check
  * before extraction skips the download when rows already exist.
- * An image-only PDF stores one empty row, like the God button, so it is not
- * retried forever.
+ * An image-only PDF (opened by pdf.js, no text) stores one empty row, like
+ * the God button, so it is not retried forever. A missing or unreadable file
+ * writes nothing (no_pdf_downloaded / no_pdf_path).
  */
 export async function indexMissingManualSearchText(
   client: TableClient & { storage: StorageClient },
@@ -986,6 +987,12 @@ export async function indexMissingManualSearchText(
   const extracted = await extractManualBodyText(client.storage, manual);
   if (extracted.fatal) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.fatal };
+  }
+  if (!extracted.text && !extracted.fileCounts.length) {
+    // Nothing was downloaded and opened (missing object, a download error, or
+    // not a PDF). Write nothing, so a transient Storage error never leaves a
+    // permanent empty row. An empty row is only for a PDF pdf.js opened.
+    return { manualId, ok: false, chars: 0, files: 0, skipped: extracted.skipped === 'no_pdf_path' ? 'no_pdf_path' : 'no_pdf_downloaded' };
   }
   const chunks: readonly IndexChunk[] = extracted.chunks?.length
     ? extracted.chunks
