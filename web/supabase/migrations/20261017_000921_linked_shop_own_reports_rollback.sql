@@ -1,115 +1,45 @@
 SET LOCAL lock_timeout = '5s';
 
--- Rollback for 000921. Restores the exact prior state:
---   - can_view_service_report_for_history: the 000920 / live stopgapped body
---     (md5 4abb0da8e35302a52783eb49416f6b5a), which has the linked-shop branch.
---   - customer_org_link_allowed: the exact live body captured read-only on
---     2026-10-17 (md5 b29880941434873db018651aaa71c5ac, search_path public, pg_temp).
+-- Rollback for 000921. Restores exactly the state before 000921, with or
+-- without 000919 underneath:
+--   - can_view_service_report_for_history, org_creator_access and
+--     customer_org_link_allowed are re-created from the pg_get_functiondef text
+--     000921 saved in migration_backup.m000921_functions before it changed them
+--     (000920 stopgapped can_view md5 4abb0da8...; org_creator_access /
+--     customer_org_link_allowed as live, or as 000919 left them). Their ACLs
+--     were never changed by 000921. Refuses to run if the backup is missing.
 --   - service_history_owner_admin EXECUTE back to authenticated (000920).
 --   - service_history_grants_select policy as in 000920 (owner OR grantee).
 --   - get_shared_service_history(bigint, bigint) as in 000920.
--- Drops the owner link RPCs, list_my_service_history_grants and the block table
--- (owner removals are forgotten; removed links are NOT re-created).
+-- Drops the owner link RPCs, list_my_service_history_grants, the block table
+-- (owner removals are forgotten; removed links are NOT re-created; grants
+-- revoked through remove_linked_service_shop stay revoked) and the backup.
 
-CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(p_service bigint, p_customer bigint)
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path TO 'public', 'pg_temp'
-AS $function$
-  SELECT p_service IS NOT NULL
-    AND p_customer IS NOT NULL
-    AND p_service = public.get_my_org_id()
-    AND public.is_active_org_member(p_service)
-    AND EXISTS (
-      SELECT 1 FROM public.organizations o
-      WHERE o.id = p_customer
-        AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
-    )
-    AND NOT EXISTS (
-      SELECT 1 FROM public.organization_customers existing
-      WHERE existing.customer_organization_id = p_customer
-        AND existing.service_organization_id IS DISTINCT FROM p_service
-    )
-    AND (
-      EXISTS (
-        SELECT 1 FROM public.organizations o
-        WHERE o.id = p_customer
-          AND o.type = 'customer'
-          AND o.created_by IS NOT NULL
-          AND EXISTS (
-            SELECT 1 FROM public.organization_memberships m
-            WHERE m.user_id = o.created_by
-              AND m.organization_id = p_service
-          )
-      )
-      OR EXISTS (
-        SELECT 1 FROM public.engineer_invitations i
-        JOIN public.organization_memberships m
-          ON m.user_id = i.invited_by
-         AND m.organization_id = p_service
-         AND lower(m.role) IN ('company_admin', 'owner', 'service_manager', 'crm')
-        WHERE i.organization_id = p_customer
-          AND i.accepted IS TRUE
-          AND lower(coalesce(i.role, '')) = 'owner'
-      )
-    );
-$function$;
+DO $$
+DECLARE
+  rec record;
+  n integer := 0;
+BEGIN
+  IF to_regclass('migration_backup.m000921_functions') IS NULL THEN
+    RAISE EXCEPTION '000921 rollback: migration_backup.m000921_functions is missing; refusing to guess the prior bodies';
+  END IF;
+  FOR rec IN SELECT signature, definition FROM migration_backup.m000921_functions ORDER BY signature LOOP
+    EXECUTE rec.definition;
+    n := n + 1;
+  END LOOP;
+  IF n <> 3 THEN
+    RAISE EXCEPTION '000921 rollback: expected 3 saved functions, found %', n;
+  END IF;
+END $$;
 
-REVOKE ALL ON FUNCTION public.customer_org_link_allowed(bigint, bigint) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.customer_org_link_allowed(bigint, bigint) TO authenticated, service_role;
-
-DROP FUNCTION IF EXISTS public.allow_linked_service_shop(bigint, bigint);
-DROP FUNCTION IF EXISTS public.remove_linked_service_shop(bigint, bigint, boolean);
 DROP FUNCTION IF EXISTS public.list_linked_service_shops(bigint);
+DROP FUNCTION IF EXISTS public.remove_linked_service_shop(bigint, bigint, boolean, boolean);
+DROP FUNCTION IF EXISTS public.remove_linked_service_shop(bigint, bigint, boolean);
+DROP FUNCTION IF EXISTS public.allow_linked_service_shop(bigint, bigint);
+DROP FUNCTION IF EXISTS public.list_my_service_history_grants();
 DROP TABLE IF EXISTS public.organization_customer_link_blocks;
 
-CREATE OR REPLACE FUNCTION public.can_view_service_report_for_history(r public.service_reports)
- RETURNS boolean
- LANGUAGE sql
- STABLE SECURITY DEFINER
- SET search_path = ''
-AS $function$
-  SELECT
-    -- Own service company reports
-    (r.organization_id IS NOT NULL AND r.organization_id = public.get_my_org_id())
-    OR (
-      r.created_by IS NOT NULL
-      AND r.created_by = auth.uid()
-      AND public.is_active_org_member(r.organization_id)
-    )
-    -- Facility that is the report customer
-    OR (
-      r.customer_organization_id IS NOT NULL
-      AND public.user_owns_or_created_org(r.customer_organization_id)
-    )
-    -- Facility that currently owns the linked equipment row (real transfers
-    -- move this row, so history follows them)
-    OR (
-      r.equipment_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM public.equipment e
-        WHERE e.id = r.equipment_id
-          AND public.user_owns_or_created_org(e.customer_organization_id)
-      )
-    )
-    -- Service org linked via organization_customers to report customer
-    OR (
-      r.customer_organization_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM public.organization_customers oc
-        WHERE oc.customer_organization_id = r.customer_organization_id
-          AND oc.service_organization_id = public.get_my_org_id()
-      )
-    );
-$function$;
-
-REVOKE ALL ON FUNCTION public.can_view_service_report_for_history(public.service_reports) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.can_view_service_report_for_history(public.service_reports) TO authenticated, service_role;
-
 GRANT EXECUTE ON FUNCTION public.service_history_owner_admin(bigint) TO authenticated;
-
-DROP FUNCTION IF EXISTS public.list_my_service_history_grants();
 
 DROP POLICY IF EXISTS service_history_grants_select ON public.service_history_grants;
 CREATE POLICY service_history_grants_select ON public.service_history_grants
@@ -198,3 +128,8 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.get_shared_service_history(bigint, bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_shared_service_history(bigint, bigint) TO authenticated;
+
+DROP TABLE IF EXISTS migration_backup.m000921_functions;
+DROP SCHEMA IF EXISTS migration_backup;
+
+NOTIFY pgrst, 'reload schema';

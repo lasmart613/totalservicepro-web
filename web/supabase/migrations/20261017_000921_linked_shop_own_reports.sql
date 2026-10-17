@@ -1,40 +1,106 @@
 SET LOCAL lock_timeout = '5s';
 
--- 000921: linked shops see only their own reports; clinic owners manage links.
--- Stacks on 000920 (PR #310). Independent of 000919 (PR #309).
+-- 000921: linked shops see only their own reports; clinic owners manage links;
+-- creator access ends when a clinic is claimed.
+--
+-- ORDER: 000919 (PR #309) -> 000920 (PR #310) -> 000921. Also correct when
+-- 000919 is never applied (000920 -> 000921): org_creator_access picks its
+-- "new and unclaimed" branch by whether organizations.creator_shop_org_id
+-- (000919) exists. If 000919 is applied AFTER 000921 it overwrites
+-- org_creator_access / customer_org_link_allowed: roll 000921 back first.
+-- One transaction. Safe to re-run (the backup keeps the first capture).
+--
+-- 0. Exact rollback: the pre-000921 pg_get_functiondef of the three redefined
+--    functions is saved in migration_backup.m000921_functions (schema not
+--    exposed by PostgREST; no client grants). The rollback re-creates them from
+--    there, so it restores exactly what was live, with or without 000919.
 --
 -- 1. can_view_service_report_for_history: drop the "service org linked via
---    organization_customers to report customer" branch. A linked shop used to
---    read ALL of the clinic's reports, other shops' included, unredacted, with
---    no revoke. Now a shop sees the reports it wrote (own-shop branch, which
---    is unchanged) and nothing else of the clinic's; everything else goes
---    through owner-consent grants and get_shared_service_history.
---    "Equipment it actively services" is NOT used as a signal: the only
---    candidates (a ticket or report naming the equipment) are written by the
---    shop itself and service_tickets inserts do not validate the customer or
---    equipment, so they are self-asserted, not owner consent.
---    Prod impact (read-only, 2026-10-17): 0 views lost (no linked clinic has a
---    report by any other shop). See /workspace/h2/LINKED-IMPACT.md.
--- 2. organization_customer_link_blocks + owner RPCs:
---    list_linked_service_shops(owner)         owner/admin lists linked and removed shops
---    remove_linked_service_shop(owner, shop)  deletes the link and (by default)
---                                             blocks the shop from re-linking itself
---    allow_linked_service_shop(owner, shop)   lifts a block (does not re-link)
---    customer_org_link_allowed now also refuses a blocked (owner, shop) pair.
---    Removing a link does not touch service_history_grants (separate consent).
--- 3. QA #310 info items:
---    - service_history_owner_admin: EXECUTE revoked from authenticated.
---    - service_history_grants SELECT is owner-side only (granted_by/revoked_by
---      stay with the owner). Grantees use list_my_service_history_grants(),
---      which returns no user ids.
---    - get_shared_service_history pages: p_limit (default 200, max 500),
---      p_offset, and total_count on every row, so truncation is visible.
---      Replaces the (bigint, bigint) signature.
+--    organization_customers to report customer" branch. A linked shop sees the
+--    reports it wrote (own-shop branch, unchanged) and nothing else of the
+--    clinic's; other shops' history goes through owner-consent grants.
+--    The two facility branches (report customer / equipment owner) now need a
+--    real member of that facility, OR (creator access) a facility with no
+--    organization_customers link at all. So creator access never opens a
+--    LINKED clinic's reports, claimed or not (QA #311 M-1).
+--    Prod impact (read-only, 2026-10-17): 0 views lost (LINKED-IMPACT.md).
 --
--- Rollback: 20261017_000921_linked_shop_own_reports_rollback.sql (restores the
---   000920 bodies, ACLs and policy, and the live customer_org_link_allowed).
+-- 2. org_creator_access (QA #311 M-1; starts from 000919's body when present):
+--      creator = auth.uid() AND (
+--        member of the org
+--        OR (org has NO memberships AND a shop I'm in links it)  -- shop CRM edit
+--        OR (org_unclaimed_new [000919: AND not stamped AND not served]))
+--    The linked-shop creator clause is no longer standalone: it lasts only
+--    while the clinic has no members. It is kept for that window because the
+--    shop's customer edit page (lib/customer-form.ts updateCustomerOrg ->
+--    "Users can update their own organizations") relies on it for the tech who
+--    added the clinic. With 1. it never grants report reads. Once the clinic
+--    has any member, its creator has no creator access at all.
+--
+-- 3. customer_org_link_allowed (QA #311 M-2; 000919 body when present, plus):
+--    a) the 000919 member-overlap rule is carried in both orders (prod: 0 of
+--       1766 links overlap, so nothing existing changes);
+--    b) blocked (owner, shop) pairs are refused (organization_customer_link_blocks);
+--    c) RULE: the creator path ("the clinic's created_by is in the linking
+--       shop") is refused once the clinic is CLAIMED (has any membership), and
+--       whenever a block on this clinic recorded that same creator
+--       (blocks.creator_user_id). So a blocked creator who starts or joins a
+--       new shop cannot re-link through it. A claimed clinic is linked only
+--       through the accepted owner-invite path (the owner's own consent).
+--
+-- 4. organization_customer_link_blocks + owner RPCs:
+--    list_linked_service_shops(owner)
+--    remove_linked_service_shop(owner, shop, p_block DEFAULT true,
+--                               p_revoke_grants DEFAULT false)  (QA #311 L-1:
+--        p_revoke_grants also revokes that shop's active history grants from
+--        this clinic in the same step)
+--    allow_linked_service_shop(owner, shop)   lifts a block (does not re-link)
+--
+-- 5. Grants / history (QA #310 + #311 info items):
+--    - service_history_owner_admin: EXECUTE revoked from authenticated.
+--    - service_history_grants SELECT: owner / company_admin / admin / manager
+--      of the owner clinic only (granted_by / revoked_by are not visible to
+--      plain clinic staff or to the grantee). Grantees use
+--      list_my_service_history_grants() (no user ids).
+--    - get_shared_service_history(owner, equipment, p_limit 200 (max 500),
+--      p_offset): total_count on every row. service_company_name is now the
+--      real organizations.name of the report's shop; the free text typed on the
+--      report header is a separate, labeled column report_company_name_text.
+--      A page past the end returns no rows (no total); the TS wrapper then
+--      re-asks for the total and returns pastEnd: true.
+--
+-- Rollback: 20261017_000921_linked_shop_own_reports_rollback.sql
 -- Proof: web/supabase/tests/20261017_linked_shop_own_reports.sql
 
+-- 0) Backup of the prior definitions (first capture wins on re-run).
+CREATE SCHEMA IF NOT EXISTS migration_backup;
+REVOKE ALL ON SCHEMA migration_backup FROM PUBLIC, anon, authenticated;
+CREATE TABLE IF NOT EXISTS migration_backup.m000921_functions (
+  signature text PRIMARY KEY,
+  definition text NOT NULL,
+  saved_at timestamptz NOT NULL DEFAULT now()
+);
+REVOKE ALL ON TABLE migration_backup.m000921_functions FROM PUBLIC, anon, authenticated;
+
+DO $$
+DECLARE
+  old_path text := current_setting('search_path');
+  sig text;
+BEGIN
+  PERFORM set_config('search_path', '', true);
+  FOREACH sig IN ARRAY ARRAY[
+    'public.can_view_service_report_for_history(public.service_reports)',
+    'public.org_creator_access(bigint,uuid,timestamp with time zone)',
+    'public.customer_org_link_allowed(bigint,bigint)'
+  ] LOOP
+    INSERT INTO migration_backup.m000921_functions (signature, definition)
+    VALUES (sig, pg_catalog.pg_get_functiondef(sig::pg_catalog.regprocedure))
+    ON CONFLICT (signature) DO NOTHING;
+  END LOOP;
+  PERFORM set_config('search_path', old_path, true);
+END $$;
+
+-- 1) History visibility.
 CREATE OR REPLACE FUNCTION public.can_view_service_report_for_history(r public.service_reports)
  RETURNS boolean
  LANGUAGE sql
@@ -49,10 +115,18 @@ AS $function$
       AND r.created_by = auth.uid()
       AND public.is_active_org_member(r.organization_id)
     )
-    -- Facility that is the report customer
+    -- Facility that is the report customer (creator access only while the
+    -- facility has no shop link)
     OR (
       r.customer_organization_id IS NOT NULL
       AND public.user_owns_or_created_org(r.customer_organization_id)
+      AND (
+        public.is_active_org_member(r.customer_organization_id)
+        OR NOT EXISTS (
+          SELECT 1 FROM public.organization_customers oc
+          WHERE oc.customer_organization_id = r.customer_organization_id
+        )
+      )
     )
     -- Facility that currently owns the linked equipment row (real transfers
     -- move this row, so history follows them)
@@ -62,31 +136,102 @@ AS $function$
         SELECT 1 FROM public.equipment e
         WHERE e.id = r.equipment_id
           AND public.user_owns_or_created_org(e.customer_organization_id)
+          AND (
+            public.is_active_org_member(e.customer_organization_id)
+            OR NOT EXISTS (
+              SELECT 1 FROM public.organization_customers oc
+              WHERE oc.customer_organization_id = e.customer_organization_id
+            )
+          )
       )
     );
 $function$;
 
-REVOKE ALL ON FUNCTION public.can_view_service_report_for_history(public.service_reports) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.can_view_service_report_for_history(public.service_reports) TO authenticated, service_role;
+-- 2) Creator access ends at the first membership.
+DO $do$
+DECLARE
+  has_919 boolean := EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute a
+    WHERE a.attrelid = 'public.organizations'::pg_catalog.regclass
+      AND a.attname = 'creator_shop_org_id'
+      AND NOT a.attisdropped
+  );
+  unclaimed_branch text;
+BEGIN
+  IF has_919 THEN
+    unclaimed_branch := $b$
+      OR (
+        public.org_unclaimed_new(p_org, p_created_at)
+        AND NOT EXISTS (
+          SELECT 1 FROM public.organizations o
+          WHERE o.id = p_org
+            AND o.creator_shop_org_id IS NOT NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM public.service_reports r
+          WHERE r.customer_organization_id = p_org
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM public.service_tickets t
+          WHERE t.customer_organization_id = p_org
+        )
+      )$b$;
+  ELSE
+    unclaimed_branch := $b$
+      OR public.org_unclaimed_new(p_org, p_created_at)$b$;
+  END IF;
 
+  EXECUTE $f$
+CREATE OR REPLACE FUNCTION public.org_creator_access(p_org bigint, p_created_by uuid, p_created_at timestamp with time zone)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT p_org IS NOT NULL
+    AND p_created_by IS NOT NULL
+    AND auth.uid() IS NOT NULL
+    AND p_created_by = auth.uid()
+    AND (
+      public.is_active_org_member(p_org)
+      -- 000921: a linking shop's creator keeps access only while the clinic
+      -- has no members (CRM edits of a clinic the shop added).
+      OR (
+        NOT EXISTS (
+          SELECT 1 FROM public.organization_memberships cm
+          WHERE cm.organization_id = p_org
+        )
+        AND EXISTS (
+          SELECT 1 FROM public.organization_customers oc
+          WHERE oc.customer_organization_id = p_org
+            AND public.is_active_org_member(oc.service_organization_id)
+        )
+      )$f$ || unclaimed_branch || $f$
+    );
+$function$$f$;
+END $do$;
+
+-- 4) Link blocks (owner removals). creator_user_id binds the clinic's creator.
 CREATE TABLE IF NOT EXISTS public.organization_customer_link_blocks (
   owner_org_id bigint NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
   shop_org_id bigint NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  creator_user_id uuid,
   blocked_by uuid NOT NULL,
   blocked_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (owner_org_id, shop_org_id)
 );
 COMMENT ON TABLE public.organization_customer_link_blocks IS
-  'Clinic owner removed this shop''s organization_customers link; customer_org_link_allowed refuses re-linking until allow_linked_service_shop. Written only by the owner RPCs.';
+  'Clinic owner removed this shop''s organization_customers link. customer_org_link_allowed refuses the pair, and refuses the creator path for creator_user_id (the clinic''s created_by at block time) from any shop. Written only by the owner RPCs.';
 ALTER TABLE public.organization_customer_link_blocks ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.organization_customer_link_blocks FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public.organization_customer_link_blocks TO service_role;
 
+-- 3) Linking rule (000919 body + 000921 rules).
 CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(p_service bigint, p_customer bigint)
  RETURNS boolean
  LANGUAGE sql
  STABLE SECURITY DEFINER
- SET search_path = ''
+ SET search_path TO ''
 AS $function$
   SELECT p_service IS NOT NULL
     AND p_customer IS NOT NULL
@@ -98,14 +243,24 @@ AS $function$
         AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
     )
     AND NOT EXISTS (
-      SELECT 1 FROM public.organization_customer_link_blocks b
-      WHERE b.owner_org_id = p_customer
-        AND b.shop_org_id = p_service
-    )
-    AND NOT EXISTS (
       SELECT 1 FROM public.organization_customers existing
       WHERE existing.customer_organization_id = p_customer
         AND existing.service_organization_id IS DISTINCT FROM p_service
+    )
+    -- 000919 rev 3 (QA #309 H3): nobody in the linking shop may already
+    -- belong to the customer org (its owner can't be on the shop's staff).
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.organization_memberships cm
+      JOIN public.organization_memberships sm ON sm.user_id = cm.user_id
+      WHERE cm.organization_id = p_customer
+        AND sm.organization_id = p_service
+    )
+    -- 000921: the clinic owner removed and blocked this shop.
+    AND NOT EXISTS (
+      SELECT 1 FROM public.organization_customer_link_blocks b
+      WHERE b.owner_org_id = p_customer
+        AND b.shop_org_id = p_service
     )
     AND (
       EXISTS (
@@ -117,6 +272,17 @@ AS $function$
             SELECT 1 FROM public.organization_memberships m
             WHERE m.user_id = o.created_by
               AND m.organization_id = p_service
+          )
+          -- 000921: the creator path ends once the clinic is claimed ...
+          AND NOT EXISTS (
+            SELECT 1 FROM public.organization_memberships cm
+            WHERE cm.organization_id = p_customer
+          )
+          -- ... and a block binds the creator, from any shop.
+          AND NOT EXISTS (
+            SELECT 1 FROM public.organization_customer_link_blocks b
+            WHERE b.owner_org_id = p_customer
+              AND b.creator_user_id = o.created_by
           )
       )
       OR EXISTS (
@@ -131,9 +297,6 @@ AS $function$
       )
     );
 $function$;
-
-REVOKE ALL ON FUNCTION public.customer_org_link_allowed(bigint, bigint) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.customer_org_link_allowed(bigint, bigint) TO authenticated, service_role;
 
 REVOKE EXECUTE ON FUNCTION public.service_history_owner_admin(bigint) FROM authenticated;
 
@@ -170,10 +333,14 @@ $function$;
 REVOKE ALL ON FUNCTION public.list_linked_service_shops(bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.list_linked_service_shops(bigint) TO authenticated;
 
+-- Replaces the 3-argument draft from 000921 rev 1 (never applied anywhere).
+DROP FUNCTION IF EXISTS public.remove_linked_service_shop(bigint, bigint, boolean);
+
 CREATE OR REPLACE FUNCTION public.remove_linked_service_shop(
   p_owner_org bigint,
   p_shop bigint,
-  p_block boolean DEFAULT true
+  p_block boolean DEFAULT true,
+  p_revoke_grants boolean DEFAULT false
 )
  RETURNS boolean
  LANGUAGE plpgsql
@@ -195,16 +362,25 @@ BEGIN
      AND service_organization_id = p_shop;
   GET DIAGNOSTICS removed = ROW_COUNT;
   IF COALESCE(p_block, true) THEN
-    INSERT INTO public.organization_customer_link_blocks (owner_org_id, shop_org_id, blocked_by)
-    VALUES (p_owner_org, p_shop, uid)
+    INSERT INTO public.organization_customer_link_blocks (owner_org_id, shop_org_id, creator_user_id, blocked_by)
+    SELECT p_owner_org, p_shop, o.created_by, uid
+    FROM public.organizations o
+    WHERE o.id = p_owner_org
     ON CONFLICT (owner_org_id, shop_org_id) DO NOTHING;
+  END IF;
+  IF COALESCE(p_revoke_grants, false) THEN
+    UPDATE public.service_history_grants
+       SET revoked_at = now(), revoked_by = uid
+     WHERE owner_org_id = p_owner_org
+       AND grantee_shop_org_id = p_shop
+       AND revoked_at IS NULL;
   END IF;
   RETURN removed > 0;
 END;
 $function$;
 
-REVOKE ALL ON FUNCTION public.remove_linked_service_shop(bigint, bigint, boolean) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.remove_linked_service_shop(bigint, bigint, boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.remove_linked_service_shop(bigint, bigint, boolean, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.remove_linked_service_shop(bigint, bigint, boolean, boolean) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.allow_linked_service_shop(p_owner_org bigint, p_shop bigint)
  RETURNS boolean
@@ -225,12 +401,21 @@ $function$;
 REVOKE ALL ON FUNCTION public.allow_linked_service_shop(bigint, bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.allow_linked_service_shop(bigint, bigint) TO authenticated;
 
--- Grants: owner side reads the table (with granted_by / revoked_by); the
--- grantee shop reads its grants through an RPC without user ids.
+-- 5) Grant rows: owner / admin roles of the owner clinic only (same role list
+--    as service_history_owner_admin; inline, since that helper is no longer
+--    executable by authenticated; a user can always read their own
+--    organization_memberships rows).
 DROP POLICY IF EXISTS service_history_grants_select ON public.service_history_grants;
 CREATE POLICY service_history_grants_select ON public.service_history_grants
   FOR SELECT TO authenticated
-  USING (public.is_active_org_member(owner_org_id));
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.organization_memberships m
+      WHERE m.user_id = auth.uid()
+        AND m.organization_id = service_history_grants.owner_org_id
+        AND lower(btrim(COALESCE(m.role, ''))) IN ('owner', 'company_admin', 'admin', 'manager')
+    )
+  );
 
 CREATE OR REPLACE FUNCTION public.list_my_service_history_grants()
  RETURNS TABLE (
@@ -257,8 +442,12 @@ REVOKE ALL ON FUNCTION public.list_my_service_history_grants() FROM PUBLIC, anon
 GRANT EXECUTE ON FUNCTION public.list_my_service_history_grants() TO authenticated;
 
 DROP FUNCTION IF EXISTS public.get_shared_service_history(bigint, bigint);
+-- Rev 1 of this file had a different RETURNS list for the 4-arg signature.
+DROP FUNCTION IF EXISTS public.get_shared_service_history(bigint, bigint, integer, integer);
 
-CREATE OR REPLACE FUNCTION public.get_shared_service_history(
+-- service_company_name     = organizations.name of the shop that wrote the report
+-- report_company_name_text = free text typed on the report header (tech_company_name)
+CREATE FUNCTION public.get_shared_service_history(
   p_owner_org bigint,
   p_equipment_id bigint DEFAULT NULL,
   p_limit integer DEFAULT 200,
@@ -279,6 +468,7 @@ CREATE OR REPLACE FUNCTION public.get_shared_service_history(
    created_at timestamptz,
    finalized_at timestamptz,
    service_company_name text,
+   report_company_name_text text,
    service_organization_id bigint,
    customer_organization_id bigint,
    total_count bigint
@@ -334,9 +524,10 @@ AS $function$
   SELECT h.id, h.report_number, h.status, h.service_type, h.model_type,
          h.equipment_name, h.equipment_type, h.serial_number, h.equipment_id,
          h.date_out, h.next_pm_due, h.created_at, h.finalized_at,
-         h.tech_company_name, h.organization_id, h.customer_organization_id,
+         s.name, h.tech_company_name, h.organization_id, h.customer_organization_id,
          count(*) OVER () AS total_count
   FROM hits h
+  LEFT JOIN public.organizations s ON s.id = h.organization_id
   ORDER BY COALESCE(h.date_out::timestamptz, h.created_at) DESC NULLS LAST, h.id
   LIMIT LEAST(GREATEST(COALESCE(p_limit, 200), 1), 500)
   OFFSET GREATEST(COALESCE(p_offset, 0), 0);
@@ -344,3 +535,5 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.get_shared_service_history(bigint, bigint, integer, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_shared_service_history(bigint, bigint, integer, integer) TO authenticated;
+
+NOTIFY pgrst, 'reload schema';
