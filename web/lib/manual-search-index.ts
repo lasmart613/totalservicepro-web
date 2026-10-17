@@ -1045,7 +1045,9 @@ export async function writeChunkedManualSearchIndex(
   chunks: readonly IndexChunk[],
 ): Promise<ChunkedWriteResult> {
   if (typeof db.rpc !== 'function') return { ok: false, reason: 'Refused: chunked writes need the Supabase RPC client.' };
-  const rpc = db.rpc;
+  // Bound: SupabaseClient.rpc reads this.rest. A detached `db.rpc` threw
+  // "Cannot read properties of undefined (reading 'rest')" before any write.
+  const rpc = db.rpc.bind(db);
   if (!chunks.length || chunks.length > 100) {
     return { ok: false, reason: `Refused: ${chunks.length} chunks (the index allows 1 to 100).` };
   }
