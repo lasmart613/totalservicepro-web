@@ -27,6 +27,10 @@ test('000919 rev 2: a real type change is refused before writing (QA H1 flip)', 
     ['service_company', 'customer'],
     ['parts_supplier', 'service_company'],
     ['customer', 'parts_supplier'],
+    // QA #309 L4: same group is refused too, never dropped silently.
+    ['laser_clinic', 'laser_rental'],
+    ['customer', 'laser_clinic'],
+    ['laser_reseller', 'customer'],
   ]) {
     const r = onboardingOrgUpdatePayload({ ...base, type: sent }, existing);
     assert.equal(r.ok, false, `${existing} -> ${sent}`);

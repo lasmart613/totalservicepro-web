@@ -106,12 +106,13 @@ test('createLinkedCustomer and createShopCustomerOrg: one RPC, errors thrown, no
   await assert.rejects(createShopCustomerOrg(ok as never, { serviceOrgId: 4, name: '  ' }), /name is required/);
 });
 
-test('migration 000919 rev 2: H1 type lock, any-type stamp/served, M1 insert policy, L1 guard, L2 caps + limiter, rollback', () => {
+test('migration 000919 rev 3: H3 link + membership rules, H1 type lock, any-type stamp/served, M1 insert policy, L1 guard, L2 caps + limiter, rollback', () => {
   assert.match(mig919, /^SET LOCAL lock_timeout = '5s';$/m);
   assert.match(mig919, /ORDERING: 000918 \(manual search index catch-up\) is applied/);
-  // Every function is SECURITY DEFINER with an empty search_path (7).
-  assert.equal((mig919.match(/^\s*(STABLE )?SECURITY DEFINER$/gm) || []).length, 7);
-  assert.equal((mig919.match(/^\s*SET search_path (=|TO) ''$/gm) || []).length, 7);
+  // Every function is SECURITY DEFINER with an empty search_path (9).
+  assert.equal((mig919.match(/^\s*(STABLE )?SECURITY DEFINER$/gm) || []).length, 9);
+  assert.equal((mig919.match(/^\s*SET search_path (=|TO) ''$/gm) || []).length, 9);
+  assert.doesNotMatch(mig919, /SET search_path TO 'public'/);
   assert.doesNotMatch(mig919, /(pg_catalog|public)\.(extract|coalesce)\b/i);
   assert.match(mig919, /ADD COLUMN IF NOT EXISTS creator_shop_org_id bigint;/);
   assert.match(mig919, /REVOKE INSERT \(creator_shop_org_id\), UPDATE \(creator_shop_org_id\)/);
@@ -134,6 +135,19 @@ test('migration 000919 rev 2: H1 type lock, any-type stamp/served, M1 insert pol
   // L1: tickets / reports name only a linked customer.
   assert.equal((mig919.match(/CREATE TRIGGER trg_guard_service_customer_org/g) || []).length, 2);
   assert.match(mig919, /customer_organization_id must be a customer linked to this service company/);
+  // H3 (rev 3): no link while the shop's staff belong to the customer org;
+  // no membership on a stamped org for its creator or the stamp shop's staff,
+  // whoever inserts it (no auth.uid() skip).
+  const link = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(', '$function$;');
+  assert.match(link, /FROM public\.organization_memberships cm\s+JOIN public\.organization_memberships sm ON sm\.user_id = cm\.user_id\s+WHERE cm\.organization_id = p_customer\s+AND sm\.organization_id = p_service/);
+  assert.match(link, /o\.type = 'customer'/, 'live creator branch kept');
+  const memb = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.guard_stamped_org_membership()', '$function$;');
+  assert.doesNotMatch(memb, /auth\.uid\(\)/, 'applies to the service role too');
+  assert.match(memb, /JOIN public\.organizations s ON s\.id = o\.creator_shop_org_id/, 'stamp shop must still exist');
+  assert.match(memb, /o\.created_by = NEW\.user_id/);
+  assert.match(mig919, /CREATE TRIGGER trg_guard_stamped_org_membership\s+BEFORE INSERT OR UPDATE OF user_id, organization_id ON public\.organization_memberships/);
+  assert.match(rollback919, /DROP TRIGGER IF EXISTS trg_guard_stamped_org_membership ON public\.organization_memberships;/);
+  assert.match(rollback919, /CREATE OR REPLACE FUNCTION public\.customer_org_link_allowed\(p_service bigint, p_customer bigint\)\n RETURNS boolean\n LANGUAGE sql\n STABLE SECURITY DEFINER\n SET search_path TO 'public', 'pg_temp'/);
   // L2: caps and 30/user/hour on the 000910 limiter.
   const rpc = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.create_shop_customer_org(', '$function$;');
   assert.doesNotMatch(rpc, /m\.role/);
@@ -160,7 +174,10 @@ test('migration 000919 rev 2: H1 type lock, any-type stamp/served, M1 insert pol
     'any type: stamped (82) and served (83) refused',
     'L2: caps (22001), 30/user/hour',
     'L1: linked ticket/report ok',
-    'rollback: 5 live functions byte for byte',
+    'rollback: 8 live functions byte for byte',
+    'before 000919: H3 founder-route chain completes',
+    'H3: route chain refused at the owner membership',
+    'H3 legit: outsider owner on a stamped org (handover)',
   ]) {
     assert.ok(proof919.includes(marker), marker);
   }

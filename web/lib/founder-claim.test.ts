@@ -106,16 +106,21 @@ test('loadFounderClaimState reads memberships and service links; errors become n
   });
 });
 
-test('founder route checks the claim on existing orgs before granting or writing the membership', () => {
+test('founder route checks the claim on EVERY path (new and existing) before granting or writing the membership', () => {
   const route = readFileSync(join(here, '../app/api/org/founder/route.ts'), 'utf8');
   const decide = route.indexOf('const decision = decideFounderLink');
-  const claim = route.indexOf('const claim = await loadFounderClaimState(admin, orgId, user.id);');
+  const claim = route.indexOf('const claim = await loadFounderClaimState(admin, orgId as number | string, user.id);');
   const allowed = route.indexOf('const allowed = founderClaimAllowed(');
   const grant = route.indexOf('await grantSignupTrialIfEligible(admin');
   const membership = route.indexOf('const membership = await upsertMembership(admin');
   assert.ok(decide > 0 && claim > decide && allowed > claim, 'claim check follows decideFounderLink');
   assert.ok(allowed < grant && allowed < membership, 'claim check precedes the trial grant and membership write');
-  assert.match(route.slice(claim - 200, claim), /if \(existingForGrant\) \{/);
+  // QA #309 H3: no longer gated on existingForGrant (the new-org path skipped it).
+  assert.doesNotMatch(route.slice(claim - 200, claim), /if \(existingForGrant\) \{/);
+  // New-org path: allow-list + shop-member check before the insert.
+  const check = route.indexOf('await checkFounderNewOrg(admin, { userId: user.id, orgType: pending.orgType })');
+  const insert = route.indexOf(".from('organizations')\n        .insert(row)");
+  assert.ok(check > 0 && insert > check, 'checkFounderNewOrg precedes the org insert');
 });
 
 test('legacy founder read still carries created_at for the claim check', async () => {
