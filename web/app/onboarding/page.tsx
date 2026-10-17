@@ -27,6 +27,7 @@ import {
 import { StripeConnectCard } from '@/components/StripeConnectCard';
 
 import { OrgTypeStep, type OrgType } from './org-type-step';
+import { onboardingOrgUpdatePayload } from '@/lib/onboarding-org-update';
 type TeamMember = {
   id: string;
   email: string;
@@ -559,11 +560,17 @@ export default function Onboarding() {
 
       const createdNewOrg = !orgId;
       if (orgId) {
-        let { error: uErr } = await supabase.from('organizations').update(orgPayload).eq('id', orgId);
+        // 000919: type is fixed after insert. Never send it on update; a real
+        // change (clinic <-> service <-> supplier) is refused before writing.
+        const upd = onboardingOrgUpdatePayload(orgPayload, existingOrgType);
+        if (!upd.ok) throw new Error(upd.error);
+        const updatePayload = upd.payload;
+        let { error: uErr } = await supabase.from('organizations').update(updatePayload).eq('id', orgId);
         if (uErr && /list_in_directory|column/i.test(uErr.message || '')) {
-          delete orgPayload.list_in_directory;
-          await supabase.from('organizations').update(orgPayload).eq('id', orgId);
+          delete updatePayload.list_in_directory;
+          ({ error: uErr } = await supabase.from('organizations').update(updatePayload).eq('id', orgId));
         }
+        if (uErr) throw new Error(uErr.message || 'Could not save organization.');
       } else {
         orgPayload.created_by = currentUser.id;
         let { data: newOrg, error: iErr } = await supabase

@@ -294,6 +294,38 @@ function textOrNull(value: unknown): string | null {
   return text ? text : null;
 }
 
+/** Same caps as create_shop_customer_org (000919): longer is refused with 22001. */
+export const SHOP_CUSTOMER_TEXT_CAPS = {
+  name: 200,
+  address: 500,
+  city: 100,
+  state: 100,
+  phone: 50,
+  laserModels: 1000,
+  facilityType: 100,
+} as const;
+
+const SHOP_CUSTOMER_CAP_LABELS: Record<keyof typeof SHOP_CUSTOMER_TEXT_CAPS, string> = {
+  name: 'Customer name',
+  address: 'Address',
+  city: 'City',
+  state: 'State',
+  phone: 'Phone',
+  laserModels: 'Laser models',
+  facilityType: 'Facility type',
+};
+
+/** First field over its cap, as a user-facing message; null when all fit. */
+export function shopCustomerTextTooLong(fields: Partial<Record<keyof typeof SHOP_CUSTOMER_TEXT_CAPS, string | null>>): string | null {
+  for (const key of Object.keys(SHOP_CUSTOMER_TEXT_CAPS) as (keyof typeof SHOP_CUSTOMER_TEXT_CAPS)[]) {
+    const value = fields[key];
+    if (value != null && value.length > SHOP_CUSTOMER_TEXT_CAPS[key]) {
+      return `${SHOP_CUSTOMER_CAP_LABELS[key]} is too long (max ${SHOP_CUSTOMER_TEXT_CAPS[key]} characters).`;
+    }
+  }
+  return null;
+}
+
 /**
  * Create a customer org for a service company: organizations row and its
  * organization_customers link in ONE transaction (create_shop_customer_org,
@@ -321,15 +353,28 @@ export async function createShopCustomerOrg(
   }
   const name = textOrNull(opts.name);
   if (!name) throw new Error('Customer name is required.');
+  const fields = {
+    name,
+    address: textOrNull(opts.address),
+    city: textOrNull(opts.city),
+    state: textOrNull(opts.state),
+    phone: textOrNull(opts.phone),
+    laserModels: textOrNull(opts.laserModels),
+    facilityType: textOrNull(opts.facilityType) || 'Clinic',
+  };
+  const tooLong = shopCustomerTextTooLong(fields);
+  if (tooLong) throw new Error(tooLong);
+  // Over 30 creates per user per hour the RPC raises PT429 (HTTP 429); its
+  // message is shown as is.
   const { data, error } = await supabase.rpc('create_shop_customer_org', {
     p_service_org: Number(opts.serviceOrgId),
-    p_name: name,
-    p_address: textOrNull(opts.address),
-    p_city: textOrNull(opts.city),
-    p_state: textOrNull(opts.state),
-    p_phone: textOrNull(opts.phone),
-    p_laser_models: textOrNull(opts.laserModels),
-    p_facility_type: textOrNull(opts.facilityType) || 'Clinic',
+    p_name: fields.name,
+    p_address: fields.address,
+    p_city: fields.city,
+    p_state: fields.state,
+    p_phone: fields.phone,
+    p_laser_models: fields.laserModels,
+    p_facility_type: fields.facilityType,
   });
   if (error) throw new Error(error.message || 'Failed to add customer');
   const id = Number(data);
