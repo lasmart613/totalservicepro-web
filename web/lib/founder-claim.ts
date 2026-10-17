@@ -24,6 +24,37 @@ function missingStampColumn(res: Res): boolean {
   return /creator_shop_org_id/i.test(message) && /does not exist|could not find|schema cache|42703|PGRST204/i.test(message);
 }
 
+async function shopMembershipFromRows(
+  admin: FounderClaimAdmin,
+  memberships: unknown[] | null,
+  excludeOrgId: number | string | null
+): Promise<boolean | null> {
+  if (memberships == null) return null;
+  const q = (table: string) => admin.from(table) as Query;
+  for (const row of memberships as Array<{ organization_id?: unknown }>) {
+    if (row?.organization_id == null) continue;
+    if (excludeOrgId != null && String(row.organization_id) === String(excludeOrgId)) continue;
+    const org = rows(await q('organizations').select('type').eq('id', row.organization_id).limit(1));
+    if (org == null) return null;
+    const type = String((org[0] as { type?: unknown } | undefined)?.type || '').trim().toLowerCase();
+    if (SHOP_ORG_TYPES.has(type)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the user holds a membership in any service company now (the same
+ * rule as caller_in_service_company() in 000919). Service-role read; a read
+ * error returns null, which callers treat as "yes" (fail closed).
+ */
+export async function userIsShopMember(admin: FounderClaimAdmin, userId: string): Promise<boolean | null> {
+  const res = await (admin.from('organization_memberships') as Query)
+    .select('organization_id')
+    .eq('user_id', userId)
+    .limit(50);
+  return shopMembershipFromRows(admin, rows(res), null);
+}
+
 /**
  * creatorIsShopMember: the org's creator (the caller: decideFounderLink only
  * lets created_by claim) holds a membership in any service company. With a
@@ -64,23 +95,7 @@ export async function loadFounderClaimState(
   const m = rows(mine);
   const a = rows(anyMember);
   const l = rows(link);
-  const c = rows(callerOrgs);
-  let creatorIsShopMember: boolean | null = c == null ? null : false;
-  if (c) {
-    for (const row of c as Array<{ organization_id?: unknown }>) {
-      if (row?.organization_id == null || String(row.organization_id) === String(orgId)) continue;
-      const org = rows(await q('organizations').select('type').eq('id', row.organization_id).limit(1));
-      if (org == null) {
-        creatorIsShopMember = null;
-        break;
-      }
-      const type = String((org[0] as { type?: unknown } | undefined)?.type || '').trim().toLowerCase();
-      if (SHOP_ORG_TYPES.has(type)) {
-        creatorIsShopMember = true;
-        break;
-      }
-    }
-  }
+  const creatorIsShopMember = await shopMembershipFromRows(admin, rows(callerOrgs), orgId);
   let creatorWasShopMember: boolean | null;
   if (missingStampColumn(stamp)) {
     creatorWasShopMember = false;
