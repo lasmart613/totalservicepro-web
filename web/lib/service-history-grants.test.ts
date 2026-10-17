@@ -73,7 +73,8 @@ test('grants table: RLS on, read-only to clients, one active grant per scope', (
 test('shared history RPC returns exactly the safe columns', () => {
   const start = up.indexOf('RETURNS TABLE (');
   const cols = up.slice(start, up.indexOf(')\n LANGUAGE', start)).match(/^\s{3}(\w+) /gm)!.map((s) => s.trim());
-  assert.deepEqual(cols, [...SHARED_HISTORY_COLUMNS]);
+  // 000921 adds report_company_name_text (labeled header text) after service_company_name.
+  assert.deepEqual(cols, SHARED_HISTORY_COLUMNS.filter((c) => c !== 'report_company_name_text'));
   for (const bad of ['comments', 'pdf_url', 'tech_signature', 'customer_phone', 'customer_email', 'tech_email', 'checklist_', 'power_measurements', 'ticket_id']) {
     assert.ok(!cols.some((c) => c.startsWith(bad)), bad);
   }
@@ -105,17 +106,37 @@ test('grantServiceHistory calls the RPC with numeric ids and a bound client', as
   assert.match((await grantServiceHistory(denied, 2, 8)).error!, /only an owner or admin/);
 });
 
-test('revokeServiceHistory and loadSharedServiceHistory', async () => {
+test('revokeServiceHistory and loadSharedServiceHistory (paged, truncation visible)', async () => {
   const c = new FakeClient((fn) =>
     fn === 'revoke_service_history'
       ? { data: true, error: null }
-      : { data: [{ id: 'a', report_number: 'SR-1', comments: 'SECRET' }], error: null }
+      : { data: [{ id: 'a', report_number: 'SR-1', comments: 'SECRET', total_count: 3 }], error: null }
   );
   assert.deepEqual(await revokeServiceHistory(c, 7), { revoked: true, error: null });
-  const rows = await loadSharedServiceHistory(c, 2);
-  assert.deepEqual(rows, [{ id: 'a', report_number: 'SR-1' }]);
-  assert.deepEqual(c.calls[1], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: null }]);
-  assert.deepEqual(await loadSharedServiceHistory(c, ''), []);
+  const page = await loadSharedServiceHistory(c, 2, null, { limit: 1 });
+  assert.deepEqual(page, { rows: [{ id: 'a', report_number: 'SR-1' }], total: 3, truncated: true, pastEnd: false });
+  assert.deepEqual(c.calls[1], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: null, p_limit: 1, p_offset: 0 }]);
+  await loadSharedServiceHistory(c, 2, 5, { limit: 9999, offset: -3 });
+  assert.deepEqual(c.calls[2], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: 5, p_limit: 500, p_offset: 0 }]);
+  const last = await loadSharedServiceHistory(c, 2, null, { limit: 1, offset: 2 });
+  assert.equal(last.truncated, false);
+  assert.deepEqual(await loadSharedServiceHistory(c, ''), { rows: [], total: 0, truncated: false, pastEnd: false });
   const broken = new FakeClient(() => ({ data: null, error: { message: 'x' } }));
-  assert.deepEqual(await loadSharedServiceHistory(broken, 2), []);
+  assert.deepEqual(await loadSharedServiceHistory(broken, 2), { rows: [], total: 0, truncated: false, pastEnd: false });
+});
+
+test('loadSharedServiceHistory: a page past the end still reports the total', async () => {
+  const c = new FakeClient(() => ({ data: [], error: null }));
+  let n = 0;
+  const paged = new FakeClient(() =>
+    n++ === 0 ? { data: [], error: null } : { data: [{ id: 'a', total_count: 4 }], error: null }
+  );
+  assert.deepEqual(await loadSharedServiceHistory(paged, 2, null, { limit: 2, offset: 10 }), { rows: [], total: 4, truncated: false, pastEnd: true });
+  assert.deepEqual(paged.calls[1], ['get_shared_service_history', { p_owner_org: 2, p_equipment_id: null, p_limit: 1, p_offset: 0 }]);
+  // Nothing shared at all: empty, not past the end.
+  assert.deepEqual(await loadSharedServiceHistory(c, 2, null, { offset: 10 }), { rows: [], total: 0, truncated: false, pastEnd: false });
+  // First page empty: no second call.
+  const one = new FakeClient(() => ({ data: [], error: null }));
+  await loadSharedServiceHistory(one, 2);
+  assert.equal(one.calls.length, 1);
 });
