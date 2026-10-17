@@ -60,3 +60,80 @@ test('local proof covers atomic create, failed-link rollback, founder claim refu
     assert.ok(proof.includes(marker), marker);
   }
 });
+
+// ---- 000919: every shop customer create goes through create_shop_customer_org.
+
+const report = readFileSync(join(here, '../app/reports/new/NewServiceReportClient.tsx'), 'utf8');
+const customerForm = readFileSync(join(here, './customer-form.ts'), 'utf8');
+const mig919 = readFileSync(join(here, '../supabase/migrations/20261016_000919_customer_org_claim_served_or_shop_created.sql'), 'utf8');
+const rollback919 = readFileSync(join(here, '../supabase/migrations/20261016_000919_customer_org_claim_served_or_shop_created_rollback.sql'), 'utf8');
+const proof919 = readFileSync(join(here, '../supabase/tests/20261016_customer_org_claim_served_or_shop_created.sql'), 'utf8');
+
+function bodyOf(src: string, start: string, end: string): string {
+  const a = src.indexOf(start);
+  assert.ok(a >= 0, start);
+  return src.slice(a, src.indexOf(end, a));
+}
+
+test('report form: add-customer and save-time create use the RPC, no browser insert, no ignored link failure', () => {
+  const add = bodyOf(report, 'const handleAddNewCustomer = async () => {', '\n  };\n');
+  const ensure = bodyOf(report, 'async function ensureCustomerOrg() {', '\n  }\n');
+  for (const [name, body] of [['handleAddNewCustomer', add], ['ensureCustomerOrg', ensure]] as const) {
+    assert.match(body, /createShopCustomerOrg\(supabase, \{\s*serviceOrgId: currentUserOrgId,/, name);
+    assert.doesNotMatch(body, /from\('organizations'\)\.insert/, name);
+    assert.doesNotMatch(body, /from\('organization_customers'\)/, name);
+  }
+  assert.doesNotMatch(report, /ignore link failure/);
+  assert.doesNotMatch(report, /from\('organizations'\)\.insert\(/);
+});
+
+test('createLinkedCustomer and createShopCustomerOrg: one RPC, errors thrown, no two-step insert', async () => {
+  const linked = bodyOf(customerForm, 'export async function createLinkedCustomer(', '\n}\n');
+  assert.match(linked, /await createShopCustomerOrg\(supabase, \{/);
+  assert.doesNotMatch(linked, /insertOmittingCharOverflow/);
+  assert.doesNotMatch(linked, /from\('organization_customers'\)|'organization_customers',/);
+  const { createShopCustomerOrg } = await import('./customer-form.ts');
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const ok = { rpc: async (fn: string, args: Record<string, unknown>) => { calls.push([fn, args]); return { data: 812, error: null }; } };
+  assert.equal(await createShopCustomerOrg(ok as never, { serviceOrgId: '4', name: '  Sunrise  ', city: ' ', state: 'AZ' }), 812);
+  assert.deepEqual(calls, [['create_shop_customer_org', {
+    p_service_org: 4, p_name: 'Sunrise', p_address: null, p_city: null, p_state: 'AZ', p_phone: null,
+    p_laser_models: null, p_facility_type: 'Clinic',
+  }]]);
+  const refused = { rpc: async () => ({ data: null, error: { message: 'only a current member of this service company can add customers' } }) };
+  await assert.rejects(createShopCustomerOrg(refused as never, { serviceOrgId: 4, name: 'X' }), /only a current member/);
+  await assert.rejects(createShopCustomerOrg(ok as never, { serviceOrgId: null, name: 'X' }), /not loaded/);
+  await assert.rejects(createShopCustomerOrg(ok as never, { serviceOrgId: 4, name: '  ' }), /name is required/);
+});
+
+test('migration 000919: rules, stamp trigger, served check, member RPC, rollback', () => {
+  assert.match(mig919, /^SET LOCAL lock_timeout = '5s';$/m);
+  assert.match(mig919, /000918 is reserved by PR #307/);
+  assert.equal((mig919.match(/^SECURITY DEFINER$/gm) || []).length, 3);
+  assert.equal((mig919.match(/^SET search_path = ''$/gm) || []).length, 3);
+  assert.doesNotMatch(mig919, /(pg_catalog|public)\.(extract|coalesce)\b/i);
+  assert.match(mig919, /ADD COLUMN IF NOT EXISTS creator_shop_org_id bigint;/);
+  assert.match(mig919, /REVOKE INSERT \(creator_shop_org_id\), UPDATE \(creator_shop_org_id\)/);
+  assert.match(mig919, /CREATE TRIGGER trg_stamp_org_creator_shop\s+BEFORE INSERT OR UPDATE ON public\.organizations/);
+  assert.ok('trg_stamp_org_creator_shop' > 'trg_set_org_created_by', 'fires after created_by is filled');
+  assert.match(mig919, /OR o\.creator_shop_org_id IS NOT NULL/);
+  assert.match(mig919, /FROM public\.service_reports r\s+WHERE r\.customer_organization_id = o\.id/);
+  assert.match(mig919, /FROM public\.service_tickets t\s+WHERE t\.customer_organization_id = o\.id/);
+  const rpc = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.create_shop_customer_org(', '$function$;');
+  assert.doesNotMatch(rpc, /m\.role/);
+  assert.match(rpc, /lower\(btrim\(coalesce\(s\.type, ''\)\)\) IN \('service_company', 'service'\)/);
+  assert.doesNotMatch(mig919, /UPDATE public\.organizations/, 'no backfill');
+  assert.match(rollback919, /^SET LOCAL lock_timeout = '5s';$/m);
+  assert.match(rollback919, /IN \('company_admin', 'owner', 'service_manager'\)/);
+  assert.match(rollback919, /DROP COLUMN IF EXISTS creator_shop_org_id/);
+  for (const marker of [
+    'before 000919: shop tech creates unlinked clinic, leaves, claims owner (the bug)',
+    'leave-then-claim refused',
+    'clinic self-signup: no stamp, founder owner claim still allowed',
+    'unlinked but served org refused',
+    'rollback: live 000917 functions restored byte for byte',
+  ]) {
+    assert.ok(proof919.includes(marker), marker);
+  }
+  assert.doesNotMatch(proof919, /\b1005\b/);
+});

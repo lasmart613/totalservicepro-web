@@ -141,9 +141,12 @@ test('Add Service Ticket submit uses omit-and-retry on every write, including ti
   const form = readFileSync(join(here, './customer-form.ts'), 'utf8');
   assert.match(schedule, /insertOmittingCharOverflow/);
   assert.match(schedule, /service_tickets/);
-  assert.match(form, /insertOmittingCharOverflow\(supabase, 'organizations'/);
-  assert.match(form, /insertOmittingCharOverflow\(\s*supabase,\s*'organization_customers'/);
-  assert.match(form, /ticket_prefix: shortTicketPrefix/);
+  // 000919: the customer org + link are one RPC (create_shop_customer_org;
+  // ticket_prefix comes from trg_org_ticket_prefix); the remaining fields are
+  // written with omit-and-retry on the new row.
+  assert.match(form, /supabase\.rpc\('create_shop_customer_org'/);
+  assert.doesNotMatch(form, /insertOmittingCharOverflow\(\s*supabase,\s*'organization_customers'/);
+  assert.match(form, /updateOmittingCharOverflow\(\s*supabase,\s*'organizations',\s*details,/);
   assert.doesNotMatch(form, /country: region\.country/);
   assert.match(form, /finalizeOrganizationPayload/);
   assert.doesNotMatch(schedule, /from\('service_tickets'\)\s*\n\s*\.insert\(\[payload\]\)/);
