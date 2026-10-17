@@ -19,7 +19,7 @@
  * pdfjs-dist as a real node module. No [functions] block in netlify.toml.
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createNodeServiceClient } from '../../lib/supabase/node-service-client.ts';
 import { runManualIndexCatchup, type CatchupClient } from '../../lib/manual-index-catchup.ts';
 
 const manualIndexCatchup = async (): Promise<void> => {
@@ -33,7 +33,8 @@ const manualIndexCatchup = async (): Promise<void> => {
     console.error(JSON.stringify({ event: 'manual-index-catchup', ok: false, error: 'missing Supabase URL or service role key' }));
     return;
   }
-  const admin = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  // Node 20 runtime: needs the ws realtime transport (see node-service-client.ts).
+  const admin = createNodeServiceClient(url, key);
   const summary = await runManualIndexCatchup(admin as unknown as CatchupClient);
   if (!summary.ok) console.error(JSON.stringify({ event: 'manual-index-catchup-failed', error: summary.error }));
 };

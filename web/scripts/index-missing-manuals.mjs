@@ -263,10 +263,10 @@ async function inner() {
     console.log(planText());
     return;
   }
-  const { createClient } = await import('@supabase/supabase-js');
+  const { createNodeServiceClient } = await import('../lib/supabase/node-service-client.ts');
   const lib = await import('../lib/manual-search-index.ts');
   const { fetchAllPages } = await import('../lib/supabase/paginate.ts');
-  const admin = createClient(url, key, { auth: { autoRefreshToken: false, persistSession: false } });
+  const admin = createNodeServiceClient(url, key);
   const out = await runIndexMissing(
     {
       admin,

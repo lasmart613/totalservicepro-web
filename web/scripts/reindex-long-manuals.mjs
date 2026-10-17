@@ -69,11 +69,9 @@ async function applyReindex() {
   if (!url || !key) {
     throw new Error('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY before --apply.');
   }
-  const { createClient } = await import('@supabase/supabase-js');
+  const { createNodeServiceClient } = await import('../lib/supabase/node-service-client.ts');
   const { reindexManualPageRange } = await import('../lib/manual-search-index.ts');
-  const admin = createClient(url, key, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const admin = createNodeServiceClient(url, key);
   for (const manual of LONG_MANUAL_REINDEX) {
     const loaded = await admin
       .from('manuals')
