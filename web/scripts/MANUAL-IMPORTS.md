@@ -30,9 +30,45 @@ node scripts/index-missing-manuals.mjs --apply --ids-file=inserted_ids.json --re
 `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` must be set. Without `--apply`
 the script is a read-only dry run.
 
-The write is expect-empty (`replace_manual_search_index` with
-`p_expected_md5 NULL`): a manual that already has index rows is skipped and
+The write is expect-empty: a manual that already has index rows is skipped and
 reported as `already_indexed`, never overwritten. Re-running is safe.
+
+### Chunked writes (migration 000918)
+
+PostgREST runs as `authenticator`, which has an 8 s `statement_timeout`.
+Writing a large, text-dense manual in one `replace_manual_search_index` call
+can exceed it (ids 1195 and 1210 did on Oct 16, 2026), so with 000918
+applied both this script and the scheduled catch-up write in pieces:
+
+1. `begin_manual_search_index_append(id, total_chunks)` creates a marker row
+   in `public.manual_search_index_pending` and returns a token. It returns
+   `already_indexed` if the manual has rows and no marker, and `busy` if
+   another writer holds a marker younger than 10 minutes. An older marker is
+   treated as a crashed write: its partial rows are deleted and it is taken
+   over.
+2. `append_manual_search_index_chunks(id, token, expected_rows, ...)` inserts
+   about 200k characters per call. It writes only if the token matches and
+   the manual has exactly `expected_rows` rows, so a duplicate or out-of-order
+   call writes nothing. A call that hits the statement timeout is retried
+   (twice).
+3. `finish_manual_search_index_append(id, token)` checks the row count equals
+   `total_chunks` and deletes the marker. Only then is the manual indexed.
+4. On any failure, `abort_manual_search_index_append(id, token)` deletes the
+   partial rows and the marker. If the abort itself fails, the skip reason
+   says so, and the stale-marker takeover cleans up later.
+
+While the marker exists the manual counts as **not indexed** everywhere:
+`search_manual_catalog`, library body search, `get-manual-url` page bounds,
+the repair assistant's excerpts, and `manuals_missing_search_index` (it
+reports these as `in_progress`). A God → Manuals reindex
+(`replace_manual_search_index`) replaces the rows and clears the marker.
+
+Without 000918 the script falls back to the single
+`replace_manual_search_index` call (`p_expected_md5 NULL`).
+
+The edge functions `get-manual-url` and `grok-assistant` read the marker.
+Deploy them after applying 000918; until then they treat a missing marker
+table as "nothing in progress".
 
 Check the last line of output:
 
@@ -72,7 +108,16 @@ Needs migration 000918 applied (without it the function logs
 - Manuals whose PDF bytes in Storage exceed 20 MiB (summed for folders) are
   never picked. Each run logs them (`manual-index-catchup-oversized`, up to 20
   ids). Index them with the script above.
+- A file whose Storage size is missing or not a number is never treated as
+  small: the manual is not picked and is logged as `unknown_size`
+  (`manual-index-catchup-unknown-size`). Check the object's metadata, then
+  index it with the script.
+- Published manuals with no file in Storage are counted and logged as
+  `no_file` (`manual-index-catchup-no-file`). Upload the PDF or fix
+  `storage_path`; the catch-up picks them up after that.
 - Deleted Storage files (archived versions, delete markers) count as absent.
+- Manuals with a chunked write in progress (`in_progress`) are skipped until
+  the marker is 10 minutes old.
 
 ### Rollout: clear the backlog with the script first
 

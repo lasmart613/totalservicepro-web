@@ -16,9 +16,15 @@
  * off, so it cannot be picked first on every run. Success clears the row; a
  * failure stores the reason with record_manual_search_index_failure.
  *
- * Oversized PDFs (over maxBytes, default 20 MiB of PDF in Storage) are never
- * returned as eligible by the RPC. They are logged and left to
- * scripts/index-missing-manuals.mjs.
+ * Never eligible, but logged every run (up to 20 ids each) and left to
+ * scripts/index-missing-manuals.mjs or a person: oversized PDFs (over
+ * maxBytes, default 20 MiB in Storage), PDFs whose Storage size is missing or
+ * not a number (unknown_size, never treated as small), and published
+ * manuals with no live file in Storage at all (no_file).
+ *
+ * Writes are chunked (~200,000 characters per call, see
+ * writeChunkedManualSearchIndex) so each statement stays under the REST
+ * role's 8 s statement_timeout, and partial rows stay invisible to readers.
  *
  * Fails closed: any read error, a missing RPC, missing credentials or a
  * failed attempt record ends the run before an extraction or write.
@@ -54,6 +60,11 @@ export type CatchupSummary = {
   eligible: number | null;
   oversized: number | null;
   oversizedIds: number[];
+  unknownSize: number | null;
+  unknownSizeIds: number[];
+  noFile: number | null;
+  noFileIds: number[];
+  inProgress: number | null;
   attempted: number;
   indexed: number[];
   emptyText: number[];
@@ -65,7 +76,18 @@ export type CatchupSummary = {
   ms: number;
 };
 
-type MissingRead = { missing: number; eligible: number; oversized: number; oversizedIds: number[]; ids: number[] };
+type MissingRead = {
+  missing: number;
+  eligible: number;
+  oversized: number;
+  oversizedIds: number[];
+  unknownSize: number;
+  unknownSizeIds: number[];
+  noFile: number;
+  noFileIds: number[];
+  inProgress: number;
+  ids: number[];
+};
 
 function parseIds(raw: unknown): number[] | null {
   if (!Array.isArray(raw)) return null;
@@ -89,10 +111,20 @@ export function parseMissingRead(data: unknown): MissingRead | null {
   const missing = count(row.missing);
   const eligible = count(row.eligible);
   const oversized = count(row.oversized);
+  const unknownSize = count(row.unknown_size);
+  const noFile = count(row.no_file);
+  const inProgress = count(row.in_progress);
   const ids = parseIds(row.ids);
   const oversizedIds = parseIds(row.oversized_ids);
-  if (missing == null || eligible == null || oversized == null || !ids || !oversizedIds) return null;
-  return { missing, eligible, oversized, oversizedIds, ids };
+  const unknownSizeIds = parseIds(row.unknown_size_ids);
+  const noFileIds = parseIds(row.no_file_ids);
+  if (
+    missing == null || eligible == null || oversized == null || unknownSize == null || noFile == null ||
+    inProgress == null || !ids || !oversizedIds || !unknownSizeIds || !noFileIds
+  ) {
+    return null;
+  }
+  return { missing, eligible, oversized, oversizedIds, unknownSize, unknownSizeIds, noFile, noFileIds, inProgress, ids };
 }
 
 export async function runManualIndexCatchup(
@@ -120,6 +152,11 @@ export async function runManualIndexCatchup(
     eligible: null,
     oversized: null,
     oversizedIds: [],
+    unknownSize: null,
+    unknownSizeIds: [],
+    noFile: null,
+    noFileIds: [],
+    inProgress: null,
     attempted: 0,
     indexed: [],
     emptyText: [],
@@ -148,6 +185,11 @@ export async function runManualIndexCatchup(
   summary.eligible = parsed.eligible;
   summary.oversized = parsed.oversized;
   summary.oversizedIds = parsed.oversizedIds;
+  summary.unknownSize = parsed.unknownSize;
+  summary.unknownSizeIds = parsed.unknownSizeIds;
+  summary.noFile = parsed.noFile;
+  summary.noFileIds = parsed.noFileIds;
+  summary.inProgress = parsed.inProgress;
   if (parsed.oversized > 0) {
     log(
       JSON.stringify({
@@ -156,6 +198,26 @@ export async function runManualIndexCatchup(
         count: parsed.oversized,
         ids: parsed.oversizedIds,
         hint: 'left to scripts/index-missing-manuals.mjs --apply',
+      }),
+    );
+  }
+  if (parsed.unknownSize > 0) {
+    log(
+      JSON.stringify({
+        event: 'manual-index-catchup-unknown-size',
+        count: parsed.unknownSize,
+        ids: parsed.unknownSizeIds,
+        hint: 'Storage has no numeric size for the PDF; not treated as small. Use scripts/index-missing-manuals.mjs --apply --ids=...',
+      }),
+    );
+  }
+  if (parsed.noFile > 0) {
+    log(
+      JSON.stringify({
+        event: 'manual-index-catchup-no-file',
+        count: parsed.noFile,
+        ids: parsed.noFileIds,
+        hint: 'published, not indexed, and no live file in the manuals bucket; upload the PDF or unpublish the row',
       }),
     );
   }
