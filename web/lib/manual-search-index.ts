@@ -20,6 +20,7 @@ import {
 import { containsTextImatch } from './email-match.ts';
 import { chapterMetadataWithPageCounts } from './manual-page-map.ts';
 import { isMissingColumn, isPublishedColumnMissing } from './manual-published.ts';
+import { fetchAllPages, SUPABASE_PAGE_SIZE } from './supabase/paginate.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -53,6 +54,59 @@ export function asManualCatalogId(value: unknown): number | null {
   if (!/^-?\d+$/.test(s)) return null;
   const n = Number(s);
   return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
+ * Every manual id that has at least one manual_search_index row.
+ *
+ * Range-paged. A bare select('manual_id') is capped by the PostgREST max rows
+ * setting (1,000 on Supabase), so once the index passed 1,000 rows the God
+ * reindex route saw only part of it and treated the rest as unindexed.
+ * Fails closed: a read error returns error, never a short set.
+ */
+export async function listIndexedManualIds(
+  db: Pick<TableClient, 'from'>,
+  pageSize: number = SUPABASE_PAGE_SIZE,
+): Promise<{ ids: Set<number>; rows: number; error?: string }> {
+  const { data, error } = await fetchAllPages<{ manual_id?: unknown }>(
+    async (from, to) =>
+      db
+        .from('manual_search_index')
+        .select('manual_id')
+        .order('manual_id', { ascending: true })
+        .order('chunk_index', { ascending: true })
+        .range(from, to),
+    pageSize,
+  );
+  if (error) {
+    return { ids: new Set(), rows: 0, error: error.message || 'Could not read manual_search_index' };
+  }
+  const ids = new Set<number>();
+  for (const row of data) {
+    const id = asManualCatalogId(row?.manual_id);
+    if (id != null) ids.add(id);
+  }
+  return { ids, rows: data.length };
+}
+
+/**
+ * Catalog rows with no manual_search_index row at all, lowest id first.
+ * Unpublished rows are left out unless includeUnpublished is set (search and
+ * the assistant never show them).
+ */
+export function manualsMissingSearchIndex<T extends { id?: unknown; published?: unknown }>(
+  catalog: readonly T[],
+  indexed: ReadonlySet<number>,
+  opts: { includeUnpublished?: boolean } = {},
+): T[] {
+  const out: Array<{ id: number; row: T }> = [];
+  for (const row of catalog) {
+    const id = asManualCatalogId(row?.id);
+    if (id == null || indexed.has(id)) continue;
+    if (!opts.includeUnpublished && row.published === false) continue;
+    out.push({ id, row });
+  }
+  return out.sort((a, b) => a.id - b.id).map((entry) => entry.row);
 }
 
 type StorageObject = {
@@ -894,6 +948,68 @@ export async function indexManualSearchText(
   }
   if (!saved.ok) {
     return { manualId, ok: false, chars: extracted.text.length, files: extracted.files, skipped: saved.error };
+  }
+  await persistChapterPageCounts(client, manual, extracted.fileCounts);
+  return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
+}
+
+/** Skipped reason when a manual gained index rows before an expect-empty write. */
+export const ALREADY_INDEXED = 'already_indexed';
+
+/**
+ * Index a manual that had no manual_search_index row, and write only if it
+ * still has none. Used by scripts/index-missing-manuals.mjs and the scheduled
+ * catch-up. Unlike indexManualSearchText it never replaces existing rows:
+ * replace_manual_search_index is called with p_expected_md5 NULL, and the
+ * function treats NULL as "storage must be empty" (md5 of zero rows is NULL,
+ * compared with IS DISTINCT FROM). A row written after the caller listed the
+ * manual makes the RPC return false, reported as already_indexed. There is no
+ * upsert fallback: without the RPC the write is refused. A quick row check
+ * before extraction skips the download when rows already exist.
+ * An image-only PDF (opened by pdf.js, no text) stores one empty row, like
+ * the God button, so it is not retried forever. A missing or unreadable file
+ * writes nothing (no_pdf_downloaded / no_pdf_path).
+ */
+export async function indexMissingManualSearchText(
+  client: TableClient & { storage: StorageClient },
+  manual: ManualIndexRow
+): Promise<ManualIndexResult> {
+  const catalogId = asManualCatalogId(manual.id);
+  const manualId = catalogId == null ? '' : String(catalogId);
+  if (catalogId == null) return { manualId: '', ok: false, chars: 0, files: 0, skipped: 'missing_id' };
+  if (typeof client.rpc !== 'function') {
+    return { manualId, ok: false, chars: 0, files: 0, skipped: 'Refused: replace_manual_search_index is required for an expect-empty write.' };
+  }
+  const before = await readExistingSearchText(client, catalogId);
+  if (!before.ok) return { manualId, ok: false, chars: 0, files: 0, skipped: before.error };
+  if (before.chunks.length) return { manualId, ok: false, chars: 0, files: 0, skipped: ALREADY_INDEXED };
+
+  const extracted = await extractManualBodyText(client.storage, manual);
+  if (extracted.fatal) {
+    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.fatal };
+  }
+  if (!extracted.text && !extracted.fileCounts.length) {
+    // Nothing was downloaded and opened (missing object, a download error, or
+    // not a PDF). Write nothing, so a transient Storage error never leaves a
+    // permanent empty row. An empty row is only for a PDF pdf.js opened.
+    return { manualId, ok: false, chars: 0, files: 0, skipped: extracted.skipped === 'no_pdf_path' ? 'no_pdf_path' : 'no_pdf_downloaded' };
+  }
+  const chunks: readonly IndexChunk[] = extracted.chunks?.length
+    ? extracted.chunks
+    : [{ chunkIndex: 0, text: extracted.text || '', clipped: false, indexedPageMax: null }];
+  const rpc = await client.rpc('replace_manual_search_index', {
+    p_manual_id: catalogId,
+    p_chunks: chunks.map((row) => row.text),
+    p_clipped: chunks.map((row) => row.clipped === true),
+    p_page_max: chunks.map((row) => (row.indexedPageMax == null ? null : row.indexedPageMax)),
+    p_expected_md5: null,
+  });
+  if (rpc?.error) {
+    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: rpc.error.message || 'replace failed' };
+  }
+  if (rpc?.data === false) return { manualId, ok: false, chars: 0, files: extracted.files, skipped: ALREADY_INDEXED };
+  if (!extracted.text) {
+    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || 'no_extractable_text' };
   }
   await persistChapterPageCounts(client, manual, extracted.fileCounts);
   return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
