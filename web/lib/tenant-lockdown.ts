@@ -113,6 +113,10 @@ const CUSTOMER_SIDE_ORG_TYPES = new Set(['customer', 'laser_clinic', 'laser_rent
  * members, and no organization_customers link. Unknown state fails closed.
  * 000917: a customer-side org whose creator belongs to a service company
  * (a shop user's added customer) is refused too (org_founder_claim_allowed).
+ * 000919: also refused when its creator was a shop member when they created
+ * it (creator_shop_org_id, so leaving the shop first doesn't help), or when a
+ * shop already served it (service_reports / service_tickets). Unknown fails
+ * closed.
  */
 export function founderClaimAllowed(input: {
   callerIsMember: boolean | null;
@@ -122,15 +126,26 @@ export function founderClaimAllowed(input: {
   /** 000917: customer-side org created by a service-company member is never claimable. */
   orgType?: string | null;
   creatorIsShopMember?: boolean | null;
+  /** 000919: organizations.creator_shop_org_id is set. */
+  creatorWasShopMember?: boolean | null;
+  /** 000919: a service report or ticket names the org as its customer. */
+  orgServed?: boolean | null;
   now?: Date;
 }): { ok: true } | AuthzFailure {
   if (input.callerIsMember === true) return { ok: true };
   const customerSide = CUSTOMER_SIDE_ORG_TYPES.has(String(input.orgType || '').trim().toLowerCase());
-  if (customerSide && input.creatorIsShopMember !== false) {
+  if (customerSide && (input.creatorIsShopMember !== false || input.creatorWasShopMember !== false)) {
     return {
       ok: false,
       status: 403,
       error: 'A customer added by a service company cannot be claimed this way. Ask the company for an owner invite.',
+    };
+  }
+  if (customerSide && input.orgServed !== false) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'A service company already serves this customer. Ask the company for an owner invite.',
     };
   }
   const created = input.orgCreatedAt ? Date.parse(input.orgCreatedAt) : NaN;
