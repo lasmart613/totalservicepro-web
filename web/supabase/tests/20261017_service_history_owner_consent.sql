@@ -6,7 +6,7 @@
 --   psql "postgresql:///service_history_proof" -v ON_ERROR_STOP=1 \
 --     -f web/supabase/tests/20261017_service_history_owner_consent.sql
 --
--- Run psql from the repo root so the \i paths resolve.
+-- Works from any directory (\ir paths are relative to this file).
 -- Helper functions are the live (2026-10-17) definitions from pg_get_functiondef:
 -- is_active_org_member, get_my_org_id, org_unclaimed_new, org_creator_access,
 -- user_owns_or_created_org. The PRE-stopgap body of
@@ -299,7 +299,7 @@ SELECT pg_temp.expect('PRE attacker X reads other tenant', pg_temp.titles('00000
 SELECT pg_temp.expect('PRE attacker shop admin reads other tenant', pg_temp.titles('00000000-0000-0000-0000-0000000000e2'), 'OK VICTIM,VICTIM-LEGACY');
 
 -- BASELINE: the live stopgapped body (installed from the 000920 rollback).
-\i web/supabase/migrations/20261017_000920_service_history_owner_consent_rollback.sql
+\ir ../migrations/20261017_000920_service_history_owner_consent_rollback.sql
 SET LOCAL search_path = public;
 SELECT pg_temp.expect('BASELINE md5 is live stopgap', pg_temp.fn_md5(), '4abb0da8e35302a52783eb49416f6b5a');
 RESET search_path;
@@ -307,7 +307,7 @@ SELECT pg_temp.expect('BASELINE serial collision denied (X)', pg_temp.titles('00
 SELECT pg_temp.expect('BASELINE serial collision denied (S2 admin)', pg_temp.titles('00000000-0000-0000-0000-0000000000e2'), 'OK none');
 
 -- 000920.
-\i web/supabase/migrations/20261017_000920_service_history_owner_consent.sql
+\ir ../migrations/20261017_000920_service_history_owner_consent.sql
 SET LOCAL search_path = public;
 SELECT pg_temp.expect('000920 keeps the stopgapped body', pg_temp.fn_md5(), '4abb0da8e35302a52783eb49416f6b5a');
 RESET search_path;
@@ -377,7 +377,7 @@ SELECT pg_temp.expect('all 000920 functions are SECURITY DEFINER with search_pat
 SELECT pg_temp.expect('grants table has RLS on', (SELECT relrowsecurity::text FROM pg_class WHERE oid = 'public.service_history_grants'::regclass), 'true');
 
 -- Rollback: back to the live stopgapped body, grants gone.
-\i web/supabase/migrations/20261017_000920_service_history_owner_consent_rollback.sql
+\ir ../migrations/20261017_000920_service_history_owner_consent_rollback.sql
 SET LOCAL search_path = public;
 SELECT pg_temp.expect('ROLLBACK md5 is the live stopgap', pg_temp.fn_md5(), '4abb0da8e35302a52783eb49416f6b5a');
 RESET search_path;
