@@ -106,32 +106,61 @@ test('createLinkedCustomer and createShopCustomerOrg: one RPC, errors thrown, no
   await assert.rejects(createShopCustomerOrg(ok as never, { serviceOrgId: 4, name: '  ' }), /name is required/);
 });
 
-test('migration 000919: rules, stamp trigger, served check, member RPC, rollback', () => {
+test('migration 000919 rev 2: H1 type lock, any-type stamp/served, M1 insert policy, L1 guard, L2 caps + limiter, rollback', () => {
   assert.match(mig919, /^SET LOCAL lock_timeout = '5s';$/m);
-  assert.match(mig919, /000918 is reserved by PR #307/);
-  assert.equal((mig919.match(/^SECURITY DEFINER$/gm) || []).length, 3);
-  assert.equal((mig919.match(/^SET search_path = ''$/gm) || []).length, 3);
+  assert.match(mig919, /ORDERING: 000918 \(manual search index catch-up\) is applied/);
+  // Every function is SECURITY DEFINER with an empty search_path (7).
+  assert.equal((mig919.match(/^\s*(STABLE )?SECURITY DEFINER$/gm) || []).length, 7);
+  assert.equal((mig919.match(/^\s*SET search_path (=|TO) ''$/gm) || []).length, 7);
   assert.doesNotMatch(mig919, /(pg_catalog|public)\.(extract|coalesce)\b/i);
   assert.match(mig919, /ADD COLUMN IF NOT EXISTS creator_shop_org_id bigint;/);
   assert.match(mig919, /REVOKE INSERT \(creator_shop_org_id\), UPDATE \(creator_shop_org_id\)/);
   assert.match(mig919, /CREATE TRIGGER trg_stamp_org_creator_shop\s+BEFORE INSERT OR UPDATE ON public\.organizations/);
   assert.ok('trg_stamp_org_creator_shop' > 'trg_set_org_created_by', 'fires after created_by is filled');
-  assert.match(mig919, /OR o\.creator_shop_org_id IS NOT NULL/);
-  assert.match(mig919, /FROM public\.service_reports r\s+WHERE r\.customer_organization_id = o\.id/);
-  assert.match(mig919, /FROM public\.service_tickets t\s+WHERE t\.customer_organization_id = o\.id/);
+  // H1: type fixed for clients; stamp + served refuse any type.
+  const guard = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.organizations_guard_privilege()', '$function$;');
+  assert.match(guard, /IF NEW\.type IS DISTINCT FROM OLD\.type THEN\s+RAISE EXCEPTION 'organization type cannot be changed by the client' USING ERRCODE = '42501';/);
+  const claim = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.org_founder_claim_allowed(', '$function$;');
+  assert.match(claim, /creator_shop_org_id IS NULL/);
+  assert.match(claim, /FROM public\.service_reports r\s+WHERE r\.customer_organization_id = o\.id/);
+  assert.match(claim, /FROM public\.service_tickets t\s+WHERE t\.customer_organization_id = o\.id/);
+  const creator = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.org_creator_access(', '$function$;');
+  assert.match(creator, /AND NOT EXISTS \([\s\S]{0,120}o\.creator_shop_org_id IS NOT NULL/);
+  assert.match(creator, /AND NOT EXISTS \(\s+SELECT 1 FROM public\.service_reports r/);
+  assert.match(creator, /AND NOT EXISTS \(\s+SELECT 1 FROM public\.service_tickets t/);
+  // M1: no client insert of a customer-side org by a shop member.
+  assert.match(mig919, /DROP POLICY IF EXISTS organizations_insert_customers ON public\.organizations;/);
+  assert.match(mig919, /CREATE POLICY organizations_insert_customer_side_not_shop_member[\s\S]{0,120}AS RESTRICTIVE/);
+  // L1: tickets / reports name only a linked customer.
+  assert.equal((mig919.match(/CREATE TRIGGER trg_guard_service_customer_org/g) || []).length, 2);
+  assert.match(mig919, /customer_organization_id must be a customer linked to this service company/);
+  // L2: caps and 30/user/hour on the 000910 limiter.
   const rpc = bodyOf(mig919, 'CREATE OR REPLACE FUNCTION public.create_shop_customer_org(', '$function$;');
   assert.doesNotMatch(rpc, /m\.role/);
   assert.match(rpc, /lower\(btrim\(coalesce\(s\.type, ''\)\)\) IN \('service_company', 'service'\)/);
+  assert.match(rpc, /char_length\(btrim\(p_name\)\) > 200/);
+  assert.match(rpc, /USING ERRCODE = '22001'/);
+  assert.match(rpc, /USING ERRCODE = 'PT429'/);
+  assert.match(rpc, /document_send_slots/);
+  assert.match(mig919, /document_type IN \('invoice', 'estimate', 'report', 'purchase_order', 'customer_org'\)/);
   assert.doesNotMatch(mig919, /UPDATE public\.organizations/, 'no backfill');
+  assert.doesNotMatch(mig919, /statement_timeout/);
+  // Rollback.
   assert.match(rollback919, /^SET LOCAL lock_timeout = '5s';$/m);
   assert.match(rollback919, /IN \('company_admin', 'owner', 'service_manager'\)/);
+  assert.match(rollback919, /CREATE POLICY organizations_insert_customers/);
+  assert.match(rollback919, /DROP FUNCTION IF EXISTS public\.guard_service_customer_org\(\);/);
+  assert.match(rollback919, /document_type IN \('invoice', 'estimate', 'report', 'purchase_order'\)\n/);
   assert.match(rollback919, /DROP COLUMN IF EXISTS creator_shop_org_id/);
   for (const marker of [
     'before 000919: shop tech creates unlinked clinic, leaves, claims owner (the bug)',
-    'leave-then-claim refused',
-    'clinic self-signup: no stamp, founder owner claim still allowed',
-    'unlinked but served org refused',
-    'rollback: live 000917 functions restored byte for byte',
+    'shop members: every customer-side direct insert refused',
+    'clinic self-signup: insert, read back, same-type re-save, owner claim',
+    'H1: shop member founds + claims own shop',
+    'any type: stamped (82) and served (83) refused',
+    'L2: caps (22001), 30/user/hour',
+    'L1: linked ticket/report ok',
+    'rollback: 5 live functions byte for byte',
   ]) {
     assert.ok(proof919.includes(marker), marker);
   }

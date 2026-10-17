@@ -31,10 +31,11 @@ function missingStampColumn(res: Res): boolean {
  * org_founder_claim_allowed): a shop user who added a clinic must never become
  * its owner. A read error leaves it null (fails closed).
  *
- * 000919, so leaving the shop first doesn't help:
+ * 000919, so leaving the shop first doesn't help (both refuse any org type):
  * - creatorWasShopMember: organizations.creator_shop_org_id is set (the
- *   creator belonged to a service company when the org was inserted; stamped
- *   by trigger). Before 000919 is applied the column is missing: false.
+ *   creator belonged to a service company when they inserted it as a
+ *   customer-side org; stamped by trigger). Before 000919 is applied the
+ *   column is missing: false.
  * - orgServed: a service_reports or service_tickets row has
  *   customer_organization_id = the org.
  */

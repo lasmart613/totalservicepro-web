@@ -34,12 +34,18 @@ test('an org that already has members is refused to a non-member creator', () =>
 });
 
 test('brand-new unclaimed org (onboarding) is allowed; after 24h it is not', () => {
+  const clean = { creatorWasShopMember: false, orgServed: false };
   assert.equal(
-    founderClaimAllowed({ callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false, orgCreatedAt: hoursAgo(0.01), now }).ok,
+    founderClaimAllowed({ callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false, ...clean, orgCreatedAt: hoursAgo(0.01), now }).ok,
     true
   );
   assert.equal(
-    founderClaimAllowed({ callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false, orgCreatedAt: hoursAgo(25), now }).ok,
+    founderClaimAllowed({ callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false, ...clean, orgCreatedAt: hoursAgo(25), now }).ok,
+    false
+  );
+  // 000919 rev 2: stamp / served state omitted fails closed for any type.
+  assert.equal(
+    founderClaimAllowed({ callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false, orgCreatedAt: hoursAgo(0.01), now }).ok,
     false
   );
   assert.equal(UNCLAIMED_ORG_WINDOW_MS, 24 * 3600_000);
@@ -210,11 +216,35 @@ test('000919: a real clinic self-signup (never in a shop, never served) is still
   });
   const claim = await loadFounderClaimState(admin, 60, 'clinic-owner');
   assert.equal(founderClaimAllowed({ ...claim, orgType: 'laser_clinic', orgCreatedAt: fresh919, now: now919 }).ok, true);
-  // A shop admin founding a second service company is unaffected by the stamp.
+  // A shop member founding a second service company: never stamped (only
+  // customer-side inserts are), not served, so still claimable.
   assert.equal(
-    founderClaimAllowed({ ...claim, creatorWasShopMember: true, orgServed: true, orgType: 'service_company', orgCreatedAt: fresh919, now: now919 }).ok,
+    founderClaimAllowed({ ...claim, creatorIsShopMember: true, orgType: 'service_company', orgCreatedAt: fresh919, now: now919 }).ok,
     true
   );
+});
+
+test('000919 rev 2 (QA H1): stamp and served refuse a founder claim for every org type', () => {
+  const base = {
+    callerIsMember: false, orgHasMembers: false, orgHasServiceLink: false,
+    creatorIsShopMember: false, creatorWasShopMember: false, orgServed: false,
+    orgCreatedAt: fresh919, now: now919,
+  };
+  for (const orgType of ['service_company', 'service', 'parts_supplier', 'customer', 'laser_clinic', '', null]) {
+    assert.equal(founderClaimAllowed({ ...base, orgType }).ok, true, `clean ${orgType}`);
+    // The QA attack end state: a shop-created customer flipped to service_company.
+    const stamped = founderClaimAllowed({ ...base, orgType, creatorWasShopMember: true });
+    assert.equal(stamped.ok, false, `stamped ${orgType}`);
+    assert.equal(stamped.ok === false && stamped.status, 403);
+    assert.equal(founderClaimAllowed({ ...base, orgType, orgServed: true }).ok, false, `served ${orgType}`);
+    assert.equal(founderClaimAllowed({ ...base, orgType, creatorWasShopMember: null }).ok, false, `unknown stamp ${orgType}`);
+    assert.equal(founderClaimAllowed({ ...base, orgType, orgServed: null }).ok, false, `unknown served ${orgType}`);
+  }
+  // Being a shop member now still only matters for customer-side orgs (000917).
+  assert.equal(founderClaimAllowed({ ...base, orgType: 'service_company', creatorIsShopMember: true }).ok, true);
+  assert.equal(founderClaimAllowed({ ...base, orgType: 'customer', creatorIsShopMember: true }).ok, false);
+  // A member re-linking is unaffected.
+  assert.equal(founderClaimAllowed({ ...base, callerIsMember: true, orgType: 'service_company', creatorWasShopMember: true, orgServed: true }).ok, true);
 });
 
 test('000919: unreadable stamp or served state fails closed; a missing stamp column (000919 not applied) reads as false', async () => {
