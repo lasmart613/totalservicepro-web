@@ -665,6 +665,7 @@ export default function ServiceSchedule() {
           },
           createdBy: userId,
         });
+        if (created.detailsWarning) toast.error(created.detailsWarning);
         linkedCustomerId = created.id;
         await refreshCustomers(orgId);
       }
