@@ -6,7 +6,7 @@
  * time from the God form) and the God "Index PDF text" button write the index.
  * Bulk imports insert public.manuals rows with SQL or the REST API, so every
  * import since the Sep 27 full reindex (ids 1168 and up) was never indexed.
- * Run this after every bulk import.
+ * Run this after every bulk import (see scripts/MANUAL-IMPORTS.md).
  *
  * Dry run is the default. It reads public.manuals and manual_search_index
  * (read-only) and prints what --apply would do. Without SUPABASE_URL and
@@ -36,6 +36,8 @@
  *     node scripts/index-missing-manuals.mjs --apply             # write
  * Options:
  *   --ids=1755,1756        only these catalog ids (still skipped if indexed)
+ *   --ids-file=path.json   same, from a JSON array of ids or of {"id": n}
+ *                          rows (the import flow's inserted_ids.json)
  *   --limit=N              stop after N manuals
  *   --concurrency=N        parallel manuals, default 2, max 6
  *   --include-unpublished  also index unpublished rows (off by default)
@@ -43,7 +45,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -55,6 +57,17 @@ import { fileURLToPath } from 'node:url';
  */
 export const SECONDS_PER_MB = 0.15;
 export const SECONDS_PER_MANUAL_OVERHEAD = 1;
+
+/** Ids from inserted_ids.json: [1755, ...] or [{ "id": 1755, ... }, ...]. */
+export function idsFromJson(text) {
+  const parsed = JSON.parse(text);
+  if (!Array.isArray(parsed)) throw new Error('--ids-file must hold a JSON array');
+  const ids = parsed.map((row) => Number(row && typeof row === 'object' ? row.id : row));
+  if (!ids.length || ids.some((n) => !Number.isSafeInteger(n) || n < 1)) {
+    throw new Error('--ids-file must list positive integer ids');
+  }
+  return ids;
+}
 
 export function parseArgs(argv) {
   const opts = {
@@ -78,7 +91,10 @@ export function parseArgs(argv) {
       if (!ids.length || ids.some((n) => !Number.isSafeInteger(n) || n < 1)) {
         throw new Error(`--ids must be positive integers: ${arg}`);
       }
-      opts.ids = ids;
+      opts.ids = [...new Set([...(opts.ids || []), ...ids])];
+    } else if (arg.startsWith('--ids-file=')) {
+      const ids = idsFromJson(readFileSync(arg.slice(11), 'utf8'));
+      opts.ids = [...new Set([...(opts.ids || []), ...ids])];
     } else if (arg.startsWith('--limit=')) {
       const n = Number(arg.slice(8));
       if (!Number.isSafeInteger(n) || n < 1) throw new Error(`--limit must be a positive integer: ${arg}`);
