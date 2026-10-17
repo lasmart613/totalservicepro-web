@@ -41,7 +41,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
-import { canAccessRepairAi } from "../_shared/repair-ai.ts";
+import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
 import {
   isMissingColumn,
   isPublishedColumnMissing,
@@ -144,26 +144,14 @@ function isSharedCatalogPath(path: unknown): boolean {
   return cleanPath(path).toLowerCase().startsWith("shared/");
 }
 
-function orgTypeFromProfile(profile: { organizations?: unknown } | null | undefined): string {
-  const join = profile?.organizations as { type?: string } | { type?: string }[] | null | undefined;
-  const t = Array.isArray(join) ? join[0]?.type : join?.type;
-  return String(t || "").trim().toLowerCase();
-}
-
 /**
- * Same Repair AI rule as grok-assistant and grok-tts (../_shared/repair-ai.ts,
- * which mirrors web/lib/roles.ts canAccessRepairAi): a service company's owner is
- * allowed; clinic, rental, reseller and supplier owners are not.
+ * Shared catalog read for an AI cite: same Repair AI rule as grok-assistant and
+ * grok-tts (../_shared/repair-ai.ts). The caller comes from loadAiCaller, which
+ * checks the organization_memberships row for the profile org, so a removed
+ * owner/admin whose user_profiles row still says role/org is refused.
  */
-function isRepairAiCaller(role: unknown, orgType: unknown): boolean {
-  return canAccessRepairAi(
-    role == null ? null : String(role),
-    orgType == null ? null : String(orgType).trim().toLowerCase().replace(/[\s-]+/g, "_"),
-  );
-}
-
-function mayViewAiCatalog(role: unknown, orgType: unknown, ...paths: unknown[]): boolean {
-  if (!isRepairAiCaller(role, orgType)) return false;
+function mayViewAiCatalog(repairAiAllowed: boolean, ...paths: unknown[]): boolean {
+  if (!repairAiAllowed) return false;
   return paths.some((p) => isSharedCatalogPath(p));
 }
 
@@ -349,37 +337,22 @@ async function loadOwned(
   return map;
 }
 
+/**
+ * Caller org and Repair AI access from the membership-checked loadAiCaller,
+ * not user_profiles.role / organization_id alone. orgId is the profile org only
+ * while the caller still has a membership row there; otherwise null (no org
+ * library, no org slot writes).
+ */
 async function loadCallerAccess(
   admin: ReturnType<typeof createClient>,
   userId: string,
 ) {
-  let { data: profile, error } = await admin
-    .from("user_profiles")
-    .select("organization_id, role, organizations(type)")
-    .eq("id", userId)
-    .maybeSingle();
-  if (error) {
-    const again = await admin
-      .from("user_profiles")
-      .select("organization_id, role")
-      .eq("id", userId)
-      .maybeSingle();
-    profile = again.data;
-  }
-  let orgType = orgTypeFromProfile(profile);
-  if (!orgType && profile?.organization_id) {
-    const { data: org } = await admin
-      .from("organizations")
-      .select("type")
-      .eq("id", profile.organization_id)
-      .maybeSingle();
-    orgType = String(org?.type || "").trim().toLowerCase();
-  }
+  const caller = await loadAiCaller(admin as unknown as Parameters<typeof loadAiCaller>[0], userId);
   return {
-    profile,
-    orgId: profile?.organization_id ?? null,
-    role: profile?.role ?? null,
-    orgType,
+    orgId: caller.member ? caller.orgId : null,
+    role: caller.role,
+    orgType: caller.orgType,
+    repairAiAllowed: repairAiDecision(caller).ok,
   };
 }
 
@@ -1105,7 +1078,7 @@ Deno.serve(async (req) => {
     const aiContext = wantsAiCatalogRead(body);
     // Shared catalog without a library slot — AI cite / in-app reader only.
     if (!allowed && aiContext) {
-      allowed = mayViewAiCatalog(access.role, access.orgType, storagePath, man?.storage_path);
+      allowed = mayViewAiCatalog(access.repairAiAllowed, storagePath, man?.storage_path);
     }
     const readMeta = catalogReadMeta(inLibrary);
 
