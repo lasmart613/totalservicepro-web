@@ -11,7 +11,9 @@
  * Needs NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and
  * SUPABASE_SERVICE_ROLE_KEY with the Functions scope, and migration 000918
  * applied. Without them it logs an error and writes nothing.
- * Set MANUAL_INDEX_CATCHUP_DISABLED=1 to turn it off without a deploy.
+ * Set MANUAL_INDEX_CATCHUP_DISABLED=1 to turn it off without a deploy. Keep
+ * it set until a large backlog has been cleared with
+ * scripts/index-missing-manuals.mjs --apply (scripts/MANUAL-IMPORTS.md).
  *
  * Bundled by Netlify's default bundler for .mts (nft), which ships
  * pdfjs-dist as a real node module. No [functions] block in netlify.toml.
