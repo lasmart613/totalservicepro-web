@@ -26,7 +26,11 @@ type Result = { data: unknown; error: { message?: string; code?: string } | null
  * Fake service-role client. `answer` decides each manual_search_index read;
  * manuals reads return `published` rows for the published filter.
  */
-function fakeDb(answer: (call: Call) => Result, published: Array<{ id: number; published: boolean }> = []) {
+function fakeDb(
+  answer: (call: Call) => Result,
+  published: Array<{ id: number; published: boolean }> = [],
+  pending: number[] = [],
+) {
   const calls: Call[] = [];
   const db = {
     from(table: string) {
@@ -48,8 +52,17 @@ function fakeDb(answer: (call: Call) => Result, published: Array<{ id: number; p
           call.inIds = ids;
           return builder;
         },
+        eq(_column: string, id: unknown) {
+          call.inIds = [id];
+          return builder;
+        },
         then(resolve: (value: Result) => unknown, reject?: (err: unknown) => unknown) {
           try {
+            if (table === 'manual_search_index_pending') {
+              const wanted = new Set((call.inIds || []).map((id) => String(id)));
+              const rows = pending.filter((id) => wanted.has(String(id))).map((manual_id) => ({ manual_id }));
+              return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+            }
             if (table === 'manuals') {
               const wanted = new Set((call.inIds || []).map((id) => String(id)));
               const rows = published.length
@@ -245,4 +258,47 @@ test('the search route passes the raw sanitized query through', () => {
   const route = readFileSync(join(here, '../app/api/manuals/search/route.ts'), 'utf8');
   assert.match(route, /findManualIdsByBodyText\(getSupabaseAdmin\(\), tokens, q\)/);
   assert.equal(sanitizeManualSearchQuery('7111-00-2709'), '7111-00-2709');
+});
+
+test('a manual with a chunked index write in progress is not a search hit', async () => {
+  const { db } = fakeDb(() => ({ data: [{ manual_id: 4 }, { manual_id: 5 }], error: null }), [], [5]);
+  const found = await search(db, 'reservoir pump');
+  assert.deepEqual(found, { ids: ['4'], available: true });
+});
+
+test('an unreadable in-progress marker hides the hits (fail closed)', async () => {
+  const { db } = fakeDb((call) =>
+    call.table === 'manual_search_index_pending'
+      ? { data: null, error: { message: 'permission denied for table manual_search_index_pending', code: '42501' } }
+      : { data: [{ manual_id: 4 }], error: null },
+  );
+  const original = db.from.bind(db);
+  (db as { from: (t: string) => unknown }).from = (t: string) => {
+    const b = original(t);
+    if (t === 'manual_search_index_pending') {
+      b.then = (resolve: (v: Result) => unknown) =>
+        Promise.resolve({ data: null, error: { message: 'permission denied for table manual_search_index_pending', code: '42501' } }).then(resolve);
+    }
+    return b;
+  };
+  const found = await search(db, 'reservoir pump');
+  assert.deepEqual(found, { ids: [], available: true });
+});
+
+test('a database without 000918 (no marker table) keeps the hits', async () => {
+  const { db } = fakeDb(() => ({ data: [{ manual_id: 4 }], error: null }));
+  const original = db.from.bind(db);
+  (db as { from: (t: string) => unknown }).from = (t: string) => {
+    const b = original(t);
+    if (t === 'manual_search_index_pending') {
+      b.then = (resolve: (v: Result) => unknown) =>
+        Promise.resolve({
+          data: null,
+          error: { message: "Could not find the table 'public.manual_search_index_pending' in the schema cache", code: 'PGRST205' },
+        }).then(resolve);
+    }
+    return b;
+  };
+  const found = await search(db, 'reservoir pump');
+  assert.deepEqual(found, { ids: ['4'], available: true });
 });
