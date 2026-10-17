@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { setActiveOrganization, upsertMembership } from '@/lib/org-membership-server';
 import { loadFounderClaimState } from '@/lib/founder-claim';
+import { checkFounderNewOrg } from '@/lib/founder-new-org';
 import { refuseClaimOrgAutoCreate } from '@/lib/claim-signup-metadata';
 import {
   organizationInsertFromPending,
@@ -52,7 +53,27 @@ function safeAdditionalRoles(raw: unknown): string[] | null {
   return roles.length ? roles : null;
 }
 
+type FounderUserClient = {
+  auth: {
+    getUser: () => Promise<{
+      data: { user: { id: string; email?: string | null; user_metadata?: Record<string, unknown> | null } | null };
+      error: { message?: string } | null;
+    }>;
+  };
+};
+
+/** Test seams (same pattern as /api/team/members/remove). */
+export type FounderDeps = {
+  createUserClient?: (url: string, anonKey: string, accessToken: string) => FounderUserClient;
+  hasServiceRole?: () => boolean;
+  getAdmin?: () => ReturnType<typeof getSupabaseAdmin>;
+};
+
 export async function POST(req: NextRequest) {
+  return runOrgFounder(req);
+}
+
+export async function runOrgFounder(req: NextRequest, deps: FounderDeps = {}) {
   try {
     const authHeader = req.headers.get('authorization') || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -65,17 +86,19 @@ export async function POST(req: NextRequest) {
     if (!url || !anon) {
       return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
     }
-    if (!hasServiceRole()) {
+    if (!(deps.hasServiceRole ?? hasServiceRole)()) {
       return NextResponse.json(
         { error: 'Server cannot link organizations (missing service role).' },
         { status: 503 }
       );
     }
 
-    const userClient = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const userClient = deps.createUserClient
+      ? deps.createUserClient(url, anon, token)
+      : (createClient(url, anon, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { autoRefreshToken: false, persistSession: false },
+        }) as unknown as FounderUserClient);
     const {
       data: { user },
       error: userErr,
@@ -90,15 +113,16 @@ export async function POST(req: NextRequest) {
       profile?: ProfileBody | null;
     };
 
-    const admin = getSupabaseAdmin();
+    const admin = (deps.getAdmin ?? getSupabaseAdmin)();
     let orgId = body.organizationId ?? null;
     let orgType = '';
     let createdBy: string | null = null;
     let existingForGrant: FounderOrgRow | null = null;
+    let createdInRequest: { id: number | string; createdAt: string | null } | null = null;
     let trialColumnRead = false;
 
     if (orgId == null || orgId === '') {
-      const pending = body.pending;
+      let pending = body.pending;
       if (
         refuseClaimOrgAutoCreate(
           pending,
@@ -116,15 +140,23 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
+      // 000919 rev 3 (QA #309 H3): the service role skips RLS here, so the
+      // route enforces the same rules before inserting: allow-listed type, and
+      // no customer-side org founded by a current shop member.
+      const newOrg = await checkFounderNewOrg(admin, { userId: user.id, orgType: pending.orgType });
+      if (!newOrg.ok) {
+        return NextResponse.json({ error: newOrg.error }, { status: newOrg.status });
+      }
       // Created in this request: the one place a trial is granted outright.
       // trial_granted_at rides on the same insert as the grant.
+      pending = { ...pending, orgType: newOrg.orgType };
       const row = markTrialOnInsert(organizationInsertFromPending(pending, user.id));
       row.created_by = user.id;
       delete row.num_lasers;
       let { data, error } = await admin
         .from('organizations')
         .insert(row)
-        .select('id, type, created_by')
+        .select('id, type, created_by, created_at')
         .maybeSingle();
       if (error && isTrialGrantedAtMissing(error.message) && 'trial_granted_at' in row) {
         // 000915 not applied yet. A new org gets its trial once by construction.
@@ -132,7 +164,7 @@ export async function POST(req: NextRequest) {
         ({ data, error } = await admin
           .from('organizations')
           .insert(row)
-          .select('id, type, created_by')
+          .select('id, type, created_by, created_at')
           .maybeSingle());
       }
       if (error || data?.id == null) {
@@ -144,6 +176,10 @@ export async function POST(req: NextRequest) {
       orgId = data.id;
       orgType = String(data.type || pending.orgType);
       createdBy = String(data.created_by || user.id);
+      createdInRequest = {
+        id: data.id,
+        createdAt: (data as { created_at?: string | null }).created_at ?? new Date().toISOString(),
+      };
     } else {
       const loaded = await loadFounderOrg(admin, orgId);
       const org = loaded.org;
@@ -165,18 +201,28 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: decision.error }, { status: decision.status });
     }
 
-    // Existing org: created_by alone doesn't make the caller its founder (a
-    // removed tech is still created_by on the clinics they added). Same rule as
-    // org_unclaimed_new in 000916, plus 000917: a customer org created by a
-    // shop user (the caller is its created_by) is never claimable.
-    if (existingForGrant) {
-      const claim = await loadFounderClaimState(admin, orgId, user.id);
+    // Every path, new or existing: created_by alone doesn't make the caller
+    // its founder (a removed tech is still created_by on the clinics they
+    // added). Same rule as org_unclaimed_new in 000916, plus 000917/000919: a
+    // customer org created by a shop user, stamped, or already served is never
+    // claimable. A new org refused here (e.g. stamped by a race) is removed.
+    {
+      const claim = await loadFounderClaimState(admin, orgId as number | string, user.id);
       const allowed = founderClaimAllowed({
         ...claim,
         orgType,
-        orgCreatedAt: (existingForGrant as { created_at?: string | null }).created_at ?? null,
+        orgCreatedAt: createdInRequest
+          ? createdInRequest.createdAt
+          : (existingForGrant as { created_at?: string | null } | null)?.created_at ?? null,
       });
       if (!allowed.ok) {
+        if (createdInRequest) {
+          await admin
+            .from('organizations')
+            .delete()
+            .eq('id', createdInRequest.id)
+            .eq('created_by', user.id);
+        }
         return NextResponse.json({ error: allowed.error }, { status: allowed.status });
       }
     }

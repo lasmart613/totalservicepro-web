@@ -282,54 +282,155 @@ export async function persistCustomerLogo(
   return url;
 }
 
+/** Organization columns create_shop_customer_org writes itself. */
+const SHOP_CUSTOMER_RPC_COLUMNS = new Set([
+  'name', 'type', 'created_by', 'address', 'city', 'state', 'phone', 'laser_models', 'facility_type',
+  // Not sent afterwards either: the row has the defaults / trigger values.
+  'is_active', 'ticket_prefix',
+]);
+
+function textOrNull(value: unknown): string | null {
+  const text = value == null ? '' : String(value).trim();
+  return text ? text : null;
+}
+
+/** Same caps as create_shop_customer_org (000919): longer is refused with 22001. */
+export const SHOP_CUSTOMER_TEXT_CAPS = {
+  name: 200,
+  address: 500,
+  city: 100,
+  state: 100,
+  phone: 50,
+  laserModels: 1000,
+  facilityType: 100,
+} as const;
+
+const SHOP_CUSTOMER_CAP_LABELS: Record<keyof typeof SHOP_CUSTOMER_TEXT_CAPS, string> = {
+  name: 'Customer name',
+  address: 'Address',
+  city: 'City',
+  state: 'State',
+  phone: 'Phone',
+  laserModels: 'Laser models',
+  facilityType: 'Facility type',
+};
+
+/** First field over its cap, as a user-facing message; null when all fit. */
+export function shopCustomerTextTooLong(fields: Partial<Record<keyof typeof SHOP_CUSTOMER_TEXT_CAPS, string | null>>): string | null {
+  for (const key of Object.keys(SHOP_CUSTOMER_TEXT_CAPS) as (keyof typeof SHOP_CUSTOMER_TEXT_CAPS)[]) {
+    const value = fields[key];
+    if (value != null && value.length > SHOP_CUSTOMER_TEXT_CAPS[key]) {
+      return `${SHOP_CUSTOMER_CAP_LABELS[key]} is too long (max ${SHOP_CUSTOMER_TEXT_CAPS[key]} characters).`;
+    }
+  }
+  return null;
+}
+
+/**
+ * Create a customer org for a service company: organizations row and its
+ * organization_customers link in ONE transaction (create_shop_customer_org,
+ * 000917/000919). The caller must be a current member of that service
+ * company; created_by is the caller. Throws with the database message on any
+ * error, so nothing is created half-way and nothing fails silently. Never
+ * insert a customer org from the browser and link it in a second request: an
+ * unlinked shop-created org was founder-claimable after the creator left.
+ */
+export async function createShopCustomerOrg(
+  supabase: Pick<SupabaseClient, 'rpc'>,
+  opts: {
+    serviceOrgId: string | number | null | undefined;
+    name: string;
+    address?: string | null;
+    city?: string | null;
+    state?: string | null;
+    phone?: string | null;
+    laserModels?: string | null;
+    facilityType?: string | null;
+  }
+): Promise<number> {
+  if (opts.serviceOrgId == null || opts.serviceOrgId === '') {
+    throw new Error('Your organization is not loaded yet.');
+  }
+  const name = textOrNull(opts.name);
+  if (!name) throw new Error('Customer name is required.');
+  const fields = {
+    name,
+    address: textOrNull(opts.address),
+    city: textOrNull(opts.city),
+    state: textOrNull(opts.state),
+    phone: textOrNull(opts.phone),
+    laserModels: textOrNull(opts.laserModels),
+    facilityType: textOrNull(opts.facilityType) || 'Clinic',
+  };
+  const tooLong = shopCustomerTextTooLong(fields);
+  if (tooLong) throw new Error(tooLong);
+  // Over 30 creates per user per hour the RPC raises PT429 (HTTP 429); its
+  // message is shown as is.
+  const { data, error } = await supabase.rpc('create_shop_customer_org', {
+    p_service_org: Number(opts.serviceOrgId),
+    p_name: fields.name,
+    p_address: fields.address,
+    p_city: fields.city,
+    p_state: fields.state,
+    p_phone: fields.phone,
+    p_laser_models: fields.laserModels,
+    p_facility_type: fields.facilityType,
+  });
+  if (error) throw new Error(error.message || 'Failed to add customer');
+  const id = Number(data);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('Failed to add customer');
+  return id;
+}
+
 /**
  * Create a customer org and link it to the caller's service company.
- * Same tables as the former Company Profile CRM path: organizations + organization_customers.
+ * Org + link are one RPC transaction (createShopCustomerOrg); the remaining
+ * form fields are then written to the new, already-linked row. If that second
+ * write fails the customer still exists (linked), and detailsWarning says so.
  */
 export async function createLinkedCustomer(
   supabase: SupabaseClient,
   opts: {
     serviceOrgId: string | number;
     form: CustomerInfoFormValues;
+    /** Ignored: the RPC sets created_by to the signed-in caller. */
     createdBy?: string | null;
     logoFile?: File | null;
   }
-): Promise<{ id: string | number; logoWarning?: string }> {
+): Promise<{ id: string | number; logoWarning?: string; detailsWarning?: string }> {
   const err = validateCustomerForm(opts.form);
   if (err) throw new Error(err);
   if (!opts.serviceOrgId) throw new Error('Your organization is not loaded yet.');
 
-  const payload: Record<string, unknown> = customerOrgPayload(opts.form, {
-    type: 'customer',
-    is_active: true,
-    // Fits CHAR(3) if a trigger/default copies name into ticket_prefix.
-    ticket_prefix: shortTicketPrefix(opts.form.name),
-    ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
+  const payload: Record<string, unknown> = customerOrgPayload(opts.form);
+  const id = await createShopCustomerOrg(supabase, {
+    serviceOrgId: opts.serviceOrgId,
+    name: String(payload.name || opts.form.name),
+    address: payload.address as string | null,
+    city: payload.city as string | null,
+    state: payload.state as string | null,
+    phone: payload.phone as string | null,
+    facilityType: payload.facility_type as string | null,
   });
+  const created = { id: id as string | number };
 
-  const { data, error } = await insertOmittingCharOverflow(supabase, 'organizations', payload, {
-    select: 'id',
-    maxAttempts: 24,
-  });
-  const created = data?.id != null ? { id: data.id as string | number } : null;
-  if (error || !created) {
-    throw new Error(error?.message || 'Failed to add customer');
+  const details: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (!SHOP_CUSTOMER_RPC_COLUMNS.has(key)) details[key] = value;
   }
-
-  const linkPayload: Record<string, unknown> = {
-    service_organization_id: opts.serviceOrgId,
-    customer_organization_id: created.id,
-    ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
-  };
-  const { error: linkErr } = await insertOmittingCharOverflow(
-    supabase,
-    'organization_customers',
-    linkPayload
-  );
-  if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
-    // Customer row exists; still surface the link failure so Directory can show a reason.
-    console.warn('organization_customers link failed:', linkErr);
-    throw new Error(linkErr.message || 'Customer created but could not be linked to your directory');
+  let detailsWarning: string | undefined;
+  if (Object.keys(details).length) {
+    const { error: detailErr } = await updateOmittingCharOverflow(
+      supabase,
+      'organizations',
+      details,
+      { column: 'id', value: created.id },
+      { maxAttempts: 24 }
+    );
+    if (detailErr) {
+      console.warn('customer details after create', detailErr);
+      detailsWarning = `Customer added, but some details were not saved: ${detailErr.message || 'unknown error'}`;
+    }
   }
 
   let logoWarning: string | undefined;
@@ -359,7 +460,11 @@ export async function createLinkedCustomer(
     console.warn('primary location sync', e);
   }
 
-  return logoWarning ? { id: created.id, logoWarning } : created;
+  return {
+    ...created,
+    ...(logoWarning ? { logoWarning } : {}),
+    ...(detailsWarning ? { detailsWarning } : {}),
+  };
 }
 
 export async function updateCustomerOrg(

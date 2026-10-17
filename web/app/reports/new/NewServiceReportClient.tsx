@@ -42,7 +42,7 @@ import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso } from '@/lib/org-timezone';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
-import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
+import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
 import {
   catalogManufacturerValue,
   catalogModelValue,
@@ -1127,28 +1127,25 @@ export default function NewServiceReport() {
   const handleAddNewCustomer = async () => {
     if (!newCustomer.name.trim() || !currentUserOrgId) return;
     try {
-      const { data: org, error } = await supabase.from('organizations').insert({
-        name: newCustomer.name.trim(),
-        address: newCustomer.address || null,
-        city: newCustomer.city || null,
-        state: newCustomer.state || null,
-        phone: newCustomer.phone || null,
-        email: newCustomer.email || null,
-        contact_name: newCustomer.contactName || null,
-        type: 'customer',
-        created_by: currentUser?.id || null,
-      }).select().single();
-      if (error) throw error;
-
-      // Also link via junction for compatibility
-      try {
-        await supabase.from('organization_customers').insert({
-          service_organization_id: currentUserOrgId,
-          customer_organization_id: org.id
-        });
-      } catch {
-        /* ignore link failure */
+      // Org + organization_customers link in one transaction (000917/000919).
+      // Any error is shown; there is no unlinked half-create to clean up.
+      const orgId = await createShopCustomerOrg(supabase, {
+        serviceOrgId: currentUserOrgId,
+        name: newCustomer.name,
+        address: newCustomer.address,
+        city: newCustomer.city,
+        state: newCustomer.state,
+        phone: newCustomer.phone,
+      });
+      const extras: Record<string, string> = {};
+      if (newCustomer.email.trim()) extras.email = newCustomer.email.trim();
+      if (newCustomer.contactName.trim()) extras.contact_name = newCustomer.contactName.trim();
+      if (Object.keys(extras).length) {
+        const { error: extraErr } = await supabase.from('organizations').update(extras).eq('id', orgId);
+        if (extraErr) toast.error('Customer added, but the email/contact was not saved: ' + extraErr.message);
       }
+      const { data: org, error: readErr } = await supabase.from('organizations').select('*').eq('id', orgId).maybeSingle();
+      if (readErr || !org) throw new Error(readErr?.message || 'Customer added, but it could not be loaded.');
 
       await loadCustomers(currentUserOrgId);
       handleSelectCustomer(org);
@@ -1327,18 +1324,12 @@ export default function NewServiceReport() {
     // create like Android ensureCustomerOrganization (with available contact fields)
     const { data: exist } = await supabase.from('organizations').select('id').eq('name', searchTerm.trim()).eq('type', 'customer').maybeSingle();
     if (exist) return exist.id;
-    const { data: newC } = await supabase.from('organizations').insert({
-      name: searchTerm.trim(),
-      type: 'customer',
-      address: null,
-      city: null,
-      state: null,
-      phone: null,
-      email: null,
-      contact_name: null,
-      created_by: currentUser?.id || null
-    }).select('id').single();
-    return newC?.id || null;
+    // Org + link in one transaction (000917/000919); errors reach saveReport's
+    // catch and are shown. Never an unlinked customer org.
+    return createShopCustomerOrg(supabase, {
+      serviceOrgId: currentUserOrgId,
+      name: searchTerm,
+    });
   }
 
   async function ensureLinkedEquipment(orgId: any) {

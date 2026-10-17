@@ -18,12 +18,57 @@ function rows(res: Res): unknown[] | null {
 
 const SHOP_ORG_TYPES = new Set(['service_company', 'service']);
 
+/** 000919 not applied yet: organizations.creator_shop_org_id does not exist. */
+function missingStampColumn(res: Res): boolean {
+  const message = String(res.error?.message || '');
+  return /creator_shop_org_id/i.test(message) && /does not exist|could not find|schema cache|42703|PGRST204/i.test(message);
+}
+
+async function shopMembershipFromRows(
+  admin: FounderClaimAdmin,
+  memberships: unknown[] | null,
+  excludeOrgId: number | string | null
+): Promise<boolean | null> {
+  if (memberships == null) return null;
+  const q = (table: string) => admin.from(table) as Query;
+  for (const row of memberships as Array<{ organization_id?: unknown }>) {
+    if (row?.organization_id == null) continue;
+    if (excludeOrgId != null && String(row.organization_id) === String(excludeOrgId)) continue;
+    const org = rows(await q('organizations').select('type').eq('id', row.organization_id).limit(1));
+    if (org == null) return null;
+    const type = String((org[0] as { type?: unknown } | undefined)?.type || '').trim().toLowerCase();
+    if (SHOP_ORG_TYPES.has(type)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the user holds a membership in any service company now (the same
+ * rule as caller_in_service_company() in 000919). Service-role read; a read
+ * error returns null, which callers treat as "yes" (fail closed).
+ */
+export async function userIsShopMember(admin: FounderClaimAdmin, userId: string): Promise<boolean | null> {
+  const res = await (admin.from('organization_memberships') as Query)
+    .select('organization_id')
+    .eq('user_id', userId)
+    .limit(50);
+  return shopMembershipFromRows(admin, rows(res), null);
+}
+
 /**
  * creatorIsShopMember: the org's creator (the caller: decideFounderLink only
  * lets created_by claim) holds a membership in any service company. With a
  * customer-side org that blocks the founder claim (000917
  * org_founder_claim_allowed): a shop user who added a clinic must never become
  * its owner. A read error leaves it null (fails closed).
+ *
+ * 000919, so leaving the shop first doesn't help (both refuse any org type):
+ * - creatorWasShopMember: organizations.creator_shop_org_id is set (the
+ *   creator belonged to a service company when they inserted it as a
+ *   customer-side org; stamped by trigger). Before 000919 is applied the
+ *   column is missing: false.
+ * - orgServed: a service_reports or service_tickets row has
+ *   customer_organization_id = the org.
  */
 export async function loadFounderClaimState(
   admin: FounderClaimAdmin,
@@ -34,38 +79,39 @@ export async function loadFounderClaimState(
   orgHasMembers: boolean | null;
   orgHasServiceLink: boolean | null;
   creatorIsShopMember: boolean | null;
+  creatorWasShopMember: boolean | null;
+  orgServed: boolean | null;
 }> {
   const q = (table: string) => admin.from(table) as Query;
-  const [mine, anyMember, link, callerOrgs] = await Promise.all([
+  const [mine, anyMember, link, callerOrgs, stamp, reports, tickets] = await Promise.all([
     q('organization_memberships').select('user_id').eq('organization_id', orgId).eq('user_id', userId).limit(1),
     q('organization_memberships').select('user_id').eq('organization_id', orgId).limit(1),
     q('organization_customers').select('id').eq('customer_organization_id', orgId).limit(1),
     q('organization_memberships').select('organization_id').eq('user_id', userId).limit(50),
+    q('organizations').select('creator_shop_org_id').eq('id', orgId).limit(1),
+    q('service_reports').select('id').eq('customer_organization_id', orgId).limit(1),
+    q('service_tickets').select('id').eq('customer_organization_id', orgId).limit(1),
   ]);
   const m = rows(mine);
   const a = rows(anyMember);
   const l = rows(link);
-  const c = rows(callerOrgs);
-  let creatorIsShopMember: boolean | null = c == null ? null : false;
-  if (c) {
-    for (const row of c as Array<{ organization_id?: unknown }>) {
-      if (row?.organization_id == null || String(row.organization_id) === String(orgId)) continue;
-      const org = rows(await q('organizations').select('type').eq('id', row.organization_id).limit(1));
-      if (org == null) {
-        creatorIsShopMember = null;
-        break;
-      }
-      const type = String((org[0] as { type?: unknown } | undefined)?.type || '').trim().toLowerCase();
-      if (SHOP_ORG_TYPES.has(type)) {
-        creatorIsShopMember = true;
-        break;
-      }
-    }
+  const creatorIsShopMember = await shopMembershipFromRows(admin, rows(callerOrgs), orgId);
+  let creatorWasShopMember: boolean | null;
+  if (missingStampColumn(stamp)) {
+    creatorWasShopMember = false;
+  } else {
+    const st = rows(stamp);
+    creatorWasShopMember =
+      st == null ? null : st.some((row) => (row as { creator_shop_org_id?: unknown })?.creator_shop_org_id != null);
   }
+  const r = rows(reports);
+  const t = rows(tickets);
   return {
     callerIsMember: m == null ? null : m.length > 0,
     orgHasMembers: a == null ? null : a.length > 0,
     orgHasServiceLink: l == null ? null : l.length > 0,
     creatorIsShopMember,
+    creatorWasShopMember,
+    orgServed: r == null || t == null ? null : r.length > 0 || t.length > 0,
   };
 }

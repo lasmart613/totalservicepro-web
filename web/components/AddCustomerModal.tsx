@@ -42,6 +42,7 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName
         createdBy: user?.id || null,
         logoFile,
       });
+      if (created.detailsWarning) toast.error(created.detailsWarning);
 
       const emailOnFile = pickCrmReachEmail({
         directoryContacts: form.directory,
