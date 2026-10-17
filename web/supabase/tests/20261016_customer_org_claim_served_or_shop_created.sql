@@ -14,7 +14,8 @@
 -- live pg_get_functiondef md5s read on 2026-10-16/17. service_reports and
 -- service_tickets carry the live customer_organization_id column.
 -- Org ids are small local fixtures only (no real prod org ids).
--- Rev 2 adds QA #309's attacks: type flip (H1), creator access on stamped or
+-- Rev 3 adds QA #309 H3 (founder route chain; join-then-link) and its legit
+-- flows. Rev 2 adds QA #309's attacks: type flip (H1), creator access on stamped or
 -- served orgs and direct customer inserts by shop members (M1), unlinked
 -- customers on tickets/reports (L1), RPC caps and rate limit (L2).
 
@@ -331,6 +332,169 @@ CREATE TABLE public.service_tickets (
 GRANT SELECT, INSERT, UPDATE ON public.service_reports, public.service_tickets TO authenticated;
 GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated;
 
+-- Rev 3 (H3): links and home memberships as live. user_profiles carries the
+-- columns get_my_org_id / set_home_membership read and write.
+ALTER TABLE public.organization_memberships ADD COLUMN updated_at timestamptz;
+CREATE TABLE public.user_profiles (
+  id uuid PRIMARY KEY, organization_id bigint, active_organization_id bigint, role text, updated_at timestamptz
+);
+GRANT SELECT ON public.user_profiles TO authenticated;
+CREATE OR REPLACE FUNCTION public.get_my_org_id()
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT COALESCE(
+    (
+      SELECT p.active_organization_id
+      FROM public.user_profiles p
+      WHERE p.id = auth.uid()
+        AND p.active_organization_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.organization_memberships m
+          WHERE m.user_id = auth.uid()
+            AND m.organization_id = p.active_organization_id
+        )
+      LIMIT 1
+    ),
+    (
+      SELECT m.organization_id
+      FROM public.organization_memberships m
+      WHERE m.user_id = auth.uid()
+      ORDER BY m.is_home DESC NULLS LAST, m.created_at ASC NULLS LAST
+      LIMIT 1
+    )
+  );
+$function$;
+CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(p_service bigint, p_customer bigint)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT p_service IS NOT NULL
+    AND p_customer IS NOT NULL
+    AND p_service = public.get_my_org_id()
+    AND public.is_active_org_member(p_service)
+    AND EXISTS (
+      SELECT 1 FROM public.organizations o
+      WHERE o.id = p_customer
+        AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM public.organization_customers existing
+      WHERE existing.customer_organization_id = p_customer
+        AND existing.service_organization_id IS DISTINCT FROM p_service
+    )
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.organizations o
+        WHERE o.id = p_customer
+          AND o.type = 'customer'
+          AND o.created_by IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM public.organization_memberships m
+            WHERE m.user_id = o.created_by
+              AND m.organization_id = p_service
+          )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.engineer_invitations i
+        JOIN public.organization_memberships m
+          ON m.user_id = i.invited_by
+         AND m.organization_id = p_service
+         AND lower(m.role) IN ('company_admin', 'owner', 'service_manager', 'crm')
+        WHERE i.organization_id = p_customer
+          AND i.accepted IS TRUE
+          AND lower(coalesce(i.role, '')) = 'owner'
+      )
+    );
+$function$;
+CREATE OR REPLACE FUNCTION public.set_home_membership(p_user_id uuid, p_organization_id bigint, p_role text DEFAULT NULL::text, p_sync_profile boolean DEFAULT false)
+ RETURNS void
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+ SET row_security TO 'off'
+AS $function$
+DECLARE
+  n integer;
+  next_role text;
+  homes integer;
+BEGIN
+  IF p_user_id IS NULL OR p_organization_id IS NULL THEN
+    RAISE EXCEPTION 'set_home_membership requires a user and an organization';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.organizations WHERE id = p_organization_id
+  ) THEN
+    RAISE EXCEPTION 'set_home_membership organization % not found', p_organization_id;
+  END IF;
+
+  next_role := CASE
+    WHEN p_role IS NULL OR btrim(p_role) = '' THEN NULL
+    ELSE public.profile_role_from_membership(p_role)
+  END;
+
+  -- Clear first. A later failure raises and rolls this back with the insert.
+  UPDATE public.organization_memberships
+  SET is_home = false,
+      updated_at = now()
+  WHERE user_id = p_user_id
+    AND organization_id IS DISTINCT FROM p_organization_id
+    AND is_home IS TRUE;
+
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES (
+    p_user_id,
+    p_organization_id,
+    COALESCE(next_role, 'fse'),
+    true
+  )
+  ON CONFLICT (user_id, organization_id) DO UPDATE
+    SET is_home = true,
+        updated_at = now(),
+        role = COALESCE(next_role, public.organization_memberships.role);
+
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'set_home_membership expected 1 membership row, changed %', n;
+  END IF;
+
+  IF p_sync_profile THEN
+    UPDATE public.user_profiles
+    SET
+      organization_id = p_organization_id,
+      active_organization_id = p_organization_id,
+      role = public.profile_role_from_membership(COALESCE(next_role, role)),
+      updated_at = now()
+    WHERE id = p_user_id;
+  END IF;
+
+  SELECT count(*) INTO homes
+  FROM public.organization_memberships
+  WHERE user_id = p_user_id
+    AND is_home IS TRUE;
+  IF homes <> 1 THEN
+    RAISE EXCEPTION 'set_home_membership left % home rows', homes;
+  END IF;
+END;
+$function$;
+-- Live ACL: {postgres, authenticated, service_role} (no PUBLIC / anon).
+REVOKE ALL ON FUNCTION public.customer_org_link_allowed(bigint, bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.customer_org_link_allowed(bigint, bigint) TO authenticated, service_role;
+ALTER TABLE public.organization_customers ENABLE ROW LEVEL SECURITY;
+CREATE POLICY organization_customers_insert_linked ON public.organization_customers
+  FOR INSERT TO authenticated WITH CHECK (public.customer_org_link_allowed(service_organization_id, customer_organization_id));
+CREATE POLICY "Users can view their service org's customer links" ON public.organization_customers
+  FOR SELECT USING (((service_organization_id IN ( SELECT user_profiles.organization_id
+   FROM public.user_profiles
+  WHERE (user_profiles.id = auth.uid()))) AND public.is_active_org_member(service_organization_id)));
+GRANT DELETE ON public.organization_customers TO authenticated;
+
 \i web/supabase/migrations/20261010_000910_document_send_rate_limit.sql
 \i web/supabase/migrations/20261015_000917_customer_org_atomic_founder_block.sql
 
@@ -341,7 +505,10 @@ INSERT INTO live_defs VALUES
   ('create_shop_customer_org', 'd7777fb92d511d9c61f224bebf4cc4f8'),
   ('membership_insert_allowed', '4089a1ae42099fe66583365fee7ab31a'),
   ('organizations_guard_privilege', '892f169b59b5520fbc5a16942e69c0d0'),
-  ('org_creator_access', 'e11e29dc4dc12c7669afdce19032480b');
+  ('org_creator_access', 'e11e29dc4dc12c7669afdce19032480b'),
+  ('customer_org_link_allowed', 'b29880941434873db018651aaa71c5ac'),
+  ('get_my_org_id', '40bff6a0c88ba346da45f8ecc6f2c709'),
+  ('set_home_membership', '456b5da279d833d3746bb99f34e1a585');
 CREATE FUNCTION pg_temp.defs_differ() RETURNS text LANGUAGE sql AS $$
   SELECT string_agg(l.proname, ', ' ORDER BY l.proname)
   FROM live_defs l
@@ -352,7 +519,7 @@ DO $$ BEGIN
   IF pg_temp.defs_differ() IS NOT NULL THEN
     RAISE EXCEPTION 'fixture differs from prod: %', pg_temp.defs_differ();
   END IF;
-  RAISE NOTICE 'ok   fixture: 5 functions = live md5';
+  RAISE NOTICE 'ok   fixture: 8 functions = live md5';
 END $$;
 CREATE TEMP TABLE live_policy AS
   SELECT policyname, permissive, cmd, roles::text AS roles, qual, with_check
@@ -436,6 +603,68 @@ DO $$ BEGIN
   RAISE NOTICE 'ok   before 000919: shop tech creates unlinked clinic, leaves, claims owner (the bug)';
 END $$;
 DELETE FROM public.organization_memberships WHERE organization_id = 50;
+
+-- QA #309 H3: POST /api/org/founder's new-org path, exactly as the route
+-- does it with the service role (auth.uid() null): insert the org with the
+-- client's type and created_by = caller, then set_home_membership(owner).
+-- Then the user switches back to the shop and links it, shop admin A writes a
+-- report against it, the user leaves the shop. 'chain complete' = owner of a
+-- linked, served org after leaving (prod's report visibility follows that
+-- owner membership; the fixture has no report RLS, so the end state is checked).
+INSERT INTO auth.users VALUES
+  ('00000000-0000-0000-0000-0000000000c1', 'h3a@test'),
+  ('00000000-0000-0000-0000-0000000000c2', 'h3b@test'),
+  ('00000000-0000-0000-0000-0000000000c3', 'h3c@test'),
+  ('00000000-0000-0000-0000-0000000000c4', 'h3d@test');
+INSERT INTO public.user_profiles (id) SELECT id FROM auth.users;
+UPDATE public.user_profiles SET organization_id = 1
+WHERE id IN ('00000000-0000-0000-0000-00000000000a', '00000000-0000-0000-0000-00000000000f', '00000000-0000-0000-0000-000000000006');
+UPDATE public.user_profiles SET organization_id = 2 WHERE id = '00000000-0000-0000-0000-00000000000b';
+CREATE FUNCTION pg_temp.h3_chain(p_user uuid, p_name text) RETURNS text LANGUAGE plpgsql AS $$
+DECLARE o bigint; r text;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES (p_user, 1, 'fse', true) ON CONFLICT DO NOTHING;
+  INSERT INTO public.organizations (name, type, created_by) VALUES (p_name, 'customer', p_user) RETURNING id INTO o;
+  BEGIN
+    PERFORM public.set_home_membership(p_user, o, 'owner', true);
+  EXCEPTION WHEN OTHERS THEN
+    RETURN 'owner refused ' || SQLSTATE;
+  END;
+  UPDATE public.user_profiles SET active_organization_id = 1 WHERE id = p_user;
+  r := pg_temp.as_user(p_user::text,
+    format($q$INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, %s)$q$, o));
+  IF r <> 'ok' THEN RETURN 'link refused ' || r; END IF;
+  r := pg_temp.as_user('00000000-0000-0000-0000-00000000000a',
+    format($q$INSERT INTO public.service_reports (organization_id, customer_organization_id, title) VALUES (1, %s, 'H3 report') RETURNING 'x'$q$, o));
+  IF r <> 'ok x' THEN RETURN 'report refused ' || r; END IF;
+  DELETE FROM public.organization_memberships WHERE user_id = p_user AND organization_id = 1;
+  IF EXISTS (SELECT 1 FROM public.organization_memberships WHERE user_id = p_user AND organization_id = o AND role = 'owner')
+     AND EXISTS (SELECT 1 FROM public.organization_customers WHERE customer_organization_id = o)
+     AND EXISTS (SELECT 1 FROM public.service_reports WHERE customer_organization_id = o) THEN
+    RETURN 'chain complete';
+  END IF;
+  RETURN 'chain broken';
+END $$;
+-- Variant: the user founds the clinic BEFORE joining the shop (never
+-- stamped), then joins and the shop links it. Returns the admin's link result.
+CREATE FUNCTION pg_temp.h3_join_then_link(p_user uuid, p_name text) RETURNS text LANGUAGE plpgsql AS $$
+DECLARE o bigint;
+BEGIN
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  INSERT INTO public.organizations (name, type, created_by) VALUES (p_name, 'customer', p_user) RETURNING id INTO o;
+  PERFORM public.set_home_membership(p_user, o, 'owner', true);
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES (p_user, 1, 'fse', false);
+  RETURN pg_temp.as_user('00000000-0000-0000-0000-00000000000a',
+    format($q$INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, %s)$q$, o));
+END $$;
+
+DO $$ BEGIN
+  PERFORM pg_temp.expect('before: H3 founder-route chain', pg_temp.h3_chain('00000000-0000-0000-0000-0000000000c1', 'H3 Real Clinic Before'), 'chain complete');
+  PERFORM pg_temp.expect('before: H3 join-then-link', pg_temp.h3_join_then_link('00000000-0000-0000-0000-0000000000c2', 'H3 Join Before'), 'ok');
+  RAISE NOTICE 'ok   before 000919: H3 founder-route chain completes (owner of a linked, served org after leaving); join-then-link allowed';
+END $$;
 
 \i web/supabase/migrations/20261016_000919_customer_org_claim_served_or_shop_created.sql
 \i web/supabase/migrations/20261016_000919_customer_org_claim_served_or_shop_created.sql
@@ -711,6 +940,75 @@ BEGIN
   RAISE NOTICE 'ok   L1: linked ticket/report ok; unlinked, foreign, self and repointed refused (42501); status update ok; own-clinic no-shop report ok; service role unchecked';
 END $$;
 
+-- 6c) H3 after 000919: both database rules, and the legit flows they leave
+DO $$
+DECLARE o bigint; r text;
+BEGIN
+  -- The route chain: the service-role owner membership on the stamped org is refused (rule 9).
+  PERFORM pg_temp.expect('H3 founder-route chain', pg_temp.h3_chain('00000000-0000-0000-0000-0000000000c3', 'H3 Real Clinic After'), 'owner refused 42501');
+  IF (SELECT creator_shop_org_id FROM public.organizations WHERE name = 'H3 Real Clinic After') IS DISTINCT FROM 1 THEN
+    RAISE EXCEPTION 'service-role insert by a shop member was not stamped';
+  END IF;
+  -- Founded before joining (unstamped): the shop can't link it while its owner is on staff (rule 8).
+  PERFORM pg_temp.expect('H3 join-then-link (admin)', pg_temp.h3_join_then_link('00000000-0000-0000-0000-0000000000c4', 'H3 Join After'), 'ERR 42501');
+  SELECT id INTO o FROM public.organizations WHERE name = 'H3 Join After';
+  UPDATE public.user_profiles SET active_organization_id = 1 WHERE id = '00000000-0000-0000-0000-0000000000c4';
+  PERFORM pg_temp.expect('H3 join-then-link (owner herself)', pg_temp.as_user('00000000-0000-0000-0000-0000000000c4',
+    format($q$INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, %s)$q$, o)), 'ERR 42501');
+  -- Rule 9 for shop staff other than the creator, and on UPDATE.
+  SELECT id INTO o FROM public.organizations WHERE name = 'H3 Real Clinic After';
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  BEGIN
+    PERFORM public.set_home_membership('00000000-0000-0000-0000-00000000000a', o, 'owner', true);
+    RAISE EXCEPTION 'stamp-shop admin became owner';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES ('00000000-0000-0000-0000-00000000000a', 90, 'company_admin', false);
+  BEGIN
+    UPDATE public.organization_memberships SET organization_id = o
+    WHERE user_id = '00000000-0000-0000-0000-00000000000a' AND organization_id = 90;
+    RAISE EXCEPTION 'membership moved onto a stamped org';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+  RAISE NOTICE 'ok   H3: route chain refused at the owner membership (42501, service role); join-then-link refused (42501) for admin and owner; stamp-shop staff refused; UPDATE onto a stamped org refused';
+END $$;
+DO $$
+DECLARE o bigint; k bigint;
+BEGIN
+  -- Handover: an outsider (the clinic's own person, e.g. via an accepted owner
+  -- invite) may become owner of a stamped, linked org.
+  SELECT customer_organization_id INTO o FROM public.organization_customers oc
+  JOIN public.organizations x ON x.id = oc.customer_organization_id
+  WHERE oc.service_organization_id = 1 AND x.creator_shop_org_id = 1 ORDER BY oc.id LIMIT 1;
+  PERFORM set_config('request.jwt.claim.sub', '', true);
+  PERFORM public.set_home_membership('00000000-0000-0000-0000-000000000009', o, 'owner', true);
+  -- The shop's creator can re-link its own shop-created org after unlinking (no member overlap).
+  SELECT id INTO k FROM public.organizations WHERE name = 'Bulk 1';
+  DELETE FROM public.organization_customers WHERE customer_organization_id = k;
+  UPDATE public.user_profiles SET active_organization_id = 1 WHERE id = '00000000-0000-0000-0000-000000000006';
+  PERFORM pg_temp.expect('creator re-link', pg_temp.as_user('00000000-0000-0000-0000-000000000006',
+    format($q$INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, %s)$q$, k)), 'ok');
+  -- Stamp's shop gone: the creator may join.
+  INSERT INTO public.organizations (id, name, type) VALUES (95, 'Closed Shop', 'service_company');
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES ('00000000-0000-0000-0000-0000000000c1', 95, 'fse', false);
+  INSERT INTO public.organizations (id, name, type, created_by) VALUES (96, 'Orphan Clinic', 'customer', '00000000-0000-0000-0000-0000000000c1');
+  IF (SELECT creator_shop_org_id FROM public.organizations WHERE id = 96) IS DISTINCT FROM 95 THEN
+    RAISE EXCEPTION '96 should be stamped 95';
+  END IF;
+  DELETE FROM public.organizations WHERE id = 95;
+  PERFORM public.set_home_membership('00000000-0000-0000-0000-0000000000c1', 96, 'owner', true);
+  -- Clinic self-signup through the route (never in a shop): owner, then linkable by a shop.
+  INSERT INTO auth.users VALUES ('00000000-0000-0000-0000-0000000000c5', 'h3e@test');
+  INSERT INTO public.organizations (id, name, type, created_by) VALUES (97, 'Route Clinic', 'laser_clinic', '00000000-0000-0000-0000-0000000000c5');
+  PERFORM public.set_home_membership('00000000-0000-0000-0000-0000000000c5', 97, 'owner', true);
+  IF (SELECT creator_shop_org_id FROM public.organizations WHERE id = 97) IS NOT NULL THEN
+    RAISE EXCEPTION 'self-signup stamped';
+  END IF;
+  RAISE NOTICE 'ok   H3 legit: outsider owner on a stamped org (handover); creator re-link with no overlap; stamp shop gone -> allowed; route self-signup owner, unstamped';
+END $$;
+
 -- 7) grants, SECURITY DEFINER, search_path ''
 DO $$ BEGIN
   IF has_function_privilege('anon', 'public.create_shop_customer_org(bigint, text, text, text, text, text, text, text)', 'execute')
@@ -718,6 +1016,9 @@ DO $$ BEGIN
      OR has_function_privilege('authenticated', 'public.org_founder_claim_allowed(bigint)', 'execute')
      OR has_function_privilege('authenticated', 'public.stamp_org_creator_shop()', 'execute')
      OR has_function_privilege('authenticated', 'public.guard_service_customer_org()', 'execute')
+     OR has_function_privilege('authenticated', 'public.guard_stamped_org_membership()', 'execute')
+     OR has_function_privilege('anon', 'public.customer_org_link_allowed(bigint, bigint)', 'execute')
+     OR NOT has_function_privilege('authenticated', 'public.customer_org_link_allowed(bigint, bigint)', 'execute')
      OR has_function_privilege('anon', 'public.caller_in_service_company()', 'execute')
      OR NOT has_function_privilege('authenticated', 'public.caller_in_service_company()', 'execute') THEN
     RAISE EXCEPTION 'grants wrong';
@@ -730,12 +1031,14 @@ DO $$ BEGIN
                   'public.organizations_guard_privilege()'::regprocedure,
                   'public.org_creator_access(bigint,uuid,timestamptz)'::regprocedure,
                   'public.caller_in_service_company()'::regprocedure,
-                  'public.guard_service_customer_org()'::regprocedure)
+                  'public.guard_service_customer_org()'::regprocedure,
+                  'public.guard_stamped_org_membership()'::regprocedure,
+                  'public.customer_org_link_allowed(bigint,bigint)'::regprocedure)
       AND NOT (prosecdef AND proconfig = ARRAY['search_path=""'])
   ) THEN
     RAISE EXCEPTION 'SECURITY DEFINER / search_path wrong';
   END IF;
-  IF pg_temp.defs_differ() <> 'create_shop_customer_org, org_creator_access, org_founder_claim_allowed, organizations_guard_privilege' THEN
+  IF pg_temp.defs_differ() <> 'create_shop_customer_org, customer_org_link_allowed, org_creator_access, org_founder_claim_allowed, organizations_guard_privilege' THEN
     RAISE EXCEPTION 'unexpected changed set (membership_insert_allowed must be unchanged): %', pg_temp.defs_differ();
   END IF;
   RAISE NOTICE 'ok   grants; SECURITY DEFINER with empty search_path; membership_insert_allowed unchanged';
@@ -750,7 +1053,8 @@ DO $$ BEGIN
   IF to_regprocedure('public.stamp_org_creator_shop()') IS NOT NULL
      OR to_regprocedure('public.caller_in_service_company()') IS NOT NULL
      OR to_regprocedure('public.guard_service_customer_org()') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname IN ('trg_stamp_org_creator_shop', 'trg_guard_service_customer_org'))
+     OR to_regprocedure('public.guard_stamped_org_membership()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgname IN ('trg_stamp_org_creator_shop', 'trg_guard_service_customer_org', 'trg_guard_stamped_org_membership'))
      OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public'
                 AND table_name = 'organizations' AND column_name = 'creator_shop_org_id')
      OR EXISTS (SELECT 1 FROM public.document_send_slots WHERE document_type = 'customer_org') THEN
@@ -768,7 +1072,7 @@ DO $$ BEGIN
   IF (SELECT def FROM live_check) IS DISTINCT FROM (SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'document_send_slots_document_type_check') THEN
     RAISE EXCEPTION 'rollback did not restore the document_type check';
   END IF;
-  RAISE NOTICE 'ok   rollback: 5 live functions byte for byte; organizations policies and 000910 check as live; 000919 objects and slots gone';
+  RAISE NOTICE 'ok   rollback: 8 live functions byte for byte (customer_org_link_allowed included); organizations policies and 000910 check as live; 000919 objects and slots gone';
 END $$;
 
 ROLLBACK;

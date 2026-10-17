@@ -1,10 +1,12 @@
 -- Rollback for 000919: restores the live (pre-000919) definitions of
--- organizations_guard_privilege, org_creator_access, org_founder_claim_allowed
--- and create_shop_customer_org (pg_get_functiondef from prod, 2026-10-17),
+-- organizations_guard_privilege, org_creator_access, org_founder_claim_allowed,
+-- create_shop_customer_org and customer_org_link_allowed (pg_get_functiondef
+-- from prod, 2026-10-17),
 -- restores policy organizations_insert_customers and 000910's document_type
 -- CHECK, then drops everything 000919 added: policy
 -- organizations_insert_customer_side_not_shop_member, caller_in_service_company,
--- the guard_service_customer_org triggers and function, the stamp trigger and
+-- the guard_service_customer_org triggers and function, the
+-- guard_stamped_org_membership trigger and function, the stamp trigger and
 -- function, organizations.creator_shop_org_id (the stamps are lost; nothing
 -- else reads them) and the customer_org rate-limit slots.
 -- Roll the app back first (or together): with the 000917 RPC a technician's
@@ -193,6 +195,54 @@ ALTER TABLE public.document_send_slots
   ADD CONSTRAINT document_send_slots_document_type_check CHECK (
     document_type IN ('invoice', 'estimate', 'report', 'purchase_order')
   );
+
+CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(p_service bigint, p_customer bigint)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO 'public', 'pg_temp'
+AS $function$
+  SELECT p_service IS NOT NULL
+    AND p_customer IS NOT NULL
+    AND p_service = public.get_my_org_id()
+    AND public.is_active_org_member(p_service)
+    AND EXISTS (
+      SELECT 1 FROM public.organizations o
+      WHERE o.id = p_customer
+        AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM public.organization_customers existing
+      WHERE existing.customer_organization_id = p_customer
+        AND existing.service_organization_id IS DISTINCT FROM p_service
+    )
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.organizations o
+        WHERE o.id = p_customer
+          AND o.type = 'customer'
+          AND o.created_by IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM public.organization_memberships m
+            WHERE m.user_id = o.created_by
+              AND m.organization_id = p_service
+          )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.engineer_invitations i
+        JOIN public.organization_memberships m
+          ON m.user_id = i.invited_by
+         AND m.organization_id = p_service
+         AND lower(m.role) IN ('company_admin', 'owner', 'service_manager', 'crm')
+        WHERE i.organization_id = p_customer
+          AND i.accepted IS TRUE
+          AND lower(coalesce(i.role, '')) = 'owner'
+      )
+    );
+$function$;
+
+DROP TRIGGER IF EXISTS trg_guard_stamped_org_membership ON public.organization_memberships;
+DROP FUNCTION IF EXISTS public.guard_stamped_org_membership();
 
 DROP TRIGGER IF EXISTS trg_stamp_org_creator_shop ON public.organizations;
 DROP FUNCTION IF EXISTS public.stamp_org_creator_shop();

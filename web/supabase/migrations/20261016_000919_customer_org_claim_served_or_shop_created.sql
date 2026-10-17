@@ -25,6 +25,29 @@
 --       org linked to that shop (organization_customers).
 --   L2  create_shop_customer_org: length caps and 30 creates per user per
 --       sliding hour (000910's document_send_slots).
+-- Rev 3 (QA #309 re-test, 2026-10-17):
+--   H3  POST /api/org/founder inserts the org and the owner membership with
+--       the service role (RLS skipped): a shop tech founded a type=customer
+--       org, became owner, linked it to the shop (customer_org_link_allowed's
+--       creator branch), let the shop write reports against it, left, and
+--       kept reading them. The route now refuses that itself (allow-listed
+--       types, no customer-side org for a shop member, founderClaimAllowed
+--       on every path). The database closes it too, with two rules (8, 9);
+--       either one alone breaks the chain:
+--       8) customer_org_link_allowed refuses a link when any member of the
+--          linking shop is a member of the customer org. Holds whatever path
+--          made the membership (route, RPC, a future one), and also for an
+--          unstamped org founded before joining the shop.
+--       9) trg_guard_stamped_org_membership refuses a membership on a
+--          stamped org for its creator or a member of the stamp's shop, for
+--          every caller including the service role, while that shop exists.
+--          The handover of a shop-added clinic is an accepted owner invite to
+--          the clinic's own people, who are neither, so it still works.
+--       Prod 2026-10-17 (read-only): 0 of 1766 links have such an overlap; 0
+--       customer-side memberships are held by a member of any shop; 0
+--       accepted owner invites; stamps start empty (no backfill). So neither
+--       rule touches an existing row. Clinic self-signup (creator in no shop)
+--       is never stamped and has no shop overlap.
 --
 -- 1) organizations.creator_shop_org_id (new, nullable, no backfill): a
 --    service company the creator belonged to when they inserted a
@@ -462,5 +485,109 @@ $function$;
 
 REVOKE ALL ON FUNCTION public.create_shop_customer_org(bigint, text, text, text, text, text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.create_shop_customer_org(bigint, text, text, text, text, text, text, text) TO authenticated, service_role;
+
+
+-- 8) H3: links. Live body (pg_get_functiondef, 2026-10-17) with
+--    search_path '' (every name was already schema-qualified) plus one rule.
+CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(p_service bigint, p_customer bigint)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT p_service IS NOT NULL
+    AND p_customer IS NOT NULL
+    AND p_service = public.get_my_org_id()
+    AND public.is_active_org_member(p_service)
+    AND EXISTS (
+      SELECT 1 FROM public.organizations o
+      WHERE o.id = p_customer
+        AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM public.organization_customers existing
+      WHERE existing.customer_organization_id = p_customer
+        AND existing.service_organization_id IS DISTINCT FROM p_service
+    )
+    -- 000919 rev 3 (QA #309 H3): nobody in the linking shop may already
+    -- belong to the customer org (its owner can't be on the shop's staff).
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.organization_memberships cm
+      JOIN public.organization_memberships sm ON sm.user_id = cm.user_id
+      WHERE cm.organization_id = p_customer
+        AND sm.organization_id = p_service
+    )
+    AND (
+      EXISTS (
+        SELECT 1 FROM public.organizations o
+        WHERE o.id = p_customer
+          AND o.type = 'customer'
+          AND o.created_by IS NOT NULL
+          AND EXISTS (
+            SELECT 1 FROM public.organization_memberships m
+            WHERE m.user_id = o.created_by
+              AND m.organization_id = p_service
+          )
+      )
+      OR EXISTS (
+        SELECT 1 FROM public.engineer_invitations i
+        JOIN public.organization_memberships m
+          ON m.user_id = i.invited_by
+         AND m.organization_id = p_service
+         AND lower(m.role) IN ('company_admin', 'owner', 'service_manager', 'crm')
+        WHERE i.organization_id = p_customer
+          AND i.accepted IS TRUE
+          AND lower(coalesce(i.role, '')) = 'owner'
+      )
+    );
+$function$;
+
+-- Same grants as live (CREATE OR REPLACE keeps them; stated explicitly).
+REVOKE ALL ON FUNCTION public.customer_org_link_allowed(bigint, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.customer_org_link_allowed(bigint, bigint) TO authenticated, service_role;
+
+-- 9) H3: memberships on a stamped org, every role and every caller
+--    (service role and set_home_membership included).
+CREATE OR REPLACE FUNCTION public.guard_stamped_org_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+BEGIN
+  IF TG_OP = 'UPDATE'
+     AND NEW.user_id IS NOT DISTINCT FROM OLD.user_id
+     AND NEW.organization_id IS NOT DISTINCT FROM OLD.organization_id THEN
+    RETURN NEW;
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM public.organizations o
+    JOIN public.organizations s ON s.id = o.creator_shop_org_id
+    WHERE o.id = NEW.organization_id
+      AND (
+        o.created_by = NEW.user_id
+        OR EXISTS (
+          SELECT 1 FROM public.organization_memberships sm
+          WHERE sm.user_id = NEW.user_id
+            AND sm.organization_id = o.creator_shop_org_id
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'a customer organization added by a service company cannot take its creator or that company''s staff as a member'
+      USING ERRCODE = '42501';
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE ALL ON FUNCTION public.guard_stamped_org_membership() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS trg_guard_stamped_org_membership ON public.organization_memberships;
+CREATE TRIGGER trg_guard_stamped_org_membership
+  BEFORE INSERT OR UPDATE OF user_id, organization_id ON public.organization_memberships
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_stamped_org_membership();
 
 NOTIFY pgrst, 'reload schema';
