@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
@@ -22,7 +22,7 @@ import AuthOtpBox from '@/components/AuthOtpBox';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import { PublicLink, useT } from '@/lib/fa/locale';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -99,10 +99,13 @@ function OwnerSignupInner() {
   const [claimLocked, setClaimLocked] = useState(false);
   const router = useRouter();
   const t = useT();
-  const searchParams = useSearchParams();
   const supabase = getSupabaseClient();
 
+  // Read the query from window.location on mount. Next's search-params hook
+  // makes this page skip server rendering, so visitors saw "Loading sign up…"
+  // until the whole client bundle hydrated.
   useEffect(() => {
+    const searchParams = new URLSearchParams(window.location.search);
     const qCompany = (searchParams.get('company') || '').trim();
     const qEmail = (searchParams.get('email') || '').trim();
     const qClaim = (searchParams.get('claim') || '').trim();
@@ -120,7 +123,7 @@ function OwnerSignupInner() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
+  }, []);
 
   const rentalSignup = isRentalOwnerSignup(orgKind, facilityType);
   const preferredServiceOptions = rentalSignup
@@ -596,26 +599,8 @@ function OwnerSignupInner() {
   );
 }
 
-function OwnerSignupStatic() {
-  const t = useT();
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
-      <div className="w-full max-w-md">
-        <p className="text-sm font-semibold" style={{ color: 'var(--gold)' }}>Total Service Pro</p>
-        <h1 className="text-2xl font-bold mt-1">{t('Sign up as a clinic or equipment owner')}</h1>
-        <p className="text-sm text-[var(--text3)] mt-2">
-          {t('Hospitals, clinics, rental companies, and resellers. Track medical devices and find biomedical service — lasers, lithotriptors, C-arms, and more.')}
-        </p>
-        <p className="text-[var(--text3)] mt-4">{t('Loading sign up…')}</p>
-      </div>
-    </div>
-  );
-}
-
+// No Suspense wrapper: nothing here suspends, and React 19.2 outlines a
+// boundary this large, so the "Loading sign up…" fallback still flashed.
 export default function OwnerSignup() {
-  return (
-    <Suspense fallback={<OwnerSignupStatic />}>
-      <OwnerSignupInner />
-    </Suspense>
-  );
+  return <OwnerSignupInner />;
 }
