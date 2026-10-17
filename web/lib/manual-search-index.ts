@@ -953,6 +953,61 @@ export async function indexManualSearchText(
   return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
 }
 
+/** Skipped reason when a manual gained index rows before an expect-empty write. */
+export const ALREADY_INDEXED = 'already_indexed';
+
+/**
+ * Index a manual that had no manual_search_index row, and write only if it
+ * still has none. Used by scripts/index-missing-manuals.mjs and the scheduled
+ * catch-up. Unlike indexManualSearchText it never replaces existing rows:
+ * replace_manual_search_index is called with p_expected_md5 NULL, and the
+ * function treats NULL as "storage must be empty" (md5 of zero rows is NULL,
+ * compared with IS DISTINCT FROM). A row written after the caller listed the
+ * manual makes the RPC return false, reported as already_indexed. There is no
+ * upsert fallback: without the RPC the write is refused. A quick row check
+ * before extraction skips the download when rows already exist.
+ * An image-only PDF stores one empty row, like the God button, so it is not
+ * retried forever.
+ */
+export async function indexMissingManualSearchText(
+  client: TableClient & { storage: StorageClient },
+  manual: ManualIndexRow
+): Promise<ManualIndexResult> {
+  const catalogId = asManualCatalogId(manual.id);
+  const manualId = catalogId == null ? '' : String(catalogId);
+  if (catalogId == null) return { manualId: '', ok: false, chars: 0, files: 0, skipped: 'missing_id' };
+  if (typeof client.rpc !== 'function') {
+    return { manualId, ok: false, chars: 0, files: 0, skipped: 'Refused: replace_manual_search_index is required for an expect-empty write.' };
+  }
+  const before = await readExistingSearchText(client, catalogId);
+  if (!before.ok) return { manualId, ok: false, chars: 0, files: 0, skipped: before.error };
+  if (before.chunks.length) return { manualId, ok: false, chars: 0, files: 0, skipped: ALREADY_INDEXED };
+
+  const extracted = await extractManualBodyText(client.storage, manual);
+  if (extracted.fatal) {
+    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.fatal };
+  }
+  const chunks: readonly IndexChunk[] = extracted.chunks?.length
+    ? extracted.chunks
+    : [{ chunkIndex: 0, text: extracted.text || '', clipped: false, indexedPageMax: null }];
+  const rpc = await client.rpc('replace_manual_search_index', {
+    p_manual_id: catalogId,
+    p_chunks: chunks.map((row) => row.text),
+    p_clipped: chunks.map((row) => row.clipped === true),
+    p_page_max: chunks.map((row) => (row.indexedPageMax == null ? null : row.indexedPageMax)),
+    p_expected_md5: null,
+  });
+  if (rpc?.error) {
+    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: rpc.error.message || 'replace failed' };
+  }
+  if (rpc?.data === false) return { manualId, ok: false, chars: 0, files: extracted.files, skipped: ALREADY_INDEXED };
+  if (!extracted.text) {
+    return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || 'no_extractable_text' };
+  }
+  await persistChapterPageCounts(client, manual, extracted.fileCounts);
+  return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
+}
+
 /**
  * Escapes `%`, `_`, and `\` for a PostgreSQL ILIKE pattern.
  * This does not stop PostgREST from rewriting `*` to `%`. Contains-search of

@@ -28,6 +28,8 @@ export const maxDuration = 60;
  * Pass { attachCollection: true } without manualId to catch up every unstamped
  * attachable row (file or folder with a PDF). Uses afterId cursor; one upload
  * per request. The same batch also writes manual_search_index.
+ * Unpublished manuals are skipped unless { includeUnpublished: true } or a
+ * manualId is given.
  */
 export async function POST(req: NextRequest) {
   const gate = await requireGodCaller(req);
@@ -44,10 +46,12 @@ export async function POST(req: NextRequest) {
     attachCollection?: unknown;
     afterId?: unknown;
     after_id?: unknown;
+    includeUnpublished?: unknown;
   };
   const targetId = asManualCatalogId(body.manualId ?? body.manual_id);
   const attachCollection = body.attachCollection === true || body.attachCollection === '1';
   const afterId = asManualCatalogId(body.afterId ?? body.after_id);
+  const includeUnpublished = body.includeUnpublished === true || body.includeUnpublished === '1';
   const defaultLimit = attachCollection && targetId == null ? MANUAL_XAI_ATTACH_BATCH : MANUAL_REINDEX_BATCH;
   const limit = Math.min(
     attachCollection ? MANUAL_XAI_ATTACH_BATCH : 12,
@@ -60,9 +64,10 @@ export async function POST(req: NextRequest) {
     async (from, to) =>
       admin
         .from('manuals')
-        .select('id, storage_path, is_folder, chapter_metadata, is_incomplete, xai_collection_id, entry_file_path')
+        .select('id, storage_path, is_folder, chapter_metadata, is_incomplete, xai_collection_id, entry_file_path, published')
         .order('brand')
         .order('title')
+        .order('id')
         .range(from, to)
   );
   if (manErr) {
@@ -91,6 +96,9 @@ export async function POST(req: NextRequest) {
     : catalog.filter((m) => {
         const id = asManualCatalogId(m.id);
         if (targetId != null) return id === targetId;
+        // Unpublished manuals are hidden from search and the assistant; index
+        // them only on request (or by manualId), same as the backfill script.
+        if (m.published === false && !includeUnpublished) return false;
         return force || id == null || !indexed.has(id);
       });
   const batch = pending.slice(0, limit);

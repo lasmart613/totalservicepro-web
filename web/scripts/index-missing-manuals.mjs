@@ -12,11 +12,15 @@
  * (read-only) and prints what --apply would do. Without SUPABASE_URL and
  * SUPABASE_SERVICE_ROLE_KEY it only prints the plan and touches nothing.
  *
- * --apply indexes each missing manual with indexManualSearchText, the same
- * extractor the God button uses (pdf.js, [[pdfpage:N]] stamps, 1.5M-character
- * chunks). Each write goes through replace_manual_search_index with an
- * expected md5 of NULL, so a manual that gained rows in the meantime is
- * refused, not overwritten. Re-running is safe: indexed manuals are skipped.
+ * --apply indexes each missing manual with indexMissingManualSearchText: the
+ * same extractor the God button uses (pdf.js, [[pdfpage:N]] stamps,
+ * 1.5M-character chunks), but an expect-empty write. It calls
+ * replace_manual_search_index with p_expected_md5 NULL, which the function
+ * compares with IS DISTINCT FROM against md5 of the current rows (NULL when
+ * there are none). A manual that gained rows after this script listed it
+ * (God button, reindex-one, a parallel run) is refused and reported as
+ * already_indexed, never overwritten. There is no upsert fallback.
+ * Re-running is safe: indexed manuals are skipped.
  * An image-only PDF stores an empty row (same as the God button), so it is
  * not retried forever. A PDF that pdf.js cannot open, or one over the size
  * limit, writes nothing and is listed under failed.
@@ -44,8 +48,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * pdf.js extraction measured locally on the 41 Oct 16 PDFs (379 MB) under
- * Node 22: 19.3 s, about 0.05 s per MB. Download from Storage is assumed at
+ * pdf.js extraction measured locally under Node 22 on the 41 PDFs in the
+ * Oct 16 import folder (379 MB; 39 of them became catalog rows 1755-1793):
+ * 19.3 s, about 0.05 s per MB. Download from Storage is assumed at
  * about 10 MB/s, plus one read and one RPC per manual.
  */
 export const SECONDS_PER_MB = 0.15;
@@ -119,7 +124,9 @@ async function loadCatalog(admin, fetchAllPages) {
   return res.data;
 }
 
-async function storageSizes(admin, manuals) {
+export const STORAGE_LIST_PAGE = 1000;
+
+export async function storageSizes(admin, manuals) {
   const sizes = new Map();
   const byFolder = new Map();
   for (const m of manuals) {
@@ -131,8 +138,15 @@ async function storageSizes(admin, manuals) {
     byFolder.get(dir).push({ id: m.id, name });
   }
   for (const [dir, items] of byFolder) {
-    const { data } = await admin.storage.from('manuals').list(dir, { limit: 1000 });
-    const found = new Map((data || []).map((o) => [o.name, Number(o.metadata?.size) || 0]));
+    const found = new Map();
+    for (let offset = 0; ; offset += STORAGE_LIST_PAGE) {
+      const { data, error } = await admin.storage
+        .from('manuals')
+        .list(dir, { limit: STORAGE_LIST_PAGE, offset, sortBy: { column: 'name', order: 'asc' } });
+      if (error) throw new Error(`storage list ${dir} failed: ${error.message || error}`);
+      for (const o of data || []) found.set(o.name, Number(o.metadata?.size) || 0);
+      if (!data || data.length < STORAGE_LIST_PAGE) break;
+    }
     for (const item of items) sizes.set(item.id, found.has(item.name) ? found.get(item.name) : null);
   }
   return sizes;
@@ -143,7 +157,7 @@ async function storageSizes(admin, manuals) {
  * and the indexer functions from lib/manual-search-index.ts.
  */
 export async function runIndexMissing(deps, opts, log = console.log) {
-  const { admin, fetchAllPages, listIndexedManualIds, manualsMissingSearchIndex, indexManualSearchText } = deps;
+  const { admin, fetchAllPages, listIndexedManualIds, manualsMissingSearchIndex, indexMissingManualSearchText } = deps;
   const catalog = await loadCatalog(admin, fetchAllPages);
   const before = await listIndexedManualIds(admin);
   if (before.error) throw new Error(`manual_search_index read failed: ${before.error}`);
@@ -189,7 +203,7 @@ export async function runIndexMissing(deps, opts, log = console.log) {
       const started = Date.now();
       let result;
       try {
-        result = await indexManualSearchText(admin, manual);
+        result = await indexMissingManualSearchText(admin, manual);
       } catch (err) {
         result = { manualId: String(manual.id), ok: false, chars: 0, files: 0, skipped: err instanceof Error ? err.message : String(err) };
       }
@@ -204,8 +218,9 @@ export async function runIndexMissing(deps, opts, log = console.log) {
   const done = {
     indexed: results.filter((r) => r.ok).length,
     emptyText: results.filter((r) => r.skipped === 'no_extractable_text').map((r) => Number(r.manualId)),
+    alreadyIndexed: results.filter((r) => r.skipped === 'already_indexed').map((r) => Number(r.manualId)),
     failed: results
-      .filter((r) => !r.ok && r.skipped !== 'no_extractable_text')
+      .filter((r) => !r.ok && r.skipped !== 'no_extractable_text' && r.skipped !== 'already_indexed')
       .map((r) => ({ id: Number(r.manualId), reason: r.skipped })),
     indexedDistinctAfter: after.error ? null : after.ids.size,
   };
@@ -237,7 +252,7 @@ async function inner() {
       fetchAllPages,
       listIndexedManualIds: lib.listIndexedManualIds,
       manualsMissingSearchIndex: lib.manualsMissingSearchIndex,
-      indexManualSearchText: lib.indexManualSearchText,
+      indexMissingManualSearchText: lib.indexMissingManualSearchText,
     },
     opts,
   );
