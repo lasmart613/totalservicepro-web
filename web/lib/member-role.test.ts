@@ -261,7 +261,7 @@ test('the org owner and founder cannot have their role changed', async () => {
   assert.equal(membership(founder, FOUNDER)?.role, 'company_admin');
 });
 
-test('the org founder can assign a team role, but cannot raise their own', async () => {
+test('the org founder with only an fse membership cannot change roles (no creator bypass)', async () => {
   const state = baseStore();
   const founder = membership(state, FOUNDER);
   const founderProfile = profile(state, FOUNDER);
@@ -269,16 +269,39 @@ test('the org founder can assign a team role, but cannot raise their own', async
   founder.role = 'fse';
   founderProfile.role = 'fse';
   const result = await postRole({ state, callerId: FOUNDER, role: 'service_manager' });
-  assert.equal(result.status, 200);
-  assert.equal(result.body.role, 'service_manager');
-  assert.equal(membership(state, MEMBER)?.role, 'service_manager');
-  assert.equal(profile(state, MEMBER)?.role, 'service_manager');
+  assert.equal(result.status, 403);
+  assert.equal(result.updates.length, 0);
+  assert.equal(membership(state, MEMBER)?.role, 'fse');
+});
 
-  const raised = await postRole({ state, callerId: FOUNDER, userId: FOUNDER, role: 'company_admin' });
-  assert.equal(raised.status, 403);
-  assert.equal(raised.updates.length, 0);
-  assert.equal(membership(state, FOUNDER)?.role, 'fse');
-  assert.equal(profile(state, FOUNDER)?.role, 'fse');
+test('the org creator with NO membership row gets 403', async () => {
+  const state = baseStore();
+  state.orgs[0].created_by = 'creator-1';
+  state.profiles.push({ id: 'creator-1', organization_id: ORG, active_organization_id: ORG, role: 'company_admin' });
+  const result = await postRole({ state, callerId: 'creator-1', role: 'service_manager' });
+  assert.equal(result.status, 403);
+  assert.equal(result.updates.length, 0);
+});
+
+test('the org creator who was removed from the org gets 403', async () => {
+  const state = baseStore();
+  // FOUNDER is organizations.created_by; removal deleted the membership row.
+  state.memberships = state.memberships.filter((row) => row.user_id !== FOUNDER);
+  const result = await postRole({ state, callerId: FOUNDER, role: 'service_manager' });
+  assert.equal(result.status, 403);
+  assert.equal(result.updates.length, 0);
+  assert.equal(membership(state, MEMBER)?.role, 'fse');
+});
+
+test('a current company_admin may change roles; a plain member may not', async () => {
+  const ok = await postRole({ state: baseStore(), callerId: ADMIN, role: 'dispatcher' });
+  assert.equal(ok.status, 200);
+  const state = baseStore();
+  state.memberships.push({ user_id: 'tech-2', organization_id: ORG, role: 'fse', is_home: true });
+  state.profiles.push({ id: 'tech-2', organization_id: ORG, active_organization_id: ORG, role: 'fse' });
+  const refused = await postRole({ state, callerId: 'tech-2', role: 'dispatcher' });
+  assert.equal(refused.status, 403);
+  assert.equal(refused.updates.length, 0);
 });
 
 test('an owner membership can still change another member to a team role', async () => {

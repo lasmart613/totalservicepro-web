@@ -167,11 +167,13 @@ export async function POST(req: NextRequest) {
 
     // Existing org: created_by alone doesn't make the caller its founder (a
     // removed tech is still created_by on the clinics they added). Same rule as
-    // org_unclaimed_new in 000916.
+    // org_unclaimed_new in 000916, plus 000917: a customer org created by a
+    // shop user (the caller is its created_by) is never claimable.
     if (existingForGrant) {
       const claim = await loadFounderClaimState(admin, orgId, user.id);
       const allowed = founderClaimAllowed({
         ...claim,
+        orgType,
         orgCreatedAt: (existingForGrant as { created_at?: string | null }).created_at ?? null,
       });
       if (!allowed.ok) {

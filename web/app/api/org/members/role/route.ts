@@ -38,9 +38,9 @@ type RoleDeps = {
  * POST /api/org/members/role
  * { userId, organizationId, role }
  *
- * Caller must be company_admin or owner on their membership in that org,
- * or the founder of that org (organizations.created_by, or a founder flag
- * on that same membership). user_profiles.role is not authority.
+ * Caller must hold a CURRENT company_admin or owner membership row in that
+ * org. Being organizations.created_by does not count on its own (a creator
+ * who was removed or never joined is refused). user_profiles.role is not authority.
  * The new role is trimmed and lowercased and must be an invitable team role.
  * Owner, platform admin, and every other role are refused with no writes.
  * The org owner and founder cannot have their role changed.
@@ -119,14 +119,8 @@ export async function runChangeMemberRole(req: NextRequest, deps: RoleDeps = {})
     }
 
     const createdBy = orgRow?.created_by ? String(orgRow.created_by) : null;
-    const callerFounder = rowFounderFlag(callerMembership);
-    if (
-      !callerMayChangeMemberRole({
-        membershipRole: callerMembership?.role,
-        founder: callerFounder,
-        isOrgCreator: sameUser(user.id, createdBy),
-      })
-    ) {
+    // Authority is the caller's current membership row only (no creator bypass).
+    if (!callerMayChangeMemberRole({ membershipRole: callerMembership?.role })) {
       return NextResponse.json(
         { error: 'Only an admin of this organization can change roles.' },
         { status: 403 }

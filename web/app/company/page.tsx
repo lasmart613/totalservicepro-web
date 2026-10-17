@@ -706,37 +706,23 @@ function CompanyProfile() {
     if (!newCustomer.name) { setCustomerMessage('Customer name is required.'); return; }
     if (!org?.id) { setCustomerMessage('Your organization is not loaded yet.'); return; }
     try {
-      const { data: { user: actor } } = await supabase.auth.getUser();
-      const customerInsert: any = {
-        name: newCustomer.name,
-        type: 'customer',
-        created_by: actor?.id || null,
-        address: newCustomer.address || null,
-        city: newCustomer.city || null,
-        state: newCustomer.state || null,
-        phone: newCustomer.contactPhone || null,
-        laser_models: newCustomer.selectedEquipment.length 
-          ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${displayModelName(e.model)}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
-          : null,
-        facility_type: 'Clinic',
-      };
-      const { data: created, error: insErr } = await supabase
-        .from('organizations')
-        .insert(customerInsert)
-        .select('id')
-        .single();
-      if (insErr) throw insErr;
-
-      // Link to this service company so Customer Directory / CRM only show MY customers
-      if (created?.id) {
-        const { error: linkErr } = await supabase.from('organization_customers').insert({
-          service_organization_id: org.id,
-          customer_organization_id: created.id,
-        });
-        if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
-          console.warn('organization_customers link failed:', linkErr);
-        }
-      }
+      // One server-side transaction (000917 create_shop_customer_org): the
+      // customer org and its organization_customers link are written together,
+      // only for a current manager of this shop. A failed link rolls back the org.
+      const laserModels = newCustomer.selectedEquipment.length
+        ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${displayModelName(e.model)}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
+        : null;
+      const { error: createErr } = await supabase.rpc('create_shop_customer_org', {
+        p_service_org: org.id,
+        p_name: newCustomer.name,
+        p_address: newCustomer.address || null,
+        p_city: newCustomer.city || null,
+        p_state: newCustomer.state || null,
+        p_phone: newCustomer.contactPhone || null,
+        p_laser_models: laserModels,
+        p_facility_type: 'Clinic',
+      });
+      if (createErr) throw createErr;
 
       setCustomerMessage('Customer added successfully.');
       setNewCustomer({ name: '', contactName: '', contactPhone: '', contactEmail: '', address: '', city: '', state: '', notes: '', selectedEquipment: [] });
