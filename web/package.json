@@ -8,7 +8,6 @@
     "start": "next start",
     "lint": "eslint",
     "test": "node scripts/run-tests.mjs",
-
     "deploy": "netlify deploy --prod",
     "deploy:preview": "netlify deploy",
     "deploy:remote": "netlify build --context production",
@@ -33,6 +32,7 @@
     "react-signature-canvas": "^1.0.7",
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.6.1",
+    "ws": "^8.22.0",
     "zod": "^3.25.76"
   },
   "optionalDependencies": {
@@ -45,6 +45,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/ws": "^8.18.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.7",
     "jsdom": "^29.1.1",
