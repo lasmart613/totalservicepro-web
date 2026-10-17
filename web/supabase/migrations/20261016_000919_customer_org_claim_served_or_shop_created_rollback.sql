@@ -1,11 +1,103 @@
--- Rollback for 000919: restores the live (000917) definitions of
--- org_founder_claim_allowed and create_shop_customer_org, then drops the
--- stamp trigger, its function and organizations.creator_shop_org_id (the
--- stamps are lost; nothing else reads them).
+-- Rollback for 000919: restores the live (pre-000919) definitions of
+-- organizations_guard_privilege, org_creator_access, org_founder_claim_allowed
+-- and create_shop_customer_org (pg_get_functiondef from prod, 2026-10-17),
+-- restores policy organizations_insert_customers and 000910's document_type
+-- CHECK, then drops everything 000919 added: policy
+-- organizations_insert_customer_side_not_shop_member, caller_in_service_company,
+-- the guard_service_customer_org triggers and function, the stamp trigger and
+-- function, organizations.creator_shop_org_id (the stamps are lost; nothing
+-- else reads them) and the customer_org rate-limit slots.
 -- Roll the app back first (or together): with the 000917 RPC a technician's
 -- "add customer" from a service report is refused again.
 
 SET LOCAL lock_timeout = '5s';
+
+CREATE OR REPLACE FUNCTION public.organizations_guard_privilege()
+ RETURNS trigger
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+DECLARE
+  newj jsonb := pg_catalog.to_jsonb(NEW);
+  oldj jsonb := CASE WHEN TG_OP = 'UPDATE' THEN pg_catalog.to_jsonb(OLD) ELSE NULL END;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.created_by IS NOT NULL AND NEW.created_by IS DISTINCT FROM auth.uid() THEN
+      RAISE EXCEPTION 'created_by must be the signed-in user';
+    END IF;
+    IF coalesce((newj->>'is_premium')::boolean, false) IS TRUE THEN
+      RAISE EXCEPTION 'is_premium cannot be self-granted';
+    END IF;
+    IF nullif(newj->>'premium_until', '') IS NOT NULL
+       OR nullif(newj->>'premium_grant', '') IS NOT NULL THEN
+      RAISE EXCEPTION 'premium fields cannot be self-granted';
+    END IF;
+    IF nullif(newj->>'trial_granted_at', '') IS NOT NULL THEN
+      RAISE EXCEPTION 'trial_granted_at cannot be set by the client';
+    END IF;
+    IF lower(coalesce(newj->>'subscription_tier', '')) NOT IN ('', 'free')
+       OR lower(coalesce(newj->>'plan', '')) NOT IN ('', 'free') THEN
+      RAISE EXCEPTION 'plan cannot be self-granted';
+    END IF;
+    IF nullif(newj->>'stripe_account_id', '') IS NOT NULL
+       OR coalesce((newj->>'stripe_charges_enabled')::boolean, false)
+       OR coalesce((newj->>'stripe_payouts_enabled')::boolean, false)
+       OR coalesce((newj->>'stripe_details_submitted')::boolean, false) THEN
+      RAISE EXCEPTION 'stripe connect fields cannot be set by the client';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF NEW.created_by IS DISTINCT FROM OLD.created_by THEN
+    RAISE EXCEPTION 'created_by cannot be changed';
+  END IF;
+  IF (newj->>'is_premium') IS DISTINCT FROM (oldj->>'is_premium')
+     OR (newj->>'premium_until') IS DISTINCT FROM (oldj->>'premium_until')
+     OR (newj->>'premium_grant') IS DISTINCT FROM (oldj->>'premium_grant')
+     OR (newj->>'subscription_tier') IS DISTINCT FROM (oldj->>'subscription_tier')
+     OR (newj->>'plan') IS DISTINCT FROM (oldj->>'plan') THEN
+    RAISE EXCEPTION 'plan and premium fields cannot be changed by the client';
+  END IF;
+  IF (newj->>'trial_granted_at') IS DISTINCT FROM (oldj->>'trial_granted_at') THEN
+    RAISE EXCEPTION 'trial_granted_at cannot be changed by the client';
+  END IF;
+  IF (newj->>'stripe_account_id') IS DISTINCT FROM (oldj->>'stripe_account_id')
+     OR (newj->>'stripe_charges_enabled') IS DISTINCT FROM (oldj->>'stripe_charges_enabled')
+     OR (newj->>'stripe_payouts_enabled') IS DISTINCT FROM (oldj->>'stripe_payouts_enabled')
+     OR (newj->>'stripe_details_submitted') IS DISTINCT FROM (oldj->>'stripe_details_submitted') THEN
+    RAISE EXCEPTION 'stripe connect fields cannot be changed by the client';
+  END IF;
+  RETURN NEW;
+END;
+$function$
+;
+
+CREATE OR REPLACE FUNCTION public.org_creator_access(p_org bigint, p_created_by uuid, p_created_at timestamp with time zone)
+ RETURNS boolean
+ LANGUAGE sql
+ STABLE SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+  SELECT p_org IS NOT NULL
+    AND p_created_by IS NOT NULL
+    AND auth.uid() IS NOT NULL
+    AND p_created_by = auth.uid()
+    AND (
+      public.is_active_org_member(p_org)
+      OR EXISTS (
+        SELECT 1 FROM public.organization_customers oc
+        WHERE oc.customer_organization_id = p_org
+          AND public.is_active_org_member(oc.service_organization_id)
+      )
+      OR public.org_unclaimed_new(p_org, p_created_at)
+    );
+$function$
+;
 
 CREATE OR REPLACE FUNCTION public.org_founder_claim_allowed(p_org bigint)
  RETURNS boolean
@@ -29,7 +121,8 @@ AS $function$
         )
       )
   );
-$function$;
+$function$
+;
 
 CREATE OR REPLACE FUNCTION public.create_shop_customer_org(p_service_org bigint, p_name text, p_address text DEFAULT NULL::text, p_city text DEFAULT NULL::text, p_state text DEFAULT NULL::text, p_phone text DEFAULT NULL::text, p_laser_models text DEFAULT NULL::text, p_facility_type text DEFAULT 'Clinic'::text)
  RETURNS bigint
@@ -77,7 +170,29 @@ BEGIN
 
   RETURN new_id;
 END;
-$function$;
+$function$
+;
+
+DROP POLICY IF EXISTS organizations_insert_customer_side_not_shop_member ON public.organizations;
+DROP POLICY IF EXISTS organizations_insert_customers ON public.organizations;
+CREATE POLICY organizations_insert_customers
+  ON public.organizations
+  FOR INSERT
+  TO authenticated
+  WITH CHECK (((type = 'customer'::text) AND (created_by = auth.uid())));
+DROP FUNCTION IF EXISTS public.caller_in_service_company();
+
+DROP TRIGGER IF EXISTS trg_guard_service_customer_org ON public.service_tickets;
+DROP TRIGGER IF EXISTS trg_guard_service_customer_org ON public.service_reports;
+DROP FUNCTION IF EXISTS public.guard_service_customer_org();
+
+DELETE FROM public.document_send_slots WHERE document_type = 'customer_org';
+ALTER TABLE public.document_send_slots
+  DROP CONSTRAINT IF EXISTS document_send_slots_document_type_check;
+ALTER TABLE public.document_send_slots
+  ADD CONSTRAINT document_send_slots_document_type_check CHECK (
+    document_type IN ('invoice', 'estimate', 'report', 'purchase_order')
+  );
 
 DROP TRIGGER IF EXISTS trg_stamp_org_creator_shop ON public.organizations;
 DROP FUNCTION IF EXISTS public.stamp_org_creator_shop();
