@@ -7,6 +7,8 @@
 SET LOCAL lock_timeout = '5s';
 
 DROP FUNCTION IF EXISTS public.record_manual_search_index_failure(bigint, text);
+DROP FUNCTION IF EXISTS public.record_manual_search_index_attempt(bigint, text);
+DROP FUNCTION IF EXISTS public.manuals_missing_search_index(integer, bigint);
 DROP FUNCTION IF EXISTS public.manuals_missing_search_index(integer);
 DROP TABLE IF EXISTS public.manual_search_index_failures;
 
