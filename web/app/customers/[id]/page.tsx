@@ -38,6 +38,7 @@ import {
 } from '@/lib/customer-contacts';
 import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
 import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
+import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -192,6 +193,15 @@ export default function CustomerProfilePage() {
     if (id) loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  useEffect(() => {
+    // Notification links open a tab directly (/customers/:id?tab=equipment&eq=:laser).
+    if (typeof window === 'undefined') return;
+    const want = new URLSearchParams(window.location.search).get('tab');
+    if (want !== 'equipment' && want !== 'history' && want !== 'contacts' && want !== 'overview') return;
+    const t = window.setTimeout(() => setTab(want), 0);
+    return () => window.clearTimeout(t);
+  }, []);
 
   async function loadAll() {
     setLoading(true);
@@ -860,8 +870,8 @@ export default function CustomerProfilePage() {
                           String(eq.serial_number).toLowerCase())
                   ).length;
                   return (
+                  <div key={eq.id}>
                   <div
-                    key={eq.id}
                     className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface2)] border border-[var(--border)]"
                   >
                     <div className="text-xl w-9 text-center shrink-0">
@@ -891,6 +901,15 @@ export default function CustomerProfilePage() {
                       {eq.status || 'Active'}
                     </span>
                   </div>
+                  {userOrgType === 'service_company' && eq.id != null && (
+                    <LockedHistoryPanel
+                      supabase={supabase}
+                      ownerOrgId={id}
+                      equipmentId={eq.id}
+                      clinicName={customer?.name}
+                    />
+                  )}
+                  </div>
                   );
                 })}
               </div>
@@ -911,8 +930,9 @@ export default function CustomerProfilePage() {
               </h2>
             </div>
             <p className="text-xs text-[var(--text3)] mb-3">
-              Includes reports for this customer org and for lasers on their equipment list (by
-              serial / equipment ID), so history stays with the laser when ownership changes.
+              Reports your company wrote for this customer. Earlier reports by other service
+              companies stay locked until the clinic shares them: open a laser on the Equipment tab
+              to ask.
             </p>
             {reports.length === 0 ? (
               <p className="text-sm text-[var(--text3)] py-2">

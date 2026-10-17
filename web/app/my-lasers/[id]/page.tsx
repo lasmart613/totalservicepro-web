@@ -11,6 +11,7 @@ import { displayModelName, displayModelText } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser, loadServiceRequestsForLaser } from '@/lib/equipment-ensure';
 import { StorageImage } from '@/components/StorageImage';
+import { LaserHistoryAccessPanel } from '@/components/LaserHistoryAccessPanel';
 
 type Laser = {
   id: number;
@@ -327,6 +328,8 @@ export default function LaserProfilePage() {
         <div className="card p-4 text-sm whitespace-pre-wrap text-[var(--text2)]">
           {laser.service_notes || laser.notes || 'No notes yet. Use Edit Laser to add notes.'}
         </div>
+
+        <LaserHistoryAccessPanel supabase={supabase} ownerOrgId={laser.customer_organization_id} equipmentId={laser.id} />
 
         <h2 className="font-bold text-[var(--gold)] mt-8 mb-2">Service history</h2>
         <p className="text-xs text-[var(--text3)] mb-2">
