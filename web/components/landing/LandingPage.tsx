@@ -10,6 +10,7 @@ import { FindRepForm } from './FindRepForm';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
 import { LANDING_SHOT_SIZE, landingSizes, landingSrcSet } from '@/lib/landing-images';
+import { decodeLandingImages, landingImgLoading, scheduleAfterLoadIdle } from '@/lib/landing-warm';
 import './landing.css';
 
 const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
@@ -17,6 +18,22 @@ const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
   clinic: 'owner',
   parts: 'supplier',
 };
+
+/** True after window load + one idle slot. See lib/landing-warm.ts. */
+function useLandingWarm(): boolean {
+  const [warm, setWarm] = useState(false);
+  useEffect(
+    () =>
+      scheduleAfterLoadIdle(window as unknown as Parameters<typeof scheduleAfterLoadIdle>[0], () =>
+        setWarm(true),
+      ),
+    [],
+  );
+  useEffect(() => {
+    if (warm) decodeLandingImages(document.querySelector('.lp-root'));
+  }, [warm]);
+  return warm;
+}
 
 export function LandingSplash() {
   const t = useT();
@@ -41,6 +58,7 @@ function Shot({
   priority,
   sizesKind = 'hero',
   mount = true,
+  warm = false,
 }: {
   src: string;
   alt: string;
@@ -49,6 +67,7 @@ function Shot({
   priority?: boolean;
   sizesKind?: 'hero' | 'gallery' | 'role' | 'phone';
   mount?: boolean;
+  warm?: boolean;
 }) {
   const phone = frame === 'phone';
   const dim = LANDING_SHOT_SIZE[src] || { width: phone ? 390 : 1400, height: phone ? 844 : 900 };
@@ -63,7 +82,7 @@ function Shot({
           alt={alt}
           width={dim.width}
           height={dim.height}
-          loading={priority ? 'eager' : 'lazy'}
+          loading={landingImgLoading(priority, warm)}
           decoding="async"
           fetchPriority={priority ? 'auto' : 'low'}
         />
@@ -255,7 +274,7 @@ const HERO_COVER_ID: Record<string, string> = {
   'Parts sellers': 'parts',
 };
 
-function HeroCarousel() {
+function HeroCarousel({ warm }: { warm: boolean }) {
   const router = useRouter();
   const t = useT();
   const locale = usePublicLocale();
@@ -377,10 +396,10 @@ function HeroCarousel() {
               inert={idx !== i ? true : undefined}
             >
               <div
-                className={`lp-hero-copy${visited.has(idx) ? ' is-cover-on' : ''}`}
+                className={`lp-hero-copy${warm || visited.has(idx) ? ' is-cover-on' : ''}`}
                 data-cover={HERO_COVER_ID[s.audience]}
                 style={
-                  visited.has(idx)
+                  warm || visited.has(idx)
                     ? ({
                         '--lp-hero-cover': `url("${HERO_COVER[s.audience]}")`,
                         '--lp-hero-cover-sm': `url("${HERO_COVER_SM[s.audience]}")`,
@@ -399,7 +418,8 @@ function HeroCarousel() {
                 frame={s.shot.frame}
                 sizesKind="hero"
                 priority={idx === 0}
-                mount={visited.has(idx)}
+                mount={warm || visited.has(idx)}
+                warm={warm}
               />
             </div>
           ))}
@@ -477,9 +497,10 @@ function HeroCarousel() {
 
 export function LandingPage() {
   const t = useT();
+  const warm = useLandingWarm();
   return (
     <LandingShell>
-      <HeroCarousel />
+      <HeroCarousel warm={warm} />
 
       <section className="lp-gallery" aria-label={t('Product screens')}>
         <Shot
@@ -487,48 +508,56 @@ export function LandingPage() {
           alt={t('Shop dashboard for Alex Lee with open tickets, today’s calls, and upcoming service calls')}
           caption={t('Shop dashboard')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/schedule.webp"
           alt={t('Color-coded shop schedule with assigned field engineer legend')}
           caption={t('Shop schedule')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/ticket-assign.webp"
           alt={t('Edit Ticket assigning a field engineer')}
           caption={t('Assign to field engineer')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/team-equipment.webp"
           alt={t('Team Management test equipment assigned to a field engineer')}
           caption={t('Test equipment')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/directory.webp"
           alt={t('Directory search to find a repair company among service companies, clinics, resellers, and suppliers')}
           caption={t('Directory')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/reports.webp"
           alt={t('Service reports list with drafts and completed work')}
           caption={t('Service history')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/parts.webp"
           alt={t('Parts for sale form for a used Alma Harmony XL handpiece, with one active listing priced at $1,850')}
           caption={t('Parts for sale')}
           sizesKind="gallery"
+          warm={warm}
         />
         <Shot
           src="/landing/marketplace.webp"
           alt={t('Marketplace home for parts, used systems, and service needs')}
           caption={t('Marketplace')}
           sizesKind="gallery"
+          warm={warm}
         />
       </section>
 
@@ -553,6 +582,7 @@ export function LandingPage() {
                 alt={t(r.shot.alt)}
                 caption={t(r.shot.caption)}
                 sizesKind="role"
+                warm={warm}
               />
               <div className="lp-actions">
                 {r.id === 'clinic' ? (
@@ -593,7 +623,7 @@ export function LandingPage() {
                 alt={t('Google Play — coming soon')}
                 width={646}
                 height={250}
-                loading="lazy"
+                loading={landingImgLoading(false, warm)}
                 decoding="async"
               />
             </span>
@@ -603,7 +633,7 @@ export function LandingPage() {
                 alt={t('App Store — coming soon')}
                 width={120}
                 height={40}
-                loading="lazy"
+                loading={landingImgLoading(false, warm)}
                 decoding="async"
               />
             </span>
@@ -617,7 +647,7 @@ export function LandingPage() {
               alt={t('Android Service Hub')}
               width={390}
               height={844}
-              loading="lazy"
+              loading={landingImgLoading(false, warm)}
               decoding="async"
             />
           </div>
@@ -627,7 +657,7 @@ export function LandingPage() {
               alt={t('Photometry tools on Android')}
               width={390}
               height={844}
-              loading="lazy"
+              loading={landingImgLoading(false, warm)}
               decoding="async"
             />
           </div>
