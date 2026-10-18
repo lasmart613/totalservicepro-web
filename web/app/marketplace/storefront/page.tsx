@@ -288,7 +288,7 @@ export default function SupplierStorefrontSettings() {
                     if (chosen) void uploadLogo(chosen);
                   }}
                 />
-                <p className="text-xs text-[var(--text3)] mt-1">PNG, JPG, WebP, or SVG. Max 2 MB.</p>
+                <p className="text-xs text-[var(--text3)] mt-1">PNG, JPG, or WebP. Max 2 MB.</p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button type="button" className="btn btn-primary" disabled={saving} onClick={() => void save()}>

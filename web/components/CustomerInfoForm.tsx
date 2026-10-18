@@ -164,7 +164,7 @@ export function CustomerInfoForm({
                   )}
                 </div>
                 <p className="text-xs text-[var(--text3)] mt-1">
-                  Optional. PNG, JPG, WebP, or SVG. Max 2 MB.
+                  Optional. PNG, JPG, or WebP. Max 2 MB.
                 </p>
                 {logoError && <p className="text-xs text-red-400 mt-1">{logoError}</p>}
               </div>
