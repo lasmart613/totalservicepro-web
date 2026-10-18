@@ -1,13 +1,48 @@
--- Rollback for 000926. Drops the directory sign-up RPCs and tables.
--- Organizations rows created by sign-ups are NOT deleted: they stay pending
--- (is_active = false, list_in_directory = false). Review them by hand first.
+-- Rollback for 000926. Drops the directory sign-up, review and listing-invite
+-- objects and restores clinic_owner_invites to its 000924 shape.
+--
+-- Refuses if a directory-review clinic owner invite was already CLAIMED: that
+-- row is the owner's proof under guard_clinic_owner_membership and has no
+-- service company, so service_organization_id cannot be NOT NULL again.
+-- Open/expired/revoked directory-review invites are deleted.
+-- Organizations rows created by sign-ups are NOT deleted, and approved ones
+-- stay listed; review them by hand first.
 SET LOCAL lock_timeout = '5s';
-DROP FUNCTION IF EXISTS public.directory_registration_step2(uuid, bigint, jsonb);
-DROP FUNCTION IF EXISTS public.directory_registration_step1(text, text, text, text, text, text);
+
+DO $$
+BEGIN
+  IF to_regclass('public.clinic_owner_invites') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM pg_catalog.pg_attribute
+                 WHERE attrelid = 'public.clinic_owner_invites'::regclass AND attname = 'issued_via' AND NOT attisdropped) THEN
+    IF EXISTS (SELECT 1 FROM public.clinic_owner_invites WHERE issued_via = 'directory_review' AND consumed_at IS NOT NULL) THEN
+      RAISE EXCEPTION '000926 rollback refused: a directory-review clinic owner invite was claimed';
+    END IF;
+    DELETE FROM public.clinic_owner_invites WHERE issued_via = 'directory_review';
+  END IF;
+END $$;
+
+ALTER TABLE IF EXISTS public.clinic_owner_invites ALTER COLUMN service_organization_id SET NOT NULL;
+ALTER TABLE IF EXISTS public.clinic_owner_invites DROP CONSTRAINT IF EXISTS clinic_owner_invites_issued_via_check;
+ALTER TABLE IF EXISTS public.clinic_owner_invites DROP COLUMN IF EXISTS issued_via;
+
+DROP FUNCTION IF EXISTS public.claim_directory_listing_invite(uuid, uuid, text, text);
+DROP FUNCTION IF EXISTS public.directory_registration_review(uuid, text, uuid, text);
+DROP FUNCTION IF EXISTS public.directory_registrations_for_review(integer);
+DROP FUNCTION IF EXISTS public.directory_registration_take_notice(uuid);
+DROP FUNCTION IF EXISTS public.directory_registration_step2(uuid, jsonb);
+DROP FUNCTION IF EXISTS public.directory_registration_step1(text, text, text, text, text, text, uuid);
 DROP FUNCTION IF EXISTS public.directory_find_duplicate(text, text, text, bigint);
 DROP FUNCTION IF EXISTS public.directory_is_free_mail(text);
 DROP FUNCTION IF EXISTS public.directory_norm_phone(text);
 DROP FUNCTION IF EXISTS public.directory_norm_host(text);
+DROP FUNCTION IF EXISTS public.directory_email_key(text);
+DROP FUNCTION IF EXISTS public.directory_email_clean(text);
 DROP FUNCTION IF EXISTS public.directory_norm_name(text);
+DROP FUNCTION IF EXISTS public.directory_clean_text(text);
+DROP TABLE IF EXISTS public.directory_listing_invites;
+DROP TABLE IF EXISTS public.directory_registration_reviews;
 DROP TABLE IF EXISTS public.directory_registration_attempts;
+DROP TABLE IF EXISTS public.directory_form_tickets;
 DROP TABLE IF EXISTS public.directory_registrations;
+
+NOTIFY pgrst, 'reload schema';
