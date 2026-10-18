@@ -15,6 +15,10 @@
 --     from auth.users for rows already logged), recorded on every departure,
 --     including account deletion (BEFORE DELETE trigger on auth.users, because
 --     the cascade deletes the login before the membership rows go).
+--     A departure stores the email only when the normalized value is at most
+--     320 characters, otherwise NULL: an over-long legacy profile email would
+--     overflow the departures email index and block the membership removal
+--     (or the account deletion). The departure row itself is always written.
 --     clinic_shop_staff_now_or_recent matches on the user id OR the claimant's
 --     login email (current members' login emails and departure emails).
 -- L-3 service_role kept INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER (Supabase default
@@ -47,7 +51,7 @@ CREATE INDEX IF NOT EXISTS organization_membership_departures_email
   WHERE email IS NOT NULL;
 
 UPDATE public.organization_membership_departures d
-SET email = nullif(lower(btrim(coalesce(u.email, ''))), '')
+SET email = CASE WHEN length(lower(btrim(u.email))) <= 320 THEN nullif(lower(btrim(u.email)), '') END
 FROM auth.users u
 WHERE u.id = d.user_id
   AND d.email IS NULL;
@@ -67,12 +71,20 @@ BEGIN
     -- L-2 (000924): keep the normalized email so a new account at the same
     -- address is still recognised. Login email first, then the profile, then
     -- the last email recorded for this user (account deletion: see
-    -- record_departure_emails_on_account_delete).
+    -- record_departure_emails_on_account_delete). An email longer than 320
+    -- characters is not kept (it would overflow the email index and block
+    -- the removal); the departure is still logged.
     SELECT nullif(lower(btrim(coalesce(u.email, ''))), '') INTO v_email
     FROM auth.users u WHERE u.id = OLD.user_id;
+    IF length(v_email) > 320 THEN
+      v_email := NULL;
+    END IF;
     IF v_email IS NULL THEN
       SELECT nullif(lower(btrim(coalesce(p.email, ''))), '') INTO v_email
       FROM public.user_profiles p WHERE p.id = OLD.user_id;
+      IF length(v_email) > 320 THEN
+        v_email := NULL;
+      END IF;
     END IF;
     IF v_email IS NULL THEN
       SELECT d.email INTO v_email
@@ -135,9 +147,11 @@ SET search_path = ''
 AS $function$
 BEGIN
   -- The memberships are removed by the auth.users FK cascade after the login
-  -- row is gone; log them here while the email is still readable.
+  -- row is gone; log them here while the email is still readable. An email
+  -- longer than 320 characters is stored as NULL (index limit).
   INSERT INTO public.organization_membership_departures (user_id, organization_id, role, email)
-  SELECT m.user_id, m.organization_id, m.role, nullif(lower(btrim(coalesce(OLD.email, ''))), '')
+  SELECT m.user_id, m.organization_id, m.role,
+    CASE WHEN length(lower(btrim(OLD.email))) <= 320 THEN nullif(lower(btrim(OLD.email)), '') END
   FROM public.organization_memberships m
   WHERE m.user_id = OLD.id;
   RETURN OLD;

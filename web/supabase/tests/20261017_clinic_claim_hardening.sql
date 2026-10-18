@@ -123,11 +123,11 @@ INSERT INTO auth.users VALUES
   ('00000000-0000-0000-0000-0000000006a1', 'admin@shop-t.test', now()),
   ('00000000-0000-0000-0000-000000000e01', 'evil@mailbox.test', now()),
   ('00000000-0000-0000-0000-000000000e02', 'evil2@mailbox.test', now()),
-  ('00000000-0000-0000-0000-000000000f01', 'owner@clinic-l.test', now()),
-  ('00000000-0000-0000-0000-000000000f02', 'owner@clinic-k.test', now()),
-  ('00000000-0000-0000-0000-000000000f03', 'unconf@clinic-n.test', NULL),
-  ('00000000-0000-0000-0000-000000000f04', 'q@selfclinic.test', now()),
-  ('00000000-0000-0000-0000-000000000f06', 'owner@clinic-n.test', now());
+  ('00000000-0000-0000-0000-0000000007a1', 'owner@clinic-l.test', now()),
+  ('00000000-0000-0000-0000-0000000007a2', 'owner@clinic-k.test', now()),
+  ('00000000-0000-0000-0000-0000000007a3', 'unconf@clinic-n.test', NULL),
+  ('00000000-0000-0000-0000-0000000007a4', 'q@selfclinic.test', now()),
+  ('00000000-0000-0000-0000-0000000007a6', 'owner@clinic-n.test', now());
 INSERT INTO public.organizations (id, name, type, created_at) VALUES
   (10, 'Shop S', 'service_company', now() - interval '1 year'),
   (20, 'Shop T', 'service_company', now() - interval '1 year');
@@ -467,6 +467,49 @@ SELECT pg_temp.expect('LEGIT ... removing the tech from S',
   pg_temp.as_service($q$WITH d AS (DELETE FROM public.organization_memberships WHERE user_id = '00000000-0000-0000-0000-0000000005b1' AND organization_id = 10 RETURNING 1) SELECT count(*)::text FROM d$q$), 'OK 1');
 SELECT pg_temp.expect('LEGIT ... logged with the email',
   (SELECT string_agg(email, ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000005b1'), 'tech@shop-s.test');
+
+-- QA low (#316): an over-long email must not block the departure. The
+-- departures email index caps a row at ~2.7 kB, so a departure stores the
+-- normalized email only up to 320 characters, otherwise NULL.
+-- 9b1: phone-only login (no auth email) whose legacy profile email is 3.8 kB
+-- (written before the identity guard, so the guard is off for the fixture;
+-- hex so it does not compress below the index limit).
+INSERT INTO auth.users VALUES ('00000000-0000-0000-0000-0000000009b1', NULL, now());
+ALTER TABLE public.user_profiles DISABLE TRIGGER user_profiles_client_identity_guard;
+INSERT INTO public.user_profiles (id, email, role) VALUES ('00000000-0000-0000-0000-0000000009b1', (SELECT string_agg(md5('legacy' || g), '') FROM generate_series(1, 119) g) || '@legacy.test', 'technician');
+ALTER TABLE public.user_profiles ENABLE TRIGGER user_profiles_client_identity_guard;
+-- 9b2 / 9b3: login emails of exactly 320 and 321 characters.
+INSERT INTO auth.users VALUES
+  ('00000000-0000-0000-0000-0000000009b2', upper(repeat('m', 320 - length('@shop-s.test'))) || '@shop-s.test', now()),
+  ('00000000-0000-0000-0000-0000000009b3', repeat('n', 321 - length('@shop-s.test')) || '@shop-s.test', now()),
+-- 9b4 / 9b5 / 9b6: account deletions with 320-, 321- and 3.8 kB-character login emails.
+  ('00000000-0000-0000-0000-0000000009b4', repeat('o', 320 - length('@shop-s.test')) || '@shop-s.test', now()),
+  ('00000000-0000-0000-0000-0000000009b5', repeat('p', 321 - length('@shop-s.test')) || '@shop-s.test', now()),
+  ('00000000-0000-0000-0000-0000000009b6', (SELECT string_agg(md5('gone' || g), '') FROM generate_series(1, 119) g) || '@shop-s.test', now());
+INSERT INTO public.organization_memberships (user_id, organization_id, role)
+SELECT ('00000000-0000-0000-0000-0000000009b' || n)::uuid, 10, 'technician' FROM generate_series(1, 6) n;
+SELECT pg_temp.expect('LONG EMAIL setup: the legacy profile email is 3.8 kB',
+  (SELECT (length(email) >= 3800)::text FROM public.user_profiles WHERE id = '00000000-0000-0000-0000-0000000009b1'), 'true');
+SELECT pg_temp.expect('LONG EMAIL removing a member with a 3.8 kB profile email succeeds',
+  pg_temp.as_service($q$WITH d AS (DELETE FROM public.organization_memberships WHERE user_id = '00000000-0000-0000-0000-0000000009b1' AND organization_id = 10 RETURNING 1) SELECT count(*)::text FROM d$q$), 'OK 1');
+SELECT pg_temp.expect('LONG EMAIL ... departure logged with a NULL email',
+  (SELECT count(*)::text || ':' || string_agg(coalesce(email, 'NULL'), ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000009b1'), '1:NULL');
+SELECT pg_temp.expect('LONG EMAIL removing a member with a 320-char login email succeeds',
+  pg_temp.as_service($q$WITH d AS (DELETE FROM public.organization_memberships WHERE user_id = '00000000-0000-0000-0000-0000000009b2' AND organization_id = 10 RETURNING 1) SELECT count(*)::text FROM d$q$), 'OK 1');
+SELECT pg_temp.expect('LONG EMAIL ... the 320-char email is stored (normalized)',
+  (SELECT count(*)::text || ':' || string_agg(length(email)::text || ':' || (email = repeat('m', 308) || '@shop-s.test')::text, ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000009b2'), '1:320:true');
+SELECT pg_temp.expect('LONG EMAIL removing a member with a 321-char login email succeeds',
+  pg_temp.as_service($q$WITH d AS (DELETE FROM public.organization_memberships WHERE user_id = '00000000-0000-0000-0000-0000000009b3' AND organization_id = 10 RETURNING 1) SELECT count(*)::text FROM d$q$), 'OK 1');
+SELECT pg_temp.expect('LONG EMAIL ... the 321-char email is stored as NULL',
+  (SELECT count(*)::text || ':' || string_agg(coalesce(email, 'NULL'), ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000009b3'), '1:NULL');
+SELECT pg_temp.expect('LONG EMAIL account deletions (320, 321, 3.8 kB login emails) succeed',
+  pg_temp.run(NULL, 'postgres', $q$WITH d AS (DELETE FROM auth.users WHERE id IN ('00000000-0000-0000-0000-0000000009b4', '00000000-0000-0000-0000-0000000009b5', '00000000-0000-0000-0000-0000000009b6') RETURNING 1) SELECT count(*)::text FROM d$q$), 'OK 3');
+SELECT pg_temp.expect('LONG EMAIL ... account deletion keeps the 320-char email',
+  (SELECT count(*)::text || ':' || string_agg(DISTINCT coalesce(length(email)::text, 'NULL'), ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000009b4'), '2:320');
+SELECT pg_temp.expect('LONG EMAIL ... account deletion stores the 321-char email as NULL',
+  (SELECT count(*)::text || ':' || string_agg(DISTINCT coalesce(email, 'NULL'), ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000009b5'), '2:NULL');
+SELECT pg_temp.expect('LONG EMAIL ... account deletion stores the 3.8 kB email as NULL',
+  (SELECT count(*)::text || ':' || string_agg(DISTINCT coalesce(email, 'NULL'), ',') FROM public.organization_membership_departures WHERE user_id = '00000000-0000-0000-0000-0000000009b6'), '2:NULL');
 
 -- ===================== ROLLBACK 000924 =====================
 \ir ../migrations/20261017_000924_clinic_claim_hardening_rollback.sql
