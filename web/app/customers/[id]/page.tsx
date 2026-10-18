@@ -39,6 +39,7 @@ import {
 import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
 import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
 import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
+import { formatDisplayDay } from '@/lib/i18n/format-date';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -125,11 +126,8 @@ function initials(name?: string | null): string {
 
 function fmtDate(v?: string | null): string {
   if (!v) return '—';
-  try {
-    return new Date(v).toLocaleDateString();
-  } catch {
-    return String(v).slice(0, 10);
-  }
+  // Date-only values (next_pm_due, date_out) keep their calendar day.
+  return formatDisplayDay(v) || String(v).slice(0, 10);
 }
 
 function statusClass(status?: string | null): string {

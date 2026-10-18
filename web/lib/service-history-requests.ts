@@ -35,11 +35,16 @@ export type HistoryRequestError =
   | 'unavailable'
   | 'error';
 
+/**
+ * 'revoked' (000925): the request was approved, but no active grant from the
+ * clinic covers this laser any more. list_my_service_history_requests derives
+ * it; before 000925 the RPC still says 'approved' (see effectiveRequestStatus).
+ */
 export type MyHistoryRequest = {
   id: number;
   owner_org_id: number;
   equipment_id: number;
-  status: 'pending' | 'approved' | 'denied' | 'expired';
+  status: 'pending' | 'approved' | 'denied' | 'expired' | 'revoked';
   created_at: string;
   expires_at: string;
   responded_at: string | null;
@@ -331,7 +336,36 @@ export function historyEmailOn(prefs: unknown): boolean {
   return (prefs as Record<string, unknown>)[HISTORY_REQUEST_EMAIL_PREF] !== false;
 }
 
-export function requestStatusText(r: Pick<MyHistoryRequest, 'status' | 'expires_at' | 'retry_after'>): string {
+/**
+ * The request status the shop panel shows. 'Shared with you' needs an ACTIVE
+ * grant: an 'approved' request with no active share (the clinic revoked it)
+ * reads as 'revoked'. activeShare = the shop can read shared history for this
+ * laser now (get_shared_service_history only reads unrevoked grants). 000925
+ * makes the RPC report 'revoked' itself; this also covers the app running
+ * before that migration.
+ */
+export function effectiveRequestStatus<T extends Pick<MyHistoryRequest, 'status'>>(
+  r: T,
+  activeShare: boolean
+): T {
+  if (r.status === 'approved' && !activeShare) return { ...r, status: 'revoked' };
+  return r;
+}
+
+/** True while a deny or a revoke keeps this shop from asking the clinic again. */
+export function requestIsCooling(
+  r: Pick<MyHistoryRequest, 'status' | 'retry_after'> | null | undefined,
+  now: Date = new Date()
+): boolean {
+  if (!r || (r.status !== 'denied' && r.status !== 'revoked') || !r.retry_after) return false;
+  const t = new Date(r.retry_after).getTime();
+  return Number.isFinite(t) && t > now.getTime();
+}
+
+export function requestStatusText(
+  r: Pick<MyHistoryRequest, 'status' | 'expires_at' | 'retry_after'>,
+  now: Date = new Date()
+): string {
   const day = (s: string | null) => (s ? String(s).slice(0, 10) : '');
   switch (r.status) {
     case 'pending':
@@ -340,6 +374,10 @@ export function requestStatusText(r: Pick<MyHistoryRequest, 'status' | 'expires_
       return 'Shared with you';
     case 'denied':
       return r.retry_after ? `Declined · you can ask again after ${day(r.retry_after)}` : 'Declined';
+    case 'revoked':
+      return requestIsCooling(r, now)
+        ? `Access was revoked · you can ask again after ${day(r.retry_after)}`
+        : 'Access was revoked · you can ask again';
     default:
       return 'Request expired · you can ask again';
   }

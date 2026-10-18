@@ -9,11 +9,13 @@ import React, { useState } from 'react';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toast } from 'sonner';
 import {
+  effectiveRequestStatus,
   historyRequestErrorText,
   latestRequestByEquipment,
   listMyHistoryRequests,
   loadLockedTeaser,
   requestHistoryAccess,
+  requestIsCooling,
   requestStatusText,
   type MyHistoryRequest,
   type TeaserRow,
@@ -56,7 +58,9 @@ export function LockedHistoryPanel({
     ]);
     setState(teaser.state);
     setRows(teaser.rows);
-    setRequest(latestRequestByEquipment(mine).get(Number(equipmentId)) || null);
+    const latest = latestRequestByEquipment(mine).get(Number(equipmentId)) || null;
+    // 'Shared with you' only while an active grant covers this laser.
+    setRequest(latest ? effectiveRequestStatus(latest, sharedPage.rows.length > 0) : null);
     setShared(sharedPage.rows);
     setLoading(false);
   }
@@ -92,7 +96,7 @@ export function LockedHistoryPanel({
   }
 
   const pending = request?.status === 'pending';
-  const cooling = request?.status === 'denied' && request.retry_after && new Date(request.retry_after) > new Date();
+  const cooling = requestIsCooling(request);
 
   return (
     <div className="mt-2 rounded-lg border border-[var(--border)] bg-[var(--surface)] p-2">

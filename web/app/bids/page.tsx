@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 import { useT } from '@/lib/fa/locale';
 import { displayModelName } from '@/lib/model-display';
+import { formatDisplayDay } from '@/lib/i18n/format-date';
 
 type BidRow = {
   id: string;
@@ -335,7 +336,7 @@ export default function MyBidsPage() {
                         )}
                         {bid.proposed_date && (
                           <div className="text-[var(--text3)]">
-                            Proposed {new Date(bid.proposed_date).toLocaleDateString()}
+                            Proposed {formatDisplayDay(bid.proposed_date)}
                           </div>
                         )}
                         <div className="text-[var(--text3)]">
