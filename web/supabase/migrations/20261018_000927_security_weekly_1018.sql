@@ -9,7 +9,9 @@ SET LOCAL lock_timeout = '5s';
 --           logos_admin_update / logos_admin_delete, gated on
 --           public.logo_object_writable(name):
 --             * first folder = an org id where the caller is owner /
---               company_admin / admin, or an org that is a CRM customer
+--               company_admin / admin; or a parts_supplier-type org where
+--               the caller has role parts_supplier (storefront logo); or an
+--               UNCLAIMED (no members) org that is a CRM customer
 --               (organization_customers) of a shop the caller administers
 --               (Directory "Add customer" uploads to logos/{customerId}/);
 --             * first folder = the caller's own auth uid (onboarding uploads
@@ -34,7 +36,8 @@ SET LOCAL lock_timeout = '5s';
 --   storage.objects "Allow authenticated logo uploads"  (INSERT)  1eb717041618acedadfe689193b91c26
 --   storage.objects "Allow authenticated logo updates"  (UPDATE)  1734a127a8a762408f2f9f4baad62c24
 --   public.organization_memberships organization_memberships_delete_own  c07f80daae380e196fa5f31dcd38357a
---   storage.buckets 'logos' allowed_mime_types NULL (rollback restores NULL)
+--   storage.buckets 'logos' allowed_mime_types NULL, file_size_limit NULL
+--   (rollback restores both to NULL)
 -- Repo-only names logos_auth_upload/update/delete (20260821) are not live;
 -- if present they must be the bucket-only form and are dropped too.
 -- Idempotent (safe to re-run).
@@ -47,6 +50,7 @@ BEGIN
      OR to_regclass('public.organization_memberships') IS NULL
      OR to_regclass('public.organization_customers') IS NULL
      OR to_regclass('public.api_usage') IS NULL
+     OR to_regclass('public.organizations') IS NULL
      OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_attribute
                     WHERE attrelid = 'public.api_usage'::regclass AND attname = 'tokens_used' AND NOT attisdropped) THEN
     RAISE EXCEPTION '000927: expected storage.objects, organization_memberships, organization_customers, api_usage';
@@ -92,6 +96,10 @@ BEGIN
              AND b.allowed_mime_types IS NOT NULL
              AND b.allowed_mime_types <> ARRAY['image/png', 'image/jpeg', 'image/webp']::text[]) THEN
     RAISE EXCEPTION '000927: logos bucket allowed_mime_types differs from the recorded live value (NULL); refusing to replace';
+  END IF;
+  IF EXISTS (SELECT 1 FROM storage.buckets b WHERE b.id = 'logos'
+             AND b.file_size_limit IS NOT NULL AND b.file_size_limit <> 2097152) THEN
+    RAISE EXCEPTION '000927: logos bucket file_size_limit differs from the recorded live value (NULL); refusing to replace';
   END IF;
 
   -- New function names must be free or this migration's own (re-run).
@@ -149,6 +157,21 @@ BEGIN
     RETURN true;
   END IF;
 
+  -- parts_supplier sellers: the role is only valid on the seller's own
+  -- parts_supplier-type org (live 2026-10-18: 4 memberships, all on
+  -- parts_supplier orgs, each the sole member). Pinned to the org type so the
+  -- role string grants nothing on any other org type.
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships m
+    JOIN public.organizations o ON o.id = m.organization_id
+    WHERE m.user_id = uid
+      AND m.organization_id = org_id
+      AND lower(btrim(coalesce(m.role, ''))) = 'parts_supplier'
+      AND lower(btrim(coalesce(o.type, ''))) = 'parts_supplier'
+  ) THEN
+    RETURN true;
+  END IF;
+
   RETURN EXISTS (
     SELECT 1
     FROM public.organization_customers oc
@@ -157,12 +180,16 @@ BEGIN
     WHERE oc.customer_organization_id = org_id
       AND m.user_id = uid
       AND lower(btrim(coalesce(m.role, ''))) IN ('owner', 'company_admin', 'admin')
+      -- Unclaimed customers only: once the clinic has its own members, its
+      -- branding belongs to the clinic's admins (clinic owner controls its data).
+      AND NOT EXISTS (SELECT 1 FROM public.organization_memberships cm
+                      WHERE cm.organization_id = org_id)
   );
 END;
 $$;
 
 COMMENT ON FUNCTION public.logo_object_writable(text) IS
-  '000927: logos write check. {orgId}/ for an org the caller administers (owner/company_admin/admin) or a CRM customer of such a shop; {auth.uid()}/ for onboarding.';
+  '000927: logos write check. {orgId}/ for an org the caller administers (owner/company_admin/admin), a parts_supplier org where the caller has role parts_supplier, or an unclaimed CRM customer of such a shop; {auth.uid()}/ for onboarding.';
 
 REVOKE ALL ON FUNCTION public.logo_object_writable(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.logo_object_writable(text) TO authenticated;
@@ -191,7 +218,8 @@ CREATE POLICY logos_admin_delete ON storage.objects
 
 -- No SVG (or any non-raster type) through the Storage API.
 UPDATE storage.buckets
-SET allowed_mime_types = ARRAY['image/png', 'image/jpeg', 'image/webp']::text[]
+SET allowed_mime_types = ARRAY['image/png', 'image/jpeg', 'image/webp']::text[],
+    file_size_limit = 2097152   -- 2 MB, matches the client cap (INFO I-2)
 WHERE id = 'logos';
 
 -- ---------------------------------------------------------------------------

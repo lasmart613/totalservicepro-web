@@ -51,7 +51,7 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON storage.objects TO authenticated, servic
 -- Reads are not under test: allow SELECT so UPDATE/DELETE can see rows.
 CREATE POLICY test_read_all ON storage.objects FOR SELECT TO authenticated USING (true);
 
-CREATE TABLE public.organizations (id bigint PRIMARY KEY, name text NOT NULL);
+CREATE TABLE public.organizations (id bigint PRIMARY KEY, name text NOT NULL, type text);
 CREATE TABLE public.organization_memberships (id bigserial PRIMARY KEY, user_id uuid NOT NULL, organization_id bigint NOT NULL REFERENCES public.organizations(id), role text, is_home boolean NOT NULL DEFAULT false, created_at timestamptz DEFAULT now(), UNIQUE (user_id, organization_id));
 ALTER TABLE public.organization_memberships ENABLE ROW LEVEL SECURITY;
 GRANT SELECT, DELETE ON public.organization_memberships TO authenticated;
@@ -65,16 +65,22 @@ CREATE POLICY "Allow authenticated logo uploads" ON storage.objects FOR INSERT T
 CREATE POLICY "Allow authenticated logo updates" ON storage.objects FOR UPDATE TO authenticated USING (bucket_id = 'logos'::text);
 CREATE POLICY organization_memberships_delete_own ON public.organization_memberships FOR DELETE TO authenticated USING ((user_id = auth.uid()) AND (is_home = false));
 
-INSERT INTO public.organizations VALUES (2655, 'QA shop A'), (2639, 'QA shop B'), (2656, 'QA clinic C');
+INSERT INTO public.organizations VALUES (2655, 'QA shop A', 'service_company'), (2639, 'QA shop B', 'service_company'), (2656, 'QA clinic C', 'clinic'),
+  (2657, 'claimed clinic D', 'clinic'), (9001, 'parts seller P', 'parts_supplier'), (9002, 'shop with odd role', 'service_company');
+-- 2656 = unclaimed CRM customer of 2655 (no members); 2657 = CRM customer of 2655 claimed by d1 (owner).
+-- p1 = parts_supplier on parts_supplier org 9001 (sole member); p2 = role 'parts_supplier' on a non-supplier org 9002.
 -- a1 = owner 2655, a2 = company_admin 2655, f1 = fse 2655, b1 = owner 2639
 INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES
   ('aaaaaaaa-0000-0000-0000-000000000001', 2655, 'owner', true),
   ('aaaaaaaa-0000-0000-0000-000000000002', 2655, 'company_admin', true),
   ('aaaaaaaa-0000-0000-0000-000000000003', 2655, 'fse', true),
   ('aaaaaaaa-0000-0000-0000-000000000003', 2639, 'fse', false),
-  ('bbbbbbbb-0000-0000-0000-000000000001', 2639, 'owner', true);
-INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (2655, 2656);
-INSERT INTO storage.objects (bucket_id, name) VALUES ('logos', '2655/logo-1.png'), ('logos', '2639/logo-1.png'), ('logos', '2656/logo-1.png');
+  ('bbbbbbbb-0000-0000-0000-000000000001', 2639, 'owner', true),
+  ('dddddddd-1111-0000-0000-000000000001', 2657, 'owner', true),
+  ('eeeeeeee-0000-0000-0000-000000000001', 9001, 'parts_supplier', true),
+  ('eeeeeeee-0000-0000-0000-000000000002', 9002, 'parts_supplier', true);
+INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (2655, 2656), (2655, 2657);
+INSERT INTO storage.objects (bucket_id, name) VALUES ('logos', '2655/logo-1.png'), ('logos', '2639/logo-1.png'), ('logos', '2656/logo-1.png'), ('logos', '2657/logo-1.png'), ('logos', '9001/logo-1.png');
 
 CREATE TEMP TABLE proof (n serial, label text, ok boolean);
 GRANT ALL ON proof TO anon, authenticated, service_role;
@@ -133,6 +139,8 @@ INSERT INTO proof (label, ok) VALUES
   ('AFTER authenticated cannot execute reserve', NOT has_function_privilege('authenticated', 'public.ai_usage_reserve(uuid,text,integer)', 'EXECUTE')),
   ('AFTER authenticated cannot execute release', NOT has_function_privilege('authenticated', 'public.ai_usage_release(uuid,uuid)', 'EXECUTE')),
   ('AFTER logos mime = png/jpeg/webp (no svg)', (SELECT allowed_mime_types = ARRAY['image/png','image/jpeg','image/webp'] FROM storage.buckets WHERE id='logos')),
+  ('AFTER logos file_size_limit = 2 MB', (SELECT file_size_limit = 2097152 FROM storage.buckets WHERE id='logos')),
+  ('AFTER other bucket size limit untouched', (SELECT file_size_limit IS NULL FROM storage.buckets WHERE id='other')),
   ('AFTER other bucket mime untouched', (SELECT allowed_mime_types IS NULL FROM storage.buckets WHERE id='other')),
   ('AFTER service_role executes reserve', has_function_privilege('service_role', 'public.ai_usage_reserve(uuid,text,integer)', 'EXECUTE'));
 
@@ -142,6 +150,9 @@ INSERT INTO proof (label, ok) VALUES
   ('AFTER company_admin 2655 inserts 2655/', pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000002', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','2655/logo-3.png')$q$)),
   ('AFTER shop admin 2655 uploads CRM customer 2656/', pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000002', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','2656/logo-2.png')$q$)),
   ('AFTER owner deletes own org logo', pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000001', $q$DELETE FROM storage.objects WHERE bucket_id='logos' AND name='2655/logo-1.png'$q$)),
+  ('AFTER parts_supplier member inserts own org 9001/', pg_temp.try_as('eeeeeeee-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','9001/logo-2.png')$q$)),
+  ('AFTER parts_supplier member re-uploads (update) 9001/logo-1', pg_temp.try_as('eeeeeeee-0000-0000-0000-000000000001', $q$UPDATE storage.objects SET owner = auth.uid() WHERE bucket_id='logos' AND name='9001/logo-1.png'$q$)),
+  ('AFTER claimed clinic owner writes own 2657/', pg_temp.try_as('dddddddd-1111-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','2657/logo-2.png')$q$)),
   ('AFTER onboarding uid folder insert', pg_temp.try_as('cccccccc-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','cccccccc-0000-0000-0000-000000000001/onboard-logo-1.png')$q$));
 INSERT INTO proof (label, ok) VALUES
   ('AFTER shop B owner cannot update shop A logo', NOT pg_temp.try_as('bbbbbbbb-0000-0000-0000-000000000001', $q$UPDATE storage.objects SET owner = auth.uid() WHERE bucket_id='logos' AND name='2655/logo-1.png'$q$)),
@@ -156,6 +167,10 @@ INSERT INTO proof (label, ok) VALUES
   ('AFTER legacy parts/ refused', NOT pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','parts/aaaaaaaa-0000-0000-0000-000000000001/x.png')$q$)),
   ('AFTER no uid refused', NOT pg_temp.try_as('', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','2655/anon.png')$q$)),
   ('AFTER other bucket unaffected by logos policies', NOT pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('other','2655/x.png')$q$)),
+  ('AFTER parts_supplier role on non-supplier org 9002 refused', NOT pg_temp.try_as('eeeeeeee-0000-0000-0000-000000000002', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','9002/x.png')$q$)),
+  ('AFTER parts_supplier member cannot write shop 2655/', NOT pg_temp.try_as('eeeeeeee-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','2655/x.png')$q$)),
+  ('AFTER shop admin cannot insert claimed CRM clinic 2657/', NOT pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000002', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('logos','2657/shop.png')$q$)),
+  ('AFTER shop owner cannot overwrite claimed CRM clinic 2657/logo-1', NOT pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000001', $q$UPDATE storage.objects SET owner = auth.uid() WHERE bucket_id='logos' AND name='2657/logo-1.png'$q$)),
   ('AFTER fse cannot self-delete membership', NOT pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000003', $q$DELETE FROM public.organization_memberships WHERE user_id = auth.uid() AND organization_id = 2639$q$));
 -- ai_usage_reserve / release (service_role, as the edge function calls it)
 SAVEPOINT s2;
@@ -239,6 +254,7 @@ INSERT INTO proof (label, ok) VALUES
   ('ROLLBACK uploads cmd/roles restored', (SELECT polcmd = 'a' AND polroles = ARRAY['authenticated'::regrole::oid] FROM pg_policy WHERE polrelid='storage.objects'::regclass AND polname='Allow authenticated logo uploads')),
   ('ROLLBACK updates cmd/roles restored', (SELECT polcmd = 'w' AND polroles = ARRAY['authenticated'::regrole::oid] FROM pg_policy WHERE polrelid='storage.objects'::regclass AND polname='Allow authenticated logo updates')),
   ('ROLLBACK delete_own cmd/roles restored', (SELECT polcmd = 'd' AND polroles = ARRAY['authenticated'::regrole::oid] FROM pg_policy WHERE polrelid='public.organization_memberships'::regclass AND polname='organization_memberships_delete_own')),
+  ('ROLLBACK logos file_size_limit back to NULL', (SELECT file_size_limit IS NULL FROM storage.buckets WHERE id='logos')),
   ('ROLLBACK logos mime back to NULL', (SELECT allowed_mime_types IS NULL FROM storage.buckets WHERE id='logos')),
   ('ROLLBACK logos_admin_* gone', NOT EXISTS (SELECT 1 FROM pg_policy WHERE polname LIKE 'logos_admin_%')),
   ('ROLLBACK functions gone', to_regprocedure('public.logo_object_writable(text)') IS NULL AND to_regprocedure('public.ai_usage_reserve(uuid,text,integer)') IS NULL AND to_regprocedure('public.ai_usage_release(uuid,uuid)') IS NULL);

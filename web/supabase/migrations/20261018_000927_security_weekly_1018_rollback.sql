@@ -19,7 +19,7 @@ CREATE POLICY "Allow authenticated logo updates" ON storage.objects
   FOR UPDATE TO authenticated
   USING (bucket_id = 'logos'::text);
 
-UPDATE storage.buckets SET allowed_mime_types = NULL WHERE id = 'logos';
+UPDATE storage.buckets SET allowed_mime_types = NULL, file_size_limit = NULL WHERE id = 'logos';
 
 DROP FUNCTION IF EXISTS public.logo_object_writable(text);
 DROP FUNCTION IF EXISTS public.ai_usage_reserve(uuid, text, integer);

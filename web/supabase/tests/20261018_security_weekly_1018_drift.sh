@@ -22,5 +22,6 @@ run_case "changed delete_own blocks" 'DROP POLICY organization_memberships_delet
 run_case "foreign ai_usage_reserve name blocks" 'CREATE FUNCTION public.ai_usage_reserve(uuid, text, integer) RETURNS jsonb LANGUAGE sql AS $f$ SELECT NULL::jsonb $f$;'
 run_case "foreign logos_auth_upload form blocks" 'CREATE POLICY logos_auth_upload ON storage.objects FOR INSERT TO authenticated WITH CHECK (true);'
 run_case "changed logos mime blocks" "UPDATE storage.buckets SET allowed_mime_types = ARRAY['image/png'] WHERE id = 'logos';"
+run_case "changed logos file_size_limit blocks" "UPDATE storage.buckets SET file_size_limit = 10485760 WHERE id = 'logos';"
 echo "drift pass=$pass fail=$fail"
 [ "$fail" -eq 0 ]
