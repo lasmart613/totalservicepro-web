@@ -15,6 +15,7 @@ import {
   subscriptionTypeFromRecurringInterval,
 } from './persist-org-upgrade.ts';
 import { orgFreePlanFields } from './upgrade-session.ts';
+import { isStripeResourceMissing, retrieveStripeSubscription, StripeSubscriptionError } from './stripe-subscription.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -900,4 +901,121 @@ test('past_due grace behaviour is unchanged by the payment_failed backstop', asy
   const src = readFileSync(join(here, './apply-org-downgrade.ts'), 'utf8');
   assert.match(src, /const SUBSCRIPTION_DOWNGRADE_STATUSES = new Set\(\['canceled', 'unpaid', 'incomplete_expired'\]\);/);
   assert.doesNotMatch(src, /past_due_grace_days|PAST_DUE_MAX/i);
+});
+
+// ---- 000924 billing low: permanent "No such subscription" on retrieve ----
+
+function missingSubscriptionError() {
+  return new StripeSubscriptionError("No such subscription: 'sub_paid'", 400, {
+    stripeCode: 'resource_missing',
+    stripeHttpStatus: 404,
+  });
+}
+
+test('invoice.payment_failed: a permanent resource_missing on retrieve logs and returns 200, no writes', async () => {
+  const state = billingState();
+  const warnings: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  try {
+    const result = await applyBillingSubscriptionEvent({
+      writer: writerFor(state) as never,
+      event: { type: 'invoice.payment_failed', data: { object: FAILED_INVOICE } },
+      retrieveSubscription: async () => {
+        throw missingSubscriptionError();
+      },
+      listLiveSubscriptions: async () => [],
+    });
+    assert.equal(result.httpStatus, 200);
+    assert.equal(result.body.ok, true);
+    assert.equal(result.body.downgraded, false);
+    assert.equal(result.body.ignored, 'subscription_missing');
+    assert.equal(result.body.subscriptionId, 'sub_paid');
+    assert.equal(result.body.attemptCount, 4);
+    assert.equal(state.orgWrites.length, 0);
+    assert.equal(state.subscriptionWrites.length, 0);
+    assert.equal(state.orgs[0].is_premium, true);
+    assert.ok(warnings.some((args) => args[0] === '[billing] invoice.payment_failed subscription missing in Stripe'));
+  } finally {
+    console.warn = original;
+  }
+});
+
+test('invoice.payment_failed: transient retrieve errors still throw so Stripe retries', async () => {
+  const transient: unknown[] = [
+    new StripeSubscriptionError('Stripe is down', 502, { stripeCode: null, stripeHttpStatus: 500 }),
+    new StripeSubscriptionError('Too many requests', 400, { stripeCode: 'rate_limit', stripeHttpStatus: 429 }),
+    new StripeSubscriptionError('Invalid API Key provided', 400, { stripeCode: null, stripeHttpStatus: 401 }),
+    new StripeSubscriptionError('STRIPE_SECRET_KEY is not set on the server.', 503),
+    new StripeSubscriptionError('Not found but not resource_missing', 400, { stripeCode: 'other', stripeHttpStatus: 404 }),
+    new Error('fetch failed'),
+  ];
+  for (const err of transient) {
+    const state = billingState();
+    await assert.rejects(
+      applyBillingSubscriptionEvent({
+        writer: writerFor(state) as never,
+        event: { type: 'invoice.payment_failed', data: { object: FAILED_INVOICE } },
+        retrieveSubscription: async () => {
+          throw err;
+        },
+        listLiveSubscriptions: async () => [],
+      }),
+      (thrown: unknown) => thrown === err
+    );
+    assert.equal(state.orgWrites.length, 0);
+  }
+});
+
+test('isStripeResourceMissing needs both Stripe 404 and code resource_missing', () => {
+  assert.equal(isStripeResourceMissing(missingSubscriptionError()), true);
+  assert.equal(isStripeResourceMissing(new StripeSubscriptionError('x', 400, { stripeCode: 'resource_missing', stripeHttpStatus: 400 })), false);
+  assert.equal(isStripeResourceMissing(new StripeSubscriptionError('x', 400, { stripeHttpStatus: 404 })), false);
+  assert.equal(isStripeResourceMissing(new StripeSubscriptionError('x', 400)), false);
+  assert.equal(isStripeResourceMissing(Object.assign(new Error('x'), { stripeCode: 'resource_missing', stripeHttpStatus: 404 })), false);
+  assert.equal(isStripeResourceMissing(null), false);
+});
+
+test('retrieveStripeSubscription carries Stripe\'s HTTP status and error code (no network: fetch is stubbed)', async () => {
+  const saved = {
+    fetch: globalThis.fetch,
+    key: process.env.STRIPE_SECRET_KEY,
+    alias: process.env.STRIPE_SECRET,
+    ctx: process.env.CONTEXT,
+  };
+  process.env.STRIPE_SECRET_KEY = 'sk_test_stub_for_unit_test';
+  delete process.env.STRIPE_SECRET;
+  process.env.CONTEXT = 'dev';
+  const calls: string[] = [];
+  try {
+    const answer = (status: number, body: unknown) => {
+      globalThis.fetch = (async (url: string) => {
+        calls.push(String(url));
+        return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch;
+    };
+    answer(404, { error: { type: 'invalid_request_error', code: 'resource_missing', message: "No such subscription: 'sub_gone'" } });
+    const missing = await retrieveStripeSubscription('sub_gone').catch((e: unknown) => e);
+    assert.equal(isStripeResourceMissing(missing), true);
+    assert.equal((missing as StripeSubscriptionError).status, 400);
+
+    answer(429, { error: { type: 'rate_limit_error', code: 'rate_limit', message: 'Too many requests' } });
+    assert.equal(isStripeResourceMissing(await retrieveStripeSubscription('sub_x').catch((e: unknown) => e)), false);
+
+    answer(500, { error: { type: 'api_error', message: 'boom' } });
+    const down = await retrieveStripeSubscription('sub_x').catch((e: unknown) => e);
+    assert.equal(isStripeResourceMissing(down), false);
+    assert.equal((down as StripeSubscriptionError).status, 502);
+    assert.ok(calls.every((url) => url.startsWith('https://api.stripe.com/v1/subscriptions/')));
+  } finally {
+    globalThis.fetch = saved.fetch;
+    if (saved.key === undefined) delete process.env.STRIPE_SECRET_KEY;
+    else process.env.STRIPE_SECRET_KEY = saved.key;
+    if (saved.alias === undefined) delete process.env.STRIPE_SECRET;
+    else process.env.STRIPE_SECRET = saved.alias;
+    if (saved.ctx === undefined) delete process.env.CONTEXT;
+    else process.env.CONTEXT = saved.ctx;
+  }
 });
