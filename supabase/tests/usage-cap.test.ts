@@ -1,6 +1,6 @@
 // Deno tests for the shared atomic AI cap (000927) and its use in grok-tts
 // and grok-assistant. Run: deno test -A supabase/tests
-import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
+import { assert, assertEquals, assertRejects } from 'https://deno.land/std@0.224.0/assert/mod.ts'
 import { finalizeUsage, releaseUsage, reserveUsage } from '../functions/_shared/usage-cap.ts'
 
 function fakeDb(fail?: 'error' | 'throw' | 'garbage') {
@@ -74,7 +74,57 @@ Deno.test('grok-tts index: reserve before xAI, 503 on unavailable, refund on eve
   const reserveAt = post.indexOf("reserveUsage(db, uid, 'grok_tts', limit)")
   assert(reserveAt > 0 && reserveAt < post.indexOf('fetch(XAI_TTS_URL'))
   assert(/slot\.status === 'unavailable'[\s\S]{0,160}json\(503/.test(post))
-  assertEquals((post.match(/await refund\(\)/g) || []).length, 5)
+  // 5 explicit failure paths + the finally.
+  assertEquals((post.match(/await refund\(\)/g) || []).length, 6)
   assert(!/countUsage\(db, uid, TTS_REQUEST_TYPE, today/.test(src), 'old racy daily count removed')
   assert(post.includes('finalizeUsage(db, slot.id'))
+})
+
+Deno.test('grok-tts index (QA L-2): release always runs, before any upstream body read', async () => {
+  const src = await Deno.readTextFile(new URL('../functions/grok-tts/index.ts', import.meta.url))
+  const post = src.slice(src.indexOf("const slot = await reserveUsage(db, uid, 'grok_tts', limit)"))
+  // No raw upstream body read that could throw before the refund.
+  assert(!/await tr\.text\(\)/.test(post), 'upstream body only read via readDetail')
+  // Every readDetail(tr) is immediately preceded by await refund().
+  const reads = [...post.matchAll(/const detail = await readDetail\(tr\)/g)]
+  assertEquals(reads.length, 2)
+  for (const m of reads) {
+    const before = post.slice(0, m.index).trimEnd()
+    assert(before.endsWith('await refund()'), 'refund before reading the error body')
+  }
+  // readDetail swallows stream errors.
+  assert(/const readDetail = async[\s\S]{0,160}catch \(_e\)[\s\S]{0,30}return ''/.test(post))
+  // try/finally around everything after the reserve, refunding unless finalized.
+  assert(/\} finally \{\s*await refund\(\)\s*\}/.test(post), 'finally refunds')
+  assert(/if \(settled\) return\s*settled = true\s*await releaseUsage\(db, slot\.id, uid\)/.test(post), 'refund runs once')
+  assert(/settled = true\s*await finalizeUsage\(db, slot\.id/.test(post), 'success path is not refunded')
+})
+
+Deno.test('refund-once + finally pattern: a throwing body read still releases exactly once', async () => {
+  const releases: string[] = []
+  const handler = async (bodyThrows: boolean, ok: boolean) => {
+    let settled = false
+    const refund = async () => {
+      if (settled) return
+      settled = true
+      releases.push('r')
+    }
+    try {
+      if (!ok) {
+        if (bodyThrows) throw new Error('stream reset')
+        await refund()
+        return 502
+      }
+      settled = true
+      return 200
+    } finally {
+      await refund()
+    }
+  }
+  await assertRejects(() => handler(true, false))
+  assertEquals(releases.length, 1)
+  assertEquals(await handler(false, false), 502)
+  assertEquals(releases.length, 2)
+  assertEquals(await handler(false, true), 200)
+  assertEquals(releases.length, 2)
 })
