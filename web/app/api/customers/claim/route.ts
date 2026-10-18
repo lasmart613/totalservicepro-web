@@ -5,7 +5,6 @@ import { emailsMatch } from '@/lib/email-match';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { openCustomerInvite } from '@/lib/customer-invite';
 import { CLAIM_REFUSED_MESSAGE, type ClaimErrorCode } from '@/lib/claim-error';
-import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { asClaimSignupMeta, claimSignupMetadataClearPatch } from '@/lib/claim-signup-metadata';
 
 /**
@@ -24,9 +23,10 @@ import { asClaimSignupMeta, claimSignupMetadataClearPatch } from '@/lib/claim-si
  * user is not linked to another org, and the user is not the clinic's creator,
  * the inviter, or a current or recent (30 days) member of the shop that added
  * or serves the clinic. It then writes the profile and the owner home
- * membership. This route keeps its own checks (session, token email, the
- * clinic's current reach email) in front of that, and never writes
- * user_profiles or organization_memberships itself.
+ * membership. This route keeps its own checks (session, token email, clinic
+ * type) in front of that, and never writes user_profiles or
+ * organization_memberships itself. It does not compare the clinic's current
+ * CRM reach email (000924 L-4): the email of record is the database's.
  *
  * The owner slot is role owner, plus customer (legacy clinic holder). admin
  * and company_admin are staff roles and can repeat inside one org.
@@ -237,23 +237,11 @@ export async function runCustomerClaim(
       );
     }
 
-    const sources = await fetchDirectoryContactSources(writer, org.id);
-    const currentEmail = pickCrmReachEmail({
-      directoryContacts: sources.directoryContacts,
-      contactRows: sources.contactRows,
-      officeEmail: sources.officeEmail ?? (org as { email?: string | null }).email,
-    }).email.trim().toLowerCase();
-    if (!emailsMatch(currentEmail, payload.email)) {
-      return reply(
-        {
-          ok: false,
-          claimed: false,
-          error: 'This invite was issued for an email that is no longer on this clinic.',
-          code: 'email_mismatch',
-        },
-        403
-      );
-    }
+    // L-4 (000924): no check of the clinic's current CRM reach email here.
+    // The database's email of record (clinic_claim_emails, fixed by the first
+    // invite) is the authority; claim_clinic_owner_invite refuses an invite
+    // that is not for it (invite_not_email_of_record). A later CRM edit to the
+    // clinic's main email no longer breaks a pending legitimate claim.
 
     const first = (user.user_metadata as { first_name?: string } | undefined)?.first_name || null;
     const last = (user.user_metadata as { last_name?: string } | undefined)?.last_name || null;

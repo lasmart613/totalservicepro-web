@@ -39,7 +39,8 @@ function previewRequest(token: string) {
 function previewReader(
   org: { id: number; email: string | null; directory_contacts?: unknown } | null,
   contacts: Array<{ email?: string | null; is_primary?: boolean }> = [],
-  invite: InviteRow | null = openInvite()
+  invite: InviteRow | null = openInvite(),
+  record: { email: string } | null | 'error' = { email: OLD_EMAIL }
 ) {
   return {
     from(table: string) {
@@ -56,6 +57,10 @@ function previewReader(
         maybeSingle: async () => {
           if (table === 'organizations') return { data: org, error: null };
           if (table === 'clinic_owner_invites') return { data: invite, error: null };
+          if (table === 'clinic_claim_emails') {
+            if (record === 'error') return { data: null, error: { message: 'timeout' } };
+            return { data: record, error: null };
+          }
           return { data: null, error: null };
         },
         then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
@@ -76,6 +81,7 @@ async function preview(opts: {
   serviceRole?: boolean;
   invite?: InviteRow | null;
   inv?: string | null;
+  record?: { email: string } | null | 'error';
 }) {
   const previous = process.env.CUSTOMER_INVITE_SECRET;
   process.env.CUSTOMER_INVITE_SECRET = 'invite-preview-secret';
@@ -94,7 +100,8 @@ async function preview(opts: {
         previewReader(
           opts.org === undefined ? { id: CLINIC_ID, email: NEW_EMAIL } : opts.org,
           opts.contacts || [],
-          opts.invite === undefined ? openInvite(opts.inviteEmail ?? OLD_EMAIL) : opts.invite
+          opts.invite === undefined ? openInvite(opts.inviteEmail ?? OLD_EMAIL) : opts.invite,
+          opts.record === undefined ? { email: (opts.inviteEmail ?? OLD_EMAIL).toLowerCase() } : opts.record
         ) as never,
     });
     const body = (await response.json()) as Record<string, unknown>;
@@ -105,30 +112,38 @@ async function preview(opts: {
   }
 }
 
-test('invite check rejects a clinic token after the clinic email changes', async () => {
-  const changed = await preview({
-    org: { id: CLINIC_ID, email: NEW_EMAIL },
-  });
+test('L-4 (000924): a CRM edit to the clinic email does not invalidate the invite; the email of record decides', async () => {
+  const changed = await preview({ org: { id: CLINIC_ID, email: NEW_EMAIL } });
   assert.equal(changed.status, 200);
-  assert.equal(changed.body.valid, false);
-  assert.equal(changed.body.reason, 'email_mismatch');
-  assert.match(String(changed.body.error || ''), /no longer on this clinic/i);
-  assert.equal('email' in changed.body, false);
+  assert.equal(changed.body.valid, true);
+  assert.equal(changed.body.email, OLD_EMAIL);
   assert.equal(changed.packed.includes(NEW_EMAIL), false);
 
   const contactNow = await preview({
     org: { id: CLINIC_ID, email: OLD_EMAIL },
     contacts: [{ email: NEW_EMAIL, is_primary: true }],
   });
-  assert.equal(contactNow.body.valid, false);
-  assert.equal(contactNow.body.reason, 'email_mismatch');
-  assert.equal('email' in contactNow.body, false);
-  assert.equal(contactNow.packed.includes(NEW_EMAIL), false);
+  assert.equal(contactNow.body.valid, true);
 
   const empty = await preview({ org: { id: CLINIC_ID, email: '' } });
-  assert.equal(empty.body.valid, false);
-  assert.equal(empty.body.reason, 'email_mismatch');
-  assert.equal('email' in empty.body, false);
+  assert.equal(empty.body.valid, true);
+});
+
+test('invite check rejects a token whose email is not the email of record, without leaking it', async () => {
+  const rebound = await preview({ org: { id: CLINIC_ID, email: OLD_EMAIL }, record: { email: NEW_EMAIL } });
+  assert.equal(rebound.body.valid, false);
+  assert.equal(rebound.body.reason, 'email_mismatch');
+  assert.match(String(rebound.body.error || ''), /no longer on this clinic/i);
+  assert.equal('email' in rebound.body, false);
+  assert.equal(rebound.packed.includes(NEW_EMAIL), false);
+
+  const none = await preview({ org: { id: CLINIC_ID, email: OLD_EMAIL }, record: null });
+  assert.equal(none.body.valid, false);
+  assert.equal(none.body.reason, 'email_mismatch');
+
+  const failed = await preview({ org: { id: CLINIC_ID, email: OLD_EMAIL }, record: 'error' });
+  assert.equal(failed.body.valid, false);
+  assert.match(String(failed.body.error || ''), /could not be checked/i);
 });
 
 test('invite check accepts the clinic current email, including case differences', async () => {
@@ -164,9 +179,10 @@ test('invite check does not treat a bad token or missing clinic as a current-ema
 
   const route = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../app/api/customers/invite/route.ts'), 'utf8');
   const previewFn = route.slice(route.indexOf('export async function runCustomerInvitePreview'), route.indexOf('export async function POST'));
-  assert.match(previewFn, /emailsMatch\(currentEmail, payload\.email\)/);
-  assert.match(previewFn, /pickCrmReachEmail/);
-  assert.doesNotMatch(previewFn, /email:\s*currentEmail/);
+  assert.match(previewFn, /from\('clinic_claim_emails'\)/);
+  assert.match(previewFn, /emailsMatch\(recordEmail, payload\.email\)/);
+  assert.doesNotMatch(previewFn, /pickCrmReachEmail/);
+  assert.doesNotMatch(previewFn, /email:\s*recordEmail/);
 });
 
 test('000923: invite check needs an open invite row for this clinic and email', async () => {
