@@ -167,7 +167,8 @@ test('ticket notify refusal does not return the other shop ticket', () => {
 test('public RFQ share and marketplace listing images stay published', () => {
   const share = readFileSync(join(here, '../app/api/share/request/[id]/route.ts'), 'utf8');
   assert.match(share, /open\/bidding requests/);
-  assert.match(share, /serial_number/);
+  // 000927: open_service_requests column set only (no serial, error codes).
+  assert.doesNotMatch(share, /serial_number|error_codes/);
   assert.doesNotMatch(share, /from\('equipment'\)/);
   assert.doesNotMatch(share, /logo_url/);
   assert.doesNotMatch(share, /equipment-photos/);
