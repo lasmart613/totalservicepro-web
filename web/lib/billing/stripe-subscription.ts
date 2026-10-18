@@ -27,7 +27,7 @@ export type StripeObject = Record<string, unknown> & {
   unit_amount?: number;
   recurring?: { interval?: string } | null;
   data?: StripeObject[];
-  error?: { message?: string };
+  error?: { message?: string; code?: string; type?: string };
   message?: string;
   customer?: string | StripeObject | null;
   subscription?: string | StripeObject | null;
@@ -40,11 +40,30 @@ export type StripeObject = Record<string, unknown> & {
 
 export class StripeSubscriptionError extends Error {
   status: number;
-  constructor(message: string, status = 400) {
+  /** Stripe's error.code (e.g. resource_missing) when the API answered with one. */
+  stripeCode: string | null;
+  /** HTTP status Stripe answered with (status above is what our route returns). */
+  stripeHttpStatus: number | null;
+  constructor(message: string, status = 400, details?: { stripeCode?: string | null; stripeHttpStatus?: number | null }) {
     super(message);
     this.name = 'StripeSubscriptionError';
     this.status = status;
+    this.stripeCode = details?.stripeCode ?? null;
+    this.stripeHttpStatus = details?.stripeHttpStatus ?? null;
   }
+}
+
+/**
+ * Stripe said the object does not exist (404 resource_missing, "No such
+ * subscription"). Permanent: retrying the same event will never succeed.
+ * Rate limits, 5xx, network and auth errors are not this.
+ */
+export function isStripeResourceMissing(err: unknown): boolean {
+  return (
+    err instanceof StripeSubscriptionError &&
+    err.stripeHttpStatus === 404 &&
+    err.stripeCode === 'resource_missing'
+  );
 }
 
 function stripeSecretOrThrow(): string {
@@ -86,7 +105,11 @@ async function stripeRequest(
   const data = (await res.json().catch(() => ({}))) as StripeObject;
   if (!res.ok) {
     const msg = data?.error?.message || data?.message || `Stripe ${path} failed (${res.status})`;
-    throw new StripeSubscriptionError(msg, res.status >= 500 ? 502 : 400);
+    const code = typeof data?.error?.code === 'string' ? data.error.code : null;
+    throw new StripeSubscriptionError(msg, res.status >= 500 ? 502 : 400, {
+      stripeCode: code,
+      stripeHttpStatus: res.status,
+    });
   }
   return data;
 }

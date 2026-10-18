@@ -248,20 +248,11 @@ test('a token signed before 000923 (no invite id) is refused before the database
   assert.equal(result.rpcCalls.length, 0);
 });
 
-test('the route still refuses a wrong login email, a changed clinic email, or no clinic email, without calling the claim', async () => {
+test('the route refuses a wrong login email or a non-clinic before calling the claim', async () => {
   const wrongLogin = await postClaim({ userId: 'u', email: 'member@clinic.test', inviteEmail: 'other@clinic.test' });
   assert.equal(wrongLogin.status, 403);
   assert.match(wrongLogin.body.error || '', /email this invite was sent to/i);
   assert.equal(wrongLogin.rpcCalls.length, 0);
-
-  const changed = await postClaim({ userId: 'u', email: 'old@clinic.test', clinicEmail: 'new@clinic.test' });
-  assert.equal(changed.status, 403);
-  assert.match(changed.body.error || '', /no longer on this clinic/i);
-  assert.equal(changed.rpcCalls.length, 0);
-
-  const empty = await postClaim({ userId: 'u', email: 'new@clinic.test', clinicEmail: '' });
-  assert.equal(empty.status, 403);
-  assert.equal(empty.rpcCalls.length, 0);
 
   const notClinic = await postClaim({
     userId: 'u',
@@ -270,6 +261,31 @@ test('the route still refuses a wrong login email, a changed clinic email, or no
   });
   assert.equal(notClinic.status, 400);
   assert.equal(notClinic.rpcCalls.length, 0);
+});
+
+test('L-4 (000924): a CRM edit to the clinic main email does not break a pending claim; the DB email of record decides', async () => {
+  const changed = await postClaim({ userId: 'u', email: 'old@clinic.test', clinicEmail: 'new@clinic.test' });
+  assert.equal(changed.status, 200);
+  assert.equal(changed.body.claimed, true);
+  assert.equal(changed.rpcCalls.length, 1);
+  assert.equal(changed.rpcCalls[0].args.p_invite_id, INVITE_ID);
+
+  const empty = await postClaim({ userId: 'u', email: 'new@clinic.test', clinicEmail: '' });
+  assert.equal(empty.status, 200);
+  assert.equal(empty.rpcCalls.length, 1);
+
+  // The database refuses an invite that is not for its email of record.
+  const notRecord = await postClaim({
+    userId: 'u',
+    email: 'old@clinic.test',
+    clinicEmail: 'old@clinic.test',
+    rpcReply: () => ({ data: { ok: false, code: 'invite_not_email_of_record' }, error: null }),
+  });
+  assert.equal(notRecord.status, 403);
+  assert.equal(notRecord.body.code, 'email_mismatch');
+
+  const src = readFileSync(join(here, '../app/api/customers/claim/route.ts'), 'utf8');
+  assert.doesNotMatch(src, /pickCrmReachEmail|fetchDirectoryContactSources/);
 });
 
 test('the claim route source writes no profile or membership itself', () => {
@@ -471,6 +487,66 @@ test('role helpers: anyone on a service company may add customers, only admins m
   assert.equal(canSendClinicOwnerInvite('admin', 'service'), true);
   assert.equal(canSendClinicOwnerInvite('owner', 'customer'), false);
   assert.equal(canSendClinicOwnerInvite('company_admin', 'parts_supplier'), false);
+});
+
+test('000924 migration: lock_timeout first, definer functions, service_role writes revoked, exact rollback', () => {
+  const dir = join(here, '../supabase/migrations');
+  const name = '20261017_000924_clinic_claim_hardening.sql';
+  const sql = readFileSync(join(dir, name), 'utf8');
+  const rollback = readFileSync(join(dir, name.replace(/\.sql$/, '_rollback.sql')), 'utf8');
+  const strip = (text: string) => text.split('\n').filter((line) => !line.trim().startsWith('--')).join('\n');
+  const code = strip(sql);
+  const rb = strip(rollback);
+  assert.equal(code.trim().split(';')[0].trim(), "SET LOCAL lock_timeout = '5s'");
+  assert.equal(rb.trim().split(';')[0].trim(), "SET LOCAL lock_timeout = '5s'");
+  for (const text of [code, rb]) {
+    assert.doesNotMatch(text, /\bCOMMIT\b|\bCONCURRENTLY\b/i);
+    assert.doesNotMatch(text, /pg_catalog\.(coalesce|extract)\b/i);
+  }
+  const functions = [...code.matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(/g)].map((m) => m[1]);
+  assert.deepEqual(functions.sort(), [
+    'claim_clinic_owner_invite',
+    'clinic_shop_staff_now_or_recent',
+    'guard_clinic_owner_membership',
+    'log_membership_departure',
+    'record_departure_emails_on_account_delete',
+    'void_clinic_owner_invite_on_owner_removal',
+  ]);
+  for (const fn of functions) {
+    const body = code.slice(code.indexOf(`FUNCTION public.${fn}(`));
+    const header = body.slice(0, body.indexOf('AS $function$'));
+    assert.match(header, /SECURITY DEFINER/, fn);
+    assert.match(header, /SET search_path = ''/, fn);
+  }
+  // New functions are dropped; replaced ones get their exact 000923 body back.
+  for (const fn of ['record_departure_emails_on_account_delete', 'void_clinic_owner_invite_on_owner_removal']) {
+    assert.match(code, new RegExp(`REVOKE ALL ON FUNCTION public\\.${fn}\\(\\) FROM PUBLIC, anon, authenticated`), fn);
+    assert.match(rb, new RegExp(`DROP FUNCTION IF EXISTS public\\.${fn}\\(\\)`), fn);
+  }
+  const m923 = readFileSync(join(dir, '20261017_000923_clinic_claim_invite_binding.sql'), 'utf8');
+  const block = (text: string, fn: string) => {
+    const start = text.indexOf(`CREATE OR REPLACE FUNCTION public.${fn}(`);
+    const end = text.indexOf('$function$;', text.indexOf('AS $function$', start)) + '$function$;'.length;
+    return text.slice(start, end);
+  };
+  for (const fn of ['claim_clinic_owner_invite', 'clinic_shop_staff_now_or_recent', 'guard_clinic_owner_membership', 'log_membership_departure']) {
+    assert.equal(block(rollback, fn), block(m923, fn), `${fn} rollback body is the 000923 body`);
+    assert.notEqual(block(sql, fn), block(m923, fn), `${fn} is changed by 000924`);
+  }
+  assert.match(code, /REVOKE INSERT, UPDATE, DELETE, TRUNCATE, TRIGGER ON TABLE public\.clinic_owner_invites,\s+public\.clinic_reach_email_changes, public\.organization_membership_departures\s+FROM service_role/);
+  assert.match(rb, /GRANT INSERT, UPDATE, DELETE, TRUNCATE, TRIGGER ON TABLE public\.clinic_owner_invites,\s+public\.clinic_reach_email_changes, public\.organization_membership_departures\s+TO service_role/);
+  assert.doesNotMatch(code, /clinic_claim_emails[^;]*FROM service_role/);
+  assert.match(code, /ADD COLUMN IF NOT EXISTS email text/);
+  assert.match(rb, /DROP COLUMN IF EXISTS email/);
+  assert.match(code, /CREATE TRIGGER trg_record_departure_emails_on_account_delete\s+BEFORE DELETE ON auth\.users/);
+  assert.match(rb, /DROP TRIGGER IF EXISTS trg_record_departure_emails_on_account_delete ON auth\.users/);
+  assert.match(rb, /DROP TRIGGER IF EXISTS trg_void_clinic_owner_invite_on_owner_removal ON public\.organization_memberships/);
+  // L-1 lock order in the claim: clinic row, advisory lock, then the invite row.
+  const claim = block(sql, 'claim_clinic_owner_invite');
+  const orgLock = claim.indexOf('FROM public.organizations o WHERE o.id = v_org_id FOR UPDATE');
+  const adv = claim.indexOf('pg_advisory_xact_lock');
+  const invLock = claim.indexOf('FROM public.clinic_owner_invites i WHERE i.id = p_invite_id FOR UPDATE');
+  assert.ok(orgLock > 0 && orgLock < adv && adv < invLock);
 });
 
 test('000923 migration: lock_timeout first, SECURITY DEFINER with empty search_path, anon denied, exact rollback', () => {
