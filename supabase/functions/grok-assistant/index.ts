@@ -51,7 +51,7 @@ import {
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
 import { pendingIndexIds } from '../_shared/index-pending.ts'
 import { extractFaultCodes, literalSubstringPattern, stripIlikeReserved } from './fault-codes.ts'
-import { finalizeUsage, releaseUsage, reserveUsage, USAGE_UNAVAILABLE_BODY } from './usage-cap.ts'
+import { finalizeUsage, releaseUsage, reserveUsage, USAGE_UNAVAILABLE_BODY } from '../_shared/usage-cap.ts'
 import {
   attributeCitations,
   effectivePageCount,

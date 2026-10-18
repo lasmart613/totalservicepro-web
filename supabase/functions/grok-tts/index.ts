@@ -34,6 +34,7 @@ import {
   VOICES_REQUESTS_PER_MINUTE,
 } from './contract.ts'
 import { effectiveAiTier, loadAiCaller, repairAiDecision } from '../_shared/repair-ai.ts'
+import { finalizeUsage, releaseUsage, reserveUsage } from '../_shared/usage-cap.ts'
 
 const XAI_TTS_URL = 'https://api.x.ai/v1/tts'
 const XAI_VOICES_URL = 'https://api.x.ai/v1/tts/voices'
@@ -197,20 +198,7 @@ serve(async (req) => {
     // Same as grok-assistant: the higher of the user's own tier and the org plan (company Premium).
     const tier = effectiveAiTier(userTier, aiCaller.org)
     const limit = dailyVoiceLimit(tier)
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const daily = await countUsage(db, uid, TTS_REQUEST_TYPE, today.toISOString())
-    if (daily.error) {
-      return json(503, { error: 'usage_unavailable', message: 'Could not check voice limits. Try again.' })
-    }
-    if (daily.count >= limit) {
-      return json(429, {
-        error: 'daily_limit_reached',
-        message: dailyLimitMessage(tier, limit),
-        used: daily.count,
-        limit,
-      })
-    }
+    // Per-minute burst check first (reads existing rows only).
     const burst = await countUsage(db, uid, TTS_REQUEST_TYPE, new Date(Date.now() - RATE_WINDOW_MS).toISOString())
     if (burst.error) {
       return json(503, { error: 'usage_unavailable', message: 'Could not check voice limits. Try again.' })
@@ -227,6 +215,23 @@ serve(async (req) => {
         { 'Retry-After': '60' }
       )
     }
+
+    // Daily cap: reserve atomically before the xAI call (000927). Fail closed.
+    const slot = await reserveUsage(db, uid, 'grok_tts', limit)
+    if (slot.status === 'unavailable') {
+      console.error('[grok-tts] usage reserve failed', slot.reason)
+      return json(503, { error: 'usage_unavailable', message: 'Could not check voice limits. Try again.' })
+    }
+    if (slot.status === 'limit') {
+      return json(429, {
+        error: 'daily_limit_reached',
+        message: dailyLimitMessage(tier, limit),
+        used: slot.used,
+        limit,
+      })
+    }
+    // Any failure from here on refunds the slot.
+    const refund = () => releaseUsage(db, slot.id, uid)
 
     const { text, voiceId, language } = parsed.value
     let tr: Response
@@ -245,6 +250,7 @@ serve(async (req) => {
       const name = (e as Error)?.name
       const aborted = name === 'TimeoutError' || name === 'AbortError'
       console.warn('xAI tts fetch failed', aborted ? 'timeout' : (e as Error)?.name)
+      await refund()
       return json(aborted ? 504 : 502, {
         error: aborted ? 'tts_timeout' : 'TTS error',
         message: aborted ? 'Voice synthesis timed out.' : 'Voice synthesis failed.',
@@ -254,6 +260,7 @@ serve(async (req) => {
     if (!tr.ok) {
       const detail = redactSecrets(await tr.text(), xaiKey)
       console.warn('xAI tts failed', tr.status)
+      await refund()
       if (tr.status === 401 || tr.status === 403) {
         return json(502, { error: 'TTS error', message: 'Voice service rejected the server credential.' })
       }
@@ -274,19 +281,22 @@ serve(async (req) => {
     const contentType = (tr.headers.get('Content-Type') || '').toLowerCase()
     if (contentType && !contentType.includes('audio/') && !contentType.includes('application/octet-stream')) {
       const detail = redactSecrets(await tr.text(), xaiKey)
+      await refund()
       return json(502, { error: 'TTS error', message: 'Voice service did not return audio.', details: detail })
     }
-    const audio = await tr.arrayBuffer()
+    let audio: ArrayBuffer
+    try {
+      audio = await tr.arrayBuffer()
+    } catch (e) {
+      await refund()
+      throw e
+    }
     if (!audio.byteLength) {
+      await refund()
       return json(502, { error: 'TTS error', message: 'Voice service returned empty audio.' })
     }
-    const logged = await logUsage(db, uid, TTS_REQUEST_TYPE, Math.min(text.length, MAX_TTS_CHARS))
-    if (!logged) {
-      return json(503, {
-        error: 'usage_unavailable',
-        message: 'Could not record voice usage. Try again.',
-      })
-    }
+    // The slot is already counted; record characters on it (best effort).
+    await finalizeUsage(db, slot.id, Math.min(text.length, MAX_TTS_CHARS))
     return new Response(audio, {
       status: 200,
       headers: {
