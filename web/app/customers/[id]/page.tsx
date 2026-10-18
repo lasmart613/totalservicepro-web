@@ -40,6 +40,8 @@ import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
 import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
 import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
+import { useT } from '@/lib/fa/locale';
+import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -139,6 +141,7 @@ function statusClass(status?: string | null): string {
 }
 
 export default function CustomerProfilePage() {
+  const t = useT();
   const params = useParams();
   const router = useRouter();
   const id = (params?.id as string) || '';
@@ -502,7 +505,12 @@ export default function CustomerProfilePage() {
       toast.success('Customer profile saved');
     } catch (e: any) {
       console.error(e);
-      toast.error('Save failed: ' + (e?.message || e));
+      if (e?.message === LOGO_NO_PERMISSION) {
+        // Details were saved; only the logo was refused (000927 logos RLS).
+        toast.error(t(LOGO_NO_PERMISSION));
+      } else {
+        toast.error('Save failed: ' + (e?.message || e));
+      }
     } finally {
       setSaving(false);
     }

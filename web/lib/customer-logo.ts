@@ -8,6 +8,21 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 export const LOGO_MAX_BYTES = 2 * 1024 * 1024;
 // Raster only. SVG can carry script and the bucket is public, so it is refused
 // here and by the logos bucket's allowed_mime_types (000927).
+/**
+ * Shown (translated via GAP_STRINGS) when Storage refuses the logo write
+ * (000927 logos RLS: only the org's owner / company_admin / admin, or a
+ * parts_supplier on its own storefront). Never surface the raw RLS text.
+ */
+export const LOGO_NO_PERMISSION = 'The logo was not saved. Only a company owner or admin can change it.';
+
+/** True when a Storage error is a permission (RLS / 403) refusal. */
+export function isLogoPermissionError(err: { message?: string; statusCode?: string | number; status?: number } | null | undefined): boolean {
+  if (!err) return false;
+  const code = String(err.statusCode ?? err.status ?? '');
+  if (code === '403' || code === '401') return true;
+  return /row-level security|row level security|violates.*policy|unauthori[sz]ed|permission denied|not allowed/i.test(err.message || '');
+}
+
 export const LOGO_ACCEPT = 'image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp';
 
 const LOGO_TYPES = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp']);
@@ -68,7 +83,12 @@ export async function uploadCustomerLogo(
     upsert: true,
     contentType: logoContentType(file),
   });
-  if (upErr) throw new Error(upErr.message || 'Logo upload failed');
+  if (upErr) {
+    if (isLogoPermissionError(upErr as { message?: string; statusCode?: string | number })) {
+      throw new Error(LOGO_NO_PERMISSION);
+    }
+    throw new Error(upErr.message || 'Logo upload failed');
+  }
 
   const { data } = supabase.storage.from('logos').getPublicUrl(path);
   if (!data?.publicUrl) throw new Error('Could not get logo URL');

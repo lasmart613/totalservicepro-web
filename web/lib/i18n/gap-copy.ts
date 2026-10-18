@@ -127,6 +127,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Logo da empresa',
     'شعار الشركة',
   ),
+  'The logo was not saved. Only a company owner or admin can change it.': row(
+    'لوگو ذخیره نشد. فقط مالک یا مدیر شرکت می‌تواند آن را تغییر دهد.',
+    'El logotipo no se guardó. Solo el propietario o un administrador de la empresa puede cambiarlo.',
+    'Le logo n’a pas été enregistré. Seul le propriétaire ou un administrateur de l’entreprise peut le modifier.',
+    'הסמל לא נשמר. רק הבעלים או מנהל החברה יכולים לשנות אותו.',
+    'Il logo non è stato salvato. Solo il titolare o un amministratore dell’azienda può modificarlo.',
+    'Das Logo wurde nicht gespeichert. Nur der Inhaber oder ein Administrator des Unternehmens kann es ändern.',
+    'O logotipo não foi salvo. Somente o proprietário ou um administrador da empresa pode alterá-lo.',
+    'لم يتم حفظ الشعار. يمكن لمالك الشركة أو مسؤولها فقط تغييره.',
+  ),
   'PNG, JPG, or WebP. Max 2 MB.': row(
     'PNG، JPG یا WebP. حداکثر ۲ مگابایت.',
     'PNG, JPG o WebP. Máximo 2 MB.',
