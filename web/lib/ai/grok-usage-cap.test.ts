@@ -12,7 +12,7 @@ import {
   releaseUsage,
   reserveUsage,
   USAGE_UNAVAILABLE_BODY,
-} from '../../../supabase/functions/grok-assistant/usage-cap.ts';
+} from '../../../supabase/functions/_shared/usage-cap.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
