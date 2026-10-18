@@ -15,6 +15,7 @@ import {
   subscriptionTypeFromRecurringInterval,
 } from './persist-org-upgrade.ts';
 import { orgFreePlanFields } from './upgrade-session.ts';
+import { runPastDueSweep } from './past-due-sweep.ts';
 import { isStripeResourceMissing, retrieveStripeSubscription, StripeSubscriptionError } from './stripe-subscription.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -41,6 +42,7 @@ type Sub = {
   subscription_type?: string | null;
   stripe_price_id?: string | null;
   stripe_product_id?: string | null;
+  past_due_since?: string | null;
 };
 
 type Membership = { user_id: string; organization_id: number };
@@ -53,7 +55,28 @@ type State = {
   memberships: Membership[];
   orgWrites: Record<string, unknown>[];
   subscriptionWrites: Record<string, unknown>[];
+  /** Database clock for the emulated 000928 trigger. */
+  dbNow?: string;
+  /** Emulate 000928 not applied: any read of past_due_since errors. */
+  noPastDueColumn?: boolean;
 };
+
+/**
+ * In-memory copy of the 000928 trigger subscriptions_past_due_clock (the SQL
+ * proof covers the real one): Stripe rows entering grace_period start the
+ * clock at the database time, keep it within the episode, and active clears.
+ */
+function emulatePastDueClock(state: State, row: Sub, before: Sub | null) {
+  if (state.noPastDueColumn) return;
+  const id = String(row.stripe_subscription_id || '');
+  if (!id.startsWith('sub_')) return;
+  const sameSub = before != null && before.stripe_subscription_id === row.stripe_subscription_id;
+  if (row.status === 'active') row.past_due_since = null;
+  else if (row.status === 'grace_period') {
+    if (sameSub && before?.past_due_since) row.past_due_since = before.past_due_since;
+    else row.past_due_since = state.dbNow || new Date().toISOString();
+  } else if (before && !sameSub) row.past_due_since = null;
+}
 
 function paidOrg(over: Partial<Org> = {}): Org {
   return {
@@ -113,10 +136,13 @@ function writerFor(state: State) {
   return {
     from(table: string) {
       const filters: Record<string, unknown> = {};
+      const extra: Array<(row: Record<string, unknown>) => boolean> = [];
+      let selected = '';
+      let limitTo: number | null = null;
       let op: 'select' | 'update' | 'insert' = 'select';
       let payload: Record<string, unknown> | null = null;
       const matches = (row: Record<string, unknown>) =>
-        Object.entries(filters).every(([col, val]) => sameFilter(row[col], val));
+        Object.entries(filters).every(([col, val]) => sameFilter(row[col], val)) && extra.every((fn) => fn(row));
       const run = () => {
         if (table === 'organizations') {
           const rows = state.orgs.filter((row) => matches(row as unknown as Record<string, unknown>));
@@ -129,19 +155,26 @@ function writerFor(state: State) {
           return { data: rows.map((row) => ({ ...row })), error: null };
         }
         if (table === 'subscriptions') {
+          if (state.noPastDueColumn && (/past_due_since/.test(selected) || extra.length > 0)) {
+            return { data: [], error: { message: 'column subscriptions.past_due_since does not exist' } };
+          }
           if (op === 'insert' && payload) {
             const row = { id: state.subs.length + 1, ...payload } as Sub;
+            emulatePastDueClock(state, row, null);
             state.subs.push(row);
             state.subscriptionWrites.push({ ...payload });
             return { data: [{ ...row }], error: null };
           }
-          const rows = state.subs.filter((row) => matches(row as unknown as Record<string, unknown>));
+          let rows = state.subs.filter((row) => matches(row as unknown as Record<string, unknown>));
           if (op === 'update' && payload) {
             for (const sub of rows) {
+              const before = { ...sub };
               Object.assign(sub, payload);
+              emulatePastDueClock(state, sub, before);
               state.subscriptionWrites.push({ ...payload });
             }
           }
+          if (limitTo != null) rows = rows.slice(0, limitTo);
           return { data: rows.map((row) => ({ ...row })), error: null };
         }
         if (table === 'stripe_customers') {
@@ -167,7 +200,29 @@ function writerFor(state: State) {
         return { data: [], error: null };
       };
       const api = {
-        select() {
+        select(columns?: string) {
+          if (typeof columns === 'string') selected = columns;
+          return api;
+        },
+        neq(col: string, val: unknown) {
+          extra.push((row) => !sameFilter(row[col], val));
+          return api;
+        },
+        lte(col: string, val: string) {
+          extra.push((row) => row[col] != null && Date.parse(String(row[col])) <= Date.parse(val));
+          return api;
+        },
+        not(col: string, operator: string, val: unknown) {
+          assert.equal(operator, 'is');
+          assert.equal(val, null);
+          extra.push((row) => row[col] != null);
+          return api;
+        },
+        order() {
+          return api;
+        },
+        limit(n: number) {
+          limitTo = n;
           return api;
         },
         update(next: Record<string, unknown>) {
@@ -825,8 +880,8 @@ test('invoice.payment_failed downgrades when the retrieved subscription is unpai
   }
 });
 
-test('invoice.payment_failed leaves past_due (grace), active, trialing and incomplete on Premium with no write', async () => {
-  for (const status of ['past_due', 'active', 'trialing', 'incomplete']) {
+test('invoice.payment_failed leaves active, trialing and incomplete on Premium with no write', async () => {
+  for (const status of ['active', 'trialing', 'incomplete']) {
     const state = billingState();
     const { result, listCalls } = await quietly(() =>
       runEvent(state, 'invoice.payment_failed', status, [], { object: FAILED_INVOICE })
@@ -892,7 +947,7 @@ test('invoice.payment_failed with no subscription is logged only; a failed retri
   assert.equal(state.orgWrites.length, 0);
 });
 
-test('past_due grace behaviour is unchanged by the payment_failed backstop', async () => {
+test('a fresh past_due still keeps Premium; the immediate-downgrade set is unchanged (past_due is not in it)', async () => {
   const state = billingState();
   const { result } = await runEvent(state, 'customer.subscription.updated', 'past_due', []);
   assert.equal(result.body.downgraded, false);
@@ -900,7 +955,6 @@ test('past_due grace behaviour is unchanged by the payment_failed backstop', asy
   assert.equal(state.orgs[0].is_premium, true);
   const src = readFileSync(join(here, './apply-org-downgrade.ts'), 'utf8');
   assert.match(src, /const SUBSCRIPTION_DOWNGRADE_STATUSES = new Set\(\['canceled', 'unpaid', 'incomplete_expired'\]\);/);
-  assert.doesNotMatch(src, /past_due_grace_days|PAST_DUE_MAX/i);
 });
 
 // ---- 000924 billing low: permanent "No such subscription" on retrieve ----
@@ -1018,4 +1072,450 @@ test('retrieveStripeSubscription carries Stripe\'s HTTP status and error code (n
     if (saved.ctx === undefined) delete process.env.CONTEXT;
     else process.env.CONTEXT = saved.ctx;
   }
+});
+
+// ---- 000928: 14-day past_due downgrade (Larry, 2026-10-18) ----
+
+const T0 = '2026-10-01T12:00:00.000Z';
+const DAY = 24 * 60 * 60 * 1000;
+function at(days: number, extraMs = 0): Date {
+  return new Date(Date.parse(T0) + days * DAY + extraMs);
+}
+
+async function runPastDue(
+  state: State,
+  eventType: 'customer.subscription.updated' | 'invoice.payment_failed',
+  status: string,
+  now: Date,
+  opts?: { list?: { id?: string; status?: string | null }[] }
+) {
+  const object = eventType === 'invoice.payment_failed' ? FAILED_INVOICE : { id: 'sub_paid', status };
+  return quietly(() =>
+    applyBillingSubscriptionEvent({
+      writer: writerFor(state) as never,
+      event: { type: eventType, data: { object } },
+      retrieveSubscription: async () => paidSub(status) as never,
+      listLiveSubscriptions: async () => opts?.list || [],
+      now: () => now,
+    })
+  );
+}
+
+function pastDueState(): State {
+  const state = billingState();
+  state.dbNow = T0;
+  return state;
+}
+
+test('past_due: day 13 keeps Premium, day 14 downgrades exactly like unpaid (customer.subscription.updated)', async () => {
+  const state = pastDueState();
+  const first = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(0));
+  assert.equal(first.body.downgraded, false);
+  assert.equal(first.body.pastDueKept, 'past_due_grace');
+  assert.equal(state.subs[0].status, 'grace_period');
+  assert.equal(state.subs[0].past_due_since, T0);
+
+  const day13 = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(14, -60_000));
+  assert.equal(day13.body.downgraded, false);
+  assert.equal(day13.body.pastDueDays, 13);
+  assert.equal(day13.body.pastDueSince, T0);
+  assert.equal(state.orgWrites.length, 0);
+  assert.equal(state.orgs[0].is_premium, true);
+  assert.equal(state.subs[0].tier, 'premium');
+
+  const day14 = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(14));
+  assert.equal(day14.body.downgraded, true);
+  assert.equal(day14.body.plan, 'free');
+  assert.equal(day14.body.organizationId, '42');
+  assert.equal(day14.body.reason, 'past_due_14_days');
+  assert.equal(day14.body.pastDueDays, 14);
+  assertFree(state.orgs[0], state.orgWrites.at(-1));
+  assert.equal(state.subs[0].status, 'grace_period');
+  assert.equal(state.subs[0].tier, 'free');
+  assert.equal(state.subs[0].past_due_since, T0, 'the clock does not move');
+
+  // Same org outcome as an unpaid downgrade.
+  const unpaid = billingState();
+  await runEvent(unpaid, 'customer.subscription.updated', 'unpaid', []);
+  assert.deepEqual(state.orgWrites.at(-1) && { ...state.orgWrites.at(-1), updated_at: null }, {
+    ...unpaid.orgWrites.at(-1),
+    updated_at: null,
+  });
+
+  const day40 = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(40));
+  assert.equal(day40.body.downgraded, true, 'replays stay idempotent');
+  assert.equal(state.orgs[0].plan, 'free');
+});
+
+test('past_due via invoice.payment_failed: records grace and the clock, day 13 kept, day 14 downgrades', async () => {
+  const state = pastDueState();
+  const first = await runPastDue(state, 'invoice.payment_failed', 'past_due', at(0));
+  assert.equal(first.body.downgraded, false);
+  assert.equal(first.body.logged, true);
+  assert.equal(first.body.pastDueKept, 'past_due_grace');
+  assert.equal(state.subs[0].status, 'grace_period');
+  assert.equal(state.subs[0].tier, 'premium');
+  assert.equal(state.subs[0].past_due_since, T0);
+  assert.equal(state.orgWrites.length, 0);
+
+  const day13 = await runPastDue(state, 'invoice.payment_failed', 'past_due', at(13, 23 * 60 * 60 * 1000));
+  assert.equal(day13.body.downgraded, false);
+  assert.equal(state.orgs[0].is_premium, true);
+  assert.equal(state.orgWrites.length, 0);
+
+  const day14 = await runPastDue(state, 'invoice.payment_failed', 'past_due', at(14, 1));
+  assert.equal(day14.body.downgraded, true);
+  assert.equal(day14.body.trigger, 'invoice.payment_failed');
+  assert.equal(day14.body.reason, 'past_due_14_days');
+  assert.equal(day14.body.attemptCount, 4);
+  assertFree(state.orgs[0], state.orgWrites.at(-1));
+});
+
+test('recovery after a 14-day past_due downgrade restores Premium the same way as after unpaid', async () => {
+  const recover = async (state: State) =>
+    quietly(() =>
+      applyBillingSubscriptionEvent({
+        writer: writerFor(state) as never,
+        event: { type: 'customer.subscription.updated', data: { object: { id: 'sub_paid', status: 'active' } } },
+        retrieveSubscription: async () => paidSub('active') as never,
+        listLiveSubscriptions: async () => [],
+        now: () => at(16),
+      })
+    );
+
+  const pastDue = pastDueState();
+  await runPastDue(pastDue, 'customer.subscription.updated', 'past_due', at(0));
+  await runPastDue(pastDue, 'customer.subscription.updated', 'past_due', at(15));
+  assert.equal(pastDue.orgs[0].is_premium, false);
+  const back = await recover(pastDue);
+  assert.equal(back.body.applied, true);
+  assert.equal(back.body.plan, 'premium');
+
+  const unpaid = billingState();
+  await runEvent(unpaid, 'customer.subscription.updated', 'unpaid', []);
+  assert.equal(unpaid.orgs[0].is_premium, false);
+  await recover(unpaid);
+
+  for (const state of [pastDue, unpaid]) {
+    assert.equal(state.orgs[0].is_premium, true);
+    assert.equal(state.orgs[0].plan, 'premium');
+    assert.equal(state.orgs[0].subscription_tier, 'premium');
+    assert.equal(state.subs[0].status, 'active');
+    assert.equal(state.subs[0].tier, 'premium');
+    assert.equal(state.subs[0].past_due_since ?? null, null, 'recovery clears the clock');
+  }
+  assert.deepEqual({ ...pastDue.orgs[0], updated_at: null }, { ...unpaid.orgs[0], updated_at: null });
+});
+
+test('recovery before day 14 clears the clock; the next past_due starts a new 14 days', async () => {
+  const state = pastDueState();
+  await runPastDue(state, 'customer.subscription.updated', 'past_due', at(0));
+  await quietly(() =>
+    applyBillingSubscriptionEvent({
+      writer: writerFor(state) as never,
+      event: { type: 'customer.subscription.updated', data: { object: { id: 'sub_paid', status: 'active' } } },
+      retrieveSubscription: async () => paidSub('active') as never,
+      listLiveSubscriptions: async () => [],
+      now: () => at(10),
+    })
+  );
+  assert.equal(state.subs[0].status, 'active');
+  assert.equal(state.subs[0].past_due_since, null);
+
+  state.dbNow = at(12).toISOString();
+  await runPastDue(state, 'customer.subscription.updated', 'past_due', at(12));
+  assert.equal(state.subs[0].past_due_since, at(12).toISOString());
+  const day20 = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(20));
+  assert.equal(day20.body.downgraded, false, 'only 8 days into the new episode');
+  assert.equal(state.orgs[0].is_premium, true);
+  const day26 = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(26));
+  assert.equal(day26.body.downgraded, true);
+});
+
+test('complimentary Premium is never touched by the 14-day past_due rule', async () => {
+  for (const grant of ['complimentary_signup', 'complimentary_god', 'manual_grant']) {
+    const state = pastDueState();
+    state.orgs[0].premium_grant = grant;
+    state.orgs[0].premium_until = '2027-04-01T00:00:00.000Z';
+    await runPastDue(state, 'customer.subscription.updated', 'past_due', at(0));
+    for (const eventType of ['customer.subscription.updated', 'invoice.payment_failed'] as const) {
+      const late = await runPastDue(state, eventType, 'past_due', at(45));
+      assert.equal(late.body.downgraded, false, `${grant} ${eventType}`);
+      assert.equal(late.body.pastDueKept, 'complimentary', `${grant} ${eventType}`);
+    }
+    assert.equal(state.orgWrites.length, 0, grant);
+    assert.equal(state.orgs[0].is_premium, true, grant);
+    assert.equal(state.orgs[0].plan, 'premium', grant);
+    assert.equal(state.orgs[0].premium_grant, grant, grant);
+    assert.equal(state.orgs[0].premium_until, '2027-04-01T00:00:00.000Z', grant);
+  }
+});
+
+test('unpaid still downgrades immediately, with or without a past_due clock', async () => {
+  for (const eventType of ['customer.subscription.updated', 'invoice.payment_failed'] as const) {
+    const fresh = billingState();
+    const now = await runPastDue(fresh, eventType, 'unpaid', at(0));
+    assert.equal(now.body.downgraded, true, eventType);
+    assert.equal(fresh.subs[0].status, 'expired', eventType);
+
+    const afterOneDay = pastDueState();
+    await runPastDue(afterOneDay, 'customer.subscription.updated', 'past_due', at(0));
+    const unpaid = await runPastDue(afterOneDay, eventType, 'unpaid', at(1));
+    assert.equal(unpaid.body.downgraded, true, eventType);
+    assert.equal(unpaid.body.reason, undefined, 'the unpaid path, not the 14-day path');
+    assertFree(afterOneDay.orgs[0], afterOneDay.orgWrites.at(-1));
+  }
+});
+
+test('other statuses ignore the past_due clock', async () => {
+  for (const status of ['incomplete', 'paused']) {
+    const state = pastDueState();
+    state.subs[0].status = 'grace_period';
+    state.subs[0].past_due_since = at(-60).toISOString();
+    const result = await runPastDue(state, 'customer.subscription.updated', status, at(0));
+    assert.equal(result.body.downgraded, false, status);
+    assert.equal(result.body.pastDueKept, undefined, status);
+    assert.equal(state.orgWrites.length, 0, status);
+    assert.equal(state.orgs[0].is_premium, true, status);
+  }
+  for (const status of ['active', 'trialing']) {
+    const state = pastDueState();
+    state.subs[0].status = 'grace_period';
+    state.subs[0].past_due_since = at(-60).toISOString();
+    const result = await runPastDue(state, 'customer.subscription.updated', status, at(0));
+    assert.equal(result.body.applied, true, status);
+    assert.equal(state.orgs[0].is_premium, true, status);
+    assert.equal(state.subs[0].status, 'active', status);
+    assert.equal(state.subs[0].past_due_since, null, status);
+  }
+  const failedActive = pastDueState();
+  failedActive.subs[0].past_due_since = at(-60).toISOString();
+  const kept = await runPastDue(failedActive, 'invoice.payment_failed', 'active', at(0));
+  assert.equal(kept.body.downgraded, false);
+  assert.equal(failedActive.subscriptionWrites.length, 0);
+  assert.equal(failedActive.orgWrites.length, 0);
+});
+
+test('past_due: a second live subscription still blocks the 14-day downgrade', async () => {
+  const state = pastDueState();
+  await runPastDue(state, 'customer.subscription.updated', 'past_due', at(0));
+  const late = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(20), {
+    list: [{ id: 'sub_team', status: 'active' }],
+  });
+  assert.equal(late.body.downgraded, false);
+  assert.equal(late.body.pastDueKept, 'live_subscription_remains');
+  assert.equal(state.orgWrites.length, 0);
+});
+
+test('past_due with no stored clock (000928 not applied) keeps Premium', async () => {
+  const state = pastDueState();
+  state.noPastDueColumn = true;
+  const warns: unknown[][] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warns.push(args);
+  };
+  try {
+    for (const eventType of ['customer.subscription.updated', 'invoice.payment_failed'] as const) {
+      const result = await runPastDue(state, eventType, 'past_due', at(90));
+      assert.equal(result.body.downgraded, false, eventType);
+      assert.equal(result.body.pastDueKept, 'no_past_due_clock', eventType);
+    }
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(state.orgWrites.length, 0);
+  assert.equal(state.orgs[0].is_premium, true);
+  assert.ok(warns.some((args) => String(args[0]).includes('past_due clock unavailable')));
+});
+
+test('PAST_DUE_DOWNGRADE_DISABLED=1 keeps past_due on Premium (pre-000928 behaviour)', async () => {
+  const state = pastDueState();
+  await runPastDue(state, 'customer.subscription.updated', 'past_due', at(0));
+  process.env.PAST_DUE_DOWNGRADE_DISABLED = '1';
+  try {
+    const result = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(30));
+    assert.equal(result.body.downgraded, false);
+    assert.equal(result.body.pastDueKept, 'past_due_downgrade_disabled');
+    assert.equal(state.orgWrites.length, 0);
+    const swept = await runPastDueSweep({
+      writer: writerFor(state) as never,
+      retrieveSubscription: async () => paidSub('past_due') as never,
+      listLiveSubscriptions: async () => [],
+      now: at(30),
+    });
+    assert.equal(swept.disabled, true);
+    assert.equal(state.orgWrites.length, 0);
+  } finally {
+    delete process.env.PAST_DUE_DOWNGRADE_DISABLED;
+  }
+  const enabled = await runPastDue(state, 'customer.subscription.updated', 'past_due', at(30));
+  assert.equal(enabled.body.downgraded, true);
+});
+
+// ---- 000928: hourly sweep (netlify/functions/past-due-downgrade.mts) ----
+
+type SweepOrg = { orgId: number; user: string; sub: string; cus: string; stripeStatus: string; since: string | null; tier?: string; grant?: string | null };
+
+function sweepState(rows: SweepOrg[]): State {
+  const state: State = {
+    orgs: [],
+    subs: [],
+    customers: [],
+    profiles: [],
+    memberships: [],
+    orgWrites: [],
+    subscriptionWrites: [],
+    dbNow: T0,
+  };
+  for (const row of rows) {
+    state.orgs.push(paidOrg({ id: row.orgId, name: `Org ${row.orgId}`, premium_grant: row.grant ?? null }));
+    state.subs.push({
+      id: state.subs.length + 1,
+      organization_id: row.orgId,
+      user_id: row.user,
+      stripe_subscription_id: row.sub,
+      status: 'grace_period',
+      tier: row.tier || 'premium',
+      platform: 'stripe',
+      past_due_since: row.since,
+    });
+    state.customers.push({ id: `row-${row.cus}`, user_id: row.user, stripe_customer_id: row.cus });
+    state.profiles.push({ id: row.user, organization_id: row.orgId });
+    state.memberships.push({ user_id: row.user, organization_id: row.orgId });
+  }
+  return state;
+}
+
+function sweepRetrieve(rows: SweepOrg[]) {
+  return async (subscriptionId: string) => {
+    const row = rows.find((r) => r.sub === subscriptionId);
+    if (!row) throw new Error('unexpected retrieve ' + subscriptionId);
+    if (row.stripeStatus === 'missing') throw missingSubscriptionError();
+    if (row.stripeStatus === 'boom') throw new Error('stripe unavailable');
+    return {
+      id: row.sub,
+      status: row.stripeStatus,
+      customer: row.cus,
+      metadata: { kind: 'org_plan', organization_id: String(row.orgId), user_id: row.user, sku: 'premium_monthly', plan: 'premium' },
+    } as never;
+  };
+}
+
+test('sweep: downgrades day-14+ past_due, keeps day 13, recovers the ledger for active, follows Stripe for unpaid', async () => {
+  const rows: SweepOrg[] = [
+    { orgId: 2655, user: 'u-2655', sub: 'sub_d14', cus: 'cus_2655', stripeStatus: 'past_due', since: at(-14).toISOString() },
+    { orgId: 2639, user: 'u-2639', sub: 'sub_d13', cus: 'cus_2639', stripeStatus: 'past_due', since: at(-14, 60_000).toISOString() },
+    { orgId: 2656, user: 'u-2656', sub: 'sub_back', cus: 'cus_2656', stripeStatus: 'active', since: at(-20).toISOString() },
+    { orgId: 2668, user: 'u-2668', sub: 'sub_unpaid', cus: 'cus_2668', stripeStatus: 'unpaid', since: at(-30).toISOString() },
+    { orgId: 2669, user: 'u-2669', sub: 'sub_done', cus: 'cus_2669', stripeStatus: 'past_due', since: at(-30).toISOString(), tier: 'free' },
+  ];
+  const state = sweepState(rows);
+  const retrieved: string[] = [];
+  const retrieve = sweepRetrieve(rows);
+  const summary = await quietly(() =>
+    runPastDueSweep({
+      writer: writerFor(state) as never,
+      retrieveSubscription: async (id: string) => {
+        retrieved.push(id);
+        return retrieve(id);
+      },
+      listLiveSubscriptions: async () => [],
+      now: at(0),
+    })
+  );
+  assert.equal(summary.ok, true);
+  assert.equal(summary.candidates, 3);
+  assert.equal(summary.downgraded, 2);
+  assert.deepEqual(retrieved.sort(), ['sub_back', 'sub_d14', 'sub_unpaid']);
+  const byOrg = (id: number) => state.orgs.find((o) => o.id === id)!;
+  const subOf = (id: string) => state.subs.find((s) => s.stripe_subscription_id === id)!;
+
+  assert.equal(byOrg(2655).is_premium, false);
+  assert.equal(byOrg(2655).plan, 'free');
+  assert.equal(subOf('sub_d14').tier, 'free');
+  assert.deepEqual(summary.results.find((r) => r.subscriptionId === 'sub_d14')?.reason, 'past_due_14_days');
+
+  assert.equal(byOrg(2639).is_premium, true, 'day 13 is not a candidate');
+  assert.equal(byOrg(2656).is_premium, true, 'active in Stripe: never downgraded');
+  assert.equal(subOf('sub_back').status, 'active');
+  assert.equal(subOf('sub_back').past_due_since, null);
+  assert.equal(summary.results.find((r) => r.subscriptionId === 'sub_back')?.outcome, 'ledger_recovered');
+
+  assert.equal(byOrg(2668).is_premium, false);
+  assert.equal(subOf('sub_unpaid').status, 'expired');
+  assert.equal(byOrg(2669).is_premium, true, 'already-free ledger rows are not re-swept');
+
+  const again = await quietly(() =>
+    runPastDueSweep({
+      writer: writerFor(state) as never,
+      retrieveSubscription: retrieve,
+      listLiveSubscriptions: async () => [],
+      now: at(0),
+    })
+  );
+  assert.equal(again.candidates, 0, 'a second run finds nothing left to do');
+});
+
+test('sweep: complimentary Premium is never a candidate and is refused if linked', async () => {
+  const rows: SweepOrg[] = [
+    { orgId: 2655, user: 'u-2655', sub: 'sub_comp', cus: 'cus_2655', stripeStatus: 'past_due', since: at(-30).toISOString(), grant: 'complimentary_god' },
+  ];
+  const state = sweepState(rows);
+  const comp = compOrg();
+  state.orgs.push(comp);
+  const summary = await quietly(() =>
+    runPastDueSweep({
+      writer: writerFor(state) as never,
+      retrieveSubscription: sweepRetrieve(rows),
+      listLiveSubscriptions: async () => [],
+      now: at(0),
+    })
+  );
+  assert.equal(summary.candidates, 1);
+  assert.equal(summary.downgraded, 0);
+  assert.equal(summary.results[0].reason, 'complimentary');
+  assert.equal(state.orgWrites.length, 0);
+  assert.equal(state.orgs[0].is_premium, true);
+  assert.equal(comp.is_premium, true);
+  assert.equal(comp.premium_grant, 'complimentary_signup');
+  assert.equal(comp.premium_until, '2027-04-01T00:00:00.000Z');
+});
+
+test('sweep: missing Stripe subscription is skipped, a Stripe error does not stop the run, no clock column finds nothing', async () => {
+  const rows: SweepOrg[] = [
+    { orgId: 2655, user: 'u-2655', sub: 'sub_gone', cus: 'cus_2655', stripeStatus: 'missing', since: at(-30).toISOString() },
+    { orgId: 2639, user: 'u-2639', sub: 'sub_boom', cus: 'cus_2639', stripeStatus: 'boom', since: at(-29).toISOString() },
+    { orgId: 2656, user: 'u-2656', sub: 'sub_due', cus: 'cus_2656', stripeStatus: 'past_due', since: at(-28).toISOString() },
+  ];
+  const state = sweepState(rows);
+  const summary = await quietly(() =>
+    runPastDueSweep({
+      writer: writerFor(state) as never,
+      retrieveSubscription: sweepRetrieve(rows),
+      listLiveSubscriptions: async () => [],
+      now: at(0),
+    })
+  );
+  assert.equal(summary.ok, false);
+  assert.equal(summary.candidates, 3);
+  assert.equal(summary.downgraded, 1);
+  assert.equal(summary.results.find((r) => r.subscriptionId === 'sub_gone')?.reason, 'subscription_missing');
+  assert.equal(summary.results.find((r) => r.subscriptionId === 'sub_boom')?.outcome, 'error');
+  assert.equal(state.orgs.find((o) => o.id === 2655)?.is_premium, true);
+  assert.equal(state.orgs.find((o) => o.id === 2639)?.is_premium, true);
+  assert.equal(state.orgs.find((o) => o.id === 2656)?.is_premium, false);
+
+  const old = sweepState(rows);
+  old.noPastDueColumn = true;
+  const none = await runPastDueSweep({
+    writer: writerFor(old) as never,
+    retrieveSubscription: sweepRetrieve(rows),
+    listLiveSubscriptions: async () => [],
+    now: at(0),
+  });
+  assert.equal(none.ok, true);
+  assert.equal(none.skipped, 'past_due_clock_missing');
+  assert.equal(none.candidates, 0);
+  assert.equal(old.orgWrites.length, 0);
 });
