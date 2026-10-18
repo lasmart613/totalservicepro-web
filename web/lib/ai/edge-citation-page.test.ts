@@ -62,7 +62,7 @@ function loadEdge(): Promise<Edge> {
   mkdirSync(join(root, '_shared'));
   copyFileSync(join(FN_DIR, '../_shared/repair-ai.ts'), join(root, '_shared', 'repair-ai.ts'));
   copyFileSync(join(FN_DIR, '../_shared/index-pending.ts'), join(root, '_shared', 'index-pending.ts'));
-  for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts', 'citation-scope.ts', 'ai-access.ts']) {
+  for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts', 'citation-scope.ts', 'ai-access.ts', 'usage-cap.ts']) {
     copyFileSync(join(FN_DIR, f), join(dir, f));
   }
   let src = readFileSync(join(FN_DIR, 'index.ts'), 'utf8');
