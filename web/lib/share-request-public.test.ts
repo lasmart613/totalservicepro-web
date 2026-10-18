@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
-import { OPEN_SERVICE_REQUEST_COLUMNS, publicShareRequestRow, SHARE_REQUEST_SELECT } from './share-request-public.ts';
+import { PUBLIC_SHARE_REQUEST_COLUMNS, publicShareRequestRow, SHARE_REQUEST_SELECT } from './share-request-public.ts';
 
 const row = {
   id: 'r1', title: 'T', description: 'D', status: 'open', urgency: 'high', manufacturer: 'Candela', model: 'GentleMax',
@@ -10,7 +10,7 @@ const row = {
 };
 
 test('share select is the open_service_requests column set minus budget_max', () => {
-  assert.deepEqual(SHARE_REQUEST_SELECT.split(', '), [...OPEN_SERVICE_REQUEST_COLUMNS]);
+  assert.deepEqual(SHARE_REQUEST_SELECT.split(', '), [...PUBLIC_SHARE_REQUEST_COLUMNS]);
   for (const banned of ['serial_number', 'error_codes', 'preferred_date', 'posted_by', 'awarded', 'budget']) {
     assert.ok(!SHARE_REQUEST_SELECT.includes(banned), banned);
   }

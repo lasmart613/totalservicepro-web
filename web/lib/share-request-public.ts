@@ -4,7 +4,7 @@
  * bidders only, who read the view directly). No serial number, error codes,
  * preferred date, budget, equipment, photos, contacts or bids.
  */
-export const OPEN_SERVICE_REQUEST_COLUMNS = [
+export const PUBLIC_SHARE_REQUEST_COLUMNS = [
   'id',
   'title',
   'description',
@@ -21,7 +21,7 @@ export const OPEN_SERVICE_REQUEST_COLUMNS = [
   'organization_id',
 ] as const;
 
-export const SHARE_REQUEST_SELECT = OPEN_SERVICE_REQUEST_COLUMNS.join(', ');
+export const SHARE_REQUEST_SELECT = PUBLIC_SHARE_REQUEST_COLUMNS.join(', ');
 
 type Row = Record<string, unknown>;
 
