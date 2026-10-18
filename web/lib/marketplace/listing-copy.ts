@@ -3,36 +3,52 @@
  * Markdown and HTML are sanitized; source markers are not shown.
  */
 
-const ALLOWED_TAGS = new Set([
-  'p',
-  'br',
-  'hr',
-  'strong',
-  'b',
-  'em',
-  'i',
-  'u',
-  'h1',
-  'h2',
-  'h3',
-  'h4',
-  'ul',
-  'ol',
-  'li',
-  'a',
-  'blockquote',
-  'table',
-  'thead',
-  'tbody',
-  'tr',
-  'th',
-  'td',
-  'span',
-  'div',
-  'img',
-]);
+import sanitizeHtml from 'sanitize-html';
 
-const VOID_TAGS = new Set(['br', 'hr', 'img']);
+/**
+ * Allowlist for buyer-facing listing copy (eBay imports, seller HTML,
+ * our own markdown output). Everything not listed is removed: every on*
+ * handler, style, class, id, svg, math, iframe, object, form controls,
+ * script/style bodies. Links: http, https, mailto only, rel=noopener.
+ * Images: http(s) src + alt only (eBay descriptions embed product shots).
+ */
+export const LISTING_ALLOWED_TAGS = [
+  'p', 'br', 'hr', 'strong', 'b', 'em', 'i', 'u', 'code',
+  'h1', 'h2', 'h3', 'h4', 'ul', 'ol', 'li', 'a', 'blockquote',
+  'table', 'thead', 'tbody', 'tr', 'th', 'td', 'span', 'div', 'img',
+];
+
+const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: LISTING_ALLOWED_TAGS,
+  allowedAttributes: {
+    a: ['href', 'rel', 'target'],
+    img: ['src', 'alt'],
+  },
+  allowedSchemes: ['http', 'https', 'mailto'],
+  allowedSchemesByTag: { img: ['http', 'https'], a: ['http', 'https', 'mailto'] },
+  allowedSchemesAppliedToAttributes: ['href', 'src'],
+  allowProtocolRelative: false,
+  allowedStyles: {},
+  allowVulnerableTags: false,
+  // Drop the element and its text for these; other disallowed tags keep their text.
+  nonTextTags: ['script', 'style', 'textarea', 'option', 'noscript', 'svg', 'math', 'iframe', 'object', 'embed', 'template', 'title', 'head'],
+  disallowedTagsMode: 'discard',
+  enforceHtmlBoundary: false,
+  parseStyleAttributes: false,
+  transformTags: {
+    a: (_tagName: string, attribs: sanitizeHtml.Attributes): sanitizeHtml.Tag => {
+      const href = String(attribs.href || '').trim();
+      // Absolute http(s)/mailto only: no relative, protocol-relative or other schemes.
+      if (!/^(https?:\/\/|mailto:)/i.test(href) || /[\s<>"]/.test(href)) return { tagName: 'span', attribs: {} as sanitizeHtml.Attributes };
+      return {
+        tagName: 'a',
+        attribs: { href, rel: 'noopener noreferrer', target: '_blank' },
+      };
+    },
+  },
+  exclusiveFilter: (frame) =>
+    frame.tag === 'img' && !/^https?:\/\/[^\s<>"]+$/i.test(String(frame.attribs.src || '').trim()),
+};
 
 const HTML_HINT =
   /<\/?(?:p|div|br|ul|ol|li|h[1-6]|table|span|strong|em|b|i|a|img|blockquote|section|article|td|tr)\b/i;
@@ -47,10 +63,6 @@ function escapeHtml(value: string): string {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-}
-
-function escapeAttr(value: string): string {
-  return escapeHtml(value).replace(/'/g, '&#39;');
 }
 
 function decodeEntities(value: string): string {
@@ -71,52 +83,9 @@ function decodeEntities(value: string): string {
     });
 }
 
-function pickAttr(attrs: string, name: string): string | null {
-  const re = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i');
-  const m = attrs.match(re);
-  if (!m) return null;
-  return decodeEntities((m[1] || m[2] || m[3] || '').trim());
-}
-
-function safeHttpUrl(raw: string | null): string | null {
-  if (!raw) return null;
-  const url = raw.trim();
-  if (!/^https?:\/\//i.test(url)) return null;
-  if (/[\s<>]/.test(url)) return null;
-  return url;
-}
-
 export function sanitizeListingHtml(html: string): string {
-  let s = String(html || '');
-  s = s
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<!--[\s\S]*?-->/g, '')
-    .replace(/<\/?(?:script|style|iframe|object|embed|link|meta|form|input|button|textarea|select|option|svg|math|video|audio|source|track|base)(?:\s[^>]*)?>/gi, '');
-  s = s.replace(/\s+on[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-  s = s.replace(/\s+(?:style|srcset|srcdoc|formaction|xlink:href)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '');
-
-  s = s.replace(/<\/?([a-zA-Z][a-zA-Z0-9]*)(\s[^>]*)?>/g, (full, name: string, attrs = '') => {
-    const tag = name.toLowerCase();
-    const closing = full.startsWith('</');
-    if (!ALLOWED_TAGS.has(tag)) return '';
-    if (closing) return VOID_TAGS.has(tag) ? '' : `</${tag}>`;
-    if (tag === 'br' || tag === 'hr') return `<${tag}>`;
-    if (tag === 'img') {
-      const src = safeHttpUrl(pickAttr(attrs, 'src'));
-      if (!src) return '';
-      const alt = pickAttr(attrs, 'alt') || '';
-      return `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}">`;
-    }
-    if (tag === 'a') {
-      const href = safeHttpUrl(pickAttr(attrs, 'href'));
-      if (!href) return '<span>';
-      return `<a href="${escapeAttr(href)}" rel="noopener noreferrer" target="_blank">`;
-    }
-    return `<${tag}>`;
-  });
-
-  return s.replace(/<span>\s*<\/span>/g, '');
+  const out = sanitizeHtml(String(html || ''), SANITIZE_OPTIONS);
+  return out.replace(/<span>\s*<\/span>/g, '');
 }
 
 function wrapMarkdownLists(html: string): string {
@@ -196,7 +165,8 @@ function markdownToHtml(raw: string): string {
 export function renderListingCopyHtml(raw: string | null | undefined): string {
   const text = String(raw || '').trim();
   if (!text) return '';
-  const html = looksLikeHtml(text) ? sanitizeListingHtml(text) : markdownToHtml(text);
+  // Markdown output is built from escaped text; sanitize it too (defence in depth).
+  const html = sanitizeListingHtml(looksLikeHtml(text) ? text : markdownToHtml(text));
   const compact = html.replace(/\s+/g, ' ').trim();
   if (!compact || compact === '<p></p>') return '';
   return html;
