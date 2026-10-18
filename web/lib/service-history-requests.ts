@@ -32,6 +32,7 @@ export type HistoryRequestError =
   | 'not_open'
   | 'nothing_to_request'
   | 'invalid'
+  | 'unavailable'
   | 'error';
 
 export type MyHistoryRequest = {
@@ -93,6 +94,14 @@ export function positiveId(v: unknown): number | null {
   return Number.isSafeInteger(n) && n > 0 ? n : null;
 }
 
+/** True when the RPC itself is missing (migration 000922 not applied yet). */
+export function isMissingRpcError(err: unknown): boolean {
+  const e = (err || {}) as { message?: unknown; code?: unknown };
+  const code = String(e.code || '');
+  const msg = String(e.message || '').toLowerCase();
+  return code === 'PGRST202' || code === '42883' || msg.includes('could not find the function');
+}
+
 /** Map a PostgREST / RPC error to a stable kind (messages are set in 000922). */
 export function classifyHistoryRequestError(err: unknown): { kind: HistoryRequestError; retryAfter: string | null } {
   const e = (err || {}) as { message?: unknown; code?: unknown; details?: unknown };
@@ -100,6 +109,8 @@ export function classifyHistoryRequestError(err: unknown): { kind: HistoryReques
   const code = String(e.code || '');
   const details = String(e.details || '');
   const retry = /retry_after=([0-9TZ:\-]+)/.exec(details)?.[1] || null;
+  // RPC not deployed yet (000922 missing): PostgREST PGRST202, Postgres 42883.
+  if (isMissingRpcError(e)) return { kind: 'unavailable', retryAfter: null };
   if (msg.includes('rate_limited')) return { kind: 'rate_limited', retryAfter: null };
   if (msg.includes('request_cooldown')) return { kind: 'cooldown', retryAfter: retry };
   if (msg.includes('clinic_unclaimed')) return { kind: 'unclaimed', retryAfter: null };
@@ -128,6 +139,8 @@ export function historyRequestErrorText(kind: HistoryRequestError, retryAfter?: 
       return 'You can’t do that for this laser.';
     case 'invalid':
       return 'That request is not valid.';
+    case 'unavailable':
+      return 'Service history requests aren’t available yet. Try again later.';
     default:
       return 'Something went wrong. Try again.';
   }
@@ -195,9 +208,9 @@ export async function listIncomingHistoryRequests(
   client: RpcClient,
   ownerOrg: string | number,
   opts: { status?: 'pending' | 'closed' | 'all'; equipmentId?: string | number | null; limit?: number; offset?: number } = {}
-): Promise<{ rows: IncomingHistoryRequest[]; total: number; error: string | null }> {
+): Promise<{ rows: IncomingHistoryRequest[]; total: number; error: string | null; errorKind?: HistoryRequestError }> {
   const owner = positiveId(ownerOrg);
-  if (!owner) return { rows: [], total: 0, error: 'clinic is required' };
+  if (!owner) return { rows: [], total: 0, error: 'clinic is required', errorKind: 'invalid' };
   try {
     const { data, error } = await client.rpc('list_incoming_service_history_requests', {
       p_owner_org: owner,
@@ -206,12 +219,32 @@ export async function listIncomingHistoryRequests(
       p_limit: Math.min(Math.max(Math.trunc(opts.limit ?? 50) || 1, 1), 200),
       p_offset: Math.max(Math.trunc(opts.offset ?? 0) || 0, 0),
     });
-    if (error) return { rows: [], total: 0, error: error.message || String(error) };
+    if (error) {
+      return { rows: [], total: 0, error: error.message || String(error), errorKind: classifyHistoryRequestError(error).kind };
+    }
     const rows = (Array.isArray(data) ? data : []) as IncomingHistoryRequest[];
     return { rows, total: rows.length ? Number(rows[0].total_count) || rows.length : 0, error: null };
   } catch (e) {
-    return { rows: [], total: 0, error: e instanceof Error ? e.message : String(e) };
+    return { rows: [], total: 0, error: e instanceof Error ? e.message : String(e), errorKind: 'error' };
   }
+}
+
+/** Customer-side org types (match service_history_owner_admin in 000920). */
+const CLINIC_ORG_TYPES = new Set(['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']);
+const CLINIC_APPROVER_ROLES = new Set(['owner', 'company_admin', 'admin', 'manager']);
+
+export type InboxAccess = 'no_org' | 'not_clinic' | 'not_admin' | 'owner';
+
+/**
+ * Who may open the clinic inbox (QA #314 L-4). Shop users never see it (or
+ * its email opt-out); clinic staff see the owners-only message; a user with
+ * no org gets a clear message instead of a spinner. The RPC re-checks.
+ */
+export function inboxAccess(orgId: unknown, orgType: unknown, role: unknown): InboxAccess {
+  if (!positiveId(orgId)) return 'no_org';
+  if (!CLINIC_ORG_TYPES.has(String(orgType || '').trim().toLowerCase())) return 'not_clinic';
+  if (!CLINIC_APPROVER_ROLES.has(String(role || '').trim().toLowerCase())) return 'not_admin';
+  return 'owner';
 }
 
 export async function listOwnerHistoryGrants(

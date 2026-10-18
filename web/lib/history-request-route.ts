@@ -41,6 +41,8 @@ export function statusForKind(kind: HistoryRequestError): number {
     case 'nothing_to_request':
     case 'invalid':
       return 400;
+    case 'unavailable':
+      return 503;
     default:
       return 500;
   }
@@ -49,5 +51,6 @@ export function statusForKind(kind: HistoryRequestError): number {
 export function rpcErrorBody(err: unknown): { status: number; body: { error: string; kind: HistoryRequestError; retryAfter: string | null } } {
   const { kind, retryAfter } = classifyHistoryRequestError(err);
   const msg = String((err as any)?.message || 'Request failed');
-  return { status: statusForKind(kind), body: { error: kind === 'error' ? 'Request failed' : msg, kind, retryAfter } };
+  const error = kind === 'error' ? 'Request failed' : kind === 'unavailable' ? 'Service history requests are not available yet' : msg;
+  return { status: statusForKind(kind), body: { error, kind, retryAfter } };
 }

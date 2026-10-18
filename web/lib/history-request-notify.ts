@@ -25,6 +25,7 @@ import {
   historyRequestSubject,
   historyRequestText,
   isEmailAddress,
+  safeOrgName,
   type OutgoingEmail,
 } from './history-request-email.ts';
 
@@ -97,13 +98,13 @@ function laserText(n: RequestNotice): string {
 
 export function ownerNotificationMessage(n: RequestNotice): string {
   const count = Math.max(0, Number(n.teaser_count) || 0);
-  return `${n.shop_name || 'A service company'} asked to see the earlier service history of ${laserText(n)}${
+  return `${safeOrgName(n.shop_name, 'A service company')} asked to see the earlier service history of ${laserText(n)}${
     count ? ` (${count} report${count === 1 ? '' : 's'})` : ''
   }.`;
 }
 
 export function shopNotificationMessage(n: RequestNotice): string {
-  const clinic = n.owner_name || 'The clinic';
+  const clinic = safeOrgName(n.owner_name, 'The clinic');
   return n.status === 'approved'
     ? `${clinic} shared the earlier service history of ${laserText(n)}.`
     : `${clinic} declined to share the earlier service history of ${laserText(n)}.`;

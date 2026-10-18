@@ -31,8 +31,27 @@ export type HistoryRequestEmailCopy = {
   url: string;
 };
 
+/**
+ * Shop names are chosen by the shop itself (QA #314 L-5), so they never go in
+ * a subject line, and in the body they are cleaned, stripped of links and
+ * bidi/zero-width characters, and capped at 60 characters.
+ */
+export function safeOrgName(s: unknown, fallback: string): string {
+  const v = clean(
+    String(s == null ? '' : s)
+      .replace(/[\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]/g, '')
+      .replace(/(https?:\/\/|www\.)\S*/gi, ' '),
+    60
+  );
+  return v || fallback;
+}
+
 function shop(c: HistoryRequestEmailCopy): string {
-  return clean(c.shopName) || 'A service company';
+  return safeOrgName(c.shopName, 'A service company');
+}
+
+function clinic(c: HistoryRequestEmailCopy): string {
+  return safeOrgName(c.clinicName, 'The clinic');
 }
 
 function laserLine(c: HistoryRequestEmailCopy): string {
@@ -41,8 +60,9 @@ function laserLine(c: HistoryRequestEmailCopy): string {
   return sn ? `${laser} (SN ${sn})` : laser;
 }
 
-export function historyRequestSubject(c: HistoryRequestEmailCopy): string {
-  return `${shop(c)} is asking to see your laser's service history`;
+/** Fixed subject: no org-controlled text (L-5). */
+export function historyRequestSubject(_c?: HistoryRequestEmailCopy): string {
+  return 'A service company asked to see your laser’s service history';
 }
 
 export function historyRequestText(c: HistoryRequestEmailCopy): string {
@@ -77,15 +97,16 @@ ${n ? `<p>${n} earlier report${n === 1 ? ' is' : 's are'} locked until you decid
 </body></html>`;
 }
 
-export function historyApprovedSubject(c: HistoryRequestEmailCopy): string {
-  return `${clean(c.clinicName) || 'The clinic'} shared a laser's service history with you`;
+/** Fixed subject: no org-controlled text (L-5). */
+export function historyApprovedSubject(_c?: HistoryRequestEmailCopy): string {
+  return 'A clinic shared a laser’s service history with you';
 }
 
 export function historyApprovedText(c: HistoryRequestEmailCopy): string {
   return [
     clean(c.firstName) ? `Hi ${clean(c.firstName)},` : 'Hi,',
     '',
-    `${clean(c.clinicName) || 'The clinic'} approved your request for the earlier service history of ${laserLine(c)}.`,
+    `${clinic(c)} approved your request for the earlier service history of ${laserLine(c)}.`,
     '',
     'Open it in Total Service Pro:',
     c.url,
@@ -97,7 +118,7 @@ export function historyApprovedText(c: HistoryRequestEmailCopy): string {
 export function historyApprovedHtml(c: HistoryRequestEmailCopy): string {
   return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#111">
 <p>${clean(c.firstName) ? `Hi ${esc(clean(c.firstName))},` : 'Hi,'}</p>
-<p><strong>${esc(clean(c.clinicName) || 'The clinic')}</strong> approved your request for the earlier service history of ${esc(laserLine(c))}.</p>
+<p><strong>${esc(clinic(c))}</strong> approved your request for the earlier service history of ${esc(laserLine(c))}.</p>
 <p><a href="${esc(c.url)}">Open it in Total Service Pro</a></p>
 <p style="color:#888;font-size:12px">Sent by Total Service Pro · repairplanet.net</p>
 </body></html>`;
