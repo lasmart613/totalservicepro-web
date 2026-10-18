@@ -91,3 +91,10 @@ test('000926 strips bidi controls when storing', () => {
   assert.match(code, /\\u202a-\\u202e\\u2066-\\u2069/);
   assert.match(code, /v_name text := public\.directory_clean_text\(p_name\)/);
 });
+
+test('000926 L-12/L-14: decoy replay answers like a real replay; rollback header lists its data effects', () => {
+  const s2 = code.slice(code.indexOf('FUNCTION public.directory_registration_step2('), code.indexOf('FUNCTION public.directory_registration_take_notice('));
+  assert.match(s2, /INSERT INTO public\.directory_form_tickets \(nonce, used_at\) VALUES \(p_registration_id, pg_catalog\.now\(\)\)\s+ON CONFLICT \(nonce\) DO NOTHING;\s+IF NOT FOUND THEN\s+RETURN pg_catalog\.jsonb_build_object\('ok', false, 'reason', 'expired'\);/);
+  const r = readFileSync(rb, 'utf8');
+  for (const s of ['clinic_claim_emails rows written at approval REMAIN', 'stay listed', 'does not unlist them', 'are DELETED', 'DROPPED']) assert.ok(r.includes(s), s);
+});

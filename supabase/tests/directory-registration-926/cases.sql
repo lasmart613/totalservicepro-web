@@ -71,6 +71,13 @@ SET ROLE service_role;
 SELECT pg_temp.ok((public.directory_registration_step2(gen_random_uuid(), '{"contact_name":"Bot"}')->>'status')='received', 'honeypot decoy id: same received answer');
 RESET ROLE;
 SELECT pg_temp.ok(NOT EXISTS (SELECT 1 FROM public.directory_registrations WHERE details->>'contact_name'='Bot'), 'decoy step 2 wrote nothing');
+-- L-12: a decoy replay gets exactly what a real replay gets.
+CREATE TEMP TABLE l12 AS SELECT gen_random_uuid() AS d, (pg_temp.s1('L12 Real Co','service','l12@l12real.test',NULL,NULL,'ip-l12')->>'registration_id')::uuid AS r;
+SELECT pg_temp.ok((public.directory_registration_step2((SELECT d FROM l12), '{"contact_name":"Bot"}')->>'status')='received', 'L-12 decoy first use: received');
+SELECT pg_temp.ok((public.directory_registration_step2((SELECT r FROM l12), '{"contact_name":"Pat"}')->>'status')='received', 'L-12 real first use: received');
+SELECT pg_temp.ok(public.directory_registration_step2((SELECT d FROM l12), '{"contact_name":"Bot"}')
+                  = public.directory_registration_step2((SELECT r FROM l12), '{"contact_name":"Pat"}'), 'L-12 decoy replay = real replay (same jsonb)');
+SELECT pg_temp.ok(public.directory_registration_step2((SELECT d FROM l12), '{}') = '{"ok":false,"reason":"expired"}'::jsonb, 'L-12 replay answer is expired');
 SELECT pg_temp.cool();
 
 -- rate limits

@@ -4,9 +4,18 @@
 -- Refuses if a directory-review clinic owner invite was already CLAIMED: that
 -- row is the owner's proof under guard_clinic_owner_membership and has no
 -- service company, so service_organization_id cannot be NOT NULL again.
--- Open/expired/revoked directory-review invites are deleted.
--- Organizations rows created by sign-ups are NOT deleted, and approved ones
--- stay listed; review them by hand first.
+--
+-- Data effects (QA L-14), read before running:
+--   * Open, expired or revoked directory-review clinic owner invites are DELETED.
+--   * directory_listing_invites (open or not) are DROPPED with their table.
+--   * The organizations those invites were for are NOT changed: approved orgs
+--     stay listed (is_active = true, list_in_directory = true) with no way to
+--     claim them. This rollback does not unlist them; unlist by hand if wanted.
+--   * Organizations created by sign-ups (pending, unlisted) are NOT deleted.
+--   * clinic_claim_emails rows written at approval REMAIN (recorded_via
+--     'first_invite'); they are ordinary 000923 rows and stay valid.
+--   * directory_registrations, _attempts, _reviews and directory_form_tickets
+--     are dropped, so sign-up and review history is lost.
 SET LOCAL lock_timeout = '5s';
 
 DO $$

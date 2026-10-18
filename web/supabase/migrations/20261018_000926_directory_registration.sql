@@ -25,7 +25,12 @@
 --     (single use, under 2 hours, org still inactive/unlisted/non-premium,
 --     allow-listed columns only). Match: saves the fields on the
 --     registration only. Unknown id (the function's honeypot decoy): the
---     same 'received' answer, nothing written.
+--     same 'received' answer the first time and the same 'expired' refusal
+--     a real replay gets after that (its id is kept as a used ticket).
+--
+-- Housekeeping: expired rate-limit rows (older than 1 day) and used form
+-- tickets (older than 3 hours) are pruned inside step 1, i.e. only when the
+-- next sign-up arrives. No cron is needed; a quiet period just leaves them.
 --
 -- Text is NFKC-normalized and bidi/control characters (U+202A-202E,
 -- U+2066-2069, U+200E/F, C0 controls) are stripped before storing.
@@ -407,7 +412,14 @@ BEGIN
 
   SELECT x.organization_id INTO v_org_id FROM public.directory_registrations x WHERE x.id = p_registration_id;
   IF NOT FOUND THEN
-    -- Only signed tokens reach here, so an unknown id is the honeypot decoy. Same answer, nothing written.
+    -- Only signed tokens reach here, so an unknown id is the honeypot decoy. First use gets the same
+    -- answer as a real completion; a replay gets the same refusal a real replay gets (QA L-12).
+    -- The decoy id is remembered in directory_form_tickets (random uuid, no collision with ticket nonces).
+    INSERT INTO public.directory_form_tickets (nonce, used_at) VALUES (p_registration_id, pg_catalog.now())
+    ON CONFLICT (nonce) DO NOTHING;
+    IF NOT FOUND THEN
+      RETURN pg_catalog.jsonb_build_object('ok', false, 'reason', 'expired');
+    END IF;
     RETURN pg_catalog.jsonb_build_object('ok', true, 'status', 'received');
   END IF;
 
