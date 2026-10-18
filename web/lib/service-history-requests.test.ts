@@ -3,13 +3,16 @@ import test from 'node:test';
 import {
   HISTORY_REQUEST_EMAIL_PREF,
   classifyHistoryRequestError,
+  effectiveRequestStatus,
   historyEmailOn,
+  historyRequestErrorText,
   inboxAccess,
   isMissingRpcError,
   latestRequestByEquipment,
   listIncomingHistoryRequests,
   loadLockedTeaser,
   requestHistoryAccess,
+  requestIsCooling,
   requestStatusText,
   respondToHistoryRequest,
   withHistoryEmailPref,
@@ -119,4 +122,47 @@ test('incoming list reports an unavailable RPC distinctly', async () => {
   assert.equal(r.errorKind, 'unavailable');
   const f = new FakeClient(() => ({ data: null, error: { code: '42501', message: 'only an owner or admin of this facility can see its history requests' } }));
   assert.equal((await listIncomingHistoryRequests(f as any, 10)).errorKind, 'forbidden');
+});
+
+// 000925 follow-ups (QA live check of #314): panel status from an ACTIVE grant,
+// and a revoke cools down like a deny.
+test('panel: approved shows "Shared with you" only while a grant is active', () => {
+  const approved: any = { id: 1, equipment_id: 1, status: 'approved', expires_at: '2026-10-31', retry_after: null };
+  assert.equal(requestStatusText(effectiveRequestStatus(approved, true)), 'Shared with you');
+  const afterRevoke = effectiveRequestStatus(approved, false);
+  assert.equal(afterRevoke.status, 'revoked');
+  assert.doesNotMatch(requestStatusText(afterRevoke), /Shared with you/);
+  assert.equal(requestStatusText(afterRevoke), 'Access was revoked · you can ask again');
+  for (const st of ['pending', 'denied', 'expired', 'revoked'] as const) {
+    assert.equal(effectiveRequestStatus({ ...approved, status: st }, false).status, st);
+    assert.equal(effectiveRequestStatus({ ...approved, status: st }, true).status, st);
+  }
+  assert.equal(approved.status, 'approved', 'input is not mutated');
+});
+
+test('panel: revoked (from the 000925 RPC) is locked and cools down like a deny', () => {
+  const now = new Date('2026-10-18T16:00:00Z');
+  const revoked: any = { status: 'revoked', expires_at: '2026-10-31', retry_after: '2026-11-17T16:00:00Z' };
+  assert.equal(requestStatusText(revoked, now), 'Access was revoked · you can ask again after 2026-11-17');
+  assert.equal(requestIsCooling(revoked, now), true);
+  assert.equal(requestIsCooling({ ...revoked, retry_after: '2026-10-01T00:00:00Z' }, now), false);
+  assert.equal(requestStatusText({ ...revoked, retry_after: '2026-10-01T00:00:00Z' }, now), 'Access was revoked · you can ask again');
+  assert.equal(requestIsCooling({ status: 'denied', retry_after: '2026-11-17T16:00:00Z' }, now), true);
+  assert.equal(requestIsCooling({ status: 'approved', retry_after: '2026-11-17T16:00:00Z' }, now), false);
+  assert.equal(requestIsCooling({ status: 'expired', retry_after: '2026-11-17T16:00:00Z' }, now), false);
+  assert.equal(requestIsCooling({ status: 'pending', retry_after: null }, now), false);
+  assert.equal(requestIsCooling(null, now), false);
+  assert.equal(requestIsCooling({ status: 'revoked', retry_after: 'garbage' }, now), false);
+});
+
+test('re-request after a revoke gets the same request_cooldown error and text as a deny', () => {
+  const err = { code: 'P0001', message: 'request_cooldown', details: 'retry_after=2026-11-17T16:11:55Z' };
+  const c = classifyHistoryRequestError(err);
+  assert.deepEqual(c, { kind: 'cooldown', retryAfter: '2026-11-17T16:11:55Z' });
+  assert.equal(historyRequestErrorText(c.kind, c.retryAfter), 'The clinic declined recently. You can ask again after 2026-11-17.');
+});
+
+test('N-2 refusal maps to forbidden', () => {
+  const e = { code: '42501', message: 'only an owner or admin who has not been part of that service company in the last 30 days can share with it' };
+  assert.equal(classifyHistoryRequestError(e).kind, 'forbidden');
 });
