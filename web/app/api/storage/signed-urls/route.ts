@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { signImagePaths } from '@/lib/signed-image-urls';
+import { isPublicListingObject, listingPathOwner, publicListingObjectKeys } from '@/lib/public-listing-sign';
 import {
   isPrivateImageBucket,
   parseStoredStorageUrl,
@@ -36,10 +37,32 @@ export async function POST(req: NextRequest) {
     items.push({ url, width: itemWidth(row?.width), bucket: parsed.bucket, path: parsed.path });
   }
 
-  const serviceItems = items.filter((item) => serviceRoleSignable(item.bucket, item.path));
-  const memberItems = items.filter(
-    (item) => item.bucket === 'equipment-photos' && !serviceRoleSignable(item.bucket, item.path)
+  // Service role signs only photos of a public listing (referenced by an
+  // active listing's images/photos, under its seller's {uid}/listings/).
+  // Everything else is signed with the caller's JWT (storage RLS) or not at all.
+  const candidates = items.filter(
+    (item) => serviceRoleSignable(item.bucket, item.path) && listingPathOwner(item.path) != null
   );
+  let publicKeys = new Set<string>();
+  if (candidates.length && hasServiceRole()) {
+    const owners = [...new Set(candidates.map((item) => listingPathOwner(item.path) as string))];
+    try {
+      const admin = getSupabaseAdmin();
+      const list = owners.join(',');
+      const { data, error } = await admin
+        .from('marketplace_listings')
+        .select('status, seller_id, created_by, images, photos')
+        .or(`seller_id.in.(${list}),created_by.in.(${list})`)
+        .limit(500);
+      if (error) console.error('[signed-urls] listing lookup failed', error.message);
+      publicKeys = publicListingObjectKeys((data as any[]) || []);
+    } catch (err) {
+      console.error('[signed-urls] listing lookup failed', err);
+    }
+  }
+  const serviceItems = candidates.filter((item) => isPublicListingObject(publicKeys, item.bucket, item.path));
+  const serviceSet = new Set(serviceItems);
+  const memberItems = items.filter((item) => item.bucket === 'equipment-photos' && !serviceSet.has(item));
 
   const signedByPath = new Map<string, string>();
 
