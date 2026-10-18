@@ -176,23 +176,41 @@ export async function hashIp(secret: string, ip: string | null): Promise<string 
 const IPV4_RE = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/
 const IPV6_RE = /^[0-9a-f:]{2,39}$/i
 
+export const CLIENT_IP_SOURCES = ['cf-connecting-ip', 'x-forwarded-for-rightmost'] as const
+export type ClientIpSource = (typeof CLIENT_IP_SOURCES)[number]
+export const DEFAULT_CLIENT_IP_SOURCE: ClientIpSource = 'cf-connecting-ip'
+
 /**
- * Client IP for the per-IP rate limit (QA M-1).
- *
- * Supabase doesn't document a trusted client-IP header for Edge Functions.
- * Its gateway APPENDS the address it saw to X-Forwarded-For, so the leftmost
- * entries are whatever the caller sent and only the RIGHTMOST entry is set by
- * the platform. We use that one, and only if it's an IP literal.
- * CF-Connecting-IP, X-Real-IP and the leftmost XFF hop are ignored (they are
- * caller-controlled or undocumented). No usable IP -> null: the per-IP limit
- * is skipped and the per-email and global caps (in SQL) still apply, so
- * no-IP callers never share one bucket.
+ * Which header carries the client IP for the per-IP limit (QA M-1r).
+ * DIRECTORY_CLIENT_IP_HEADER = 'cf-connecting-ip' (default) or 'x-forwarded-for-rightmost'.
+ * Production edge logs show CF-Connecting-IP and X-Real-IP but no X-Forwarded-For.
+ * Supabase's edge sits behind Cloudflare, which overwrites any CF-Connecting-IP
+ * the caller sends, so it is the default. An unknown value falls back to the
+ * default (and is reported by the cold-start log).
  */
-export function clientIp(headers: Headers): string | null {
+export function clientIpSource(env: (k: string) => string | undefined): { source: ClientIpSource; invalid: string | null } {
+  const raw = String(env('DIRECTORY_CLIENT_IP_HEADER') || '').trim().toLowerCase()
+  if (!raw) return { source: DEFAULT_CLIENT_IP_SOURCE, invalid: null }
+  return (CLIENT_IP_SOURCES as readonly string[]).includes(raw)
+    ? { source: raw as ClientIpSource, invalid: null }
+    : { source: DEFAULT_CLIENT_IP_SOURCE, invalid: raw }
+}
+
+function ipLiteral(v: string): string | null {
+  const t = v.trim()
+  return IPV4_RE.test(t) || (IPV6_RE.test(t) && t.includes(':')) ? t.toLowerCase() : null
+}
+
+/**
+ * Client IP from the configured source only; every other header is ignored.
+ * No usable IP -> null: the per-IP limit is skipped and the per-email and
+ * global caps (in SQL) still apply, so no-IP callers never share one bucket.
+ */
+export function clientIp(headers: Headers, source: ClientIpSource = DEFAULT_CLIENT_IP_SOURCE): string | null {
+  if (source === 'cf-connecting-ip') return ipLiteral(headers.get('cf-connecting-ip') || '')
   const xff = headers.get('x-forwarded-for')
   if (!xff) return null
-  const last = xff.split(',').map((s) => s.trim()).filter(Boolean).pop() || ''
-  return IPV4_RE.test(last) || (IPV6_RE.test(last) && last.includes(':')) ? last.toLowerCase() : null
+  return ipLiteral(xff.split(',').map((x) => x.trim()).filter(Boolean).pop() || '')
 }
 
 // ---------- validation ----------
@@ -347,13 +365,13 @@ export function honeypotTripped(body: Record<string, unknown>): boolean {
 }
 
 /**
- * Turnstile is required when DIRECTORY_TURNSTILE_ENABLED is 'true' or '1'.
+ * Turnstile is required when DIRECTORY_TURNSTILE_ENABLED is true, 1 or yes (any case).
  * It fails closed: flag on with no TURNSTILE_SECRET_KEY, a missing/bad
  * token, a Cloudflare error or timeout all refuse step 1.
  */
 export function turnstileEnabled(env: (k: string) => string | undefined): boolean {
   const v = String(env('DIRECTORY_TURNSTILE_ENABLED') || '').trim().toLowerCase()
-  return v === 'true' || v === '1'
+  return v === 'true' || v === '1' || v === 'yes'
 }
 
 // ---------- review notice ----------
@@ -361,8 +379,29 @@ export function turnstileEnabled(env: (k: string) => string | undefined): boolea
 export const REVIEW_NOTICE_SUBJECT = 'New Medical Repair Network sign-up to review'
 export const DEFAULT_REVIEW_URL = 'https://repairplanet.net/admin/god/directory'
 export const DEFAULT_NOTICE_FROM = 'Medical Repair Network <contact@medicalrepairnetwork.com>'
-/** Never send directory notices to Larry's personal admin inbox. */
+/** Never send directory notices to Larry's personal admin inbox (compared on the email key). */
 export const FORBIDDEN_NOTICE_RECIPIENTS = ['larrysmart@gmail.com']
+
+/** Same key as SQL directory_email_key: NFKC, lowercase, +tag stripped, Gmail/Googlemail dots collapsed. */
+export function emailKey(v: string): string {
+  const e = v.normalize('NFKC').trim().toLowerCase()
+  const at = e.lastIndexOf('@')
+  if (at < 1) return e
+  let local = e.slice(0, at).split('+')[0]
+  let domain = e.slice(at + 1)
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    local = local.replace(/\./g, '')
+    domain = 'gmail.com'
+  }
+  return `${local}@${domain}`
+}
+
+/** Larry's inbox in any variant, plus DIRECTORY_BLOCKED_RECIPIENTS (comma list). */
+export function isBlockedRecipient(email: string, env: (k: string) => string | undefined): boolean {
+  const blocked = [...FORBIDDEN_NOTICE_RECIPIENTS, ...String(env('DIRECTORY_BLOCKED_RECIPIENTS') || '').split(',')]
+    .map((x) => x.trim()).filter(Boolean).map(emailKey)
+  return blocked.includes(emailKey(email))
+}
 
 export function escHtml(s: unknown): string {
   return String(s ?? '')
@@ -392,8 +431,8 @@ export type NoticePayload = {
 }
 
 export function reviewInbox(env: (k: string) => string | undefined): string | null {
-  const v = String(env('DIRECTORY_REVIEW_INBOX') || '').trim().toLowerCase()
-  if (!isValidEmail(v) || FORBIDDEN_NOTICE_RECIPIENTS.includes(v)) return null
+  const v = normalizeEmail(String(env('DIRECTORY_REVIEW_INBOX') || ''))
+  if (!isValidEmail(v) || isBlockedRecipient(v, env)) return null
   return v
 }
 

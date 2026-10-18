@@ -10,12 +10,16 @@
  * documented TEST secret keys (always-pass / always-fail).
  */
 import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
-import { handle } from '../functions/register-directory-org/handler.ts'
+import { handle, logConfigOnce, resetColdStart } from '../functions/register-directory-org/handler.ts'
 import {
   buildReviewNotice,
   checkFormTicket,
   checkStep2Token,
   clientIp,
+  clientIpSource,
+  emailKey,
+  isBlockedRecipient,
+  turnstileEnabled,
   cpLength,
   fieldError,
   issueFormTicket,
@@ -69,7 +73,7 @@ function stub(reply: (name: string, args: any) => any, calls: Call[] = []) {
 }
 
 function post(body: unknown, origin: string | null = ORIGIN, headers: Record<string, string> = {}) {
-  const h: Record<string, string> = { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.9', ...headers }
+  const h: Record<string, string> = { 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.9', ...headers }
   if (origin) h.origin = origin
   return new Request('http://fn.test/register-directory-org', { method: 'POST', headers: h, body: typeof body === 'string' ? body : JSON.stringify(body) })
 }
@@ -127,26 +131,57 @@ Deno.test('no secret configured -> 503, nothing called', async () => {
 
 // ---------- M-1: client IP ----------
 
-Deno.test('M-1: only the rightmost (platform-appended) X-Forwarded-For hop is used; spoofed headers ignored', () => {
+Deno.test('M-1r: default source is CF-Connecting-IP; XFF and X-Real-IP ignored', () => {
   const h = (o: Record<string, string>) => new Headers(o)
-  assertEquals(clientIp(h({ 'x-forwarded-for': '1.2.3.4, 198.51.100.7' })), '198.51.100.7')
-  assertEquals(clientIp(h({ 'x-forwarded-for': '9.9.9.9, 8.8.8.8 , 198.51.100.7' })), '198.51.100.7')
-  assertEquals(clientIp(h({ 'cf-connecting-ip': '1.1.1.1', 'x-real-ip': '2.2.2.2', 'x-forwarded-for': '198.51.100.7' })), '198.51.100.7')
-  assertEquals(clientIp(h({ 'cf-connecting-ip': '1.1.1.1', 'x-real-ip': '2.2.2.2' })), null)
-  assertEquals(clientIp(h({ 'x-forwarded-for': '198.51.100.7, unknown' })), null)
-  assertEquals(clientIp(h({ 'x-forwarded-for': '2001:DB8::1' })), '2001:db8::1')
-  assertEquals(clientIp(h({})), null)
+  assertEquals(clientIp(h({ 'cf-connecting-ip': '198.51.100.7', 'x-forwarded-for': '1.2.3.4', 'x-real-ip': '2.2.2.2' })), '198.51.100.7')
+  assertEquals(clientIp(h({ 'x-forwarded-for': '198.51.100.7', 'x-real-ip': '2.2.2.2' })), null)
+  assertEquals(clientIp(h({ 'cf-connecting-ip': 'unknown' })), null)
+  assertEquals(clientIp(h({ 'cf-connecting-ip': '2001:DB8::1' })), '2001:db8::1')
 })
 
-Deno.test('M-1: rotating the first XFF hop or CF-Connecting-IP gives the same IP hash', async () => {
-  const hashes = new Set<string>()
-  for (let i = 0; i < 6; i++) {
+Deno.test('M-1r: x-forwarded-for-rightmost option uses only the last hop', () => {
+  const h = (o: Record<string, string>) => new Headers(o)
+  const src = 'x-forwarded-for-rightmost' as const
+  assertEquals(clientIp(h({ 'x-forwarded-for': '1.2.3.4, 198.51.100.7' }), src), '198.51.100.7')
+  assertEquals(clientIp(h({ 'cf-connecting-ip': '1.1.1.1' }), src), null)
+  assertEquals(clientIp(h({ 'x-forwarded-for': '198.51.100.7, junk' }), src), null)
+})
+
+Deno.test('M-1r: DIRECTORY_CLIENT_IP_HEADER parsing', () => {
+  assertEquals(clientIpSource(env()), { source: 'cf-connecting-ip', invalid: null })
+  assertEquals(clientIpSource(env({ DIRECTORY_CLIENT_IP_HEADER: ' X-Forwarded-For-Rightmost ' })), { source: 'x-forwarded-for-rightmost', invalid: null })
+  assertEquals(clientIpSource(env({ DIRECTORY_CLIENT_IP_HEADER: 'x-real-ip' })), { source: 'cf-connecting-ip', invalid: 'x-real-ip' })
+})
+
+Deno.test('M-1r: handler hashes the configured header; spoofing the other header changes nothing', async () => {
+  const run = async (e: ReturnType<typeof env>, headers: Record<string, string>) => {
     const calls: Call[] = []
-    await handle(post({ ...START, ticket: await oldTicket() }, ORIGIN, { 'x-forwarded-for': `10.0.0.${i}, 198.51.100.7`, 'cf-connecting-ip': `203.0.113.${i}` }),
-      env(), stub(created, calls))
-    hashes.add(calls[0].body.p_ip_hash)
+    await handle(post({ ...START, ticket: await oldTicket() }, ORIGIN, headers), e, stub(created, calls))
+    return calls[0].body.p_ip_hash as string | null
   }
-  assertEquals(hashes.size, 1)
+  const cf = new Set<string | null>()
+  for (let i = 0; i < 4; i++) cf.add(await run(env(), { 'cf-connecting-ip': '198.51.100.7', 'x-forwarded-for': `10.0.0.${i}`, 'x-real-ip': `10.1.0.${i}` }))
+  assertEquals(cf.size, 1)
+  assert([...cf][0])
+  assertEquals(await run(env(), { 'cf-connecting-ip': '', 'x-forwarded-for': '198.51.100.7' }), null, 'default ignores XFF')
+  const xe = env({ DIRECTORY_CLIENT_IP_HEADER: 'x-forwarded-for-rightmost' })
+  const x = new Set<string | null>()
+  for (let i = 0; i < 4; i++) x.add(await run(xe, { 'x-forwarded-for': `10.0.0.${i}, 198.51.100.7`, 'cf-connecting-ip': `203.0.113.${i}` }))
+  assertEquals(x.size, 1)
+})
+
+Deno.test('M-1r/L-13: cold-start log names the header once, never an IP; warns on Turnstile without secret', () => {
+  resetColdStart()
+  const logs: string[] = [], warns: string[] = []
+  logConfigOnce(env({ DIRECTORY_TURNSTILE_ENABLED: 'YES' }), (m) => logs.push(m), (m) => warns.push(m))
+  logConfigOnce(env(), (m) => logs.push(m), (m) => warns.push(m))
+  assertEquals(logs, ['register-directory-org: client IP source header = cf-connecting-ip'])
+  assert(warns.some((w) => w.includes('TURNSTILE_SECRET_KEY is missing')))
+  assert(!/\d+\.\d+\.\d+\.\d+/.test(logs.join(' ') + warns.join(' ')))
+  resetColdStart()
+  const w2: string[] = []
+  logConfigOnce(env({ DIRECTORY_CLIENT_IP_HEADER: 'bogus', DIRECTORY_TURNSTILE_ENABLED: 'true', TURNSTILE_SECRET_KEY: 's' }), () => {}, (m) => w2.push(m))
+  assertEquals(w2, ['register-directory-org: unknown DIRECTORY_CLIENT_IP_HEADER value; using cf-connecting-ip'])
 })
 
 Deno.test('M-1: no IP -> p_ip_hash null (no shared "unknown" bucket)', async () => {
@@ -154,6 +189,11 @@ Deno.test('M-1: no IP -> p_ip_hash null (no shared "unknown" bucket)', async () 
   const req = new Request('http://fn.test', { method: 'POST', headers: { origin: ORIGIN, 'content-type': 'application/json' }, body: JSON.stringify({ ...START, ticket: await oldTicket() }) })
   assertEquals((await handle(req, env(), stub(created, calls))).status, 200)
   assertEquals(calls[0].body.p_ip_hash, null)
+})
+
+Deno.test('L-13: Turnstile flag true for true, 1, yes in any case; false otherwise', () => {
+  for (const v of ['true', 'TRUE', '1', 'yes', 'Yes', ' YES ']) assertEquals(turnstileEnabled(env({ DIRECTORY_TURNSTILE_ENABLED: v })), true, v)
+  for (const v of ['', '0', 'false', 'no', 'on', 'y']) assertEquals(turnstileEnabled(env({ DIRECTORY_TURNSTILE_ENABLED: v })), false, v)
 })
 
 // ---------- tickets (L-2) ----------
@@ -344,7 +384,7 @@ Deno.test('Turnstile on: no token, failed check, HTTP error, network error, bad 
 Deno.test('Turnstile on: a passing check proceeds; secret, token and rightmost IP are sent; off by default skips it', async () => {
   const calls: Call[] = []
   const on = env({ DIRECTORY_TURNSTILE_ENABLED: 'true', TURNSTILE_SECRET_KEY: TS_PASS_SECRET })
-  const r = await handle(post({ ...START, ticket: await oldTicket(), turnstile: TS_DUMMY_TOKEN }, ORIGIN, { 'x-forwarded-for': '6.6.6.6, 198.51.100.7' }), on,
+  const r = await handle(post({ ...START, ticket: await oldTicket(), turnstile: TS_DUMMY_TOKEN }, ORIGIN, { 'cf-connecting-ip': '198.51.100.7', 'x-forwarded-for': '6.6.6.6' }), on,
     stub((n) => (n === 'turnstile' ? { success: true } : created()), calls))
   assertEquals(r.status, 200)
   assertEquals(calls[0].body, { secret: TS_PASS_SECRET, response: TS_DUMMY_TOKEN, remoteip: '198.51.100.7' })
@@ -405,6 +445,29 @@ Deno.test('step 2: DB refusal (used/expired) -> 400 restart', async () => {
   const r = await handle(post({ action: 'complete', token, contact_name: 'Pat Lee' }), env(), stub(() => ({ ok: false, reason: 'expired' })))
   assertEquals(r.status, 400)
   assertEquals((await r.json()).restart, true)
+})
+
+Deno.test('L-12: replaying a honeypot decoy token gets exactly what a real replay gets', async () => {
+  const replay = { ok: false, reason: 'expired' }
+  const decoy = (await (await handle(post({ ...START, ticket: await oldTicket(), company_url: 'x' }), env(), stub(() => ({})))).json()).token
+  const real = await issueStep2Token(SECRET, RID)
+  const out: [number, string][] = []
+  for (const token of [decoy, real]) {
+    const r = await handle(post({ action: 'complete', token, contact_name: 'Pat Lee' }), env(), stub(() => replay))
+    out.push([r.status, await r.text()])
+  }
+  assertEquals(out[0], out[1])
+  assertEquals(out[0][0], 400)
+})
+
+Deno.test('L-11: notice inbox blocked on the email key (Larry variants) and DIRECTORY_BLOCKED_RECIPIENTS', () => {
+  for (const v of ['larrysmart@gmail.com', 'Larry.Smart@gmail.com', 'larry.smart+mrn@googlemail.com', 'ｌａｒｒｙ.smart@gmail.com']) {
+    assertEquals(reviewInbox(env({ DIRECTORY_REVIEW_INBOX: v })), null, v)
+  }
+  assertEquals(reviewInbox(env({ DIRECTORY_REVIEW_INBOX: 'ops+mrn@corp.test', DIRECTORY_BLOCKED_RECIPIENTS: 'x@y.test, OPS@corp.test' })), null)
+  assertEquals(reviewInbox(env({ DIRECTORY_REVIEW_INBOX: 'FieldserviceTotalService@gmail.com' })), 'fieldservicetotalservice@gmail.com')
+  assertEquals(emailKey('A.B+x@GoogleMail.com'), 'ab@gmail.com')
+  assertEquals(isBlockedRecipient('larry.smart@example.com', env()), false)
 })
 
 // ---------- review notice ----------
@@ -496,7 +559,7 @@ Deno.test({ name: 'e2e: start + complete creates one pending unlisted org; token
   const fx = pgFetch(DB!)
   const name = `E2E Co ${crypto.randomUUID().slice(0, 8)}`
   const ticket = await oldTicket()
-  const r1 = await handle(post({ ...START, name, email: `a@${name.slice(7)}.example`, ticket }, ORIGIN, { 'x-forwarded-for': `198.51.100.${Math.floor(Math.random() * 200)}` }), env(), fx)
+  const r1 = await handle(post({ ...START, name, email: `a@${name.slice(7)}.example`, ticket }, ORIGIN, { 'cf-connecting-ip': `198.51.100.${Math.floor(Math.random() * 200)}` }), env(), fx)
   const j1 = await r1.json()
   assertEquals(j1.status, 'created')
   const again = await handle(post({ ...START, name: name + ' 2', email: `b@${name.slice(7)}.example`, ticket }), env(), fx)
@@ -512,7 +575,7 @@ Deno.test({ name: 'e2e M-2: known company -> same created reply, no org; step 2 
   const fx = pgFetch(DB!)
   const before = await q(DB!, 'select count(*) from organizations')
   const email = `zz${crypto.randomUUID().slice(0, 6)}@acmelaser.com`
-  const r = await handle(post({ ...START, name: 'Acme Laser Service', email, ticket: await oldTicket() }, ORIGIN, { 'x-forwarded-for': '192.0.2.77' }), env(), fx)
+  const r = await handle(post({ ...START, name: 'Acme Laser Service', email, ticket: await oldTicket() }, ORIGIN, { 'cf-connecting-ip': '192.0.2.77' }), env(), fx)
   const j = await r.json()
   assertEquals(Object.keys(j).sort(), ['ok', 'status', 'token'])
   assertEquals(j.status, 'created')

@@ -2,6 +2,7 @@ import {
   checkFormTicket,
   checkStep2Token,
   clientIp,
+  clientIpSource,
   corsHeadersFor,
   hashIp,
   honeypotTripped,
@@ -90,6 +91,23 @@ async function turnstileOk(env: Env, fx: Fetch, token: unknown, ip: string | nul
   }
 }
 
+let coldStartLogged = false
+/** Once per cold start: which IP header is used (never an IP) and Turnstile config problems. */
+export function logConfigOnce(env: Env, log: (m: string) => void = console.log, warn: (m: string) => void = console.warn): void {
+  if (coldStartLogged) return
+  coldStartLogged = true
+  const ip = clientIpSource(env)
+  log(`register-directory-org: client IP source header = ${ip.source}`)
+  if (ip.invalid) warn(`register-directory-org: unknown DIRECTORY_CLIENT_IP_HEADER value; using ${ip.source}`)
+  if (turnstileEnabled(env) && !env('TURNSTILE_SECRET_KEY')) {
+    warn('register-directory-org: DIRECTORY_TURNSTILE_ENABLED is on but TURNSTILE_SECRET_KEY is missing; every sign-up will be refused')
+  }
+}
+/** Tests only. */
+export function resetColdStart(): void {
+  coldStartLogged = false
+}
+
 export type Deps = { sleep?: (ms: number) => Promise<void>; now?: () => number; random?: () => number }
 
 /**
@@ -100,6 +118,7 @@ export type Deps = { sleep?: (ms: number) => Promise<void>; now?: () => number; 
  *      -> { ok, status: 'received' }
  */
 export async function handle(req: Request, env: Env, fx: Fetch = fetch, deps: Deps = {}): Promise<Response> {
+  logConfigOnce(env)
   const allowed = parseAllowedOrigins(env('DIRECTORY_ALLOWED_ORIGINS'))
   const origin = req.headers.get('origin')
   const cors = corsHeadersFor(origin, allowed)
@@ -128,7 +147,7 @@ export async function handle(req: Request, env: Env, fx: Fetch = fetch, deps: De
     return json(400, { ok: false, error: 'Invalid request.' }, cors)
   }
 
-  const ip = clientIp(req.headers)
+  const ip = clientIp(req.headers, clientIpSource(env).source)
   const now = deps.now ?? (() => Date.now())
   const started = now()
   const minMs = Number(env('DIRECTORY_MIN_RESPONSE_MS') ?? DEFAULT_MIN_RESPONSE_MS)

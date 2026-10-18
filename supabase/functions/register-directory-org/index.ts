@@ -10,8 +10,10 @@
  * Secrets (supabase secrets set ...):
  *   DIRECTORY_FORM_SECRET        required, 32+ random chars (HMAC for form tickets, step-2 tokens, IP hashes)
  *   DIRECTORY_ALLOWED_ORIGINS    comma list, e.g. https://medicalrepairnetwork.com,https://www.medicalrepairnetwork.com,https://medicalrepairnetwork.netlify.app
- *   DIRECTORY_TURNSTILE_ENABLED  'true' (or '1') to require Cloudflare Turnstile. REQUIRED for public launch. Fails closed.
+ *   DIRECTORY_TURNSTILE_ENABLED  true / 1 / yes (any case) to require Cloudflare Turnstile. REQUIRED for public launch. Fails closed.
  *   TURNSTILE_SECRET_KEY         set by CEO; with the flag on and no secret, step 1 is refused
+ *   DIRECTORY_CLIENT_IP_HEADER   'cf-connecting-ip' (default) or 'x-forwarded-for-rightmost'
+ *   DIRECTORY_BLOCKED_RECIPIENTS optional comma list never emailed (Larry's inbox is always blocked)
  *   DIRECTORY_MIN_RESPONSE_MS    optional, default 450 (step-1 answers are padded to this + up to 150 ms jitter)
  *   RESEND_API_KEY               review notice (same key the app uses)
  *   DIRECTORY_REVIEW_INBOX       review notice recipient (no default; unset = no notice)
