@@ -380,6 +380,8 @@ export function buildCustomerInviteHtml(opts: {
   signupUrl: string;
   loginUrl: string;
   theme?: CompanyTheme | null;
+  /** Directory approval (000926 directory_review invites only): "listing is now live" intro. */
+  directoryListing?: boolean;
 }): string {
   const company = esc(opts.companyName || 'your clinic');
   const greet = opts.contactName?.trim()
@@ -431,9 +433,11 @@ export function buildCustomerInviteHtml(opts: {
             <td style="padding:8px 28px 24px;">
               <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#c4c7cc;">${greet}</p>
               <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#c4c7cc;">
-                ${fromWho}
+                ${opts.directoryListing
+                  ? `<strong style="color:#f1f3f4;">${company}</strong>'s listing is now live in the Medical Repair Network directory. Create a free account to manage it.`
+                  : `${fromWho}
                 <strong style="color:#f1f3f4;">${company}</strong>
-                to RepairPlanet so your clinic has a home for service work — not another spreadsheet.
+                to RepairPlanet so your clinic has a home for service work — not another spreadsheet.`}
               </p>
               <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#c4c7cc;">
                 Create a <strong style="color:#f1f3f4;">free account</strong> and claim this company profile. Then you can keep track of and view:
@@ -488,6 +492,7 @@ export function buildCustomerInviteText(opts: {
   serviceCompanyName?: string | null;
   signupUrl: string;
   loginUrl: string;
+  directoryListing?: boolean;
 }): string {
   const company = opts.companyName || 'your clinic';
   const greet = opts.contactName?.trim() ? `Hi ${opts.contactName.trim()},` : `Hello ${company} team,`;
@@ -497,7 +502,9 @@ export function buildCustomerInviteText(opts: {
   return [
     greet,
     '',
-    `${fromWho} ${company} to RepairPlanet (Total Service Pro).`,
+    opts.directoryListing
+      ? `${company}'s listing is now live in the Medical Repair Network directory. Create a free account to manage it.`
+      : `${fromWho} ${company} to RepairPlanet (Total Service Pro).`,
     '',
     'Create a free account to claim this company profile and keep track of:',
     '• Laser service history',

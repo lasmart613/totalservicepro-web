@@ -3,15 +3,17 @@ import test from 'node:test';
 import { NextRequest, NextResponse } from 'next/server';
 import { runDirectoryReview, runDirectoryReviewList } from './directory-review-api.ts';
 import { runDirectoryClaim } from './directory-claim-api.ts';
-import { openCustomerInvite } from './customer-invite.ts';
+import { buildCustomerInviteHtml, buildCustomerInviteText, openCustomerInvite } from './customer-invite.ts';
 import {
   buildListingInviteEmail,
+  directoryEmailKey,
   isForbiddenDirectoryRecipient,
   signDirectoryListingInvite,
   verifyDirectoryListingInvite,
 } from './directory-review.ts';
 
 process.env.CUSTOMER_INVITE_SECRET = 'test-secret-'.padEnd(48, 'x');
+process.env.DIRECTORY_INVITE_SECRET = 'dir-invite-secret-'.padEnd(48, 'y');
 const RID = '6f1c2a5e-4b7d-4c1e-9a0b-1234567890ab';
 const INV = '3f0c9d2e-8a1b-4c3d-9e8f-0a1b2c3d4e5f';
 const god = async () => ({ ok: true as const, caller: { userId: 'aaaaaaaa-0000-0000-0000-00000000a001', email: 'ceo@example.test' } });
@@ -99,6 +101,65 @@ test('approve clinic: 000923 invite emailed through the existing /signup/owner c
     assert.equal(opened.payload.inv, INV);
     assert.equal(opened.payload.orgId, '88');
     assert.equal(opened.payload.email, 'lima@derm.test');
+  }
+  // copy nit: directory approvals say the listing is live, not "added X to RepairPlanet"
+  assert.match(h.mails[0].html, /listing is now live in the Medical Repair Network directory/);
+  assert.match(h.mails[0].text, /Lima Derm's listing is now live in the Medical Repair Network directory/);
+  assert.doesNotMatch(h.mails[0].html + h.mails[0].text, /added/);
+});
+
+test('copy nit: shop-issued customer invite copy is unchanged', () => {
+  const opts = { companyName: 'Lima Derm', serviceCompanyName: 'Acme Laser', signupUrl: 'https://r/s', loginUrl: 'https://r/l' };
+  assert.match(buildCustomerInviteText(opts), /Acme Laser added Lima Derm to RepairPlanet \(Total Service Pro\)\./);
+  assert.match(buildCustomerInviteHtml(opts), /added\s+<strong[^>]*>Lima Derm<\/strong>\s+to RepairPlanet/);
+  assert.doesNotMatch(buildCustomerInviteHtml(opts), /listing is now live/);
+});
+
+test('L-11: Larry block on the normalized key, plus DIRECTORY_BLOCKED_RECIPIENTS', () => {
+  for (const e of ['larrysmart@gmail.com', 'Larry.Smart@gmail.com', 'larry.smart+mrn@googlemail.com', ' L.A.R.R.Y.S.M.A.R.T@GMAIL.COM ', 'ｌａｒｒｙｓｍａｒｔ@gmail.com']) {
+    assert.equal(isForbiddenDirectoryRecipient(e, ''), true, e);
+  }
+  assert.equal(isForbiddenDirectoryRecipient('larry.smart@example.com', ''), false);
+  assert.equal(isForbiddenDirectoryRecipient('ops+x@corp.test', 'Ops@corp.test, other@x.test'), true);
+  assert.equal(directoryEmailKey('A.B+tag@GoogleMail.com'), 'ab@gmail.com');
+});
+
+test('L-11: invite to a blocked variant or a listed address is not sent', async () => {
+  process.env.DIRECTORY_BLOCKED_RECIPIENTS = 'blocked@corp.test';
+  try {
+    for (const to of ['larry.smart+x@gmail.com', 'Blocked+1@corp.test']) {
+      const h = harness({ ok: true, status: 'approved', already: false, invite_kind: 'listing', invite_id: INV, invite_email: to, organization_id: 1 });
+      const r = await runDirectoryReview(req({ registration_id: RID, decision: 'approve' }), h.deps);
+      assert.equal((await r.json()).email_skipped, 'forbidden_recipient');
+      assert.equal(h.mails.length, 0);
+    }
+  } finally {
+    delete process.env.DIRECTORY_BLOCKED_RECIPIENTS;
+  }
+});
+
+test('L-15: listing invites need DIRECTORY_INVITE_SECRET (32+), never the service-role key', async () => {
+  const saved = process.env.DIRECTORY_INVITE_SECRET;
+  const savedSr = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    process.env.SUPABASE_SERVICE_ROLE_KEY = 'service-role-'.padEnd(64, 'z');
+    for (const v of [undefined, 'short']) {
+      if (v === undefined) delete process.env.DIRECTORY_INVITE_SECRET; else process.env.DIRECTORY_INVITE_SECRET = v;
+      assert.throws(() => signDirectoryListingInvite({ inv: INV, org: '1', email: 'a@b.test' }));
+      const h = harness({ ok: true, status: 'approved', already: false, invite_kind: 'listing', invite_id: INV, invite_email: 'a@b.test', organization_id: 1 });
+      const r = await runDirectoryReview(req({ registration_id: RID, decision: 'approve' }), h.deps);
+      assert.equal((await r.json()).email_skipped, 'signing_not_configured');
+      assert.equal(h.mails.length, 0);
+    }
+    process.env.DIRECTORY_INVITE_SECRET = saved;
+    const tok = signDirectoryListingInvite({ inv: INV, org: '1', email: 'a@b.test' });
+    process.env.DIRECTORY_INVITE_SECRET = 'other-'.padEnd(40, 'q');
+    assert.equal(verifyDirectoryListingInvite(tok), null, 'a token signed with another secret fails');
+    delete process.env.DIRECTORY_INVITE_SECRET;
+    assert.equal(verifyDirectoryListingInvite(tok), null, 'missing secret fails closed');
+  } finally {
+    process.env.DIRECTORY_INVITE_SECRET = saved;
+    if (savedSr === undefined) delete process.env.SUPABASE_SERVICE_ROLE_KEY; else process.env.SUPABASE_SERVICE_ROLE_KEY = savedSr;
   }
 });
 

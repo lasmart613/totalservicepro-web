@@ -124,8 +124,8 @@ export async function runDirectoryReview(req: NextRequest, deps: DirectoryReview
       mail = {
         to: [to],
         subject: customerInviteSubject(company),
-        html: buildCustomerInviteHtml({ companyName: company, contactName: contact, serviceCompanyName: 'Medical Repair Network', signupUrl, loginUrl }),
-        text: buildCustomerInviteText({ companyName: company, contactName: contact, serviceCompanyName: 'Medical Repair Network', signupUrl, loginUrl }),
+        html: buildCustomerInviteHtml({ companyName: company, contactName: contact, serviceCompanyName: 'Medical Repair Network', signupUrl, loginUrl, directoryListing: true }),
+        text: buildCustomerInviteText({ companyName: company, contactName: contact, serviceCompanyName: 'Medical Repair Network', signupUrl, loginUrl, directoryListing: true }),
       };
     } else {
       const token = signDirectoryListingInvite({ inv: inviteId, org: String(r.organization_id), email: to });

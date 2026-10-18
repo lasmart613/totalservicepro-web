@@ -36,9 +36,25 @@ export function escHtml(s: unknown): string {
     .replace(/'/g, '&#39;');
 }
 
-export function isForbiddenDirectoryRecipient(email: string | null | undefined): boolean {
-  const e = String(email || '').trim().toLowerCase();
-  return DIRECTORY_FORBIDDEN_RECIPIENTS.includes(e);
+/** Same key as SQL directory_email_key: NFKC, lowercase, +tag stripped, Gmail/Googlemail dots collapsed. */
+export function directoryEmailKey(email: string | null | undefined): string {
+  const e = String(email || '').normalize('NFKC').trim().toLowerCase();
+  const at = e.lastIndexOf('@');
+  if (at < 1) return e;
+  let local = e.slice(0, at).split('+')[0];
+  let domain = e.slice(at + 1);
+  if (domain === 'gmail.com' || domain === 'googlemail.com') {
+    local = local.replace(/\./g, '');
+    domain = 'gmail.com';
+  }
+  return `${local}@${domain}`;
+}
+
+/** Larry's personal inbox (any +tag / dot / googlemail variant) plus DIRECTORY_BLOCKED_RECIPIENTS (comma list). */
+export function isForbiddenDirectoryRecipient(email: string | null | undefined, extra = process.env.DIRECTORY_BLOCKED_RECIPIENTS): boolean {
+  const key = directoryEmailKey(email);
+  const blocked = [...DIRECTORY_FORBIDDEN_RECIPIENTS, ...String(extra || '').split(',')].map((x) => x.trim()).filter(Boolean).map(directoryEmailKey);
+  return blocked.includes(key);
 }
 
 export type ReviewDecision = 'approve' | 'reject';
@@ -53,8 +69,11 @@ export function isRegistrationId(v: unknown): v is string {
 
 type ListingPayload = { inv: string; org: string; email: string; exp: number };
 
+/** Own secret only (QA L-15): no fallback to the service-role or customer-invite key. Fails closed. */
+export const DIRECTORY_INVITE_SECRET_MIN = 32;
 function listingSecret(): string | null {
-  return process.env.CUSTOMER_INVITE_SECRET || process.env.SUPABASE_SERVICE_ROLE_KEY || null;
+  const s = process.env.DIRECTORY_INVITE_SECRET || '';
+  return s.length >= DIRECTORY_INVITE_SECRET_MIN ? s : null;
 }
 
 function sig(secret: string, body: string): string {
