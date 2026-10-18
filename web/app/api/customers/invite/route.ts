@@ -46,9 +46,10 @@ import { getCompanyTheme } from '@/lib/company-theme';
 /**
  * GET /api/customers/invite?token=
  * Public preview for the owner signup form (company name + email only).
- * The token email must still be the clinic's current reach email
- * (same emailsMatch rule as POST /api/customers/claim). A mismatch is
- * invalid and does not include the clinic's current address.
+ * The token must name an open invite row, and its email must be the clinic's
+ * email of record (clinic_claim_emails, 000924 L-4), the same authority
+ * claim_clinic_owner_invite uses. A mismatch is invalid and never includes
+ * the recorded address.
  */
 export async function GET(req: NextRequest) {
   return runCustomerInvitePreview(req);
@@ -111,13 +112,19 @@ export async function runCustomerInvitePreview(
     return NextResponse.json({ valid: false, error: 'Invite link is invalid or expired.' }, { status: 200 });
   }
 
-  const sources = await fetchDirectoryContactSources(reader, org.id);
-  const currentEmail = pickCrmReachEmail({
-    directoryContacts: sources.directoryContacts,
-    contactRows: sources.contactRows,
-    officeEmail: sources.officeEmail ?? (org as { email?: string | null }).email,
-  }).email;
-  if (!emailsMatch(currentEmail, payload.email)) {
+  // L-4 (000924): the invite must be for the clinic's email of record (the
+  // database's authority, fixed by the first invite), not whatever the CRM's
+  // main email is right now.
+  const { data: record, error: recordErr } = await reader
+    .from('clinic_claim_emails')
+    .select('email')
+    .eq('customer_organization_id', org.id)
+    .maybeSingle();
+  if (recordErr) {
+    return NextResponse.json({ valid: false, error: 'Invite could not be checked.' }, { status: 200 });
+  }
+  const recordEmail = (record as { email?: string | null } | null)?.email ?? null;
+  if (!recordEmail || !emailsMatch(recordEmail, payload.email) || !emailsMatch(recordEmail, inviteRow.email)) {
     return NextResponse.json(
       {
         valid: false,
