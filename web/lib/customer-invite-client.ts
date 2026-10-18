@@ -13,6 +13,8 @@ export type CustomerInviteSendResult = {
   skipped?: 'no_email' | 'invalid_email' | 'not_configured' | string;
   to?: string | null;
   error?: string;
+  /** e.g. not_shop_admin, confirm_required, email_of_record_differs (000923). */
+  code?: string;
 };
 
 export const CLAIM_SIGNUP_ORG_BLOCKED = CLAIM_REFUSED_MESSAGE;
@@ -132,6 +134,7 @@ export async function sendCustomerInviteEmail(
     skipped: json.skipped,
     to: json.to ?? null,
     error: json.error,
+    code: json.code,
   };
 }
 
