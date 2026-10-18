@@ -729,7 +729,11 @@ test('one home migration, rollback, and Tony oneoff stay data-safe', () => {
   );
   const founder = readFileSync(join(here, '../app/api/org/founder/route.ts'), 'utf8');
   const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
-  const customer = readFileSync(join(here, '../app/api/customers/claim/route.ts'), 'utf8');
+  // 000923: the clinic claim seats the owner inside claim_clinic_owner_invite.
+  const customer = readFileSync(
+    join(here, '../supabase/migrations/20261017_000923_clinic_claim_invite_binding.sql'),
+    'utf8'
+  );
 
   const firstSql = (sql: string) =>
     sql
@@ -805,7 +809,5 @@ test('one home migration, rollback, and Tony oneoff stay data-safe', () => {
   assert.match(founder, /syncProfile:\s*true/);
   assert.match(onboarding, /is_home:\s*true/);
   assert.match(onboarding, /ensureOrganizationMembership/);
-  assert.match(customer, /set_home_membership/);
-  assert.match(customer, /p_role:\s*'owner'/);
-  assert.match(customer, /p_sync_profile:\s*true/);
+  assert.match(customer, /PERFORM public\.set_home_membership\(p_user_id, v_org\.id, 'owner', true\)/);
 });
