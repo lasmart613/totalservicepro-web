@@ -118,7 +118,9 @@ test('M-1: 000922 redefines grant_service_history with the dual-member guard; ro
   // up = live body + exactly the guard block.
   const guard = /  -- M-1 \(000922\)[\s\S]*?-- I-2 \(000922\)[\s\S]*?END IF;\n/.exec(grantBody(up))?.[0] || '';
   assert.ok(guard);
-  assert.equal(grantBody(up).replace(guard, ''), grantBody(down));
+  const lock = /  -- N-1 \(000922\)[\s\S]*?pg_advisory_xact_lock\([^;]*;\n/.exec(grantBody(up))?.[0] || '';
+  assert.ok(lock.includes("'tsp.history_grantor:' || uid::text"));
+  assert.equal(grantBody(up).replace(lock, '').replace(guard, ''), grantBody(down));
   assert.ok(up.includes(LIVE_GRANT_MD5) && down.includes(LIVE_GRANT_MD5));
   assert.match(code(up), /REVOKE ALL ON FUNCTION public\.grant_service_history\(bigint, bigint, bigint\) FROM PUBLIC, anon;/);
   assert.match(code(down), /REVOKE ALL ON FUNCTION public\.grant_service_history\(bigint, bigint, bigint\) FROM PUBLIC, anon;/);
@@ -161,4 +163,13 @@ test('L-A: membership trigger revokes the joiner\'s grants to that shop; rollbac
   for (const t of ['L-A re-join (UPDATE into L)', 'L-A owner joins L (INSERT', 'I-1 dual member cannot DENY', 'I-2 direct grant_service_history to a blocked shop', 'I-3 tech whose C ticket is Completed but future-dated']) {
     assert.ok(proof.includes(t), t);
   }
+});
+
+test('N-1: grant and revoke trigger share the per-user advisory lock key', () => {
+  const u = code(up);
+  assert.match(u, /pg_advisory_xact_lock\(pg_catalog\.hashtextextended\('tsp\.history_grantor:' \|\| uid::text, 0\)\)/);
+  assert.match(u, /pg_advisory_xact_lock\(pg_catalog\.hashtextextended\('tsp\.history_grantor:' \|\| NEW\.user_id::text, 0\)\);\s+UPDATE public\.service_history_grants g/);
+  const race = readFileSync(join(here, '../supabase/tests/race/000922_race.sh'), 'utf8');
+  for (const o of ['grant_first', 'join_first']) assert.ok(race.includes(o), o);
+  assert.match(race, /active grants by the joiner" "\$\(active\)" 0/);
 });

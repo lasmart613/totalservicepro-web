@@ -59,6 +59,19 @@ END $$;
 --   I-1  A dual member can neither approve NOR deny its own shop's request,
 --        and is not an owner recipient of its own shop's request notice.
 --   I-2  grant_service_history refuses a shop the clinic has blocked.
+--   N-1  (rev 3) grant_service_history and the revoke trigger take the same
+--        per-user advisory xact lock, hashtextextended('tsp.history_grantor:'
+--        || user uuid, 0), before reading, so a grant and a join of the same
+--        user in two sessions serialize: either M-1 sees the committed
+--        membership, or the trigger's UPDATE sees the committed grant.
+--        Lock order vs 000923: the join path takes 000923's
+--        'tsp.clinic_owner:<org>' (BEFORE trigger) and then this lock (AFTER
+--        trigger); no path takes this lock and then 'tsp.clinic_owner', and
+--        grant/respond never write memberships, so no deadlock cycle.
+--        Not done: auto-revoking grants when the clinic blocks a shop.
+--        000921's remove_linked_service_shop(p_block, p_revoke_grants) makes
+--        that the owner's explicit choice; new grants to a blocked shop are
+--        refused (I-2).
 --   I-3  A Completed/Closed ticket keeps a tech eligible only while its
 --        service date (or creation date when unset) lies within the last 90
 --        days and not in the future; updated_at no longer counts.
@@ -758,6 +771,10 @@ BEGIN
   IF uid IS NULL THEN
     RAISE EXCEPTION 'not signed in' USING ERRCODE = '42501';
   END IF;
+  -- N-1 (000922): serialize with trg_revoke_conflicted_history_grants for the
+  -- same user (key tsp.history_grantor:<uid>), so a concurrent join is seen
+  -- by the M-1 check below, or revokes this grant after it commits.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tsp.history_grantor:' || uid::text, 0));
   IF p_owner_org IS NULL OR p_grantee_shop IS NULL THEN
     RAISE EXCEPTION 'owner and service company are required' USING ERRCODE = '22023';
   END IF;
@@ -1018,6 +1035,9 @@ BEGIN
      AND NEW.organization_id IS NOT DISTINCT FROM OLD.organization_id THEN
     RETURN NULL;
   END IF;
+  -- N-1: same key as grant_service_history. Taken before the UPDATE, so the
+  -- UPDATE's snapshot includes a grant committed while we waited.
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tsp.history_grantor:' || NEW.user_id::text, 0));
   UPDATE public.service_history_grants g
      SET revoked_at = greatest(now(), g.granted_at), revoked_by = NEW.user_id
    WHERE g.grantee_shop_org_id = NEW.organization_id
