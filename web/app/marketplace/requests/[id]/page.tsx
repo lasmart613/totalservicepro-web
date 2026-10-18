@@ -17,6 +17,7 @@ import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 import { displayModelName } from '@/lib/model-display';
+import { formatDisplayDay } from '@/lib/i18n/format-date';
 
 function money(n: number | null | undefined) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -407,7 +408,7 @@ export default function ServiceRequestDetail() {
                   <span className="font-medium text-[var(--text)]">{request.urgency || '—'}</span>
                 </span>
                 {request.preferred_date && (
-                  <span>Preferred: {new Date(request.preferred_date).toLocaleDateString()}</span>
+                  <span>Preferred: {formatDisplayDay(request.preferred_date)}</span>
                 )}
                 {regionLabel && (
                   <span>
@@ -606,7 +607,7 @@ export default function ServiceRequestDetail() {
                           <div className="text-xs text-[var(--text3)] mt-1">
                             Status: {b.status || 'pending'}
                             {b.proposed_date
-                              ? ` · Proposed: ${new Date(b.proposed_date).toLocaleDateString()}`
+                              ? ` · Proposed: ${formatDisplayDay(b.proposed_date)}`
                               : ''}
                           </div>
                           {b.notes && <p className="text-sm mt-2">{b.notes}</p>}
