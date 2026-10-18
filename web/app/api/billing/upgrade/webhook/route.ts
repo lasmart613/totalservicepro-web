@@ -28,8 +28,10 @@ export const dynamic = 'force-dynamic';
 /**
  * Stripe → org upgrade when success_url is missed, and back to Free when
  * the subscription is deleted or updated to canceled, unpaid, or
- * incomplete_expired. past_due stays Premium. invoice.payment_failed is
- * logged and does not change the plan. checkout.session.completed applies
+ * incomplete_expired. past_due stays Premium. invoice.payment_failed
+ * retrieves the subscription and downgrades only when it is already
+ * canceled, unpaid, or incomplete_expired; otherwise (past_due included) it
+ * is logged and does not change the plan. checkout.session.completed applies
  * only while the subscription is active or trialing. A later cancel, or a
  * completed event that arrives after customer.subscription.deleted, does
  * not put Premium back.

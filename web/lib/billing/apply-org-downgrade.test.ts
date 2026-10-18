@@ -791,3 +791,113 @@ test('upgrade webhook wires the downgrade events to the subscription list', () =
   assert.match(src, /applyBillingSubscriptionEvent/);
   assert.match(src, /applyPaidCheckoutSession/);
 });
+
+const FAILED_INVOICE = { id: 'in_failed', customer: 'cus_paid', subscription: 'sub_paid', attempt_count: 4 };
+
+async function quietly<T>(fn: () => Promise<T>): Promise<T> {
+  const original = console.info;
+  console.info = () => {};
+  try {
+    return await fn();
+  } finally {
+    console.info = original;
+  }
+}
+
+test('invoice.payment_failed downgrades when the retrieved subscription is unpaid, canceled, or incomplete_expired', async () => {
+  for (const status of ['unpaid', 'canceled', 'incomplete_expired']) {
+    const state = billingState();
+    const { result, listCalls } = await quietly(() =>
+      runEvent(state, 'invoice.payment_failed', status, [], { object: FAILED_INVOICE })
+    );
+    assert.equal(result.httpStatus, 200, status);
+    assert.equal(result.body.downgraded, true, status);
+    assert.equal(result.body.plan, 'free', status);
+    assert.equal(result.body.organizationId, '42', status);
+    assert.equal(result.body.trigger, 'invoice.payment_failed', status);
+    assert.equal(result.body.status, status, status);
+    assert.equal(result.body.attemptCount, 4, status);
+    assert.deepEqual(listCalls, ['cus_paid'], status);
+    assertFree(state.orgs[0], state.orgWrites.at(-1));
+    assert.equal(state.subs[0].status, status === 'canceled' ? 'cancelled' : 'expired', status);
+    assert.equal(state.subs[0].tier, 'free', status);
+  }
+});
+
+test('invoice.payment_failed leaves past_due (grace), active, trialing and incomplete on Premium with no write', async () => {
+  for (const status of ['past_due', 'active', 'trialing', 'incomplete']) {
+    const state = billingState();
+    const { result, listCalls } = await quietly(() =>
+      runEvent(state, 'invoice.payment_failed', status, [], { object: FAILED_INVOICE })
+    );
+    assert.equal(result.httpStatus, 200, status);
+    assert.equal(result.body.downgraded, false, status);
+    assert.equal(result.body.logged, true, status);
+    assert.deepEqual(listCalls, [], status);
+    assert.equal(state.orgWrites.length, 0, status);
+    assert.equal(state.subscriptionWrites.length, 0, status);
+    assert.equal(state.orgs[0].is_premium, true, status);
+    assert.equal(state.subs[0].status, 'active', status);
+  }
+});
+
+test('invoice.payment_failed keeps every downgrade guard: live subscription, complimentary, unanchored', async () => {
+  const live = billingState();
+  const kept = await quietly(() =>
+    runEvent(live, 'invoice.payment_failed', 'unpaid', [{ id: 'sub_other', status: 'active' }], { object: FAILED_INVOICE })
+  );
+  assert.equal(kept.result.body.downgraded, undefined);
+  assert.equal(kept.result.body.ignored, 'live_subscription_remains');
+  assert.equal(live.orgWrites.length, 0);
+
+  const comp = billingState();
+  comp.orgs[0].premium_grant = 'complimentary_god';
+  const compResult = await quietly(() =>
+    runEvent(comp, 'invoice.payment_failed', 'canceled', [], { object: FAILED_INVOICE })
+  );
+  assert.equal(compResult.result.body.ignored, 'complimentary');
+  assert.equal(comp.orgWrites.length, 0);
+
+  const loose = billingState();
+  loose.subs = [];
+  loose.memberships = [];
+  const looseResult = await quietly(() =>
+    runEvent(loose, 'invoice.payment_failed', 'unpaid', [], { object: FAILED_INVOICE })
+  );
+  assert.equal(looseResult.result.body.ignored, 'not_a_member');
+  assert.equal(loose.orgWrites.length, 0);
+});
+
+test('invoice.payment_failed with no subscription is logged only; a failed retrieve throws so Stripe retries', async () => {
+  const state = billingState();
+  const noSub = await quietly(() =>
+    runEvent(state, 'invoice.payment_failed', 'unpaid', [], { object: { id: 'in_one_off', customer: 'cus_paid' } })
+  );
+  assert.equal(noSub.result.body.downgraded, false);
+  assert.equal(noSub.result.body.subscriptionId, null);
+  assert.equal(state.orgWrites.length, 0);
+
+  await assert.rejects(
+    applyBillingSubscriptionEvent({
+      writer: writerFor(state) as never,
+      event: { type: 'invoice.payment_failed', data: { object: FAILED_INVOICE } },
+      retrieveSubscription: async () => {
+        throw new Error('stripe unavailable');
+      },
+      listLiveSubscriptions: async () => [],
+    }),
+    /stripe unavailable/
+  );
+  assert.equal(state.orgWrites.length, 0);
+});
+
+test('past_due grace behaviour is unchanged by the payment_failed backstop', async () => {
+  const state = billingState();
+  const { result } = await runEvent(state, 'customer.subscription.updated', 'past_due', []);
+  assert.equal(result.body.downgraded, false);
+  assert.equal(state.subs[0].status, 'grace_period');
+  assert.equal(state.orgs[0].is_premium, true);
+  const src = readFileSync(join(here, './apply-org-downgrade.ts'), 'utf8');
+  assert.match(src, /const SUBSCRIPTION_DOWNGRADE_STATUSES = new Set\(\['canceled', 'unpaid', 'incomplete_expired'\]\);/);
+  assert.doesNotMatch(src, /past_due_grace_days|PAST_DUE_MAX/i);
+});
