@@ -1,14 +1,20 @@
 /**
  * Turn a Stripe-paid organization back to Free when the subscription is
- * actually over. The first failed renewal stays on Premium so Stripe can retry.
+ * actually over. A failed renewal stays on Premium for 14 days so Stripe can
+ * retry.
  *
- * Downgrade only on customer.subscription.deleted, and on
+ * Downgrade on customer.subscription.deleted, and on
  * customer.subscription.updated when the retrieved status is canceled,
- * unpaid, or incomplete_expired. past_due does not change the plan.
+ * unpaid, or incomplete_expired. past_due keeps Premium until the
+ * subscription has been past_due for 14 days (subscriptions.past_due_since,
+ * migration 000928; see past-due.ts), then downgrades exactly like unpaid.
  * invoice.payment_failed retrieves the subscription: canceled, unpaid, or
  * incomplete_expired downgrades exactly like the events above (a backstop
- * when the updated/deleted event is missed or not subscribed). Any other
- * status, including past_due, is logged and returns 200 with no plan write.
+ * when the updated/deleted event is missed or not subscribed); past_due
+ * records the grace status and applies the same 14-day check. Any other
+ * status is logged and returns 200 with no plan write. The hourly
+ * past-due-downgrade scheduled function covers past_due subscriptions that
+ * get no further Stripe events.
  *
  * Complimentary and manual Premium are not Stripe subscriptions and are
  * never written here:
@@ -36,9 +42,17 @@
  */
 
 const SUBSCRIPTION_DOWNGRADE_STATUSES = new Set(['canceled', 'unpaid', 'incomplete_expired']);
+/** Stripe status whose 14-day clock can downgrade (past-due.ts). */
+const PAST_DUE_STATUS = 'past_due';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isComplimentaryGrant } from '../complimentary-premium.ts';
+import {
+  pastDueDays,
+  pastDueDowngradeDisabled,
+  pastDueDowngradeDue,
+  readPastDueSince,
+} from './past-due.ts';
 import type { OrgPlanFields } from '../org-plan.ts';
 import { loadOrgPlanRow } from '../org-plan-load.ts';
 import { applyPaidSubscriptionRecord } from './apply-org-upgrade.ts';
@@ -264,7 +278,7 @@ async function orgStripeAnchors(
   return { customerIds: [...customerIds], subscriptionIds: [...subscriptionIds] };
 }
 
-async function writeSubscriptionLedgerStatus(
+export async function writeSubscriptionLedgerStatus(
   writer: SupabaseClient,
   subscriptionId: string,
   stripeStatus: string,
@@ -442,24 +456,106 @@ async function orgStillHasLiveStripeSubscription(input: {
   return false;
 }
 
-function subscriptionStatusEndsPremium(status: unknown): boolean {
+export function subscriptionStatusEndsPremium(status: unknown): boolean {
   return SUBSCRIPTION_DOWNGRADE_STATUSES.has(String(status || '').trim().toLowerCase());
 }
 
-function keptPremium(status: string): BillingEventResult {
+function keptPremium(status: string, pastDue?: PastDueCheck | null): BillingEventResult {
+  const body: Record<string, unknown> = { ok: true, handled: true, downgraded: false, status };
+  if (pastDue) {
+    body.pastDueSince = pastDue.pastDueSince;
+    body.pastDueDays = pastDue.pastDueDays;
+    body.pastDueKept = pastDue.reason || 'past_due_grace';
+  }
+  return { httpStatus: 200, body };
+}
+
+export type PastDueCheck = {
+  downgraded: boolean;
+  organizationId?: string | null;
+  reason?: string;
+  pastDueSince: string | null;
+  pastDueDays: number | null;
+};
+
+function isPastDueStatus(status: unknown): boolean {
+  return String(status || '').trim().toLowerCase() === PAST_DUE_STATUS;
+}
+
+/**
+ * 14-day past_due rule. Call after the ledger row has been written as
+ * grace_period (the 000928 trigger has then started or kept the clock).
+ * Before day 14, with no stored clock, or with PAST_DUE_DOWNGRADE_DISABLED=1
+ * nothing is written. From day 14 the org is downgraded through
+ * applyStripePremiumDowngrade, the same path as unpaid: complimentary,
+ * unanchored and still-live-elsewhere orgs are refused there.
+ */
+export async function applyPastDueDowngradeIfDue(input: {
+  writer: SupabaseClient;
+  subscription: StripeSubscriptionLike & StripeObject;
+  listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
+  retrieveSubscription?: (subscriptionId: string) => Promise<StripeObject>;
+  retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
+  now?: Date;
+}): Promise<PastDueCheck> {
+  const subscriptionId =
+    typeof input.subscription.id === 'string' && input.subscription.id.startsWith('sub_')
+      ? input.subscription.id
+      : null;
+  const none = { pastDueSince: null, pastDueDays: null };
+  if (!subscriptionId) return { downgraded: false, reason: 'missing_subscription_id', ...none };
+  if (!isPastDueStatus(input.subscription.status)) return { downgraded: false, reason: 'not_past_due', ...none };
+  if (pastDueDowngradeDisabled()) return { downgraded: false, reason: 'past_due_downgrade_disabled', ...none };
+
+  const now = input.now || new Date();
+  const pastDueSince = await readPastDueSince(input.writer, subscriptionId);
+  const days = pastDueDays(pastDueSince, now);
+  if (!pastDueSince) return { downgraded: false, reason: 'no_past_due_clock', ...none };
+  if (!pastDueDowngradeDue(pastDueSince, now)) {
+    return { downgraded: false, reason: 'past_due_grace', pastDueSince, pastDueDays: days };
+  }
+
+  const result = await applyStripePremiumDowngrade({
+    writer: input.writer,
+    subscription: input.subscription,
+    listLiveSubscriptions: input.listLiveSubscriptions,
+    retrieveSubscription: input.retrieveSubscription,
+    retrieveCustomer: input.retrieveCustomer,
+  });
+  console.info('[billing] past_due 14-day check', {
+    subscriptionId,
+    organizationId: result.organizationId ?? null,
+    pastDueSince,
+    pastDueDays: days,
+    downgraded: result.downgraded,
+    reason: result.reason ?? null,
+  });
+  return { ...result, pastDueSince, pastDueDays: days };
+}
+
+function pastDueDowngradeBody(check: PastDueCheck, extra: Record<string, unknown> = {}): BillingEventResult {
+  const body = downgradeBody(check);
   return {
-    httpStatus: 200,
-    body: { ok: true, handled: true, downgraded: false, status },
+    httpStatus: body.httpStatus,
+    body: {
+      ...body.body,
+      reason: 'past_due_14_days',
+      pastDueSince: check.pastDueSince,
+      pastDueDays: check.pastDueDays,
+      ...extra,
+    },
   };
 }
 
 /**
  * customer.subscription.created/updated/deleted and invoice.payment_failed.
- * Active and trialing still upgrade. Deleted, and updated to canceled,
- * unpaid, or incomplete_expired, downgrade unless another live subscription
- * remains. invoice.payment_failed downgrades only when the retrieved
- * subscription is already canceled, unpaid, or incomplete_expired.
- * past_due never changes the plan.
+ * Active and trialing still upgrade (this is also how a past_due or unpaid
+ * downgrade recovers). Deleted, and updated to canceled, unpaid, or
+ * incomplete_expired, downgrade unless another live subscription remains.
+ * invoice.payment_failed downgrades when the retrieved subscription is
+ * already canceled, unpaid, or incomplete_expired. past_due (either event)
+ * records grace_period and downgrades only once it has been past_due for 14
+ * days (applyPastDueDowngradeIfDue).
  */
 export async function applyBillingSubscriptionEvent(input: {
   writer: SupabaseClient;
@@ -467,7 +563,10 @@ export async function applyBillingSubscriptionEvent(input: {
   retrieveSubscription: (subscriptionId: string) => Promise<StripeObject>;
   listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
   retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
+  /** Clock for the 14-day past_due check (tests). Defaults to the current time. */
+  now?: () => Date;
 }): Promise<BillingEventResult> {
+  const now = input.now ? input.now() : new Date();
   if (isInvoicePaymentFailed(input.event.type)) {
     const invoice = stripeWebhookObject(input.event);
     const subId = subscriptionIdFromInvoice(invoice);
@@ -511,7 +610,7 @@ export async function applyBillingSubscriptionEvent(input: {
         // The subscription itself is already over (unpaid, canceled or
         // incomplete_expired). Same anchoring, complimentary and
         // live-subscription guards as customer.subscription.deleted.
-        // past_due never reaches this branch.
+        // past_due never reaches this branch (see the 14-day check below).
         const result = await applyStripePremiumDowngrade({
           writer: input.writer,
           subscription,
@@ -543,9 +642,56 @@ export async function applyBillingSubscriptionEvent(input: {
       } catch (err) {
         console.warn('[billing] invoice.payment_failed lookup skipped', err);
       }
+      if (isPastDueStatus(status)) {
+        // past_due: record grace (starts or keeps the 000928 clock), then the
+        // 14-day rule. Before day 14 this stays Premium and is only logged.
+        await writeSubscriptionLedgerStatus(input.writer, subId, PAST_DUE_STATUS);
+        const check = await applyPastDueDowngradeIfDue({
+          writer: input.writer,
+          subscription,
+          listLiveSubscriptions: input.listLiveSubscriptions,
+          retrieveSubscription: input.retrieveSubscription,
+          retrieveCustomer: input.retrieveCustomer,
+          now,
+        });
+        if (check.downgraded) {
+          console.info('[billing] invoice.payment_failed', {
+            organizationId: check.organizationId ?? null,
+            subscriptionId: subId,
+            attemptCount,
+            status,
+            downgraded: true,
+          });
+          return pastDueDowngradeBody(check, {
+            trigger: 'invoice.payment_failed',
+            status,
+            subscriptionId: subId,
+            attemptCount,
+          });
+        }
+        console.info('[billing] invoice.payment_failed', {
+          organizationId,
+          subscriptionId,
+          attemptCount,
+        });
+        return {
+          httpStatus: 200,
+          body: {
+            ok: true,
+            handled: true,
+            logged: true,
+            downgraded: false,
+            organizationId,
+            subscriptionId,
+            attemptCount,
+            pastDueSince: check.pastDueSince,
+            pastDueDays: check.pastDueDays,
+            pastDueKept: check.reason || 'past_due_grace',
+          },
+        };
+      }
     }
-    // Any other status (active, past_due, trialing, incomplete): logged only.
-    // The past_due grace period is unchanged.
+    // Any other status (active, trialing, incomplete): logged only.
     console.info('[billing] invoice.payment_failed', {
       organizationId,
       subscriptionId,
@@ -597,7 +743,19 @@ export async function applyBillingSubscriptionEvent(input: {
     input.event.type === 'customer.subscription.updated' && subscriptionStatusEndsPremium(status);
   if (!deleted && !ended) {
     if (ledgerStatusForStripe(status) === 'grace_period' && subId) {
+      // past_due: the grace write starts (or keeps) the 000928 clock; from
+      // day 14 the org is downgraded the same way as unpaid.
       await writeSubscriptionLedgerStatus(input.writer, subId, status);
+      const check = await applyPastDueDowngradeIfDue({
+        writer: input.writer,
+        subscription,
+        listLiveSubscriptions: input.listLiveSubscriptions,
+        retrieveSubscription: input.retrieveSubscription,
+        retrieveCustomer: input.retrieveCustomer,
+        now,
+      });
+      if (check.downgraded) return pastDueDowngradeBody(check, { status });
+      return keptPremium(status, check);
     }
     return keptPremium(status || 'unknown');
   }
