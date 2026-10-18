@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { notifyOwnersOfRequest, notifyShopOfResponse, type RequestNotice } from './history-request-notify.ts';
-import { historyRequestHtml, historyRequestText, sendResendEmail } from './history-request-email.ts';
+import { historyApprovedSubject, historyRequestHtml, historyRequestSubject, historyRequestText, safeOrgName, sendResendEmail } from './history-request-email.ts';
 import { notificationClickPath } from './notification-link.ts';
 
 function notice(over: Partial<RequestNotice> = {}): RequestNotice {
@@ -83,7 +83,8 @@ test('new request: owners/admins notified in-app; email only to members who allo
   assert.equal(state.notifications[0].message, 'Shop L asked to see the earlier service history of Candela GentleMax (SN SN-1) (4 reports).');
   assert.equal(sent.length, 1);
   assert.equal(sent[0].to, 'c1@clinic.test');
-  assert.match(sent[0].subject, /^Shop L is asking to see your laser's service history$/);
+  assert.equal(sent[0].subject, 'A service company asked to see your laser’s service history');
+  assert.ok(sent[0].text.includes('Shop L asked'));
   assert.ok(sent[0].text.includes('https://repairplanet.net/my-lasers/history-requests?r=7'));
   assert.equal(state.updates.length, 1);
   assert.equal(notificationClickPath(state.notifications[0].link, 'general', 'https://repairplanet.net'), '/my-lasers/history-requests?r=7');
@@ -164,4 +165,16 @@ test('Resend sender: needs a key and a valid address', async () => {
   assert.deepEqual(body.to, ['a@b.co']);
   if (prev === undefined) delete process.env.RESEND_API_KEY;
   else process.env.RESEND_API_KEY = prev;
+});
+
+test('L-5: subjects carry no org-controlled text; names in bodies are cleaned and capped', () => {
+  const evil = 'Account suspended \u202E call 555-0100 now https://evil.test/x ' + 'A'.repeat(200);
+  const copy = { shopName: evil, clinicName: evil, laser: 'GentleMax', url: 'https://x.test/' };
+  assert.ok(!historyRequestSubject(copy).includes('suspended'));
+  assert.ok(!historyApprovedSubject(copy).includes('suspended'));
+  const n = safeOrgName(evil, 'A service company');
+  assert.ok(n.length <= 60);
+  assert.ok(!n.includes('\u202E') && !n.includes('evil.test') && !n.includes('https'));
+  assert.equal(safeOrgName('   ', 'A service company'), 'A service company');
+  assert.ok(historyRequestText(copy).split('\n').every((l) => !l.includes('evil.test')));
 });

@@ -4,6 +4,8 @@ import {
   HISTORY_REQUEST_EMAIL_PREF,
   classifyHistoryRequestError,
   historyEmailOn,
+  inboxAccess,
+  isMissingRpcError,
   latestRequestByEquipment,
   listIncomingHistoryRequests,
   loadLockedTeaser,
@@ -30,7 +32,8 @@ test('classify: messages set by 000922 map to stable kinds', () => {
   assert.equal(classifyHistoryRequestError({ code: '42501', message: 'not available for this laser' }).kind, 'forbidden');
   assert.equal(classifyHistoryRequestError({ code: '22023', message: 'request is no longer open' }).kind, 'not_open');
   assert.equal(classifyHistoryRequestError({ code: '22023', message: 'no locked history on this laser' }).kind, 'nothing_to_request');
-  assert.equal(classifyHistoryRequestError({ code: '42883', message: 'function does not exist' }).kind, 'error');
+  assert.equal(classifyHistoryRequestError({ code: '42883', message: 'function does not exist' }).kind, 'unavailable');
+  assert.equal(classifyHistoryRequestError({ code: 'XX000', message: 'boom' }).kind, 'error');
 });
 
 test('teaser: maps rows, never passes anything but owner + laser', async () => {
@@ -93,4 +96,27 @@ test('latest request per laser and status text', () => {
   assert.equal(m.get(1)?.id, 3);
   assert.match(requestStatusText(m.get(1)!), /ask again after 2026-11-16/);
   assert.match(requestStatusText(m.get(2)!), /expires 2026-10-31/);
+});
+
+test('missing RPC (000922 not applied) classifies as unavailable', () => {
+  assert.equal(classifyHistoryRequestError({ code: 'PGRST202', message: 'Could not find the function public.x' }).kind, 'unavailable');
+  assert.equal(classifyHistoryRequestError({ code: '42883', message: 'function does not exist' }).kind, 'unavailable');
+  assert.equal(isMissingRpcError({ code: '42501' }), false);
+  assert.equal(classifyHistoryRequestError({ code: '42501', message: 'only an owner or admin who is not part of the requesting company can approve' }).kind, 'forbidden');
+});
+
+test('inbox access (L-4): shop users, staff and org-less users never get the inbox', () => {
+  assert.equal(inboxAccess(null, null, null), 'no_org');
+  assert.equal(inboxAccess(1, 'service_company', 'company_admin'), 'not_clinic');
+  assert.equal(inboxAccess(10, 'customer', 'staff'), 'not_admin');
+  assert.equal(inboxAccess(10, 'laser_clinic', ' Manager '), 'owner');
+  assert.equal(inboxAccess(10, 'customer', 'owner'), 'owner');
+});
+
+test('incoming list reports an unavailable RPC distinctly', async () => {
+  const c = new FakeClient(() => ({ data: null, error: { code: 'PGRST202', message: 'Could not find the function' } }));
+  const r = await listIncomingHistoryRequests(c as any, 10);
+  assert.equal(r.errorKind, 'unavailable');
+  const f = new FakeClient(() => ({ data: null, error: { code: '42501', message: 'only an owner or admin of this facility can see its history requests' } }));
+  assert.equal((await listIncomingHistoryRequests(f as any, 10)).errorKind, 'forbidden');
 });
