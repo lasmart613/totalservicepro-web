@@ -50,7 +50,7 @@ import {
   stripeWebhookObject,
   type StripeWebhookEventLike,
 } from './stripe-webhook.ts';
-import type { StripeObject } from './stripe-subscription.ts';
+import { isStripeResourceMissing, type StripeObject } from './stripe-subscription.ts';
 import {
   normalizeOrgId,
   orgFreePlanFields,
@@ -476,9 +476,32 @@ export async function applyBillingSubscriptionEvent(input: {
     let subscriptionId: string | null = subId;
     let status: string | null = null;
     if (subId) {
-      // A failed retrieve throws so the webhook answers 5xx and Stripe retries
-      // this event; the handler is idempotent.
-      const subscription = await input.retrieveSubscription(subId);
+      // A transient failed retrieve throws so the webhook answers non-2xx and
+      // Stripe retries this event; the handler is idempotent. A permanent
+      // "No such subscription" (404 resource_missing: deleted, or another
+      // mode's id) is logged and answered 200 so Stripe stops retrying.
+      let subscription: StripeObject;
+      try {
+        subscription = await input.retrieveSubscription(subId);
+      } catch (err) {
+        if (!isStripeResourceMissing(err)) throw err;
+        console.warn('[billing] invoice.payment_failed subscription missing in Stripe', {
+          subscriptionId: subId,
+          attemptCount,
+        });
+        return {
+          httpStatus: 200,
+          body: {
+            ok: true,
+            handled: true,
+            logged: true,
+            downgraded: false,
+            ignored: 'subscription_missing',
+            subscriptionId: subId,
+            attemptCount,
+          },
+        };
+      }
       if (!customerIdOf(subscription.customer) && invoice) {
         const fromInvoice = customerIdOf(invoice.customer);
         if (fromInvoice) subscription.customer = fromInvoice;
