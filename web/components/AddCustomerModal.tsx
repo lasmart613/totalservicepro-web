@@ -63,6 +63,9 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName
           const invite = await sendCustomerInviteEmail(access, created.id);
           if (invite.emailed) {
             toast.success(`Customer added. Invite sent to ${invite.to || emailOnFile}.`);
+          } else if (invite.code === 'not_shop_admin') {
+            // 000923: only a shop owner, company_admin or admin sends the clinic owner invite.
+            toast.success('Customer added. Ask a shop owner or admin to send the clinic owner invite.');
           } else {
             toast.success(
               `Customer added. Invite was not sent${invite.error ? `: ${invite.error}` : '.'}`

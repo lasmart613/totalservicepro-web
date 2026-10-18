@@ -5,7 +5,10 @@
  * Downgrade only on customer.subscription.deleted, and on
  * customer.subscription.updated when the retrieved status is canceled,
  * unpaid, or incomplete_expired. past_due does not change the plan.
- * invoice.payment_failed is logged and returns 200 with no plan write.
+ * invoice.payment_failed retrieves the subscription: canceled, unpaid, or
+ * incomplete_expired downgrades exactly like the events above (a backstop
+ * when the updated/deleted event is missed or not subscribed). Any other
+ * status, including past_due, is logged and returns 200 with no plan write.
  *
  * Complimentary and manual Premium are not Stripe subscriptions and are
  * never written here:
@@ -383,7 +386,7 @@ export async function applyStripePremiumDowngrade(input: {
   }
   const organizationId = linked.organizationId;
 
-  const org = await loadOrgPlanRow(input.writer, organizationId);
+  const org = await loadOrgPlanRow(input.writer as unknown as Parameters<typeof loadOrgPlanRow>[0], organizationId);
   if (!org) return { downgraded: false, reason: 'missing_org' };
   if (stripeDowngradeBlockedByComplimentary(org)) {
     return { downgraded: false, organizationId, reason: 'complimentary' };
@@ -454,7 +457,9 @@ function keptPremium(status: string): BillingEventResult {
  * customer.subscription.created/updated/deleted and invoice.payment_failed.
  * Active and trialing still upgrade. Deleted, and updated to canceled,
  * unpaid, or incomplete_expired, downgrade unless another live subscription
- * remains. past_due and a failed invoice do not change the plan.
+ * remains. invoice.payment_failed downgrades only when the retrieved
+ * subscription is already canceled, unpaid, or incomplete_expired.
+ * past_due never changes the plan.
  */
 export async function applyBillingSubscriptionEvent(input: {
   writer: SupabaseClient;
@@ -469,13 +474,42 @@ export async function applyBillingSubscriptionEvent(input: {
     const attemptCount = attemptCountFromInvoice(invoice);
     let organizationId: string | null = null;
     let subscriptionId: string | null = subId;
+    let status: string | null = null;
     if (subId) {
+      // A failed retrieve throws so the webhook answers 5xx and Stripe retries
+      // this event; the handler is idempotent.
+      const subscription = await input.retrieveSubscription(subId);
+      if (!customerIdOf(subscription.customer) && invoice) {
+        const fromInvoice = customerIdOf(invoice.customer);
+        if (fromInvoice) subscription.customer = fromInvoice;
+      }
+      status = typeof subscription.status === 'string' ? subscription.status : null;
+      if (subscriptionStatusEndsPremium(status)) {
+        // The subscription itself is already over (unpaid, canceled or
+        // incomplete_expired). Same anchoring, complimentary and
+        // live-subscription guards as customer.subscription.deleted.
+        // past_due never reaches this branch.
+        const result = await applyStripePremiumDowngrade({
+          writer: input.writer,
+          subscription,
+          listLiveSubscriptions: input.listLiveSubscriptions,
+          retrieveSubscription: input.retrieveSubscription,
+          retrieveCustomer: input.retrieveCustomer,
+        });
+        console.info('[billing] invoice.payment_failed', {
+          organizationId: result.organizationId ?? null,
+          subscriptionId: subId,
+          attemptCount,
+          status,
+          downgraded: result.downgraded,
+        });
+        const body = downgradeBody(result);
+        return {
+          httpStatus: body.httpStatus,
+          body: { ...body.body, trigger: 'invoice.payment_failed', status, subscriptionId: subId, attemptCount },
+        };
+      }
       try {
-        const subscription = await input.retrieveSubscription(subId);
-        if (!customerIdOf(subscription.customer) && invoice) {
-          const fromInvoice = customerIdOf(invoice.customer);
-          if (fromInvoice) subscription.customer = fromInvoice;
-        }
         const linked = await lookupStripeOrganization({
           writer: input.writer,
           subscription,
@@ -487,6 +521,8 @@ export async function applyBillingSubscriptionEvent(input: {
         console.warn('[billing] invoice.payment_failed lookup skipped', err);
       }
     }
+    // Any other status (active, past_due, trialing, incomplete): logged only.
+    // The past_due grace period is unchanged.
     console.info('[billing] invoice.payment_failed', {
       organizationId,
       subscriptionId,

@@ -160,6 +160,23 @@ export function canAddCustomers(role?: RoleLike, orgType?: OrgTypeLike): boolean
   return isServiceCompany(role, orgType) || normalizeOrgType(orgType) === 'service_company';
 }
 
+/**
+ * Membership roles that may send a clinic its owner invite (000923).
+ * Mirrors public.issue_clinic_owner_invite, which is the authority.
+ */
+export const CLINIC_OWNER_INVITE_ROLES = ['owner', 'company_admin', 'admin'] as const;
+
+/**
+ * Send the owner invite for a clinic the shop added (Customer Directory).
+ * Shop admins only: owner, company_admin or admin membership on a service
+ * company. Other staff can still add and edit customers (canAddCustomers).
+ */
+export function canSendClinicOwnerInvite(membershipRole?: RoleLike, orgType?: OrgTypeLike): boolean {
+  const r = normalizeRole(membershipRole);
+  if (!(CLINIC_OWNER_INVITE_ROLES as readonly string[]).includes(r)) return false;
+  return isServiceOrgType(orgType);
+}
+
 /** Company / facility / supplier profile access */
 export function canAccessCompanyProfile(role?: RoleLike): boolean {
   const r = normalizeRole(role);

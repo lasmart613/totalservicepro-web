@@ -104,7 +104,11 @@ export function isSubscriptionDeleted(type: string | null | undefined): boolean 
   return type === 'customer.subscription.deleted';
 }
 
-/** Logged only. A failed renewal does not turn Premium off; Stripe retries first. */
+/**
+ * A failed renewal alone does not turn Premium off (past_due grace; Stripe retries).
+ * The handler downgrades only if the retrieved subscription is already
+ * canceled, unpaid, or incomplete_expired.
+ */
 export function isInvoicePaymentFailed(type: string | null | undefined): boolean {
   return type === 'invoice.payment_failed';
 }

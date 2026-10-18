@@ -15,7 +15,18 @@ export type CustomerInvitePayload = {
   email: string;
   name: string;
   exp: number;
+  /**
+   * public.clinic_owner_invites.id (000923). The claim is bound to that row:
+   * a token without it (signed before 000923) can no longer be claimed.
+   */
+  inv?: string;
 };
+
+const INVITE_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isClinicInviteId(value: unknown): value is string {
+  return typeof value === 'string' && INVITE_ID_RE.test(value);
+}
 
 export function isValidCustomerEmail(email: string): boolean {
   const e = String(email || '').trim();
@@ -44,6 +55,10 @@ export function signCustomerInvite(payload: Omit<CustomerInvitePayload, 'exp'>, 
     name: payload.name.trim(),
     exp: Math.floor(Date.now() / 1000) + ttlSec,
   };
+  if (payload.inv != null) {
+    if (!isClinicInviteId(payload.inv)) throw new Error('Invalid clinic invite id');
+    body.inv = payload.inv.toLowerCase();
+  }
   const encoded = Buffer.from(JSON.stringify(body), 'utf8').toString('base64url');
   const sig = createHmac('sha256', secret).update(encoded).digest('base64url');
   return `${encoded}.${sig}`;
@@ -93,15 +108,15 @@ export function openCustomerInvite(
     if (!parsed?.orgId || !parsed?.email || !parsed?.exp) return { ok: false, reason: 'token_invalid' };
     if (!isValidCustomerEmail(parsed.email)) return { ok: false, reason: 'token_invalid' };
     if (parsed.exp < Math.floor(Date.now() / 1000)) return { ok: false, reason: 'token_expired' };
-    return {
-      ok: true,
-      payload: {
-        orgId: String(parsed.orgId),
-        email: String(parsed.email).trim().toLowerCase(),
-        name: String(parsed.name || '').trim(),
-        exp: Number(parsed.exp),
-      },
+    if (parsed.inv != null && !isClinicInviteId(parsed.inv)) return { ok: false, reason: 'token_invalid' };
+    const out: CustomerInvitePayload = {
+      orgId: String(parsed.orgId),
+      email: String(parsed.email).trim().toLowerCase(),
+      name: String(parsed.name || '').trim(),
+      exp: Number(parsed.exp),
     };
+    if (parsed.inv != null) out.inv = String(parsed.inv).toLowerCase();
+    return { ok: true, payload: out };
   } catch {
     return { ok: false, reason: 'token_invalid' };
   }

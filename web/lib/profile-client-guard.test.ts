@@ -151,7 +151,6 @@ test('user_profiles pointer writes stay equal or on the service role', () => {
   }
   flagged.sort();
   assert.deepEqual(flagged, [
-    'app/api/customers/claim/route.ts',
     'app/api/org/leave/route.ts',
     'lib/org-membership-server.ts',
     'lib/team-profile.ts',
@@ -175,11 +174,12 @@ test('user_profiles pointer writes stay equal or on the service role', () => {
   assert.match(serviceLeave, /organization_id: null,\s+active_organization_id: null,/);
   assert.match(leave, /rpc\('leave_organization'/);
 
+  // 000923: the claim writes no profile itself; claim_clinic_owner_invite does it.
   const claim = read('app/api/customers/claim/route.ts');
   const readyAt = claim.indexOf('if (!serviceRoleReady())');
-  const writeAt = claim.indexOf(".from('user_profiles').upsert");
-  assert.ok(readyAt >= 0 && writeAt > readyAt);
-  assert.match(claim, /rpc\('set_home_membership'/);
+  const rpcAt = claim.indexOf("rpc('claim_clinic_owner_invite'");
+  assert.ok(readyAt >= 0 && rpcAt > readyAt);
+  assert.doesNotMatch(claim, /from\('user_profiles'\)/);
   assert.doesNotMatch(claim, /active_organization_id:/);
 
   const switchRoute = read('app/api/org/switch/route.ts');

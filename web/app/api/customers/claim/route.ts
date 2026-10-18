@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { emailsMatch } from '@/lib/email-match';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { openCustomerInvite } from '@/lib/customer-invite';
-import { type ClaimErrorCode } from '@/lib/claim-error';
+import { CLAIM_REFUSED_MESSAGE, type ClaimErrorCode } from '@/lib/claim-error';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { asClaimSignupMeta, claimSignupMetadataClearPatch } from '@/lib/claim-signup-metadata';
 
@@ -12,70 +12,65 @@ import { asClaimSignupMeta, claimSignupMetadataClearPatch } from '@/lib/claim-si
  * POST /api/customers/claim
  * Body: { token }
  *
- * Links the signed-in user to the invited customer org (owner role).
- * Does not create a second organization. Refuses if another owner already
- * claims the org, or if this user already belongs to a different org.
- * A member already in this clinic becomes owner only when the owner slot is
- * empty and their signed-in email matches the invite. An existing owner blocks that.
+ * Links the signed-in user to the invited customer org as its owner. Does not
+ * create a second organization.
  *
- * The owner slot is role owner, plus customer. customer is the legacy clinic
- * holder (isOwnerish, and onboarding promotes it to owner). Claim writes owner.
- * admin and company_admin are staff roles and can repeat inside one org, so
- * they do not occupy this slot. A partial unique index on role = owner is the
- * race backstop; a unique violation is 409.
+ * 000923: the claim is the database's decision. The token carries the id of a
+ * public.clinic_owner_invites row that a shop admin issued
+ * (issue_clinic_owner_invite); claim_clinic_owner_invite then, in one locked
+ * transaction, refuses unless the invite is open, its email is the clinic's
+ * email of record and the user's confirmed login email, the clinic has no owner
+ * (organization_memberships OR user_profiles, owner or legacy customer), the
+ * user is not linked to another org, and the user is not the clinic's creator,
+ * the inviter, or a current or recent (30 days) member of the shop that added
+ * or serves the clinic. It then writes the profile and the owner home
+ * membership. This route keeps its own checks (session, token email, the
+ * clinic's current reach email) in front of that, and never writes
+ * user_profiles or organization_memberships itself.
+ *
+ * The owner slot is role owner, plus customer (legacy clinic holder). admin
+ * and company_admin are staff roles and can repeat inside one org.
  */
 export const CLINIC_OWNER_SLOT_ROLES = ['owner', 'customer'] as const;
-
-function holdsClinicOwnerSlot(role: unknown): boolean {
-  return (CLINIC_OWNER_SLOT_ROLES as readonly string[]).includes(String(role || '').trim().toLowerCase());
-}
 
 function isUniqueOwnerViolation(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   if (String(error.code || '') === '23505') return true;
-  return /duplicate key|unique constraint/i.test(String(error.message || ''));
+  return /duplicate key|unique constraint|already has an owner/i.test(String(error.message || ''));
 }
 
-function isOwnerRole(role: unknown): boolean {
-  return String(role || '').trim().toLowerCase() === 'owner';
-}
+const CLAIM_TOKEN_INVALID_MESSAGE = 'This clinic invite is not valid. Ask the shop that invited you to send a new one.';
 
-async function setClinicHome(
-  writer: SupabaseClient,
-  userId: string,
-  orgId: string | number
-): Promise<NextResponse | null> {
-  const organizationId = Number(orgId);
-  if (!Number.isFinite(organizationId)) {
-    return NextResponse.json(
-      {
-        ok: false,
-        claimed: false,
-        error: 'Could not set this clinic as your home organization.',
-        code: 'server_error' satisfies ClaimErrorCode,
-      },
-      { status: 500 }
-    );
-  }
-  const { error } = await writer.rpc('set_home_membership', {
-    p_user_id: userId,
-    p_organization_id: organizationId,
-    p_role: 'owner',
-    p_sync_profile: true,
-  });
-  if (error) {
-    return NextResponse.json(
-      {
-        ok: false,
-        claimed: false,
-        error: 'Could not set this clinic as your home organization.',
-        code: 'server_error' satisfies ClaimErrorCode,
-      },
-      { status: 503 }
-    );
-  }
-  return null;
-}
+/** claim_clinic_owner_invite refusal codes -> HTTP status, claim code and message. */
+const CLAIM_RPC_REFUSALS: Record<string, { status: number; code: ClaimErrorCode; error: string }> = {
+  invite_invalid: { status: 400, code: 'token_invalid', error: CLAIM_TOKEN_INVALID_MESSAGE },
+  invite_revoked: { status: 400, code: 'token_invalid', error: CLAIM_TOKEN_INVALID_MESSAGE },
+  invite_used: { status: 400, code: 'token_invalid', error: CLAIM_TOKEN_INVALID_MESSAGE },
+  invite_expired: {
+    status: 400,
+    code: 'token_expired',
+    error: 'This clinic invite has expired. Ask the shop that invited you to send a new one.',
+  },
+  invite_not_email_of_record: {
+    status: 403,
+    code: 'email_mismatch',
+    error: 'This invite was issued for an email that is no longer on this clinic.',
+  },
+  email_mismatch: { status: 403, code: 'email_mismatch', error: 'Sign in with the email this invite was sent to.' },
+  email_unconfirmed: {
+    status: 403,
+    code: 'claim_refused',
+    error: 'Confirm your email address first, then open the invite link again.',
+  },
+  owner_exists: { status: 409, code: 'owner_exists', error: 'This company profile already has an owner account.' },
+  other_org: { status: 409, code: 'claim_refused', error: 'This account is already linked to another organization.' },
+  shop_staff: {
+    status: 403,
+    code: 'claim_refused',
+    error: 'A member of the service company that added this clinic cannot claim it.',
+  },
+  not_clinic: { status: 400, code: 'claim_refused', error: 'This invite is not for a clinic profile.' },
+};
 
 type ClaimUserClient = {
   auth: {
@@ -190,8 +185,11 @@ export async function runCustomerClaim(
       );
     }
     const payload = opened.payload;
+    if (!payload.inv) {
+      // Signed before 000923: not bound to an issued invite row.
+      return reply({ ok: false, claimed: false, error: CLAIM_TOKEN_INVALID_MESSAGE, code: 'token_invalid' }, 400);
+    }
 
-    const userEmail = String(user.email || '').trim().toLowerCase();
     if (!emailsMatch(user.email, payload.email)) {
       return reply(
         {
@@ -257,189 +255,56 @@ export async function runCustomerClaim(
       );
     }
 
-    const saveOwnerRole = async (userId: string) => {
-      const updated = await writer
-        .from('user_profiles')
-        .update({ role: 'owner', onboarding_completed: true })
-        .eq('id', userId)
-        .select('id, role, organization_id')
-        .maybeSingle();
-      if (isUniqueOwnerViolation(updated.error)) {
-        return NextResponse.json(
-          {
-            ok: false,
-            claimed: false,
-            error: 'This company profile already has an owner account.',
-            code: 'owner_exists',
-          },
-          { status: 409 }
+    const first = (user.user_metadata as { first_name?: string } | undefined)?.first_name || null;
+    const last = (user.user_metadata as { last_name?: string } | undefined)?.last_name || null;
+
+    const { data: claimed, error: claimErr } = await writer.rpc('claim_clinic_owner_invite', {
+      p_invite_id: payload.inv,
+      p_user_id: user.id,
+      p_first_name: first,
+      p_last_name: last,
+    });
+    if (claimErr) {
+      if (isUniqueOwnerViolation(claimErr)) {
+        return reply(
+          { ok: false, claimed: false, error: 'This company profile already has an owner account.', code: 'owner_exists' },
+          409
         );
       }
-      if (updated.error) {
-        return NextResponse.json(
-          { ok: false, claimed: false, error: 'Could not update the clinic owner role.', code: 'server_error' },
-          { status: 503 }
-        );
-      }
-      const row = updated.data as { role?: string | null; organization_id?: string | number | null } | null;
-      if (!row || !isOwnerRole(row.role) || String(row.organization_id) !== String(org.id)) {
-        return NextResponse.json(
-          { ok: false, claimed: false, error: 'Clinic owner role was not saved.', code: 'server_error' },
-          { status: 500 }
-        );
-      }
-      return null;
-    };
-
-    const { data: existingProf } = await writer
-      .from('user_profiles')
-      .select('id, organization_id, role, email')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    const alreadyInThisOrg =
-      existingProf?.organization_id != null &&
-      String(existingProf.organization_id) === String(org.id);
-
-    // Re-claim by the person who is already owner stays a success and does not
-    // look for a second owner. Writing role=owner here does not change the role.
-    if (alreadyInThisOrg && isOwnerRole(existingProf?.role)) {
-      const failed = await saveOwnerRole(user.id);
-      if (failed) return replyFrom(failed);
-      const homeError = await setClinicHome(writer, user.id, org.id);
-      if (homeError) return homeError;
-      return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
-    }
-
-    if (existingProf?.organization_id != null && !alreadyInThisOrg) {
-      return reply(
-        {
-          ok: false,
-          claimed: false,
-          error: 'This account is already linked to another organization.',
-          code: 'claim_refused',
-        },
-        409
-      );
-    }
-
-    const ownerLookup = await writer
-      .from('user_profiles')
-      .select('id, email, role')
-      .eq('organization_id', org.id)
-      .in('role', [...CLINIC_OWNER_SLOT_ROLES]);
-
-    if (ownerLookup.error) {
+      console.error('customer claim rpc', claimErr.message || claimErr);
       return NextResponse.json(
         {
           ok: false,
           claimed: false,
-          error: 'Could not check who owns this clinic. Nothing was changed.',
-          code: 'server_error',
+          error: 'Could not link this clinic profile. Nothing was changed.',
+          code: 'server_error' satisfies ClaimErrorCode,
         },
         { status: 503 }
       );
     }
 
-    const otherOwners = ownerLookup.data;
-
-    const takenByOther = (otherOwners || []).some((row: { id?: string; email?: string | null; role?: string | null }) => {
-      if (!row?.id || String(row.id) === String(user.id)) return false;
-      return holdsClinicOwnerSlot(row.role);
-    });
-
-    if (takenByOther) {
-      return reply(
-        {
-          ok: false,
-          claimed: false,
-          error: 'This company profile already has an owner account.',
-          code: 'owner_exists',
-        },
-        409
-      );
-    }
-
-    // Already linked, and nobody else holds the owner slot. Email was matched
-    // above, same as a first claim. Promote this member; do not skip the check.
-    if (alreadyInThisOrg) {
-      const failed = await saveOwnerRole(user.id);
-      if (failed) return replyFrom(failed);
-      const homeError = await setClinicHome(writer, user.id, org.id);
-      if (homeError) return homeError;
-      return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
-    }
-
-    const first = (user.user_metadata as { first_name?: string } | undefined)?.first_name || null;
-    const last = (user.user_metadata as { last_name?: string } | undefined)?.last_name || null;
-
-    const upsert = {
-      id: user.id,
-      email: userEmail,
-      first_name: first,
-      last_name: last,
-      role: 'owner',
-      organization_id: org.id,
-      onboarding_completed: true,
-    };
-
-    let { error: upErr } = await writer.from('user_profiles').upsert(upsert, { onConflict: 'id' });
-    if (isUniqueOwnerViolation(upErr)) {
-      return reply(
-        {
-          ok: false,
-          claimed: false,
-          error: 'This company profile already has an owner account.',
-          code: 'owner_exists',
-        },
-        409
-      );
-    }
-    if (upErr) {
-      const slim = {
-        organization_id: org.id,
-        role: 'owner',
-        onboarding_completed: true,
-        email: userEmail,
+    const result = (claimed || {}) as { ok?: boolean; code?: string; organization_id?: number | string; already_linked?: boolean };
+    if (result.ok !== true) {
+      const refusal = CLAIM_RPC_REFUSALS[String(result.code || '')] ?? {
+        status: 403,
+        code: 'claim_refused' as ClaimErrorCode,
+        error: CLAIM_REFUSED_MESSAGE,
       };
-      const retry = await writer.from('user_profiles').update(slim).eq('id', user.id);
-      upErr = retry.error;
-      if (isUniqueOwnerViolation(upErr)) {
-        return reply(
-          {
-            ok: false,
-            claimed: false,
-            error: 'This company profile already has an owner account.',
-            code: 'owner_exists',
-          },
-          409
-        );
-      }
+      return reply({ ok: false, claimed: false, error: refusal.error, code: refusal.code }, refusal.status);
     }
-    if (upErr) {
-      return NextResponse.json(
-        { ok: false, claimed: false, error: upErr.message || 'Could not link profile.', code: 'server_error' },
-        { status: 500 }
-      );
-    }
-
-    const { data: check } = await writer
-      .from('user_profiles')
-      .select('organization_id')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (!check?.organization_id || String(check.organization_id) !== String(org.id)) {
+    if (String(result.organization_id) !== String(org.id)) {
       return NextResponse.json(
         { ok: false, claimed: false, error: 'Profile did not link to the company.', code: 'server_error' },
         { status: 500 }
       );
     }
 
-    const homeError = await setClinicHome(writer, user.id, org.id);
-    if (homeError) return homeError;
-
-    return NextResponse.json({ ok: true, claimed: true, organizationId: org.id });
+    return NextResponse.json({
+      ok: true,
+      claimed: true,
+      organizationId: org.id,
+      ...(result.already_linked ? { alreadyLinked: true } : {}),
+    });
   } catch (e: any) {
     console.error('customer claim', e);
     return NextResponse.json({ error: e?.message || 'Server error', code: 'server_error' }, { status: 500 });
