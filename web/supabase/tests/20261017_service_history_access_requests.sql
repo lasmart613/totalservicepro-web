@@ -8,7 +8,14 @@
 --     -f path/to/web/supabase/tests/20261017_service_history_access_requests.sql
 --
 -- Base = prod order: 000919 -> 000920 -> 000921 (all live since 2026-10-17),
--- on the 000921 proof's fixture (live helper bodies), then 000922.
+-- on the 000921 proof's fixture (live helper bodies), then 000923 (fixture
+-- copy of fix/clinic-claim-invite-binding @ 168d4f6a), then 000922.
+--
+-- Negative run (QA #314 L-B: 000922 must fail cleanly without 000923):
+--   psql ... -v ON_ERROR_STOP=1 -v skip923=1 -f <this file>
+-- must exit non-zero, and its only ERROR must be
+--   "000922 requires 000923 (clinic owner invite binding): apply 000923 first"
+-- with nothing of 000922 created (the run stops at its first statement).
 -- Fixture data only. T01..T30 are the plan's test cases (/workspace/teaser/PLAN.md §6);
 -- T14 (true two-session race) also runs in the harness race script; T29/T30
 -- (route + preview) are covered by the Node tests / build.
@@ -216,6 +223,12 @@ ALTER TABLE public.service_tickets ADD COLUMN assigned_to uuid, ADD COLUMN statu
 ALTER TABLE public.user_profiles ADD COLUMN email text, ADD COLUMN first_name text, ADD COLUMN last_name text,
   ADD COLUMN notification_prefs jsonb, ADD COLUMN is_active boolean DEFAULT true;
 ALTER TABLE public.equipment ADD COLUMN manufacturer text;
+-- Live columns / tables 000923 needs (prod information_schema).
+ALTER TABLE public.organizations ADD COLUMN email text, ADD COLUMN directory_contacts jsonb;
+ALTER TABLE public.user_profiles ADD COLUMN role text;
+CREATE TABLE public.contacts (id bigserial PRIMARY KEY, organization_id bigint, first_name text, last_name text, title text,
+  phone text, email text, is_primary boolean, created_at timestamptz DEFAULT now(), updated_at timestamptz);
+CREATE TABLE auth.users (id uuid PRIMARY KEY, email text, email_confirmed_at timestamptz);
 CREATE SCHEMA IF NOT EXISTS extensions;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA extensions;
 CREATE SCHEMA IF NOT EXISTS private;
@@ -371,6 +384,17 @@ SELECT pg_temp.expect('BASE 000919 applied (creator_shop_org_id column)', (SELEC
 SELECT pg_temp.expect('BASE 000921 applied (link blocks)', (to_regclass('public.organization_customer_link_blocks') IS NOT NULL)::text, 'true');
 SELECT pg_temp.expect('BASE linked shop L reads only its own C report', pg_temp.as_user(:'L_ADMIN', $q$SELECT string_agg(title, ',' ORDER BY title) FROM public.service_reports WHERE customer_organization_id = 10$q$), 'OK L-1');
 
+-- 000923 first (L-B). The negative run (-v skip923=1) leaves it out.
+\if :{?skip923}
+SELECT pg_temp.expect('NEG 000923 deliberately NOT applied', (to_regclass('public.clinic_owner_invites') IS NULL)::text, 'true');
+\ir ../migrations/20261017_000922_service_history_access_requests.sql
+SELECT pg_temp.expect('NEG FAILED: 000922 applied without 000923', 'applied', 'refused');
+\else
+\ir fixtures/000923_clinic_claim_invite_binding_at_168d4f6a.sql
+SELECT pg_temp.expect('BASE 000923 applied (clinic_owner_invites, membership guard)',
+  (to_regclass('public.clinic_owner_invites') IS NOT NULL AND to_regprocedure('public.guard_clinic_owner_membership()') IS NOT NULL)::text, 'true');
+\endif
+
 INSERT INTO fp VALUES ('pre922', pg_temp.fingerprint()), ('policies', pg_temp.policies());
 INSERT INTO fp SELECT 'md5:' || p.oid::regprocedure::text, md5(pg_get_functiondef(p.oid)) FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.prokind = 'f';
 
@@ -500,6 +524,12 @@ SELECT pg_temp.expect('L-3 tech whose only C ticket was completed > 90 days ago 
 UPDATE public.service_tickets SET status = 'Cancelled', service_date = current_date + 3, updated_at = now() WHERE id = 1;
 SELECT pg_temp.expect('L-3 tech assigned only to a Cancelled C ticket is refused',
   pg_temp.as_user(:'L_TECH', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR 42501 only a shop owner or admin, or a tech assigned to this clinic, can ask for history');
+UPDATE public.service_tickets SET status = 'Completed', service_date = current_date + 3650, updated_at = now() WHERE id = 1;
+SELECT pg_temp.expect('I-3 tech whose C ticket is Completed but future-dated is refused',
+  pg_temp.as_user(:'L_TECH', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR 42501 only a shop owner or admin, or a tech assigned to this clinic, can ask for history');
+UPDATE public.service_tickets SET status = 'Completed', service_date = current_date - 200, updated_at = now() WHERE id = 1;
+SELECT pg_temp.expect('I-3 an edit (updated_at bump) on an old Completed ticket does not re-open eligibility',
+  pg_temp.as_user(:'L_TECH', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR 42501 only a shop owner or admin, or a tech assigned to this clinic, can ask for history');
 UPDATE public.service_tickets SET status = 'Completed', service_date = current_date - 10, updated_at = now() - interval '200 days' WHERE id = 1;
 SELECT pg_temp.expect('L-3 helper: tech with a C ticket completed 10 days ago may request',
   pg_temp.as_user(:'L_TECH', 'SELECT 1::text') || ':' || (SELECT pg_temp.as_role('postgres', $q$SELECT (set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000b2', true) IS NOT NULL AND public.service_history_can_request(1, 10))::text$q$)), 'OK 1:OK true');
@@ -567,19 +597,27 @@ SELECT pg_temp.expect('T21 grant_service_history still refuses the shop directly
 SET LOCAL session_replication_role = replica;
 INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES
   (:'DUAL', 10, 'company_admin', false), (:'DUAL', 1, 'fse', true);
+INSERT INTO public.user_profiles (id, organization_id, active_organization_id, email, first_name, last_name)
+  VALUES (:'DUAL', 10, 10, 'd1@dual.test', 'Dee', 'Dual');
 SET LOCAL session_replication_role = origin;
 SELECT pg_temp.expect('M-1 dual member approves its own shop''s request (this laser): refused',
   pg_temp.as_user(:'DUAL', format('SELECT status FROM public.respond_to_service_history_request(%s, $$approve$$)', (SELECT v FROM fp WHERE k = 'req1'))),
-  'ERR 42501 only an owner or admin who is not part of the requesting company can approve');
+  'ERR 42501 only an owner or admin who is not part of the requesting company can answer this request');
 SELECT pg_temp.expect('M-1 dual member approves with scope all: refused',
   pg_temp.as_user(:'DUAL', format('SELECT status FROM public.respond_to_service_history_request(%s, $$approve$$, $$all$$)', (SELECT v FROM fp WHERE k = 'req1'))),
-  'ERR 42501 only an owner or admin who is not part of the requesting company can approve');
+  'ERR 42501 only an owner or admin who is not part of the requesting company can answer this request');
 SELECT pg_temp.expect('M-1 dual member calls grant_service_history directly (all lasers): refused',
   pg_temp.as_user(:'DUAL', 'SELECT public.grant_service_history(10, 1, NULL)::text'),
   'ERR 42501 only an owner or admin who is not part of that service company can share with it');
 SELECT pg_temp.expect('M-1 dual member calls grant_service_history directly (one laser): refused',
   pg_temp.as_user(:'DUAL', 'SELECT public.grant_service_history(10, 1, 1)::text'),
   'ERR 42501 only an owner or admin who is not part of that service company can share with it');
+SELECT pg_temp.expect('I-1 dual member cannot DENY its own shop''s request either',
+  pg_temp.as_user(:'DUAL', format('SELECT status FROM public.respond_to_service_history_request(%s, $$deny$$)', (SELECT v FROM fp WHERE k = 'req1'))),
+  'ERR 42501 only an owner or admin who is not part of the requesting company can answer this request');
+SELECT pg_temp.expect('I-1 dual member is not an owner recipient of its own shop''s request',
+  (SELECT string_agg(r->>'email', ',' ORDER BY r->>'email') FROM jsonb_array_elements(public.service_history_request_notice((SELECT v FROM fp WHERE k = 'req1')::bigint)->'owner_recipients') r),
+  'c1@clinic-c.test,c3@clinic-c.test');
 SELECT pg_temp.expect('M-1 no grant, request still pending',
   (SELECT count(*)::text FROM public.service_history_grants) || ':' || (SELECT status FROM public.service_history_requests WHERE id = (SELECT v FROM fp WHERE k = 'req1')::bigint), '0:pending');
 -- A clinic whose ONLY approver is a member of the shop is unclaimed for that shop.
@@ -591,6 +629,7 @@ SELECT pg_temp.expect('M-1 clinic U whose only approver is an L member: still cl
 SELECT pg_temp.expect('M-1 ... and L cannot request it',
   pg_temp.as_user(:'L_ADMIN', 'SELECT status FROM public.request_service_history_access(12, 4)'), 'ERR 42501 clinic_unclaimed');
 DELETE FROM public.organization_memberships WHERE user_id = :'DUAL';
+DELETE FROM public.user_profiles WHERE id = :'DUAL';
 DELETE FROM public.service_history_slots WHERE bucket LIKE 'teaser%';
 
 -- T23 approve (equipment scope) -> exactly one grant, unlocks exactly the teased rows.
@@ -679,6 +718,9 @@ SELECT pg_temp.expect('T05 blocked: request refused', pg_temp.as_user(:'L_ADMIN'
 SELECT pg_temp.expect('T05 blocked: pending request shows closed (blocked)', pg_temp.as_user(:'C_OWNER', $q$SELECT status || ':' || close_reason FROM public.list_incoming_service_history_requests(10, 'all') ORDER BY created_at DESC, id DESC LIMIT 1$q$), 'OK expired:blocked');
 SELECT pg_temp.expect('L-1 owner approves the blocked shop''s pending request by direct RPC: closed as blocked, no grant',
   pg_temp.as_user(:'C_OWNER', format($q$SELECT status || ':' || coalesce(grant_id::text, 'none') || ':' || close_reason FROM public.respond_to_service_history_request(%s, 'approve', 'all')$q$, (SELECT max(id) FROM public.service_history_requests))), 'OK expired:none:blocked');
+SELECT pg_temp.expect('I-2 direct grant_service_history to a blocked shop is refused',
+  pg_temp.as_user(:'C_OWNER', 'SELECT public.grant_service_history(10, 1, 1)::text') || ' | ' || pg_temp.as_user(:'C_OWNER', 'SELECT public.grant_service_history(10, 1, NULL)::text'),
+  'ERR 42501 this facility has blocked that service company | ERR 42501 this facility has blocked that service company');
 SELECT pg_temp.expect('L-1 no active grant after approving a blocked shop', (SELECT count(*)::text FROM public.service_history_grants WHERE revoked_at IS NULL), '0');
 SELECT pg_temp.expect('L-1 the row is closed, approving again is refused',
   (SELECT status || ':' || close_reason FROM public.service_history_requests WHERE id = (SELECT max(id) FROM public.service_history_requests)) || ' | ' ||
@@ -695,6 +737,32 @@ SELECT pg_temp.expect('L-1 approving an unlinked shop: closed as link_removed, n
   pg_temp.as_user(:'C_OWNER', format($q$SELECT status || ':' || coalesce(grant_id::text, 'none') || ':' || close_reason FROM public.respond_to_service_history_request(%s, 'approve')$q$, (SELECT max(id) FROM public.service_history_requests))), 'OK expired:none:link_removed');
 SELECT pg_temp.expect('L-1 still no active grant', (SELECT count(*)::text FROM public.service_history_grants WHERE revoked_at IS NULL), '0');
 INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, 10);
+
+-- L-A leave -> approve -> re-join: gaining a membership in the grantee shop
+-- revokes the grants that user gave it (trigger, every writer).
+DELETE FROM public.service_history_slots;
+INSERT INTO fp SELECT 'grant0', coalesce(max(id), 0)::text FROM public.service_history_grants;
+SELECT pg_temp.expect('L-A request from L for E1', pg_temp.as_user(:'L_ADMIN', 'SELECT status || $$:$$ || created::text FROM public.request_service_history_access(10, 1)'), 'OK pending:true');
+SELECT pg_temp.expect('L-A manager (not in L) approves scope all', pg_temp.as_user(:'C_MGR', format($q$SELECT status FROM public.respond_to_service_history_request(%s, 'approve', 'all')$q$, (SELECT max(id) FROM public.service_history_requests))), 'OK approved');
+SELECT pg_temp.expect('L-A owner (not in L) also shares E2 explicitly', pg_temp.as_user(:'C_OWNER', 'SELECT (public.grant_service_history(10, 1, 2) IS NOT NULL)::text'), 'OK true');
+SELECT pg_temp.expect('L-A L reads the shared history', pg_temp.as_user(:'L_ADMIN', 'SELECT (count(*) > 0)::text FROM public.get_shared_service_history(10) WHERE service_organization_id <> 1'), 'OK true');
+-- the manager joins shop Z first (not the grantee): nothing changes
+INSERT INTO public.organization_memberships (user_id, organization_id, role) VALUES (:'C_MGR', 3, 'fse');
+SELECT pg_temp.expect('L-A joining an unrelated shop revokes nothing', (SELECT count(*)::text FROM public.service_history_grants WHERE revoked_at IS NULL), '2');
+-- then moves that membership to L (UPDATE path) = re-join
+UPDATE public.organization_memberships SET organization_id = 1 WHERE user_id = :'C_MGR' AND organization_id = 3;
+SELECT pg_temp.expect('L-A re-join (UPDATE into L): the manager''s all-lasers grant is revoked, by the manager',
+  (SELECT string_agg(coalesce(equipment_id::text, 'all') || ':' || (revoked_at IS NOT NULL)::text || ':' || coalesce(revoked_by::text, '-'), ',' ORDER BY equipment_id NULLS FIRST) FROM public.service_history_grants WHERE id > (SELECT v FROM fp WHERE k = 'grant0')::bigint),
+  'all:true:00000000-0000-0000-0000-0000000000c3,2:false:-');
+SELECT pg_temp.expect('L-A the owner''s own E2 grant survives (different granter)', pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_shared_service_history(10, 2) WHERE service_organization_id <> 1') || ' | ' || pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_shared_service_history(10, 1)'), 'OK 1 | OK 0');
+DELETE FROM public.organization_memberships WHERE user_id = :'C_MGR' AND organization_id = 1;
+-- INSERT path: owner leaves? (owner was never in L) -> owner joins L directly
+INSERT INTO public.organization_memberships (user_id, organization_id, role) VALUES (:'C_OWNER', 1, NULL);
+SELECT pg_temp.expect('L-A owner joins L (INSERT, NULL role): its E2 grant is revoked too', (SELECT count(*)::text FROM public.service_history_grants WHERE revoked_at IS NULL), '0');
+SELECT pg_temp.expect('L-A L reads nothing shared any more', pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_shared_service_history(10)'), 'OK 0');
+DELETE FROM public.organization_memberships WHERE user_id = :'C_OWNER' AND organization_id = 1;
+SELECT pg_temp.expect('L-A trigger function not executable by clients',
+  (has_function_privilege('authenticated', 'public.revoke_conflicted_history_grants()', 'EXECUTE') OR has_function_privilege('anon', 'public.revoke_conflicted_history_grants()', 'EXECUTE'))::text, 'false');
 
 -- T11 teaser rate limits.
 DELETE FROM public.service_history_slots;

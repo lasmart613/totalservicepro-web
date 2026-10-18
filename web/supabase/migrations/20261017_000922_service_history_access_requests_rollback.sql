@@ -8,6 +8,8 @@ SET LOCAL lock_timeout = '5s';
 -- Notification rows written by the server routes stay (type 'general').
 -- The private schema is left in place (it exists on prod for other objects).
 
+DROP TRIGGER IF EXISTS trg_revoke_conflicted_history_grants ON public.organization_memberships;
+DROP FUNCTION IF EXISTS public.revoke_conflicted_history_grants();
 DROP FUNCTION IF EXISTS public.service_history_request_notice(bigint);
 DROP FUNCTION IF EXISTS public.respond_to_service_history_request(bigint, text, text);
 DROP FUNCTION IF EXISTS public.list_owner_service_history_grants(bigint, bigint);

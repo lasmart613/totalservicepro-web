@@ -29,9 +29,9 @@ test('000922: lock_timeout first in both files', () => {
 });
 
 test('000922: every function is SECURITY DEFINER with an empty search_path', () => {
-  assert.equal(created.length, 12);
+  assert.equal(created.length, 13);
   const bodies = code(up).match(/CREATE OR REPLACE FUNCTION[\s\S]*?\nAS \$\$/g) || [];
-  assert.equal(bodies.length, 12);
+  assert.equal(bodies.length, 13);
   for (const b of bodies) {
     assert.match(b, /SECURITY DEFINER/, b.slice(0, 80));
     assert.match(b, /SET search_path = ''/, b.slice(0, 80));
@@ -116,7 +116,7 @@ test('M-1: 000922 redefines grant_service_history with the dual-member guard; ro
   assert.match(upBody, /sm\.organization_id = p_grantee_shop AND sm\.user_id = uid/);
   assert.doesNotMatch(downBody, /p_grantee_shop AND sm\.user_id/);
   // up = live body + exactly the guard block.
-  const guard = /  -- M-1 \(000922\)[\s\S]*?END IF;\n/.exec(grantBody(up))?.[0] || '';
+  const guard = /  -- M-1 \(000922\)[\s\S]*?-- I-2 \(000922\)[\s\S]*?END IF;\n/.exec(grantBody(up))?.[0] || '';
   assert.ok(guard);
   assert.equal(grantBody(up).replace(guard, ''), grantBody(down));
   assert.ok(up.includes(LIVE_GRANT_MD5) && down.includes(LIVE_GRANT_MD5));
@@ -136,6 +136,29 @@ test('M-1 / L-1 / L-2 / L-3 guards are in the approve and request paths', () => 
   assert.match(u, /NOT IN \('cancelled', 'canceled'\)/);
   assert.match(u, /interval '90 days'/);
   for (const t of ['M-1 dual member approves', 'M-1 dual member calls grant_service_history', 'L-1 owner approves the blocked', 'L-1 approving an unlinked shop', 'L-2 cooldown is per (clinic, shop)', 'L-3 tech whose only C ticket']) {
+    assert.ok(proof.includes(t), t);
+  }
+});
+
+test('L-B: the very first statement after lock_timeout refuses to run without 000923', () => {
+  const body = code(up).replace(/^SET LOCAL lock_timeout = '5s';\s*/, '');
+  assert.match(body, /^DO \$\$\s*BEGIN\s*IF to_regclass\('public\.clinic_owner_invites'\) IS NULL/);
+  assert.match(body.slice(0, 600), /RAISE EXCEPTION '000922 requires 000923/);
+  // proof applies the 000923 fixture (origin copy) before 000922 and has the negative run hook
+  const fx = proof.indexOf('\\ir fixtures/000923_clinic_claim_invite_binding_at_168d4f6a.sql');
+  assert.ok(fx > 0 && fx < proof.indexOf("INSERT INTO fp VALUES ('pre922'"));
+  assert.match(proof, /\\if :\{\?skip923\}/);
+  const fixture = readFileSync(join(here, '../supabase/tests/fixtures/000923_clinic_claim_invite_binding_at_168d4f6a.sql'), 'utf8');
+  assert.match(fixture, /CREATE TABLE IF NOT EXISTS public\.clinic_owner_invites/);
+});
+
+test('L-A: membership trigger revokes the joiner\'s grants to that shop; rollback drops it', () => {
+  const u = code(up);
+  assert.match(u, /CREATE TRIGGER trg_revoke_conflicted_history_grants\s+AFTER INSERT OR UPDATE OF user_id, organization_id ON public\.organization_memberships/);
+  assert.match(u, /g\.grantee_shop_org_id = NEW\.organization_id\s+AND g\.granted_by = NEW\.user_id/);
+  assert.match(u, /REVOKE ALL ON FUNCTION public\.revoke_conflicted_history_grants\(\) FROM PUBLIC, anon, authenticated, service_role;/);
+  assert.match(code(down), /DROP TRIGGER IF EXISTS trg_revoke_conflicted_history_grants ON public\.organization_memberships;/);
+  for (const t of ['L-A re-join (UPDATE into L)', 'L-A owner joins L (INSERT', 'I-1 dual member cannot DENY', 'I-2 direct grant_service_history to a blocked shop', 'I-3 tech whose C ticket is Completed but future-dated']) {
     assert.ok(proof.includes(t), t);
   }
 });

@@ -1,5 +1,17 @@
 SET LOCAL lock_timeout = '5s';
 
+-- L-B (QA #314 rev 2): 000923 (clinic owner invite binding) MUST be applied
+-- first. Abort before touching anything if its objects are missing.
+DO $$
+BEGIN
+  IF to_regclass('public.clinic_owner_invites') IS NULL
+     OR to_regclass('public.clinic_claim_emails') IS NULL
+     OR to_regclass('public.organization_membership_departures') IS NULL
+     OR to_regprocedure('public.guard_clinic_owner_membership()') IS NULL THEN
+    RAISE EXCEPTION '000922 requires 000923 (clinic owner invite binding): apply 000923 first';
+  END IF;
+END $$;
+
 -- 000922: locked service history teaser + owner permission requests.
 --
 -- A shop linked to a claimed clinic sees, for one of that clinic's lasers, a
@@ -29,8 +41,27 @@ SET LOCAL lock_timeout = '5s';
 --   L-3  Tech requesters: a member assigned to a NON-cancelled ticket of the
 --        shop for that clinic that is still open (not Completed/Closed) or was
 --        serviced/updated in the last 90 days.
--- ORDERING: apply 000923 (clinic claim / invite binding) BEFORE this migration.
--- 000923 redefines none of the functions defined here.
+-- ORDERING: apply 000923 (clinic claim / invite binding) BEFORE this migration;
+-- the first DO block enforces it. 000923 redefines none of the functions here.
+--
+-- QA #314 rev 2:
+--   L-A  Leave / approve / re-join: trigger trg_revoke_conflicted_history_grants
+--        on organization_memberships revokes every active service_history_grants
+--        row whose granted_by user gains (INSERT or UPDATE) a membership in the
+--        grantee shop. Chosen over a read-time check because grants record
+--        granted_by, the trigger fires for every writer (clients, service role,
+--        set_home_membership, the 000923 claim), the revocation is durable and
+--        visible to the owner (revoked_at / revoked_by on the Shared-with list),
+--        and it needs no change to the live read paths
+--        (get_shared_service_history / can_view_service_report_for_history),
+--        so no further live function bodies are redefined. Prod has 0 grants
+--        today, so there is nothing to sweep.
+--   I-1  A dual member can neither approve NOR deny its own shop's request,
+--        and is not an owner recipient of its own shop's request notice.
+--   I-2  grant_service_history refuses a shop the clinic has blocked.
+--   I-3  A Completed/Closed ticket keeps a tech eligible only while its
+--        service date (or creation date when unset) lies within the last 90
+--        days and not in the future; updated_at no longer counts.
 --
 -- Eligibility (Rule A, Larry 2026-10-17): caller's active shop
 --   = get_my_org_id(), active member, service-company type
@@ -349,7 +380,8 @@ REVOKE ALL ON FUNCTION public.service_history_teaser_rows(bigint, bigint, bigint
 -- Caller may send requests for (shop, owner): shop owner/admin/manager, or a
 -- tech currently assigned to one of the shop's tickets for that clinic. L-3
 -- bound: the ticket is not Cancelled, and is either still open (status not
--- Completed/Closed) or was serviced or updated in the last 90 days.
+-- Completed/Closed) or was serviced in the last 90 days (service date, or
+-- creation date when unset; never a future date).
 CREATE OR REPLACE FUNCTION public.service_history_can_request(p_shop bigint, p_owner bigint)
 RETURNS boolean
 LANGUAGE sql
@@ -377,8 +409,8 @@ AS $$
             AND lower(btrim(coalesce(t.status, ''))) NOT IN ('cancelled', 'canceled')
             AND (
               lower(btrim(coalesce(t.status, ''))) NOT IN ('completed', 'closed')
-              OR t.service_date >= (now() - interval '90 days')::date
-              OR coalesce(t.updated_at, t.created_at) > now() - interval '90 days'
+              OR coalesce(t.service_date, t.created_at::date)
+                   BETWEEN (now() - interval '90 days')::date AND now()::date
             )
         )
       )
@@ -743,6 +775,13 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'only an owner or admin who is not part of that service company can share with it' USING ERRCODE = '42501';
   END IF;
+  -- I-2 (000922): never share with a shop this facility has blocked.
+  IF EXISTS (
+    SELECT 1 FROM public.organization_customer_link_blocks b
+    WHERE b.owner_org_id = p_owner_org AND b.shop_org_id = p_grantee_shop
+  ) THEN
+    RAISE EXCEPTION 'this facility has blocked that service company' USING ERRCODE = '42501';
+  END IF;
   IF NOT EXISTS (
     SELECT 1 FROM public.organizations s
     WHERE s.id = p_grantee_shop
@@ -826,12 +865,12 @@ BEGIN
     RAISE EXCEPTION 'request is no longer open' USING ERRCODE = '22023';
   END IF;
 
-  -- M-1: never approve your own shop's request (membership gained after linking).
-  IF decision = 'approve' AND EXISTS (
+  -- M-1 / I-1: never answer (approve OR deny) your own shop's request.
+  IF EXISTS (
     SELECT 1 FROM public.organization_memberships sm
     WHERE sm.organization_id = q.requester_shop_org_id AND sm.user_id = uid
   ) THEN
-    RAISE EXCEPTION 'only an owner or admin who is not part of the requesting company can approve' USING ERRCODE = '42501';
+    RAISE EXCEPTION 'only an owner or admin who is not part of the requesting company can answer this request' USING ERRCODE = '42501';
   END IF;
 
   -- L-1: a blocked (or unlinked) shop can no longer be approved.
@@ -927,6 +966,11 @@ AS $$
       WHERE m.organization_id = q.owner_org_id
         AND lower(btrim(coalesce(m.role, ''))) IN ('owner', 'company_admin', 'admin', 'manager')
         AND coalesce(up.is_active, true)
+        -- I-1: members of the requesting shop are not asked to answer it.
+        AND NOT EXISTS (
+          SELECT 1 FROM public.organization_memberships sm
+          WHERE sm.organization_id = q.requester_shop_org_id AND sm.user_id = m.user_id
+        )
     ), '[]'::jsonb),
     'shop_recipients', coalesce((
       SELECT jsonb_agg(jsonb_build_object(
@@ -955,5 +999,37 @@ AS $$
 $$;
 REVOKE ALL ON FUNCTION public.service_history_request_notice(bigint) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.service_history_request_notice(bigint) TO service_role;
+
+-- ---------------------------------------------------------------------------
+-- L-A: a user who gains a membership in a shop loses every active grant they
+-- gave that shop (closes leave -> approve -> re-join). New object; rollback
+-- drops it.
+CREATE OR REPLACE FUNCTION public.revoke_conflicted_history_grants()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF NEW.user_id IS NULL OR NEW.organization_id IS NULL THEN
+    RETURN NULL;
+  END IF;
+  IF TG_OP = 'UPDATE' AND NEW.user_id IS NOT DISTINCT FROM OLD.user_id
+     AND NEW.organization_id IS NOT DISTINCT FROM OLD.organization_id THEN
+    RETURN NULL;
+  END IF;
+  UPDATE public.service_history_grants g
+     SET revoked_at = greatest(now(), g.granted_at), revoked_by = NEW.user_id
+   WHERE g.grantee_shop_org_id = NEW.organization_id
+     AND g.granted_by = NEW.user_id
+     AND g.revoked_at IS NULL;
+  RETURN NULL;
+END;
+$$;
+REVOKE ALL ON FUNCTION public.revoke_conflicted_history_grants() FROM PUBLIC, anon, authenticated, service_role;
+DROP TRIGGER IF EXISTS trg_revoke_conflicted_history_grants ON public.organization_memberships;
+CREATE TRIGGER trg_revoke_conflicted_history_grants
+  AFTER INSERT OR UPDATE OF user_id, organization_id ON public.organization_memberships
+  FOR EACH ROW EXECUTE FUNCTION public.revoke_conflicted_history_grants();
 
 NOTIFY pgrst, 'reload schema';
