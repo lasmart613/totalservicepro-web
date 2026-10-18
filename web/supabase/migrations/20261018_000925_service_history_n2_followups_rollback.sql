@@ -1,12 +1,14 @@
 SET LOCAL lock_timeout = '5s';
 
 -- Rollback for 20261018_000925_service_history_n2_followups.sql.
--- Restores the three prod bodies read 2026-10-18 verbatim (pg_get_functiondef
--- output) and drops the new helper. ACLs are unchanged by 000925 and by this
--- file (CREATE OR REPLACE keeps them). Safe to re-run.
+-- Restores the four prod bodies read 2026-10-18 verbatim (pg_get_functiondef
+-- output), drops the new helper and the revoked_reason column (and its CHECK).
+-- ACLs are unchanged by 000925 and by this file (CREATE OR REPLACE keeps
+-- them). Safe to re-run.
 --   public.grant_service_history(bigint,bigint,bigint)  md5 3bae6eee0d7d0360b795283d70839267
 --   public.request_service_history_access(bigint,bigint,text)  md5 eb16d6ff8db01045369b330bc1fe3082
 --   public.list_my_service_history_requests(bigint)  md5 849e65fd7513578572f1307778f267f1
+--   public.revoke_service_history(bigint)  md5 031991b951143598428bc7466a7bd8fc
 
 CREATE OR REPLACE FUNCTION public.grant_service_history(p_owner_org bigint, p_grantee_shop bigint, p_equipment_id bigint DEFAULT NULL::bigint)
  RETURNS bigint
@@ -226,6 +228,32 @@ AS $function$
 $function$
 ;
 
+CREATE OR REPLACE FUNCTION public.revoke_service_history(p_grant_id bigint)
+ RETURNS boolean
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+DECLARE
+  uid uuid := auth.uid();
+  owner_org bigint;
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'not signed in' USING ERRCODE = '42501';
+  END IF;
+  SELECT g.owner_org_id INTO owner_org FROM public.service_history_grants g WHERE g.id = p_grant_id;
+  IF owner_org IS NULL OR NOT public.service_history_owner_admin(owner_org) THEN
+    RAISE EXCEPTION 'only an owner or admin of this facility can revoke this grant' USING ERRCODE = '42501';
+  END IF;
+  UPDATE public.service_history_grants
+     SET revoked_at = now(), revoked_by = uid
+   WHERE id = p_grant_id AND revoked_at IS NULL;
+  RETURN FOUND;
+END;
+$function$
+;
+
 DROP FUNCTION IF EXISTS public.history_grantor_recent_shop_staff(bigint, uuid);
+ALTER TABLE public.service_history_grants DROP COLUMN IF EXISTS revoked_reason;
 
 NOTIFY pgrst, 'reload schema';

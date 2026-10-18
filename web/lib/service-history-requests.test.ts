@@ -166,3 +166,17 @@ test('N-2 refusal maps to forbidden', () => {
   const e = { code: '42501', message: 'only an owner or admin who has not been part of that service company in the last 30 days can share with it' };
   assert.equal(classifyHistoryRequestError(e).kind, 'forbidden');
 });
+
+test('panel: a system revoke (revoke-on-join, linked-shop removal) has no retry_after, so the shop can ask again', () => {
+  const now = new Date('2026-10-18T16:00:00Z');
+  // 000925 sets retry_after only for an owner deny or owner revoke.
+  const system: any = { status: 'revoked', expires_at: '2026-10-31', retry_after: null };
+  assert.equal(requestIsCooling(system, now), false);
+  assert.equal(requestStatusText(system, now), 'Access was revoked · you can ask again');
+  // Pre-000925 fallback: approved + no active share -> revoked, never cooling.
+  const fallback = effectiveRequestStatus({ status: 'approved', expires_at: '2026-10-31', retry_after: null } as any, false);
+  assert.equal(fallback.status, 'revoked');
+  assert.equal(requestIsCooling(fallback, now), false);
+  // An owner revoke (retry_after set) still cools down.
+  assert.equal(requestIsCooling({ status: 'revoked', retry_after: '2026-11-17T16:00:00Z' }, now), true);
+});

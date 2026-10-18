@@ -12,8 +12,9 @@
 -- proof's fixture (live helper bodies). BASE checks assert that the three
 -- bodies 000925 replaces have the prod md5s read on 2026-10-18.
 -- BEFORE checks show the live behaviour (N-2 hole, 'approved' after revoke,
--- no cooldown after revoke); AFTER checks run on 000925; then the rollback
--- must restore the pre-000925 fingerprint exactly.
+-- no cooldown after revoke); AFTER checks run on 000925 (incl. owner vs system
+-- revokes: only an owner revoke or deny starts the cooldown); then the
+-- rollback must restore the pre-000925 fingerprint and table shape exactly.
 \set ON_ERROR_STOP on
 
 DO $$
@@ -495,6 +496,14 @@ CREATE FUNCTION pg_temp.fp_nonfn() RETURNS text LANGUAGE sql AS $$
     COALESCE((SELECT string_agg(tgrelid::regclass::text || '.' || tgname || ':' || tgfoid::regprocedure::text, ',' ORDER BY 1) FROM pg_trigger WHERE NOT tgisinternal), ''))
 $$;
 
+-- Table shape of service_history_grants (live columns + constraints).
+CREATE FUNCTION pg_temp.grants_shape() RETURNS text LANGUAGE sql AS $$
+  SELECT COALESCE((SELECT string_agg(attname || ':' || format_type(atttypid, atttypmod) || ':' || attnotnull::text, ',' ORDER BY attnum)
+     FROM pg_attribute WHERE attrelid = 'public.service_history_grants'::regclass AND attnum > 0 AND NOT attisdropped), '')
+  || '#' || COALESCE((SELECT string_agg(conname || ':' || pg_get_constraintdef(oid), ',' ORDER BY conname)
+     FROM pg_constraint WHERE conrelid = 'public.service_history_grants'::regclass), '')
+$$;
+
 \set C_STAFF2 '00000000-0000-0000-0000-0000000000c5'
 \set C_TWIN   '00000000-0000-0000-0000-0000000000c6'
 
@@ -502,6 +511,10 @@ SELECT pg_temp.expect('BASE live md5 grant_service_history', pg_temp.fn_md5('pub
 SELECT pg_temp.expect('BASE live md5 request_service_history_access', pg_temp.fn_md5('public.request_service_history_access(bigint,bigint,text)'), 'eb16d6ff8db01045369b330bc1fe3082');
 SELECT pg_temp.expect('BASE live md5 list_my_service_history_requests', pg_temp.fn_md5('public.list_my_service_history_requests(bigint)'), '849e65fd7513578572f1307778f267f1');
 SELECT pg_temp.expect('BASE live md5 clinic_shop_staff_now_or_recent (000924)', pg_temp.fn_md5('public.clinic_shop_staff_now_or_recent(bigint,uuid)'), 'a094781babe3113ebe32395fce0f6533');
+SELECT pg_temp.expect('BASE live md5 revoke_service_history', pg_temp.fn_md5('public.revoke_service_history(bigint)'), '031991b951143598428bc7466a7bd8fc');
+SELECT pg_temp.expect('BASE live md5 remove_linked_service_shop (not replaced)', pg_temp.fn_md5('public.remove_linked_service_shop(bigint,bigint,boolean,boolean)'), 'e4325f3818de5697a4b1b516afc98084');
+SELECT pg_temp.expect('BASE live md5 revoke_conflicted_history_grants (not replaced)', pg_temp.fn_md5('public.revoke_conflicted_history_grants()'), '3f5fac646b4bb9ab26ccfbe941c65a4d');
+SELECT pg_temp.expect('BASE grants have no revoked_reason yet', (SELECT count(*)::text FROM pg_attribute WHERE attrelid = 'public.service_history_grants'::regclass AND attname = 'revoked_reason' AND NOT attisdropped), '0');
 SELECT pg_temp.expect('BASE helper absent', (to_regprocedure('public.history_grantor_recent_shop_staff(bigint,uuid)') IS NULL)::text, 'true');
 
 -- Clinic C manager c3 works at Shop L, then leaves it (departure logged by 000923/924).
@@ -509,7 +522,7 @@ INSERT INTO public.organization_memberships (user_id, organization_id, role, is_
 DELETE FROM public.organization_memberships WHERE user_id = :'C_MGR' AND organization_id = 1;
 SELECT pg_temp.expect('BASE departure logged with email', (SELECT string_agg(organization_id::text || ':' || email, ',') FROM public.organization_membership_departures WHERE user_id = :'C_MGR'), '1:c3@clinic-c.test');
 
-INSERT INTO fp VALUES ('pre925', pg_temp.fingerprint()), ('nonfn', pg_temp.fp_nonfn());
+INSERT INTO fp VALUES ('pre925', pg_temp.fingerprint()), ('nonfn', pg_temp.fp_nonfn()), ('shape', pg_temp.grants_shape());
 
 -- ---------------------------------------------------------------- BEFORE (live)
 SELECT pg_temp.expect_like('BEFORE N-2 just-departed manager can grant to her old shop (the hole)', pg_temp.as_user(:'C_MGR', $q$SELECT public.grant_service_history(10, 1, 1)::text$q$), 'OK %');
@@ -526,8 +539,14 @@ SELECT pg_temp.reset_history();
 -- ---------------------------------------------------------------- APPLY 000925
 \ir ../migrations/20261018_000925_service_history_n2_followups.sql
 SELECT pg_temp.expect('APPLY md5 grant_service_history', pg_temp.fn_md5('public.grant_service_history(bigint,bigint,bigint)'), '5dd66dd337620e9abbcd1bcc2da7896c');
-SELECT pg_temp.expect('APPLY md5 request_service_history_access', pg_temp.fn_md5('public.request_service_history_access(bigint,bigint,text)'), 'fdde5abf4ccaa068e1ed21efaef2e399');
-SELECT pg_temp.expect('APPLY md5 list_my_service_history_requests', pg_temp.fn_md5('public.list_my_service_history_requests(bigint)'), '606465ebd40de3d08b2cc2431bf0182d');
+SELECT pg_temp.expect('APPLY md5 request_service_history_access', pg_temp.fn_md5('public.request_service_history_access(bigint,bigint,text)'), '6b6b3239a922033385159ac94e4b11c8');
+SELECT pg_temp.expect('APPLY md5 list_my_service_history_requests', pg_temp.fn_md5('public.list_my_service_history_requests(bigint)'), 'b120c31ad8e3bd21c10ed32f4f426afc');
+SELECT pg_temp.expect('APPLY md5 revoke_service_history', pg_temp.fn_md5('public.revoke_service_history(bigint)'), 'ce11e179a58cb1355eafc0c4a9161860');
+SELECT pg_temp.expect('APPLY system revoke paths untouched', pg_temp.fn_md5('public.remove_linked_service_shop(bigint,bigint,boolean,boolean)') || ' ' || pg_temp.fn_md5('public.revoke_conflicted_history_grants()'), 'e4325f3818de5697a4b1b516afc98084 3f5fac646b4bb9ab26ccfbe941c65a4d');
+SELECT pg_temp.expect('APPLY grants shape = live + revoked_reason text + its CHECK', pg_temp.grants_shape(),
+  replace((SELECT v FROM fp WHERE k = 'shape'), 'revoked_by:uuid:false#', 'revoked_by:uuid:false,revoked_reason:text:false#')
+    || ',service_history_grants_revoked_reason_check:CHECK (((revoked_reason IS NULL) OR ((revoked_reason = ''owner''::text) AND (revoked_at IS NOT NULL))))');
+SELECT pg_temp.expect_like('APPLY CHECK rejects other reasons', pg_temp.as_role('service_role', $q$INSERT INTO public.service_history_grants (owner_org_id, grantee_shop_org_id, granted_by, revoked_at, revoked_reason) VALUES (10, 1, gen_random_uuid(), now(), 'system') RETURNING id::text$q$), 'ERR 23514');
 INSERT INTO fp VALUES ('post925', pg_temp.fingerprint());
 \ir ../migrations/20261018_000925_service_history_n2_followups.sql
 SELECT pg_temp.expect('APPLY idempotent (re-run leaves the same fingerprint)', pg_temp.fingerprint(), (SELECT v FROM fp WHERE k = 'post925'));
@@ -581,7 +600,8 @@ SELECT pg_temp.expect('AFTER legit approve: shop can read shared history', pg_te
 -- ---------------------------------------------------------------- AFTER: panel status
 SELECT pg_temp.expect('AFTER panel: approved while the grant is active', pg_temp.my_status(:'L_ADMIN', 1), 'OK approved:false');
 SELECT pg_temp.expect('AFTER revoke', pg_temp.as_user(:'C_OWNER', $q$SELECT public.revoke_service_history((SELECT max(id) FROM public.service_history_grants))::text$q$), 'OK true');
-SELECT pg_temp.expect('AFTER panel: revoked (locked) after revoke, with retry_after', pg_temp.my_status(:'L_ADMIN', 1), 'OK revoked:true');
+SELECT pg_temp.expect('AFTER owner revoke is marked revoked_reason=owner', (SELECT string_agg(coalesce(revoked_reason, 'NULL'), ',') FROM public.service_history_grants), 'owner');
+SELECT pg_temp.expect('AFTER panel: revoked (locked) after an owner revoke, with retry_after', pg_temp.my_status(:'L_ADMIN', 1), 'OK revoked:true');
 SELECT (max(revoked_at) + interval '720 hours')::text AS want_retry FROM public.service_history_grants \gset
 SELECT pg_temp.expect('AFTER panel: retry_after = revoked_at + 30 days', pg_temp.as_user(:'L_ADMIN', $q$SELECT retry_after::text FROM public.list_my_service_history_requests(1) LIMIT 1$q$), 'OK ' || :'want_retry');
 SELECT pg_temp.expect('AFTER panel: shared history empty after revoke', pg_temp.as_user(:'L_ADMIN', $q$SELECT count(*)::text FROM public.get_shared_service_history(10, 1)$q$), 'OK 0');
@@ -589,7 +609,7 @@ SELECT pg_temp.expect('AFTER panel: shared history empty after revoke', pg_temp.
 SELECT pg_temp.expect_like('AFTER owner grants all lasers directly', pg_temp.as_user(:'C_OWNER', $q$SELECT public.grant_service_history(10, 1, NULL)::text$q$), 'OK %');
 SELECT pg_temp.expect('AFTER panel: approved again under an active all-lasers grant', pg_temp.my_status(:'L_ADMIN', 1), 'OK approved:true');
 SELECT pg_temp.expect('AFTER request while shared: already approved', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 2)$q$), 'OK approved');
-UPDATE public.service_history_grants SET revoked_at = now(), revoked_by = :'C_OWNER' WHERE revoked_at IS NULL;
+SELECT pg_temp.expect('AFTER owner revokes the all-lasers grant', pg_temp.as_user(:'C_OWNER', $q$SELECT public.revoke_service_history((SELECT max(id) FROM public.service_history_grants WHERE revoked_at IS NULL))::text$q$), 'OK true');
 SELECT pg_temp.expect('AFTER panel: revoked again', pg_temp.my_status(:'L_ADMIN', 1), 'OK revoked:true');
 
 -- ---------------------------------------------------------------- AFTER: revoke cooldown
@@ -608,19 +628,49 @@ UPDATE public.service_history_requests SET responded_at = now() - interval '31 d
 SELECT pg_temp.expect('AFTER deny 31 days ago: can ask again', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 1)$q$), 'OK pending');
 SELECT pg_temp.reset_history();
 
+-- ---------------------------------------------------------------- AFTER: system revokes (no cooldown)
+-- (a) revoke-on-join: the approving owner joins the shop (000922 trigger).
+SELECT pg_temp.expect('SYS join: request', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 1)$q$), 'OK pending');
+SELECT max(id) AS rq FROM public.service_history_requests \gset
+SELECT pg_temp.expect('SYS join: owner approves', pg_temp.as_user(:'C_OWNER', format($q$SELECT status FROM public.respond_to_service_history_request(%s, 'approve')$q$, :rq)), 'OK approved');
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES (:'C_OWNER', 1, 'fse', false);
+SELECT pg_temp.expect('SYS join: trigger revoked the grant, revoked_reason NULL', (SELECT count(*) FILTER (WHERE revoked_at IS NOT NULL AND revoked_reason IS NULL)::text || '/' || count(*)::text FROM public.service_history_grants), '1/1');
+SELECT pg_temp.expect('SYS join: panel locked, no retry_after', pg_temp.my_status(:'L_ADMIN', 1), 'OK revoked:false');
+SELECT pg_temp.expect('SYS join: shop can re-request immediately', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 1)$q$), 'OK pending');
+DELETE FROM public.organization_memberships WHERE user_id = :'C_OWNER' AND organization_id = 1;
+DELETE FROM public.organization_membership_departures WHERE user_id = :'C_OWNER';
+SELECT pg_temp.reset_history();
+-- (b) linked-shop removal with p_revoke_grants (000921), link restored after.
+SELECT pg_temp.expect('SYS unlink: request', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 1)$q$), 'OK pending');
+SELECT max(id) AS rq FROM public.service_history_requests \gset
+SELECT pg_temp.expect('SYS unlink: owner approves', pg_temp.as_user(:'C_OWNER', format($q$SELECT status FROM public.respond_to_service_history_request(%s, 'approve')$q$, :rq)), 'OK approved');
+SELECT pg_temp.expect('SYS unlink: remove_linked_service_shop revokes grants', pg_temp.as_user(:'C_OWNER', $q$SELECT public.remove_linked_service_shop(10, 1, false, true)::text$q$), 'OK true');
+SELECT pg_temp.expect('SYS unlink: grant revoked, revoked_reason NULL', (SELECT count(*) FILTER (WHERE revoked_at IS NOT NULL AND revoked_reason IS NULL)::text || '/' || count(*)::text FROM public.service_history_grants), '1/1');
+INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, 10);
+SELECT pg_temp.expect('SYS unlink: panel locked, no retry_after', pg_temp.my_status(:'L_ADMIN', 1), 'OK revoked:false');
+SELECT pg_temp.expect('SYS unlink: relinked shop can re-request immediately', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 1)$q$), 'OK pending');
+SELECT pg_temp.reset_history();
+-- (c) a system revoke next to an owner revoke: the owner revoke still cools down.
+SELECT pg_temp.expect('SYS mixed: request', pg_temp.as_user(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 1)$q$), 'OK pending');
+SELECT max(id) AS rq FROM public.service_history_requests \gset
+SELECT pg_temp.expect('SYS mixed: owner approves', pg_temp.as_user(:'C_OWNER', format($q$SELECT status FROM public.respond_to_service_history_request(%s, 'approve')$q$, :rq)), 'OK approved');
+SELECT pg_temp.expect('SYS mixed: owner revokes', pg_temp.as_user(:'C_OWNER', $q$SELECT public.revoke_service_history((SELECT max(id) FROM public.service_history_grants))::text$q$), 'OK true');
+SELECT pg_temp.expect_like('SYS mixed: owner revoke -> request_cooldown', pg_temp.as_user_d(:'L_ADMIN', $q$SELECT status FROM public.request_service_history_access(10, 2)$q$), 'ERR P0001 request_cooldown | retry_after=20%Z');
+SELECT pg_temp.reset_history();
+
 -- ---------------------------------------------------------------- hygiene
-SELECT pg_temp.expect('HYG definer + empty search_path on all 4',
+SELECT pg_temp.expect('HYG definer + empty search_path on all 5',
   (SELECT string_agg(p.proname || ':' || p.prosecdef::text || ':' || array_to_string(p.proconfig, ','), ' ' ORDER BY p.proname)
-     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'history_grantor_recent_shop_staff')),
-  'grant_service_history:true:search_path="" history_grantor_recent_shop_staff:true:search_path="" list_my_service_history_requests:true:search_path="" request_service_history_access:true:search_path=""');
-SELECT pg_temp.expect('HYG anon cannot execute any of the 4',
-  (SELECT bool_or(has_function_privilege('anon', p.oid, 'EXECUTE'))::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'history_grantor_recent_shop_staff')), 'false');
+     FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'history_grantor_recent_shop_staff', 'revoke_service_history')),
+  'grant_service_history:true:search_path="" history_grantor_recent_shop_staff:true:search_path="" list_my_service_history_requests:true:search_path="" request_service_history_access:true:search_path="" revoke_service_history:true:search_path=""');
+SELECT pg_temp.expect('HYG anon cannot execute any of the 5',
+  (SELECT bool_or(has_function_privilege('anon', p.oid, 'EXECUTE'))::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'history_grantor_recent_shop_staff', 'revoke_service_history')), 'false');
 SELECT pg_temp.expect('HYG helper: owner-only EXECUTE (no PUBLIC/anon/authenticated/service_role)',
   (SELECT proacl::text FROM pg_proc WHERE oid = 'public.history_grantor_recent_shop_staff(bigint,uuid)'::regprocedure), '{postgres=X/postgres}');
 SELECT pg_temp.expect('HYG replaced functions keep their ACLs (authenticated EXECUTE)',
-  (SELECT bool_and(has_function_privilege('authenticated', p.oid, 'EXECUTE'))::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests')), 'true');
+  (SELECT bool_and(has_function_privilege('authenticated', p.oid, 'EXECUTE'))::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'revoke_service_history')), 'true');
 SELECT pg_temp.expect('HYG no schema-qualified EXTRACT/COALESCE',
-  (SELECT count(*)::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'history_grantor_recent_shop_staff')
+  (SELECT count(*)::text FROM pg_proc p WHERE p.pronamespace = 'public'::regnamespace AND p.proname IN ('grant_service_history', 'request_service_history_access', 'list_my_service_history_requests', 'history_grantor_recent_shop_staff', 'revoke_service_history')
      AND (p.prosrc ILIKE '%pg_catalog.coalesce%' OR p.prosrc ILIKE '%pg_catalog.extract%')), '0');
 SELECT pg_temp.expect('HYG N-1 grantor lock kept, once, before the N-2 check',
   (SELECT (length(prosrc) - length(replace(prosrc, $k$hashtextextended('tsp.history_grantor:' || uid::text, 0)$k$, ''))) / length($k$hashtextextended('tsp.history_grantor:' || uid::text, 0)$k$)
@@ -636,11 +686,14 @@ SELECT pg_temp.expect('ROLLBACK fingerprint = pre-000925', pg_temp.fingerprint()
 SELECT pg_temp.expect('ROLLBACK md5 grant_service_history = live', pg_temp.fn_md5('public.grant_service_history(bigint,bigint,bigint)'), '3bae6eee0d7d0360b795283d70839267');
 SELECT pg_temp.expect('ROLLBACK md5 request_service_history_access = live', pg_temp.fn_md5('public.request_service_history_access(bigint,bigint,text)'), 'eb16d6ff8db01045369b330bc1fe3082');
 SELECT pg_temp.expect('ROLLBACK md5 list_my_service_history_requests = live', pg_temp.fn_md5('public.list_my_service_history_requests(bigint)'), '849e65fd7513578572f1307778f267f1');
+SELECT pg_temp.expect('ROLLBACK md5 revoke_service_history = live', pg_temp.fn_md5('public.revoke_service_history(bigint)'), '031991b951143598428bc7466a7bd8fc');
+SELECT pg_temp.expect('ROLLBACK grants shape = pre-000925 (column + CHECK gone)', pg_temp.grants_shape(), (SELECT v FROM fp WHERE k = 'shape'));
+SELECT pg_temp.expect('ROLLBACK non-function state = pre-000925', pg_temp.fp_nonfn(), (SELECT v FROM fp WHERE k = 'nonfn'));
 SELECT pg_temp.expect('ROLLBACK helper dropped', (to_regprocedure('public.history_grantor_recent_shop_staff(bigint,uuid)') IS NULL)::text, 'true');
 SELECT pg_temp.expect_like('ROLLBACK live behaviour back (just-departed manager can grant again)', pg_temp.as_user(:'C_MGR', $q$SELECT public.grant_service_history(10, 1, 1)::text$q$), 'OK %');
 SELECT pg_temp.reset_history();
 \ir ../migrations/20261018_000925_service_history_n2_followups_rollback.sql
-SELECT pg_temp.expect('ROLLBACK idempotent', pg_temp.fingerprint(), (SELECT v FROM fp WHERE k = 'pre925'));
+SELECT pg_temp.expect('ROLLBACK idempotent', pg_temp.fingerprint() || pg_temp.grants_shape(), (SELECT v FROM fp WHERE k = 'pre925') || (SELECT v FROM fp WHERE k = 'shape'));
 \ir ../migrations/20261018_000925_service_history_n2_followups.sql
 SELECT pg_temp.expect('RE-APPLY after rollback = first apply', pg_temp.fingerprint(), (SELECT v FROM fp WHERE k = 'post925'));
 
