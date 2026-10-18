@@ -12,6 +12,7 @@ import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser, loadServiceRequestsForLaser } from '@/lib/equipment-ensure';
 import { StorageImage } from '@/components/StorageImage';
 import { LaserHistoryAccessPanel } from '@/components/LaserHistoryAccessPanel';
+import { formatDisplayDay, parseDisplayDate } from '@/lib/i18n/format-date';
 
 type Laser = {
   id: number;
@@ -132,7 +133,7 @@ export default function LaserProfilePage() {
     } catch {
       /* ignore */
     }
-    items.sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+    items.sort((a, b) => (parseDisplayDate(b.date)?.getTime() ?? 0) - (parseDisplayDate(a.date)?.getTime() ?? 0));
     setHist(items);
   }
 
@@ -344,7 +345,7 @@ export default function LaserProfilePage() {
                 <>
                   <div className="font-semibold">{h.title}</div>
                   <div className="text-xs text-[var(--text3)] mt-1">
-                    {h.date ? new Date(h.date).toLocaleDateString() : ''}
+                    {formatDisplayDay(h.date)}
                     {h.detail ? ` · ${h.detail}` : ''}
                     {' · '}
                     {h.kind === 'report' ? 'Report' : 'Request'}
