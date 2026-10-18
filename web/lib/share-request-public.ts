@@ -1,7 +1,8 @@
 /**
- * Public (logged-out) RFQ share preview. Same column set as the
- * public.open_service_requests view that signed-in bidders read: no serial
- * number, error codes, preferred date, equipment, photos, contacts or bids.
+ * Public (logged-out) RFQ share preview. The public.open_service_requests
+ * view's column set minus budget_max (CEO 2026-10-18: budget is for signed-in
+ * bidders only, who read the view directly). No serial number, error codes,
+ * preferred date, budget, equipment, photos, contacts or bids.
  */
 export const OPEN_SERVICE_REQUEST_COLUMNS = [
   'id',
@@ -17,7 +18,6 @@ export const OPEN_SERVICE_REQUEST_COLUMNS = [
   'location',
   'category',
   'created_at',
-  'budget_max',
   'organization_id',
 ] as const;
 
@@ -44,7 +44,6 @@ export function publicShareRequestRow(
     location: data.location ?? null,
     category: data.category ?? null,
     created_at: data.created_at ?? null,
-    budget_max: data.budget_max ?? null,
     organization_name: org?.name || null,
     _public_share: true as const,
   };

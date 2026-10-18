@@ -6,9 +6,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Public share endpoint for RFQs.
- * Returns the open_service_requests column set for open/bidding requests so
+ * Returns the open_service_requests column set (minus budget) for open/bidding requests so
  * logged-out invitees can preview and get a signup CTA. Serial numbers, error
- * codes, bids and private contacts are never included.
+ * codes, budget, bids and private contacts are never included.
  */
 export async function GET(
   _req: NextRequest,
@@ -34,7 +34,7 @@ export async function GET(
     const admin = getSupabaseAdmin();
     const { data: found, error } = await admin
       .from('service_requests')
-      // open_service_requests column set only (no serial, error codes, preferred date).
+      // open_service_requests column set minus budget (no serial, error codes, preferred date, budget).
       .select(SHARE_REQUEST_SELECT)
       .eq('id', id)
       .maybeSingle();
