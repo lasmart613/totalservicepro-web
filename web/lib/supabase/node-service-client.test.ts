@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createClient } from '@supabase/supabase-js';
@@ -29,9 +29,14 @@ test('createNodeServiceClient builds without a global WebSocket (Node 20)', () =
   assert.equal(typeof client.rpc, 'function');
 });
 
-test('the catch-up function and service scripts build clients through createNodeServiceClient', () => {
+test('every Netlify function and the service scripts build clients through createNodeServiceClient', () => {
+  const functions = readdirSync(join(web, 'netlify/functions'))
+    .filter((name) => /\.(mts|ts|mjs|js)$/.test(name))
+    .map((name) => `netlify/functions/${name}`);
+  assert.ok(functions.includes('netlify/functions/manual-index-catchup.mts'));
+  assert.ok(functions.includes('netlify/functions/past-due-downgrade.mts'));
   for (const rel of [
-    'netlify/functions/manual-index-catchup.mts',
+    ...functions,
     'scripts/index-missing-manuals.mjs',
     'scripts/reindex-long-manuals.mjs',
   ]) {
