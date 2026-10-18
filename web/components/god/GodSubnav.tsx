@@ -21,6 +21,7 @@ const LINKS = [
   { href: GOD_USERS_PATH, label: 'Users' },
   { href: GOD_AUTH_PATH, label: 'Auth / Users' },
   { href: '/admin/god/manuals', label: 'Manuals' },
+  { href: '/admin/god/directory', label: 'Directory' },
 ];
 
 export function GodSubnav() {
