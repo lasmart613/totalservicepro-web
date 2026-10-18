@@ -11,8 +11,26 @@ SET LOCAL lock_timeout = '5s';
 --
 -- Nothing here widens RLS. The teaser comes only from the SECURITY DEFINER
 -- RPC get_locked_service_history_teaser, which returns (ref, title,
--- service_date) and nothing else. No existing function, policy or table is
--- changed, so 000919/000920/000921 bodies are untouched.
+-- service_date) and nothing else. No policy or table is changed. ONE existing
+-- function is redefined: public.grant_service_history (000920) gains the M-1
+-- guard below; its live body (md5 c4b6de797b5e6ee4efcb918aa5137d69, read from
+-- prod 2026-10-17) is restored verbatim by the rollback. 000919/000921 bodies
+-- are untouched.
+--
+-- QA #314 revision (2026-10-17):
+--   M-1  An approver who is also a member of the requesting/grantee shop is
+--        refused, in respond_to_service_history_request AND in
+--        grant_service_history. A clinic whose only approvers are members of
+--        the shop counts as 'unclaimed' for that shop (no teaser, no request).
+--   L-1  Approve re-checks the pair: a block in organization_customer_link_blocks
+--        (or a removed link) closes the request ('blocked' / 'link_removed')
+--        instead of granting.
+--   L-2  The 30-day cooldown after a denial is per (clinic, shop), not per laser.
+--   L-3  Tech requesters: a member assigned to a NON-cancelled ticket of the
+--        shop for that clinic that is still open (not Completed/Closed) or was
+--        serviced/updated in the last 90 days.
+-- ORDERING: apply 000923 (clinic claim / invite binding) BEFORE this migration.
+-- 000923 redefines none of the functions defined here.
 --
 -- Eligibility (Rule A, Larry 2026-10-17): caller's active shop
 --   = get_my_org_id(), active member, service-company type
@@ -38,9 +56,11 @@ SET LOCAL lock_timeout = '5s';
 --   request: 20/24h per shop, 5/24h per (shop, clinic)
 --   email:   10/24h per clinic (taken by the server route, service_role)
 -- Requests: one pending per (clinic, shop, laser) (partial unique index);
--- expire after 14 days (lazily, no pg_cron); 30-day cooldown after a denial.
+-- expire after 14 days (lazily, no pg_cron); 30-day cooldown per (clinic, shop)
+-- after a denial.
 --
--- Requires 000920 and 000921 (preflight below). Safe to re-run.
+-- Requires 000920 and 000921 (preflight below), and should follow 000923.
+-- Safe to re-run.
 -- Rollback: 20261017_000922_service_history_access_requests_rollback.sql
 -- Proof: web/supabase/tests/20261017_service_history_access_requests.sql
 
@@ -178,7 +198,7 @@ CREATE TABLE IF NOT EXISTS public.service_history_requests (
   notified_at timestamptz,
   CONSTRAINT service_history_requests_status_check CHECK (status IN ('pending', 'approved', 'denied', 'expired')),
   CONSTRAINT service_history_requests_scope_check CHECK (approved_scope IS NULL OR approved_scope IN ('equipment', 'all')),
-  CONSTRAINT service_history_requests_close_reason_check CHECK (close_reason IS NULL OR close_reason IN ('expired', 'equipment_moved', 'blocked', 'covered')),
+  CONSTRAINT service_history_requests_close_reason_check CHECK (close_reason IS NULL OR close_reason IN ('expired', 'equipment_moved', 'blocked', 'link_removed', 'covered')),
   CONSTRAINT service_history_requests_not_self CHECK (owner_org_id <> requester_shop_org_id),
   CONSTRAINT service_history_requests_response CHECK ((status IN ('approved', 'denied')) = (responded_at IS NOT NULL)),
   CONSTRAINT service_history_requests_approved_scope CHECK (status <> 'approved' OR approved_scope IS NOT NULL)
@@ -241,10 +261,16 @@ AS $$
       SELECT 1 FROM public.equipment e
       WHERE e.id = p_equipment AND e.customer_organization_id = p_owner
     ) THEN 'no'
+    -- Claimed FOR THIS SHOP: at least one approver who is not also a member of
+    -- the shop (M-1: a dual member may never approve its own shop).
     WHEN NOT EXISTS (
       SELECT 1 FROM public.organization_memberships m
       WHERE m.organization_id = p_owner
         AND lower(btrim(coalesce(m.role, ''))) IN ('owner', 'company_admin', 'admin', 'manager')
+        AND NOT EXISTS (
+          SELECT 1 FROM public.organization_memberships sm
+          WHERE sm.organization_id = p_shop AND sm.user_id = m.user_id
+        )
     ) THEN 'unclaimed'
     ELSE 'ok'
   END;
@@ -321,7 +347,9 @@ $$;
 REVOKE ALL ON FUNCTION public.service_history_teaser_rows(bigint, bigint, bigint) FROM PUBLIC, anon, authenticated, service_role;
 
 -- Caller may send requests for (shop, owner): shop owner/admin/manager, or a
--- tech assigned to one of the shop's tickets for that clinic.
+-- tech currently assigned to one of the shop's tickets for that clinic. L-3
+-- bound: the ticket is not Cancelled, and is either still open (status not
+-- Completed/Closed) or was serviced or updated in the last 90 days.
 CREATE OR REPLACE FUNCTION public.service_history_can_request(p_shop bigint, p_owner bigint)
 RETURNS boolean
 LANGUAGE sql
@@ -346,6 +374,12 @@ AS $$
           WHERE t.organization_id = p_shop
             AND t.customer_organization_id = p_owner
             AND t.assigned_to = auth.uid()
+            AND lower(btrim(coalesce(t.status, ''))) NOT IN ('cancelled', 'canceled')
+            AND (
+              lower(btrim(coalesce(t.status, ''))) NOT IN ('completed', 'closed')
+              OR t.service_date >= (now() - interval '90 days')::date
+              OR coalesce(t.updated_at, t.created_at) > now() - interval '90 days'
+            )
         )
       )
     );
@@ -466,11 +500,11 @@ BEGIN
     RETURN;
   END IF;
 
+  -- L-2: the cooldown is per (clinic, shop), whichever laser was denied.
   SELECT max(q.responded_at) INTO last_denied
   FROM public.service_history_requests q
   WHERE q.owner_org_id = p_owner_org
     AND q.requester_shop_org_id = shop
-    AND q.equipment_id = p_equipment_id
     AND q.status = 'denied';
   IF last_denied IS NOT NULL AND last_denied > now() - interval '720 hours' THEN
     RAISE EXCEPTION 'request_cooldown' USING ERRCODE = 'P0001',
@@ -527,7 +561,13 @@ AS $$
   SELECT q.id, q.owner_org_id, q.equipment_id,
          CASE WHEN q.status = 'pending' AND q.expires_at <= now() THEN 'expired' ELSE q.status END,
          q.created_at, q.expires_at, q.responded_at, q.approved_scope,
-         CASE WHEN q.status = 'denied' THEN q.responded_at + interval '720 hours' END
+         -- L-2: retry_after is the pair-level cooldown end, on every row of that clinic.
+         (SELECT max(d.responded_at) + interval '720 hours'
+            FROM public.service_history_requests d
+           WHERE d.owner_org_id = q.owner_org_id
+             AND d.requester_shop_org_id = q.requester_shop_org_id
+             AND d.status = 'denied'
+             AND d.responded_at > now() - interval '720 hours')
   FROM me
   JOIN public.service_history_requests q ON q.requester_shop_org_id = me.shop
   WHERE me.shop IS NOT NULL
@@ -583,6 +623,9 @@ BEGIN
                WHEN q.expires_at <= now() THEN 'expired'
                WHEN EXISTS (SELECT 1 FROM public.organization_customer_link_blocks b
                             WHERE b.owner_org_id = q.owner_org_id AND b.shop_org_id = q.requester_shop_org_id) THEN 'expired'
+               WHEN NOT EXISTS (SELECT 1 FROM public.organization_customers oc
+                                WHERE oc.customer_organization_id = q.owner_org_id
+                                  AND oc.service_organization_id = q.requester_shop_org_id) THEN 'expired'
                WHEN NOT EXISTS (SELECT 1 FROM public.equipment e2
                                 WHERE e2.id = q.equipment_id AND e2.customer_organization_id = q.owner_org_id) THEN 'expired'
                ELSE 'pending'
@@ -592,6 +635,9 @@ BEGIN
                WHEN q.expires_at <= now() THEN 'expired'
                WHEN EXISTS (SELECT 1 FROM public.organization_customer_link_blocks b
                             WHERE b.owner_org_id = q.owner_org_id AND b.shop_org_id = q.requester_shop_org_id) THEN 'blocked'
+               WHEN NOT EXISTS (SELECT 1 FROM public.organization_customers oc
+                                WHERE oc.customer_organization_id = q.owner_org_id
+                                  AND oc.service_organization_id = q.requester_shop_org_id) THEN 'link_removed'
                WHEN NOT EXISTS (SELECT 1 FROM public.equipment e2
                                 WHERE e2.id = q.equipment_id AND e2.customer_organization_id = q.owner_org_id) THEN 'equipment_moved'
                ELSE NULL
@@ -656,6 +702,90 @@ $$;
 REVOKE ALL ON FUNCTION public.list_owner_service_history_grants(bigint, bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.list_owner_service_history_grants(bigint, bigint) TO authenticated;
 
+-- ---------------------------------------------------------------------------
+-- M-1: redefine 000920 grant_service_history with the dual-member guard.
+-- Everything else is the live body (prod md5 c4b6de797b5e6ee4efcb918aa5137d69);
+-- the rollback restores that body verbatim.
+DO $$
+BEGIN
+  IF md5(pg_catalog.pg_get_functiondef('public.grant_service_history(bigint,bigint,bigint)'::regprocedure))
+     NOT IN ('c4b6de797b5e6ee4efcb918aa5137d69') THEN
+    RAISE NOTICE '000922: grant_service_history body differs from the recorded live body (already patched or drifted)';
+  END IF;
+END $$;
+CREATE OR REPLACE FUNCTION public.grant_service_history(p_owner_org bigint, p_grantee_shop bigint, p_equipment_id bigint DEFAULT NULL::bigint)
+ RETURNS bigint
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO ''
+AS $function$
+DECLARE
+  uid uuid := auth.uid();
+  grant_id bigint;
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'not signed in' USING ERRCODE = '42501';
+  END IF;
+  IF p_owner_org IS NULL OR p_grantee_shop IS NULL THEN
+    RAISE EXCEPTION 'owner and service company are required' USING ERRCODE = '22023';
+  END IF;
+  IF p_owner_org = p_grantee_shop THEN
+    RAISE EXCEPTION 'an organization cannot grant itself' USING ERRCODE = '22023';
+  END IF;
+  IF NOT public.service_history_owner_admin(p_owner_org) THEN
+    RAISE EXCEPTION 'only an owner or admin of this facility can share its service history' USING ERRCODE = '42501';
+  END IF;
+  -- M-1 (000922): a clinic approver who is also a member of the grantee shop
+  -- may not share the clinic's history with that shop.
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships sm
+    WHERE sm.organization_id = p_grantee_shop AND sm.user_id = uid
+  ) THEN
+    RAISE EXCEPTION 'only an owner or admin who is not part of that service company can share with it' USING ERRCODE = '42501';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.organizations s
+    WHERE s.id = p_grantee_shop
+      AND lower(btrim(COALESCE(s.type, ''))) IN ('service_company', 'service')
+  ) THEN
+    RAISE EXCEPTION 'service history can only be shared with a service company' USING ERRCODE = '22023';
+  END IF;
+  IF p_equipment_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM public.equipment e
+    WHERE e.id = p_equipment_id AND e.customer_organization_id = p_owner_org
+  ) THEN
+    RAISE EXCEPTION 'that equipment does not belong to this facility' USING ERRCODE = '22023';
+  END IF;
+
+  SELECT g.id INTO grant_id
+  FROM public.service_history_grants g
+  WHERE g.owner_org_id = p_owner_org
+    AND g.grantee_shop_org_id = p_grantee_shop
+    AND COALESCE(g.equipment_id, 0) = COALESCE(p_equipment_id, 0)
+    AND g.revoked_at IS NULL;
+  IF grant_id IS NOT NULL THEN
+    RETURN grant_id;
+  END IF;
+
+  INSERT INTO public.service_history_grants (owner_org_id, grantee_shop_org_id, equipment_id, granted_by)
+  VALUES (p_owner_org, p_grantee_shop, p_equipment_id, uid)
+  ON CONFLICT DO NOTHING
+  RETURNING id INTO grant_id;
+  IF grant_id IS NULL THEN
+    SELECT g.id INTO grant_id
+    FROM public.service_history_grants g
+    WHERE g.owner_org_id = p_owner_org
+      AND g.grantee_shop_org_id = p_grantee_shop
+      AND COALESCE(g.equipment_id, 0) = COALESCE(p_equipment_id, 0)
+      AND g.revoked_at IS NULL;
+  END IF;
+  RETURN grant_id;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.grant_service_history(bigint, bigint, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.grant_service_history(bigint, bigint, bigint) TO authenticated;
+-- (CREATE OR REPLACE keeps the existing ACL, incl. the live service_role grant.)
+
 -- Owner approves or denies. The owner comes from the request row, never a parameter.
 CREATE OR REPLACE FUNCTION public.respond_to_service_history_request(
   p_request_id bigint,
@@ -694,6 +824,32 @@ BEGIN
       RETURN;
     END IF;
     RAISE EXCEPTION 'request is no longer open' USING ERRCODE = '22023';
+  END IF;
+
+  -- M-1: never approve your own shop's request (membership gained after linking).
+  IF decision = 'approve' AND EXISTS (
+    SELECT 1 FROM public.organization_memberships sm
+    WHERE sm.organization_id = q.requester_shop_org_id AND sm.user_id = uid
+  ) THEN
+    RAISE EXCEPTION 'only an owner or admin who is not part of the requesting company can approve' USING ERRCODE = '42501';
+  END IF;
+
+  -- L-1: a blocked (or unlinked) shop can no longer be approved.
+  IF decision = 'approve' AND EXISTS (
+    SELECT 1 FROM public.organization_customer_link_blocks b
+    WHERE b.owner_org_id = q.owner_org_id AND b.shop_org_id = q.requester_shop_org_id
+  ) THEN
+    UPDATE public.service_history_requests r SET status = 'expired', close_reason = 'blocked' WHERE r.id = q.id;
+    RETURN QUERY SELECT 'expired'::text, NULL::bigint, 'blocked'::text;
+    RETURN;
+  END IF;
+  IF decision = 'approve' AND NOT EXISTS (
+    SELECT 1 FROM public.organization_customers oc
+    WHERE oc.customer_organization_id = q.owner_org_id AND oc.service_organization_id = q.requester_shop_org_id
+  ) THEN
+    UPDATE public.service_history_requests r SET status = 'expired', close_reason = 'link_removed' WHERE r.id = q.id;
+    RETURN QUERY SELECT 'expired'::text, NULL::bigint, 'link_removed'::text;
+    RETURN;
   END IF;
 
   IF decision = 'approve' AND NOT EXISTS (

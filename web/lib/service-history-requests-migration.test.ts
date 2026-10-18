@@ -16,7 +16,12 @@ const down = readFileSync(join(mig, '20261017_000922_service_history_access_requ
 const proof = readFileSync(join(here, '../supabase/tests/20261017_service_history_access_requests.sql'), 'utf8');
 const code = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
 
-const created = [...code(up).matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(([^)]*)\)/g)].map((m) => m[1]);
+// grant_service_history (000920) is REDEFINED, not created (QA #314 M-1).
+const created = [...code(up).matchAll(/CREATE OR REPLACE FUNCTION public\.(\w+)\(([^)]*)\)/g)]
+  .map((m) => m[1])
+  .filter((n) => n !== 'grant_service_history');
+const LIVE_GRANT_MD5 = 'c4b6de797b5e6ee4efcb918aa5137d69';
+const grantBody = (s: string) => /CREATE OR REPLACE FUNCTION public\.grant_service_history[\s\S]*?\$function\$;/.exec(s)?.[0] || '';
 
 test('000922: lock_timeout first in both files', () => {
   assert.match(code(up).trim(), /^SET LOCAL lock_timeout = '5s';/);
@@ -100,4 +105,37 @@ test('proof covers T01..T28 and applies 919 -> 920 -> 921 first', () => {
   const a = at('20261016_000919_'), b = at('20261017_000920_'), c = at('20261017_000921_'), d = at('20261017_000922_service_history_access_requests.sql');
   assert.ok(a > 0 && a < b && b < c && c < d);
   assert.match(proof, /ROLLBACK;\s*$/);
+});
+
+test('M-1: 000922 redefines grant_service_history with the dual-member guard; rollback restores the live body', () => {
+  const upBody = grantBody(code(up));
+  const downBody = grantBody(code(down));
+  assert.ok(upBody && downBody);
+  assert.match(upBody, /SECURITY DEFINER/);
+  assert.match(upBody, /SET search_path TO ''/);
+  assert.match(upBody, /sm\.organization_id = p_grantee_shop AND sm\.user_id = uid/);
+  assert.doesNotMatch(downBody, /p_grantee_shop AND sm\.user_id/);
+  // up = live body + exactly the guard block.
+  const guard = /  -- M-1 \(000922\)[\s\S]*?END IF;\n/.exec(grantBody(up))?.[0] || '';
+  assert.ok(guard);
+  assert.equal(grantBody(up).replace(guard, ''), grantBody(down));
+  assert.ok(up.includes(LIVE_GRANT_MD5) && down.includes(LIVE_GRANT_MD5));
+  assert.match(code(up), /REVOKE ALL ON FUNCTION public\.grant_service_history\(bigint, bigint, bigint\) FROM PUBLIC, anon;/);
+  assert.match(code(down), /REVOKE ALL ON FUNCTION public\.grant_service_history\(bigint, bigint, bigint\) FROM PUBLIC, anon;/);
+  assert.ok(proof.includes(`'${LIVE_GRANT_MD5}'`));
+});
+
+test('M-1 / L-1 / L-2 / L-3 guards are in the approve and request paths', () => {
+  const u = code(up);
+  assert.match(u, /sm\.organization_id = q\.requester_shop_org_id AND sm\.user_id = uid/);
+  assert.match(u, /organization_customer_link_blocks b\s+WHERE b\.owner_org_id = q\.owner_org_id AND b\.shop_org_id = q\.requester_shop_org_id\s+\) THEN\s+UPDATE public\.service_history_requests r SET status = 'expired', close_reason = 'blocked'/);
+  assert.match(u, /close_reason = 'link_removed'/);
+  // cooldown query has no equipment filter
+  const cd = /SELECT max\(q\.responded_at\) INTO last_denied[\s\S]*?;/.exec(u)?.[0] || '';
+  assert.ok(cd && !cd.includes('equipment_id'));
+  assert.match(u, /NOT IN \('cancelled', 'canceled'\)/);
+  assert.match(u, /interval '90 days'/);
+  for (const t of ['M-1 dual member approves', 'M-1 dual member calls grant_service_history', 'L-1 owner approves the blocked', 'L-1 approving an unlinked shop', 'L-2 cooldown is per (clinic, shop)', 'L-3 tech whose only C ticket']) {
+    assert.ok(proof.includes(t), t);
+  }
 });

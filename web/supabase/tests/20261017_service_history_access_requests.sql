@@ -211,7 +211,8 @@ REVOKE ALL ON FUNCTION public.org_creator_access(bigint, uuid, timestamp with ti
 GRANT EXECUTE ON FUNCTION public.org_creator_access(bigint, uuid, timestamp with time zone) TO authenticated, service_role;
 
 -- Extra live columns this feature reads (prod information_schema, 2026-10-17).
-ALTER TABLE public.service_tickets ADD COLUMN assigned_to uuid;
+ALTER TABLE public.service_tickets ADD COLUMN assigned_to uuid, ADD COLUMN status text, ADD COLUMN service_date date,
+  ADD COLUMN created_at timestamptz DEFAULT now(), ADD COLUMN updated_at timestamptz DEFAULT now();
 ALTER TABLE public.user_profiles ADD COLUMN email text, ADD COLUMN first_name text, ADD COLUMN last_name text,
   ADD COLUMN notification_prefs jsonb, ADD COLUMN is_active boolean DEFAULT true;
 ALTER TABLE public.equipment ADD COLUMN manufacturer text;
@@ -277,8 +278,8 @@ INSERT INTO public.user_profiles (id, organization_id, active_organization_id, e
   ('00000000-0000-0000-0000-0000000000c3', 10, 10, 'c3@clinic-c.test', 'Cam', 'Manager', '{"notif_history_request_email": false}'),
   ('00000000-0000-0000-0000-0000000000f1', 11, 11, 'f1@clinic-d.test', 'Fay', 'Owner', NULL);
 INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, 10), (1, 12), (3, 11);
-INSERT INTO public.service_tickets (organization_id, customer_organization_id, assigned_to) VALUES
-  (1, 10, '00000000-0000-0000-0000-0000000000b2');
+INSERT INTO public.service_tickets (id, organization_id, customer_organization_id, assigned_to, status, service_date) VALUES
+  (1, 1, 10, '00000000-0000-0000-0000-0000000000b2', 'Scheduled', current_date + 3);
 INSERT INTO public.equipment (id, customer_organization_id, serial_number, model, manufacturer) VALUES
   (1, 10, 'SN-1', 'GentleMax', 'Candela'),
   (2, 10, 'SN-2', 'Vbeam', 'Candela'),
@@ -362,6 +363,8 @@ GRANT SELECT ON fp TO authenticated;
 \set C_STAFF '00000000-0000-0000-0000-0000000000c2'
 \set C_MGR   '00000000-0000-0000-0000-0000000000c3'
 \set D_OWNER '00000000-0000-0000-0000-0000000000f1'
+-- d1: QA #314 M-1 dual member (clinic C admin AND shop L member), added later.
+\set DUAL    '00000000-0000-0000-0000-0000000000d1'
 
 \ir ../migrations/20261017_000921_linked_shop_own_reports.sql
 SELECT pg_temp.expect('BASE 000919 applied (creator_shop_org_id column)', (SELECT count(*)::text FROM pg_attribute WHERE attrelid = 'public.organizations'::regclass AND attname = 'creator_shop_org_id' AND NOT attisdropped), '1');
@@ -374,8 +377,13 @@ INSERT INTO fp SELECT 'md5:' || p.oid::regprocedure::text, md5(pg_get_functionde
 -- ===================================================================== 000922
 \ir ../migrations/20261017_000922_service_history_access_requests.sql
 
-SELECT pg_temp.expect('no existing function body changed by 000922',
-  (SELECT bool_and(v = md5(pg_get_functiondef(substr(k, 5)::regprocedure)))::text FROM fp WHERE k LIKE 'md5:%'), 'true');
+SELECT pg_temp.expect('base grant_service_history body = live prod body (md5 c4b6de79...)',
+  (SELECT v FROM fp WHERE k = 'md5:grant_service_history(bigint,bigint,bigint)'), 'c4b6de797b5e6ee4efcb918aa5137d69');
+SELECT pg_temp.expect('M-1 000922 redefines grant_service_history (and only that existing function)',
+  (SELECT string_agg(substr(k, 5), ',') FROM fp WHERE k LIKE 'md5:%' AND v <> md5(pg_get_functiondef(substr(k, 5)::regprocedure))), 'grant_service_history(bigint,bigint,bigint)');
+SELECT pg_temp.expect('M-1 grant_service_history keeps SECURITY DEFINER, search_path "", no anon/PUBLIC',
+  (SELECT prosecdef::text || ':' || array_to_string(proconfig, ',') || ':' || has_function_privilege('anon', oid, 'EXECUTE')::text || ':' || has_function_privilege('authenticated', oid, 'EXECUTE')::text
+     FROM pg_proc WHERE oid = 'public.grant_service_history(bigint,bigint,bigint)'::regprocedure), 'true:search_path="":false:true');
 SELECT pg_temp.expect('no RLS policy added or changed by 000922 (no widening)', pg_temp.policies(), (SELECT v FROM fp WHERE k = 'policies'));
 SELECT pg_temp.expect('re-run is safe (idempotent)', 'ok', 'ok');
 \ir ../migrations/20261017_000922_service_history_access_requests.sql
@@ -485,6 +493,22 @@ SELECT pg_temp.expect('REQ tech with no ticket for C is refused',
 SELECT pg_temp.expect('T17 a laser with no locked rows cannot be requested',
   pg_temp.as_user(:'L_ADMIN', 'SELECT status FROM public.request_service_history_access(10, 2)'), 'ERR 22023 no locked history on this laser');
 
+-- L-3 tech eligibility: assigned to an open ticket, or one serviced/updated in 90 days; never Cancelled.
+UPDATE public.service_tickets SET status = 'Completed', service_date = current_date - 200, created_at = now() - interval '200 days', updated_at = now() - interval '120 days' WHERE id = 1;
+SELECT pg_temp.expect('L-3 tech whose only C ticket was completed > 90 days ago is refused',
+  pg_temp.as_user(:'L_TECH', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR 42501 only a shop owner or admin, or a tech assigned to this clinic, can ask for history');
+UPDATE public.service_tickets SET status = 'Cancelled', service_date = current_date + 3, updated_at = now() WHERE id = 1;
+SELECT pg_temp.expect('L-3 tech assigned only to a Cancelled C ticket is refused',
+  pg_temp.as_user(:'L_TECH', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR 42501 only a shop owner or admin, or a tech assigned to this clinic, can ask for history');
+UPDATE public.service_tickets SET status = 'Completed', service_date = current_date - 10, updated_at = now() - interval '200 days' WHERE id = 1;
+SELECT pg_temp.expect('L-3 helper: tech with a C ticket completed 10 days ago may request',
+  pg_temp.as_user(:'L_TECH', 'SELECT 1::text') || ':' || (SELECT pg_temp.as_role('postgres', $q$SELECT (set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000b2', true) IS NOT NULL AND public.service_history_can_request(1, 10))::text$q$)), 'OK 1:OK true');
+UPDATE public.service_tickets SET status = 'Awaiting Scheduling', service_date = NULL, created_at = now() - interval '400 days', updated_at = now() - interval '400 days' WHERE id = 1;
+SELECT pg_temp.expect('L-3 helper: tech on an OPEN (old) C ticket may request',
+  (SELECT pg_temp.as_role('postgres', $q$SELECT (set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000b2', true) IS NOT NULL AND public.service_history_can_request(1, 10))::text$q$)), 'OK true');
+SELECT set_config('request.jwt.claim.sub', '', true);
+UPDATE public.service_tickets SET status = 'Scheduled', service_date = current_date + 3, created_at = now(), updated_at = now() WHERE id = 1;
+
 -- T12 dedupe.
 SELECT pg_temp.expect('T12 assigned tech requests E1 (with a clicked ref)',
   pg_temp.as_user(:'L_TECH', format($q$SELECT status || ':' || created::text FROM public.request_service_history_access(10, 1, %L)$q$,
@@ -537,6 +561,38 @@ SELECT pg_temp.expect('T21 respond takes no owner/shop parameters',
 SELECT pg_temp.expect('T21 bad decision', pg_temp.as_user(:'C_OWNER', format('SELECT status FROM public.respond_to_service_history_request(%s, $$maybe$$)', (SELECT v FROM fp WHERE k = 'req1'))), 'ERR 22023 decision must be approve or deny');
 SELECT pg_temp.expect('T21 grant_service_history still refuses the shop directly', pg_temp.as_user(:'L_ADMIN', 'SELECT public.grant_service_history(10, 1, 1)::text'), 'ERR 42501 only an owner or admin of this facility can share its service history');
 
+-- M-1 dual member: d1 becomes a C admin AND an L member after the link was made
+-- (simulates a membership gained through a path 000919 does not cover, e.g.
+-- the pre-000923 claim; triggers are bypassed only to build the fixture).
+SET LOCAL session_replication_role = replica;
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES
+  (:'DUAL', 10, 'company_admin', false), (:'DUAL', 1, 'fse', true);
+SET LOCAL session_replication_role = origin;
+SELECT pg_temp.expect('M-1 dual member approves its own shop''s request (this laser): refused',
+  pg_temp.as_user(:'DUAL', format('SELECT status FROM public.respond_to_service_history_request(%s, $$approve$$)', (SELECT v FROM fp WHERE k = 'req1'))),
+  'ERR 42501 only an owner or admin who is not part of the requesting company can approve');
+SELECT pg_temp.expect('M-1 dual member approves with scope all: refused',
+  pg_temp.as_user(:'DUAL', format('SELECT status FROM public.respond_to_service_history_request(%s, $$approve$$, $$all$$)', (SELECT v FROM fp WHERE k = 'req1'))),
+  'ERR 42501 only an owner or admin who is not part of the requesting company can approve');
+SELECT pg_temp.expect('M-1 dual member calls grant_service_history directly (all lasers): refused',
+  pg_temp.as_user(:'DUAL', 'SELECT public.grant_service_history(10, 1, NULL)::text'),
+  'ERR 42501 only an owner or admin who is not part of that service company can share with it');
+SELECT pg_temp.expect('M-1 dual member calls grant_service_history directly (one laser): refused',
+  pg_temp.as_user(:'DUAL', 'SELECT public.grant_service_history(10, 1, 1)::text'),
+  'ERR 42501 only an owner or admin who is not part of that service company can share with it');
+SELECT pg_temp.expect('M-1 no grant, request still pending',
+  (SELECT count(*)::text FROM public.service_history_grants) || ':' || (SELECT status FROM public.service_history_requests WHERE id = (SELECT v FROM fp WHERE k = 'req1')::bigint), '0:pending');
+-- A clinic whose ONLY approver is a member of the shop is unclaimed for that shop.
+SET LOCAL session_replication_role = replica;
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES (:'DUAL', 12, 'owner', false);
+SET LOCAL session_replication_role = origin;
+SELECT pg_temp.expect('M-1 clinic U whose only approver is an L member: still clinic_unclaimed for L',
+  pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_locked_service_history_teaser(12, 4)'), 'ERR 42501 clinic_unclaimed');
+SELECT pg_temp.expect('M-1 ... and L cannot request it',
+  pg_temp.as_user(:'L_ADMIN', 'SELECT status FROM public.request_service_history_access(12, 4)'), 'ERR 42501 clinic_unclaimed');
+DELETE FROM public.organization_memberships WHERE user_id = :'DUAL';
+DELETE FROM public.service_history_slots WHERE bucket LIKE 'teaser%';
+
 -- T23 approve (equipment scope) -> exactly one grant, unlocks exactly the teased rows.
 INSERT INTO fp SELECT 'teased', string_agg(report_id::text, ',' ORDER BY report_id) FROM public.service_history_teaser_rows(1, 10, 1);
 SELECT pg_temp.expect('T23 C owner approves (default scope = this laser)', pg_temp.as_user(:'C_OWNER', format('SELECT status || $$:$$ || (grant_id IS NOT NULL)::text FROM public.respond_to_service_history_request(%s, $$approve$$)', (SELECT v FROM fp WHERE k = 'req1'))), 'OK approved:true');
@@ -575,6 +631,10 @@ SELECT pg_temp.expect('T26 denied: no new grant', (SELECT count(*)::text FROM pu
 SELECT pg_temp.expect('T26 denied: shared history still locked', pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_shared_service_history(10, 1)'), 'OK 0');
 SELECT pg_temp.expect('T26 denied: teaser still shows the rows', pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_locked_service_history_teaser(10, 1)'), 'OK 4');
 SELECT pg_temp.expect('T15 re-request inside 30 days: cooldown', pg_temp.as_user(:'L_ADMIN', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR P0001 request_cooldown');
+SELECT pg_temp.expect('L-2 cooldown is per (clinic, shop): another laser of C is refused too',
+  pg_temp.as_user(:'L_ADMIN', 'SELECT status FROM public.request_service_history_access(10, 2)'), 'ERR P0001 request_cooldown');
+SELECT pg_temp.expect('L-2 another clinic is not affected (Z/D path unchanged; L has no D link)',
+  pg_temp.as_user(:'Z_ADMIN', 'SELECT status FROM public.request_service_history_access(11, 3)'), 'ERR 22023 no locked history on this laser');
 SELECT pg_temp.expect('T15 shop sees retry_after = denial + 30 days', pg_temp.as_user(:'L_ADMIN', $q$SELECT (retry_after - responded_at)::text FROM public.list_my_service_history_requests(1) WHERE status = 'denied'$q$), 'OK 30 days');
 UPDATE public.service_history_requests SET responded_at = now() - interval '31 days', created_at = now() - interval '32 days', expires_at = now() - interval '18 days' WHERE status = 'denied';
 SELECT pg_temp.expect('T15 after 30 days: request allowed again', pg_temp.as_user(:'L_ADMIN', 'SELECT status || $$:$$ || created::text FROM public.request_service_history_access(10, 1)'), 'OK pending:true');
@@ -617,10 +677,24 @@ SELECT pg_temp.expect('T05 owner removes and blocks L', pg_temp.as_user(:'C_OWNE
 SELECT pg_temp.expect('T05 blocked: teaser refused', pg_temp.as_user(:'L_ADMIN', 'SELECT count(*)::text FROM public.get_locked_service_history_teaser(10, 1)'), 'ERR 42501 not available for this laser');
 SELECT pg_temp.expect('T05 blocked: request refused', pg_temp.as_user(:'L_ADMIN', 'SELECT status FROM public.request_service_history_access(10, 1)'), 'ERR 42501 not available for this laser');
 SELECT pg_temp.expect('T05 blocked: pending request shows closed (blocked)', pg_temp.as_user(:'C_OWNER', $q$SELECT status || ':' || close_reason FROM public.list_incoming_service_history_requests(10, 'all') ORDER BY created_at DESC, id DESC LIMIT 1$q$), 'OK expired:blocked');
+SELECT pg_temp.expect('L-1 owner approves the blocked shop''s pending request by direct RPC: closed as blocked, no grant',
+  pg_temp.as_user(:'C_OWNER', format($q$SELECT status || ':' || coalesce(grant_id::text, 'none') || ':' || close_reason FROM public.respond_to_service_history_request(%s, 'approve', 'all')$q$, (SELECT max(id) FROM public.service_history_requests))), 'OK expired:none:blocked');
+SELECT pg_temp.expect('L-1 no active grant after approving a blocked shop', (SELECT count(*)::text FROM public.service_history_grants WHERE revoked_at IS NULL), '0');
+SELECT pg_temp.expect('L-1 the row is closed, approving again is refused',
+  (SELECT status || ':' || close_reason FROM public.service_history_requests WHERE id = (SELECT max(id) FROM public.service_history_requests)) || ' | ' ||
+  pg_temp.as_user(:'C_OWNER', format($q$SELECT status FROM public.respond_to_service_history_request(%s, 'approve')$q$, (SELECT max(id) FROM public.service_history_requests))), 'expired:blocked | ERR 22023 request is no longer open');
 -- Restore the link for the rate-limit tests.
 DELETE FROM public.organization_customer_link_blocks;
 INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, 10);
 UPDATE public.service_history_requests SET status = 'expired', close_reason = 'blocked' WHERE status = 'pending';
+-- L-1 link removed without a block (direct delete): approve closes it as link_removed.
+SELECT pg_temp.expect('L-1 pending request before the link is removed', pg_temp.as_user(:'L_ADMIN', 'SELECT status || $$:$$ || created::text FROM public.request_service_history_access(10, 1)'), 'OK pending:true');
+DELETE FROM public.organization_customers WHERE service_organization_id = 1 AND customer_organization_id = 10;
+SELECT pg_temp.expect('L-1 inbox shows it closed (link_removed)', pg_temp.as_user(:'C_OWNER', $q$SELECT status || ':' || close_reason FROM public.list_incoming_service_history_requests(10, 'all') ORDER BY created_at DESC, id DESC LIMIT 1$q$), 'OK expired:link_removed');
+SELECT pg_temp.expect('L-1 approving an unlinked shop: closed as link_removed, no grant',
+  pg_temp.as_user(:'C_OWNER', format($q$SELECT status || ':' || coalesce(grant_id::text, 'none') || ':' || close_reason FROM public.respond_to_service_history_request(%s, 'approve')$q$, (SELECT max(id) FROM public.service_history_requests))), 'OK expired:none:link_removed');
+SELECT pg_temp.expect('L-1 still no active grant', (SELECT count(*)::text FROM public.service_history_grants WHERE revoked_at IS NULL), '0');
+INSERT INTO public.organization_customers (service_organization_id, customer_organization_id) VALUES (1, 10);
 
 -- T11 teaser rate limits.
 DELETE FROM public.service_history_slots;
@@ -667,6 +741,8 @@ SELECT pg_temp.expect('T16 unknown bucket refused by CHECK', pg_temp.as_role('po
 SELECT pg_temp.expect('T28 ROLLBACK fingerprint (public functions+ACLs, policies, tables, private tables) equals pre-000922', pg_temp.fingerprint(), (SELECT v FROM fp WHERE k = 'pre922'));
 SELECT pg_temp.expect('T28 ROLLBACK every 919/920/921 function body identical',
   (SELECT bool_and(v = md5(pg_get_functiondef(substr(k, 5)::regprocedure)))::text FROM fp WHERE k LIKE 'md5:%'), 'true');
+SELECT pg_temp.expect('T28 ROLLBACK grant_service_history restored to the live prod body (md5)',
+  md5(pg_get_functiondef('public.grant_service_history(bigint,bigint,bigint)'::regprocedure)), 'c4b6de797b5e6ee4efcb918aa5137d69');
 SELECT pg_temp.expect('T28 ROLLBACK teaser RPC gone', (to_regprocedure('public.get_locked_service_history_teaser(bigint,bigint)') IS NULL)::text, 'true');
 SELECT pg_temp.expect('T28 ROLLBACK key table gone', (to_regclass('private.service_history_ref_keys') IS NULL)::text, 'true');
 SELECT pg_temp.expect('T28 ROLLBACK history behaviour unchanged (L reads only its own C report)', pg_temp.as_user(:'L_ADMIN', $q$SELECT string_agg(title, ',' ORDER BY title) FROM public.service_reports WHERE customer_organization_id = 10$q$), 'OK L-1');
