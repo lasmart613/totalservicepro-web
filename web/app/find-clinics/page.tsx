@@ -24,6 +24,7 @@ import {
 } from '@/lib/prospects/country-pills';
 import {
   addErrorKey,
+  emptyStateKey,
   parseProspectResponse,
   upgradeCta,
   PROSPECT_PAGE_SIZE,
@@ -294,7 +295,7 @@ export default function FindClinicsPage() {
 
             {clinics.length === 0 ? (
               <div className="card p-8 text-center text-[var(--text3)] mb-6">
-                {premium ? t('No clinics match these filters.') : t('No clinics near your address yet. Add your city, state and country in Company Profile.')}
+                {t(emptyStateKey(data))}
               </div>
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">

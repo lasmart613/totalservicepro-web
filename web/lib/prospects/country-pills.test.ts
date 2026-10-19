@@ -89,7 +89,7 @@ test('parseProspectResponse maps server answers', () => {
   assert.ok(ok.ok && ok.data.aggregates.length === 1 && ok.data.country_counts[0].count === 2 && ok.data.page.has_more === false);
   const prem = parseProspectResponse({ tier: 'premium', total: 0 }, null);
   assert.ok(prem.ok && prem.data.tier === 'premium' && prem.data.clinics.length === 0);
-  assert.equal(addErrorKey('daily_cap'), 'You reached today’s limit for adding clinics. Try again tomorrow.');
+  assert.equal(addErrorKey('daily_cap'), 'You reached the limit for adding clinics in the last 24 hours. You can add more clinics once 24 hours have passed since your earlier adds.');
   assert.equal(addErrorKey('whatever'), 'Could not add this clinic.');
 });
 
@@ -135,4 +135,67 @@ test('each add refusal has its own message', () => {
   assert.equal(addErrorKey('not_service_org'), 'Only service companies can add clinics as customers.');
   assert.equal(addErrorKey('no_org'), 'Join or create a company before adding customers.');
   assert.equal(addErrorKey(undefined), 'Could not add this clinic.');
+});
+
+import {
+  EMPTY_COUNTRY_NOT_IN_POOL,
+  EMPTY_FILTERS,
+  EMPTY_NO_COUNTRY,
+  EMPTY_NO_LOCATION,
+  emptyStateKey,
+} from './find-clinics.ts';
+import { appStrings } from '../i18n/app-copy.ts';
+
+test('viewer block (000933) is parsed; older answers give null', () => {
+  const r = parseProspectResponse({ tier: 'free', total: 0, clinics: [], viewer: { country: 'United States', state: 'US:TX', city: 'dallas', has_location: true, country_pool: 0 } }, null);
+  assert.ok(r.ok);
+  assert.deepEqual(r.ok && r.data.viewer, { has_location: true, country_pool: 0 });
+  const old = parseProspectResponse({ tier: 'free', total: 0, clinics: [], viewer: { country: null, state: null, city: null } }, null);
+  assert.ok(old.ok && old.data.viewer === null);
+  const noCountry = parseProspectResponse({ tier: 'free', clinics: [], viewer: { has_location: true, country_pool: null } }, null);
+  assert.deepEqual(noCountry.ok && noCountry.data.viewer, { has_location: true, country_pool: null });
+  const junk = parseProspectResponse({ tier: 'free', clinics: [], viewer: { has_location: 'yes', country_pool: '3' } }, null);
+  assert.ok(junk.ok && junk.data.viewer === null);
+});
+
+test('empty state: add-address copy only when the org has no location (L-1)', () => {
+  const load = (viewer: unknown, tier = 'free') => {
+    const r = parseProspectResponse({ tier, total: 2745, clinics: [], viewer }, null);
+    assert.ok(r.ok);
+    return r.ok ? r.data : null;
+  };
+  // US shop with an address: the pool has no US clinics yet
+  assert.equal(emptyStateKey(load({ has_location: true, country_pool: 0 })), EMPTY_COUNTRY_NOT_IN_POOL);
+  assert.equal(EMPTY_COUNTRY_NOT_IN_POOL, 'We don’t have clinics in your country yet. More regions are coming.');
+  // no location at all
+  assert.equal(emptyStateKey(load({ has_location: false, country_pool: null })), EMPTY_NO_LOCATION);
+  // a city/state but no country
+  assert.equal(emptyStateKey(load({ has_location: true, country_pool: null })), EMPTY_NO_COUNTRY);
+  // older RPC without the viewer flags keeps the old copy
+  assert.equal(emptyStateKey(load(undefined)), EMPTY_NO_LOCATION);
+  assert.equal(emptyStateKey(null), EMPTY_NO_LOCATION);
+  // Premium: empty only through filters
+  assert.equal(emptyStateKey(load({ has_location: true, country_pool: 0 }, 'premium')), EMPTY_FILTERS);
+});
+
+test('Find clinics copy has all 8 translations, and the cap copy fits a rolling 24 h', () => {
+  const keys = [
+    EMPTY_COUNTRY_NOT_IN_POOL,
+    EMPTY_NO_COUNTRY,
+    EMPTY_NO_LOCATION,
+    EMPTY_FILTERS,
+    ...['premium_required', 'not_service_org', 'no_org', 'daily_cap', 'not_admin', 'boom'].map(addErrorKey),
+  ];
+  for (const loc of ['fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar'] as const) {
+    const table = appStrings(loc);
+    for (const k of keys) {
+      assert.ok(table[k] && table[k].trim() && table[k] !== k, `${loc}: ${k}`);
+    }
+  }
+  assert.doesNotMatch(addErrorKey('daily_cap'), /tomorrow|today/i);
+  assert.match(addErrorKey('daily_cap'), /24 hours/);
+  for (const loc of ['fa', 'he', 'ar'] as const) {
+    // RTL locales: real RTL script, not an English fallback
+    assert.match(appStrings(loc)[EMPTY_COUNTRY_NOT_IN_POOL], /[\u0590-\u05FF\u0600-\u06FF]/);
+  }
 });
