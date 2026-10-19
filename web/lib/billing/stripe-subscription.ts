@@ -12,12 +12,12 @@ import {
   stripeSecretProblem,
   stripeSiteOrigin,
   stripeTestKeyOnProductionMessage,
-} from '@/lib/billing/stripe-pay';
-import { PLAN_OFFERS, type PlanOffer, type PlanSku } from '@/lib/billing/plan-catalog';
+} from './stripe-pay.ts';
+import { PLAN_OFFERS, type PlanOffer, type PlanSku } from './plan-catalog.ts';
 import {
   buildUpgradeCheckoutFields,
   type UpgradeSessionOwner,
-} from '@/lib/billing/upgrade-session';
+} from './upgrade-session.ts';
 
 export type StripeObject = Record<string, unknown> & {
   id?: string;
