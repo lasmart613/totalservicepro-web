@@ -282,6 +282,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         label: 'Business Management',
         items: [
           { href: '/customers', label: 'Customers' },
+          ...(showServiceNav ? [{ href: '/find-clinics', label: 'Find clinics' }] : []),
           { href: '/estimates', label: 'Estimates' },
           { href: '/invoices', label: 'Invoices' },
           { href: '/purchase-orders', label: 'Purchase Orders' },

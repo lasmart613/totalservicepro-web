@@ -1,0 +1,461 @@
+-- 000929: organizations.country + signed-in "Find clinics" prospect finder.
+--
+-- NOTE: numbered 000929 because #320 (000927) and #321 (000928) are about to
+-- merge. Bump the number if anything else lands first.
+--
+-- 1) organizations.country text: full English country name ('United States',
+--    'Egypt', ...). NULL or a trimmed, non-empty string. Indexed. Clients may
+--    INSERT/UPDATE it (column grant, same as the other profile columns).
+-- 2) organizations.prospect_pool text: server-side source marker for the
+--    shared pool of imported clinics ('intl-clinics-1018'). Set only by the
+--    one-off backfill (service role). No client INSERT/UPDATE grant.
+-- 3) public.prospect_customer_links: audit + cap ledger for "Add to my
+--    customers". RLS on, no policies, all client privileges revoked.
+-- 4) RPCs (SECURITY DEFINER, search_path '', anon denied, EXECUTE for
+--    authenticated only):
+--      find_clinic_prospects(country, city, limit, offset)  jsonb
+--      add_prospect_customer(bigint)      jsonb
+--    Helpers (not callable by clients):
+--      org_is_paid_entitled(bigint)       1:1 port of lib/org-plan.ts orgIsPaid
+--      prospect_state_key(text)           'California' / 'ca' -> 'CA'
+--      prospect_pool_rows(...)            internal pool rows
+--
+-- Visibility model: a caller sees clinics only through find_clinic_prospects.
+-- It requires an authenticated active member of a service_company org
+-- (get_my_org_id + is_active_org_member). The pool is
+--   laser_clinic orgs linked to the caller's org (organization_customers)
+--   UNION organizations WHERE prospect_pool IS NOT NULL
+--   ('intl-clinics-1018' = EG/AE/SA/IN, 'amer-clinics-1018' = MX/CA/BR).
+-- No organizations RLS policy is added or widened.
+--
+-- Tiering (server-side, never "send and hide"):
+--   Free:    at most 20 local clinics with details (same city, then same
+--            state, then same country as the caller org); everything else only
+--            as counts by country and city. No names/contacts/ids/equipment.
+--   Premium: org_is_paid_entitled() (named paid plan or is_premium incl.
+--            complimentary, expired complimentary = Free) gets every row.
+--
+-- add_prospect_customer only inserts an organization_customers link for the
+-- caller's own org. It never touches service_reports, equipment, grants or
+-- any history table, so linking never unlocks service history
+-- (can_view_service_report_for_history keys on report org / creator /
+-- current equipment owner, not on organization_customers for the shop).
+-- Owners/admins of a Premium service_company only; idempotent; 50 new links
+-- per org per rolling 24 h; every new link is logged in
+-- prospect_customer_links.
+--
+-- extract()/coalesce() are SQL syntax and stay unqualified on purpose.
+-- APPLY ON LIVE SUPABASE only after Larry's yes. Rollback:
+-- 20261018_000929_organizations_country_rollback.sql
+
+SET LOCAL lock_timeout = '5s';
+
+-- ---------------------------------------------------------------------------
+-- Drift guards: nothing this migration creates may already exist with
+-- another shape. A re-run on an already-migrated DB is allowed only when the
+-- objects match.
+-- ---------------------------------------------------------------------------
+DO $$
+DECLARE
+  t text;
+BEGIN
+  SELECT data_type INTO t FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'organizations' AND column_name = 'country';
+  IF t IS NOT NULL AND t <> 'text' THEN
+    RAISE EXCEPTION 'drift: organizations.country exists as %', t;
+  END IF;
+  SELECT data_type INTO t FROM information_schema.columns
+   WHERE table_schema = 'public' AND table_name = 'organizations' AND column_name = 'prospect_pool';
+  IF t IS NOT NULL AND t <> 'text' THEN
+    RAISE EXCEPTION 'drift: organizations.prospect_pool exists as %', t;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc p JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+     WHERE n.nspname = 'public'
+       AND p.proname IN ('find_clinic_prospects', 'add_prospect_customer', 'org_is_paid_entitled', 'prospect_state_key', 'prospect_pool_rows')
+       AND NOT EXISTS (
+         SELECT 1 FROM pg_catalog.pg_description d
+          WHERE d.objoid = p.oid AND d.description LIKE '000929:%'
+       )
+  ) THEN
+    RAISE EXCEPTION 'drift: a 000929 function name already exists and was not created by 000929';
+  END IF;
+  IF to_regprocedure('public.get_my_org_id()') IS NULL
+     OR to_regprocedure('public.is_active_org_member(bigint)') IS NULL THEN
+    RAISE EXCEPTION 'missing helper get_my_org_id() / is_active_org_member(bigint)';
+  END IF;
+END $$;
+
+-- ---------------------------------------------------------------------------
+-- Columns, checks, indexes, grants
+-- ---------------------------------------------------------------------------
+ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS country text;
+ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS prospect_pool text;
+
+ALTER TABLE public.organizations DROP CONSTRAINT IF EXISTS organizations_country_trimmed_check;
+ALTER TABLE public.organizations ADD CONSTRAINT organizations_country_trimmed_check
+  CHECK (country IS NULL OR (country = btrim(country) AND country <> ''));
+ALTER TABLE public.organizations DROP CONSTRAINT IF EXISTS organizations_prospect_pool_check;
+ALTER TABLE public.organizations ADD CONSTRAINT organizations_prospect_pool_check
+  CHECK (prospect_pool IS NULL OR prospect_pool IN ('intl-clinics-1018', 'amer-clinics-1018'));
+
+COMMENT ON COLUMN public.organizations.country IS
+  'Full English country name (e.g. United States, Egypt, United Arab Emirates). NULL = unknown.';
+COMMENT ON COLUMN public.organizations.prospect_pool IS
+  'Shared imported-clinic pool marker for find_clinic_prospects(). Service role only.';
+
+CREATE INDEX IF NOT EXISTS organizations_country_idx ON public.organizations (country);
+CREATE INDEX IF NOT EXISTS organizations_prospect_pool_idx ON public.organizations (prospect_pool)
+  WHERE prospect_pool IS NOT NULL;
+
+GRANT INSERT (country), UPDATE (country) ON TABLE public.organizations TO authenticated;
+
+-- ---------------------------------------------------------------------------
+-- Audit / cap ledger
+-- ---------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS public.prospect_customer_links (
+  id bigserial PRIMARY KEY,
+  service_organization_id bigint NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  customer_organization_id bigint NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS prospect_customer_links_org_time_idx
+  ON public.prospect_customer_links (service_organization_id, created_at);
+ALTER TABLE public.prospect_customer_links ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.prospect_customer_links FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON SEQUENCE public.prospect_customer_links_id_seq FROM PUBLIC, anon, authenticated;
+COMMENT ON TABLE public.prospect_customer_links IS
+  'Audit of Find clinics "Add to my customers" links (000929). Written only by add_prospect_customer().';
+
+-- ---------------------------------------------------------------------------
+-- Helpers
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.org_is_paid_entitled(p_org bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  -- 1:1 port of orgIsPaid() in web/lib/org-plan.ts:
+  --   expired complimentary (premium_until <= now) -> only a named paid plan
+  --   else is_premium = true OR plan/subscription_tier exactly premium|team|enterprise
+  SELECT coalesce((
+    SELECT CASE
+      WHEN o.premium_until IS NOT NULL AND o.premium_until <= pg_catalog.now()
+        THEN lower(btrim(coalesce(o.subscription_tier, ''))) IN ('premium', 'team', 'enterprise')
+          OR lower(btrim(coalesce(o.plan, ''))) IN ('premium', 'team', 'enterprise')
+      ELSE o.is_premium IS TRUE
+          OR lower(btrim(coalesce(o.subscription_tier, ''))) IN ('premium', 'team', 'enterprise')
+          OR lower(btrim(coalesce(o.plan, ''))) IN ('premium', 'team', 'enterprise')
+    END
+    FROM public.organizations o WHERE o.id = p_org
+  ), false);
+$$;
+COMMENT ON FUNCTION public.org_is_paid_entitled(bigint) IS
+  '000929: SQL port of lib/org-plan.ts orgIsPaid (complimentary Premium counts until premium_until).';
+
+CREATE OR REPLACE FUNCTION public.prospect_state_key(p_state text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT CASE
+    WHEN nullif(btrim(coalesce(p_state, '')), '') IS NULL THEN NULL
+    ELSE coalesce(
+      (SELECT m.code FROM (VALUES
+        ('alabama','AL'),('alaska','AK'),('arizona','AZ'),('arkansas','AR'),('california','CA'),
+        ('colorado','CO'),('connecticut','CT'),('delaware','DE'),('district of columbia','DC'),
+        ('florida','FL'),('georgia','GA'),('hawaii','HI'),('idaho','ID'),('illinois','IL'),
+        ('indiana','IN'),('iowa','IA'),('kansas','KS'),('kentucky','KY'),('louisiana','LA'),
+        ('maine','ME'),('maryland','MD'),('massachusetts','MA'),('michigan','MI'),('minnesota','MN'),
+        ('mississippi','MS'),('missouri','MO'),('montana','MT'),('nebraska','NE'),('nevada','NV'),
+        ('new hampshire','NH'),('new jersey','NJ'),('new mexico','NM'),('new york','NY'),
+        ('north carolina','NC'),('north dakota','ND'),('ohio','OH'),('oklahoma','OK'),('oregon','OR'),
+        ('pennsylvania','PA'),('rhode island','RI'),('south carolina','SC'),('south dakota','SD'),
+        ('tennessee','TN'),('texas','TX'),('utah','UT'),('vermont','VT'),('virginia','VA'),
+        ('washington','WA'),('west virginia','WV'),('wisconsin','WI'),('wyoming','WY')
+      ) AS m(name, code) WHERE m.name = lower(btrim(p_state))),
+      upper(btrim(p_state))
+    )
+  END;
+$$;
+COMMENT ON FUNCTION public.prospect_state_key(text) IS
+  '000929: normalizes a state for locality matching (US names -> 2-letter code, else upper-case).';
+
+-- ---------------------------------------------------------------------------
+-- prospect_pool_rows(org, country, state_key, city_lower)  [internal]
+-- One row per clinic the org may consider: the shared imported pool
+-- (partial index on prospect_pool) UNION its own linked laser clinics
+-- (organization_customers_unique / idx_org_customers_service_org), joined to
+-- organizations by primary key. rank: 0 same city, 1 same state, 2 same
+-- country, NULL elsewhere.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.prospect_pool_rows(p_org bigint, p_country text, p_state text, p_city text)
+RETURNS TABLE (id bigint, name text, linked boolean, rank int, country text, city text)
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  WITH links AS (
+    SELECT oc.customer_organization_id AS id
+      FROM public.organization_customers oc
+     WHERE oc.service_organization_id = p_org
+  ),
+  ids AS (
+    SELECT o.id FROM public.organizations o WHERE o.prospect_pool IS NOT NULL
+    UNION
+    SELECT l.id FROM links l
+  )
+  SELECT o.id, o.name,
+         (l.id IS NOT NULL) AS linked,
+         CASE
+           WHEN p_city IS NOT NULL AND lower(btrim(coalesce(o.city, ''))) = p_city
+                AND (p_state IS NULL OR public.prospect_state_key(o.state) IS NOT DISTINCT FROM p_state)
+                AND (p_country IS NULL OR o.country IS NOT DISTINCT FROM p_country) THEN 0
+           WHEN p_state IS NOT NULL AND public.prospect_state_key(o.state) = p_state
+                AND (p_country IS NULL OR o.country IS NOT DISTINCT FROM p_country) THEN 1
+           WHEN p_country IS NOT NULL AND o.country = p_country THEN 2
+           ELSE NULL
+         END AS rank,
+         o.country,
+         nullif(btrim(coalesce(o.city, '')), '') AS city
+    FROM ids
+    JOIN public.organizations o ON o.id = ids.id
+    LEFT JOIN links l ON l.id = o.id
+   WHERE o.id <> p_org
+     AND o.is_active IS DISTINCT FROM false
+     AND (o.prospect_pool IS NOT NULL OR lower(coalesce(o.type, '')) = 'laser_clinic');
+$$;
+COMMENT ON FUNCTION public.prospect_pool_rows(bigint, text, text, text) IS
+  '000929: internal pool for find_clinic_prospects (imported pool + own linked laser clinics). Not client-callable.';
+
+-- ---------------------------------------------------------------------------
+-- find_clinic_prospects(p_country, p_city, p_limit, p_offset)
+-- All filtering, paging and counting happens here. Page size is capped at
+-- 100 (default 50), offset at 50,000. Counts (pills, city list, CTA) are
+-- GROUP BY aggregates over the pool, never a client-side fetch of all rows.
+-- Free:    clinics = at most 20 local rows (no paging, filters ignored);
+--          area_counts = top 300 (country, city) groups of the gated rest;
+--          country_counts = gated rest per country; locked = CTA counts.
+-- Premium: clinics = one filtered page; country_counts over the pool;
+--          city_counts (top 300) within p_country; locked = NULL.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.find_clinic_prospects(
+  p_country text DEFAULT NULL,
+  p_city text DEFAULT NULL,
+  p_limit int DEFAULT 50,
+  p_offset int DEFAULT 0
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_org bigint;
+  v_type text;
+  v_country text;
+  v_state text;
+  v_city text;
+  v_paid boolean;
+  v_limit int := least(greatest(coalesce(p_limit, 50), 1), 100);
+  v_offset int := least(greatest(coalesce(p_offset, 0), 0), 50000);
+  v_fcountry text := nullif(btrim(coalesce(p_country, '')), '');
+  v_fcity text := nullif(lower(btrim(coalesce(p_city, ''))), '');
+  v_out jsonb;
+BEGIN
+  IF v_uid IS NULL THEN
+    RETURN jsonb_build_object('error', 'not_authenticated');
+  END IF;
+  v_org := public.get_my_org_id();
+  IF v_org IS NULL OR NOT public.is_active_org_member(v_org) THEN
+    RETURN jsonb_build_object('error', 'no_org');
+  END IF;
+  SELECT lower(btrim(coalesce(o.type, ''))), nullif(btrim(coalesce(o.country, '')), ''),
+         public.prospect_state_key(o.state), nullif(lower(btrim(coalesce(o.city, ''))), '')
+    INTO v_type, v_country, v_state, v_city
+    FROM public.organizations o WHERE o.id = v_org;
+  IF v_type IS DISTINCT FROM 'service_company' THEN
+    RETURN jsonb_build_object('error', 'not_service_org');
+  END IF;
+  v_paid := public.org_is_paid_entitled(v_org);
+
+  IF NOT v_paid THEN
+    WITH pool AS MATERIALIZED (
+      SELECT * FROM public.prospect_pool_rows(v_org, v_country, v_state, v_city)
+    ),
+    chosen AS (
+      SELECT p.id, p.linked, p.rank FROM pool p WHERE p.rank IS NOT NULL
+       ORDER BY p.rank, p.id LIMIT 20
+    ),
+    rest AS (
+      SELECT p.* FROM pool p WHERE NOT EXISTS (SELECT 1 FROM chosen c WHERE c.id = p.id)
+    ),
+    area AS (
+      SELECT r.country, r.city, count(*)::int AS n FROM rest r GROUP BY r.country, r.city
+    )
+    SELECT jsonb_build_object(
+      'tier', 'free',
+      'total', (SELECT count(*)::int FROM pool),
+      'clinics', (SELECT coalesce(jsonb_agg(jsonb_build_object(
+          'id', o.id, 'name', o.name, 'type', o.type, 'address', o.address, 'city', o.city,
+          'state', o.state, 'zip', o.zip, 'country', o.country, 'phone', o.phone,
+          'email', o.email, 'website', o.website, 'contact_name', o.contact_name,
+          'laser_models', o.laser_models, 'facility_type', o.facility_type,
+          'is_customer', c.linked, 'local', true) ORDER BY c.rank, c.id), '[]'::jsonb)
+        FROM chosen c JOIN public.organizations o ON o.id = c.id),
+      'country_counts', (SELECT coalesce(jsonb_agg(jsonb_build_object('country', x.country, 'count', x.n)
+          ORDER BY x.n DESC, x.country NULLS LAST), '[]'::jsonb)
+        FROM (SELECT a.country, sum(a.n)::int AS n FROM area a GROUP BY a.country) x),
+      'area_counts', (SELECT coalesce(jsonb_agg(jsonb_build_object('country', y.country, 'city', y.city, 'count', y.n)
+          ORDER BY y.n DESC, y.country NULLS LAST, y.city NULLS LAST), '[]'::jsonb)
+        FROM (SELECT * FROM area a ORDER BY a.n DESC, a.country NULLS LAST, a.city NULLS LAST LIMIT 300) y),
+      'locked', (SELECT jsonb_build_object(
+          'area', count(*) FILTER (WHERE r.rank IN (0, 1))::int,
+          'total', count(*)::int) FROM rest r),
+      'free_limit', 20,
+      'page', jsonb_build_object('limit', 20, 'offset', 0, 'filtered_total', (SELECT count(*)::int FROM chosen), 'has_more', false)
+    ) INTO v_out;
+  ELSE
+    WITH pool AS MATERIALIZED (
+      SELECT * FROM public.prospect_pool_rows(v_org, v_country, v_state, v_city)
+    ),
+    filtered AS (
+      SELECT p.* FROM pool p
+       WHERE (v_fcountry IS NULL OR p.country = v_fcountry)
+         AND (v_fcity IS NULL OR lower(p.city) = v_fcity)
+    ),
+    page AS (
+      SELECT f.id, f.linked, f.rank, row_number() OVER (ORDER BY coalesce(f.rank, 9), f.name, f.id) AS pos
+        FROM filtered f
+       ORDER BY coalesce(f.rank, 9), f.name, f.id
+       OFFSET v_offset LIMIT v_limit
+    ),
+    ftotal AS (SELECT count(*)::int AS n FROM filtered)
+    SELECT jsonb_build_object(
+      'tier', 'premium',
+      'total', (SELECT count(*)::int FROM pool),
+      'clinics', (SELECT coalesce(jsonb_agg(jsonb_build_object(
+          'id', o.id, 'name', o.name, 'type', o.type, 'address', o.address, 'city', o.city,
+          'state', o.state, 'zip', o.zip, 'country', o.country, 'phone', o.phone,
+          'email', o.email, 'website', o.website, 'contact_name', o.contact_name,
+          'laser_models', o.laser_models, 'facility_type', o.facility_type,
+          'is_customer', pg.linked, 'local', pg.rank IS NOT NULL) ORDER BY pg.pos), '[]'::jsonb)
+        FROM page pg JOIN public.organizations o ON o.id = pg.id),
+      'country_counts', (SELECT coalesce(jsonb_agg(jsonb_build_object('country', x.country, 'count', x.n)
+          ORDER BY x.n DESC, x.country NULLS LAST), '[]'::jsonb)
+        FROM (SELECT p.country, count(*)::int AS n FROM pool p GROUP BY p.country) x),
+      'city_counts', (SELECT coalesce(jsonb_agg(jsonb_build_object('city', y.city, 'count', y.n)
+          ORDER BY y.n DESC, y.city), '[]'::jsonb)
+        FROM (SELECT min(p.city) AS city, count(*)::int AS n FROM pool p
+               WHERE p.city IS NOT NULL AND (v_fcountry IS NULL OR p.country = v_fcountry)
+               GROUP BY lower(p.city) ORDER BY count(*) DESC, lower(p.city) LIMIT 300) y),
+      'area_counts', '[]'::jsonb,
+      'locked', NULL,
+      'free_limit', 20,
+      'page', jsonb_build_object('limit', v_limit, 'offset', v_offset,
+                                 'filtered_total', (SELECT n FROM ftotal),
+                                 'has_more', v_offset + v_limit < (SELECT n FROM ftotal))
+    ) INTO v_out;
+  END IF;
+
+  RETURN v_out || jsonb_build_object('viewer', jsonb_build_object('country', v_country, 'state', v_state, 'city', v_city));
+END;
+$$;
+COMMENT ON FUNCTION public.find_clinic_prospects(text, text, int, int) IS
+  '000929: Find clinics for service_company members. Server-side filter/page (max 100)/aggregates. Free = 20 local rows + counts; Premium = paged rows.';
+
+-- ---------------------------------------------------------------------------
+-- add_prospect_customer(clinic_id)
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.add_prospect_customer(p_clinic_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_org bigint;
+  v_role text;
+  v_recent int;
+BEGIN
+  PERFORM pg_catalog.set_config('lock_timeout', '5s', true);
+  IF v_uid IS NULL THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'not_authenticated');
+  END IF;
+  v_org := public.get_my_org_id();
+  IF v_org IS NULL OR NOT public.is_active_org_member(v_org) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'no_org');
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM public.organizations o
+                  WHERE o.id = v_org AND lower(btrim(coalesce(o.type, ''))) = 'service_company') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'not_service_org');
+  END IF;
+  SELECT lower(btrim(coalesce(m.role, ''))) INTO v_role
+    FROM public.organization_memberships m
+   WHERE m.user_id = v_uid AND m.organization_id = v_org
+   ORDER BY CASE lower(btrim(coalesce(m.role, ''))) WHEN 'owner' THEN 0 WHEN 'company_admin' THEN 1 WHEN 'admin' THEN 2 ELSE 9 END
+   LIMIT 1;
+  IF v_role IS NULL OR v_role NOT IN ('owner', 'company_admin', 'admin') THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'not_admin');
+  END IF;
+  IF NOT public.org_is_paid_entitled(v_org) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'premium_required');
+  END IF;
+  IF p_clinic_id IS NULL OR p_clinic_id = v_org OR NOT EXISTS (
+       SELECT 1 FROM public.organizations o
+        WHERE o.id = p_clinic_id AND o.is_active IS DISTINCT FROM false
+          AND o.prospect_pool IS NOT NULL) THEN
+    -- only the shared pool can be added; own linked clinics are already linked
+    IF EXISTS (SELECT 1 FROM public.organization_customers oc
+                WHERE oc.service_organization_id = v_org AND oc.customer_organization_id = p_clinic_id) THEN
+      RETURN jsonb_build_object('ok', true, 'status', 'already_linked');
+    END IF;
+    RETURN jsonb_build_object('ok', false, 'error', 'not_found');
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('add_prospect_customer:' || v_org::text));
+
+  IF EXISTS (SELECT 1 FROM public.organization_customers oc
+              WHERE oc.service_organization_id = v_org AND oc.customer_organization_id = p_clinic_id) THEN
+    RETURN jsonb_build_object('ok', true, 'status', 'already_linked');
+  END IF;
+
+  SELECT count(*) INTO v_recent FROM public.prospect_customer_links l
+   WHERE l.service_organization_id = v_org AND l.created_at > pg_catalog.now() - interval '24 hours';
+  IF v_recent >= 50 THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'daily_cap', 'cap', 50);
+  END IF;
+
+  INSERT INTO public.organization_customers (service_organization_id, customer_organization_id, created_by, notes)
+  VALUES (v_org, p_clinic_id, v_uid, 'Added from Find clinics')
+  ON CONFLICT (service_organization_id, customer_organization_id) DO NOTHING;
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('ok', true, 'status', 'already_linked');
+  END IF;
+
+  INSERT INTO public.prospect_customer_links (service_organization_id, customer_organization_id, user_id)
+  VALUES (v_org, p_clinic_id, v_uid);
+
+  RETURN jsonb_build_object('ok', true, 'status', 'linked');
+END;
+$$;
+COMMENT ON FUNCTION public.add_prospect_customer(bigint) IS
+  '000929: Premium service_company owner/admin links a pool clinic as a customer. Idempotent, 50/day, audited. No history access.';
+
+REVOKE ALL ON FUNCTION public.org_is_paid_entitled(bigint) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.prospect_state_key(text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.prospect_pool_rows(bigint, text, text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.find_clinic_prospects(text, text, int, int) FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.add_prospect_customer(bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.find_clinic_prospects(text, text, int, int) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.add_prospect_customer(bigint) TO authenticated;

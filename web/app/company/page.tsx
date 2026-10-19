@@ -1,4 +1,5 @@
 'use client';
+import { CountrySelect } from '@/components/CountrySelect';
 import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useEffect, useState, useRef, Suspense } from 'react';
@@ -483,6 +484,7 @@ function CompanyProfile() {
         city: currentOrg.city ?? null,
         state: currentOrg.state ?? null,
         zip: currentOrg.zip ?? null,
+        country: currentOrg.country ?? null,
         phone: currentOrg.phone ?? null,
         email: currentOrg.email ?? null,
         website: currentOrg.website ?? null,
@@ -514,6 +516,9 @@ function CompanyProfile() {
       const followUps: string[] = [];
       if (omitted.includes('currency_code') || omitted.includes('number_format')) {
         followUps.push('Currency will stay on US dollars until the organization currency columns are added.');
+      }
+      if (omitted.includes('country')) {
+        followUps.push('Country will be saved once the organization country column is added.');
       }
       if (omitted.includes('timezone')) {
         followUps.push('Timezone will use the address state until the organization timezone column is added.');
@@ -810,6 +815,10 @@ function CompanyProfile() {
               <div>
                 <label className="label">{t('ZIP')}</label>
                 <input className="input" value={org.zip || ''} onChange={e => setOrg({ ...org, zip: e.target.value })} />
+              </div>
+              <div>
+                <label className="label" htmlFor="org-country">{t('Country')}</label>
+                <CountrySelect id="org-country" value={org.country} onChange={(country) => setOrg({ ...org, country })} />
               </div>
               <div>
                 <label className="label">{t('Timezone')}</label>

@@ -6,6 +6,7 @@ import { isOwnerOrgType } from '@/lib/org-types';
 import { companyBrandingEnabled, normalizeHex, type CompanyThemeSource } from '@/lib/company-theme';
 import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
 import { parseOrgTimeZone } from '@/lib/org-timezone';
+import { normalizeCountryName } from '@/lib/countries';
 
 /**
  * POST /api/org/profile
@@ -37,6 +38,7 @@ const ALLOWED_FIELDS = [
   'currency_code',
   'number_format',
   'timezone',
+  'country',
 ] as const;
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
@@ -186,6 +188,14 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: checked.error }, { status: 400 });
       }
       payload.timezone = checked.timezone;
+    }
+    if ('country' in payload) {
+      const raw = payload.country;
+      const name = raw == null || raw === '' ? null : normalizeCountryName(raw);
+      if (raw != null && raw !== '' && !name) {
+        return NextResponse.json({ error: 'Unknown country' }, { status: 400 });
+      }
+      payload.country = name;
     }
     if (Object.keys(payload).length === 0) {
       return NextResponse.json({ error: 'No profile fields to save' }, { status: 400 });
