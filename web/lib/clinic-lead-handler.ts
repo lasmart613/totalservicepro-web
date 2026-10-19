@@ -128,13 +128,15 @@ export async function handleClinicLeadPost(
           admin.from('clinic_service_leads').insert(leadRow).select('id').maybeSingle();
         let { data, error } = await insert();
         if (error && isConfirmationKeyConflict(error) && confirmationKey) {
-          // Retake a stale claim (claimed long ago, never marked sent).
+          // Retake a stale claim: claimed long ago AND the send provably never
+          // started (send_attempted_at is written before every send attempt).
           const cutoff = new Date(now().getTime() - CONFIRMATION_CLAIM_STALE_MS).toISOString();
           const freed = await admin
             .from('clinic_service_leads')
             .update({ confirmation_key: null, claimed_at: null })
             .eq('confirmation_key', confirmationKey)
             .eq('confirmation_sent', false)
+            .is('send_attempted_at', null)
             .lt('claimed_at', cutoff)
             .select('id');
           if (freed.error) console.error('[clinic-service-leads] stale claim check', freed.error.message);
@@ -213,7 +215,23 @@ export async function handleClinicLeadPost(
       }
 
       let confirmed = false;
-      if (plan.confirmationTo) {
+      let mayAttempt = true;
+      if (plan.confirmationTo && claimedKey && storedId && admin) {
+        // Mark the attempt BEFORE sending. A row with this marker is never
+        // retaken by the stale-claim path, so a send whose confirmation_sent
+        // write later fails cannot produce a second email. If the marker
+        // cannot be written, do not send: finally releases the claim and a
+        // retry confirms.
+        const { error } = await admin
+          .from('clinic_service_leads')
+          .update({ send_attempted_at: now().toISOString() })
+          .eq('id', storedId);
+        if (error) {
+          mayAttempt = false;
+          console.error('[clinic-service-leads] send marker failed; confirmation skipped', error.code, error.message);
+        }
+      }
+      if (plan.confirmationTo && mayAttempt) {
         const confirm = await send({
           from: clinicLeadFromAddress(),
           to: [plan.confirmationTo],
@@ -227,10 +245,7 @@ export async function handleClinicLeadPost(
           console.error('[clinic-service-leads] confirmation', confirm.error);
         } else {
           confirmationDelivered = true;
-          if (stored && storedId && admin) {
-            const { error } = await admin.from('clinic_service_leads').update({ confirmation_sent: true }).eq('id', storedId);
-            if (error) console.error('[clinic-service-leads] confirmation_sent flag', error.message);
-          }
+          if (stored && storedId && admin) await markConfirmationSent(admin, storedId);
         }
       }
 
@@ -265,6 +280,25 @@ export async function handleClinicLeadPost(
     console.error('[clinic-service-leads]', e);
     return { status: 500, body: { error: GENERIC_500 } };
   }
+}
+
+export const CONFIRMATION_FLAG_ATTEMPTS = 3;
+
+/**
+ * Set confirmation_sent=true, retrying a transient failure. If every attempt
+ * fails the row still carries send_attempted_at, so it is never retaken.
+ */
+export async function markConfirmationSent(admin: SupabaseClient, leadId: string): Promise<boolean> {
+  for (let i = 1; i <= CONFIRMATION_FLAG_ATTEMPTS; i++) {
+    try {
+      const { error } = await admin.from('clinic_service_leads').update({ confirmation_sent: true }).eq('id', leadId);
+      if (!error) return true;
+      console.error(`[clinic-service-leads] confirmation_sent flag attempt ${i}`, leadId, error.code, error.message);
+    } catch (e) {
+      console.error(`[clinic-service-leads] confirmation_sent flag attempt ${i} threw`, leadId, e);
+    }
+  }
+  return false;
 }
 
 /** Free the claim so a retry can confirm. Errors are logged, never thrown. */

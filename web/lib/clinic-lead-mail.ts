@@ -3,7 +3,8 @@
  * DNS failure or timeout comes back as { ok: false } so the caller's claim
  * release always runs.
  */
-export const CLINIC_LEAD_EMAIL_TIMEOUT_MS = 10_000;
+/** Per send. Two sends (team + confirmation) must fit inside Netlify's sync function limit. */
+export const CLINIC_LEAD_EMAIL_TIMEOUT_MS = 5_000;
 
 export type ResendMail = {
   from: string;
