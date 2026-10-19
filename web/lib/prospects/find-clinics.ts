@@ -160,7 +160,7 @@ export function addErrorKey(code: unknown): string {
       return 'Join or create a company before adding customers.';
     case 'daily_cap':
       // Rolling 24 h cap (50 per org), not a calendar day.
-      return 'You reached the limit for adding clinics in the last 24 hours. You can add more within 24 hours.';
+      return 'You reached the limit for adding clinics in the last 24 hours. You can add more clinics once 24 hours have passed since your earlier adds.';
     default:
       return 'Could not add this clinic.';
   }

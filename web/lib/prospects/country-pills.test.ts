@@ -89,7 +89,7 @@ test('parseProspectResponse maps server answers', () => {
   assert.ok(ok.ok && ok.data.aggregates.length === 1 && ok.data.country_counts[0].count === 2 && ok.data.page.has_more === false);
   const prem = parseProspectResponse({ tier: 'premium', total: 0 }, null);
   assert.ok(prem.ok && prem.data.tier === 'premium' && prem.data.clinics.length === 0);
-  assert.equal(addErrorKey('daily_cap'), 'You reached the limit for adding clinics in the last 24 hours. You can add more within 24 hours.');
+  assert.equal(addErrorKey('daily_cap'), 'You reached the limit for adding clinics in the last 24 hours. You can add more clinics once 24 hours have passed since your earlier adds.');
   assert.equal(addErrorKey('whatever'), 'Could not add this clinic.');
 });
 
