@@ -90,6 +90,9 @@ INSERT INTO public.organizations (id, name, type, city, state, country, prospect
  (8021,'ON Toronto 2','laser_clinic','Toronto','Ontario','Canada','amer-clinics-1018','+1 416 555 0021'),
  (8022,'QC Montreal 1','laser_clinic','Montréal','Québec','Canada','amer-clinics-1018','+1 514 555 0022'),
  (8023,'QC Montreal 2','laser_clinic','Montreal','Quebec','Canada','amer-clinics-1018','+1 514 555 0023'),
+ -- Newfoundland (code NL collides with Mexico's Nuevo León) and a pool row whose country is not canonical
+ (8024,'NL St Johns','laser_clinic','St. John''s','NL','Canada','amer-clinics-1018','+1 709 555 0024'),
+ (8025,'ON Toronto upper','laser_clinic','Toronto','ON','CANADA','amer-clinics-1018','+1 416 555 0025'),
  -- Brazil: São Paulo state, several city spellings; Rio
  (8030,'SP Capital 1','laser_clinic','São Paulo','São Paulo','Brazil','amer-clinics-1018','+55 11 5555 0030'),
  (8031,'SP Capital 2','laser_clinic','São Paulo','São Paulo','Brazil','amer-clinics-1018','+55 11 5555 0031'),
@@ -132,6 +135,9 @@ INSERT INTO public.organizations (id, name, type, city, state, country, is_premi
  (9311,'Blank shop','service_company',NULL,NULL,NULL,false,NULL,NULL),
  (9312,'City-only shop','service_company','Calgary',NULL,NULL,false,NULL,NULL),
  (9313,'Cairo shop','service_company','cairo','cairo','Egypt',false,NULL,NULL),
+ (9314,'Calgary AB lowercase-country shop','service_company','Calgary','AB','canada',false,NULL,NULL),
+ (9315,'Monterrey NL no-country shop','service_company','Monterrey','NL',NULL,false,NULL,NULL),
+ (9316,'Cairo lowercase-country shop','service_company','Cairo','Cairo','egypt',false,NULL,NULL),
  (9401,'Premium Calgary AB','service_company','Calgary','AB','Canada',true,now() + interval '30 days','complimentary_signup');
 
 INSERT INTO public.organization_memberships (user_id, organization_id, role)
@@ -214,7 +220,15 @@ BEGIN
     ('Washington','USA','US:WA'), ('District of Columbia','United States','US:DC'),
     ('Cairo','Egypt','raw:cairo'), ('cairo','Egypt','raw:cairo'), ('AB','Egypt','raw:ab'),
     ('Prov of Alberta','Canada','raw:prov of alberta'), ('Multiple states','Brazil','raw:multiple states'),
-    (NULL,'Canada',NULL), ('  ','Canada',NULL)
+    (NULL,'Canada',NULL), ('  ','Canada',NULL),
+    -- country spelled any way
+    ('AB','canada','CA:AB'), ('AB',' CANADA ','CA:AB'), ('SP','brasil','BR:SP'), ('NL','méxico','MX:NLE'), ('TX','usa','US:TX'),
+    -- no country: codes/names that name a state in two of US/CA/BR/MX (and CA = Canada) stay raw
+    ('NL',NULL,'raw:nl'), ('DF',NULL,'raw:df'), ('Distrito Federal',NULL,'raw:distrito federal'), ('PR',NULL,'raw:pr'),
+    ('MA',NULL,'raw:ma'), ('SC',NULL,'raw:sc'), ('PE',NULL,'raw:pe'), ('CA',NULL,'raw:ca'), ('AL',NULL,'raw:al'),
+    ('BC',NULL,'raw:bc'), ('MS',NULL,'raw:ms'), ('MT',NULL,'raw:mt'), ('PA',NULL,'raw:pa'), ('Que',NULL,'raw:que'),
+    -- ... but unambiguous names still resolve without a country
+    ('Nuevo León',NULL,'MX:NLE'), ('Puerto Rico',NULL,'US:PR'), ('California',NULL,'US:CA'), ('Massachusetts',NULL,'US:MA')
   ) v(s, c, want) LOOP
     IF public.prospect_region_key(t.s, t.c) IS DISTINCT FROM t.want THEN
       RAISE EXCEPTION 'FAIL region_key(%, %) = % want %', t.s, t.c, public.prospect_region_key(t.s, t.c), t.want;
@@ -229,7 +243,15 @@ BEGIN
       RAISE EXCEPTION 'FAIL city_key(%) = % want %', t.s, public.prospect_city_key(t.s), t.want;
     END IF;
   END LOOP;
-  RAISE NOTICE 'PASS region/city keys (US, CA, BR, MX; codes, names, accents, dots, raw fallback)';
+  FOR t IN SELECT * FROM (VALUES
+    ('Canada','CA'), ('canada','CA'), (' CANADA ','CA'), ('Brasil','BR'), ('brazil','BR'), ('México','MX'), ('mexico','MX'),
+    ('United States','US'), ('usa','US'), ('U.S.A.','US'), ('Egypt','raw:egypt'), (' egypt','raw:egypt'), ('EGYPT','raw:egypt'), ('',NULL), (NULL,NULL)
+  ) v(s, want) LOOP
+    IF public.prospect_country_code(t.s) IS DISTINCT FROM t.want THEN
+      RAISE EXCEPTION 'FAIL country_code(%) = % want %', t.s, public.prospect_country_code(t.s), t.want;
+    END IF;
+  END LOOP;
+  RAISE NOTICE 'PASS region/city/country keys (US, CA, BR, MX; codes, names, accents, dots, raw fallback; colliding codes need a country)';
 END $$;
 
 -- ranking through the RPC (Free)
@@ -250,22 +272,22 @@ BEGIN
   END IF;
   IF 8070 = ANY (public._ids(r)) THEN RAISE EXCEPTION 'FAIL inactive row shown'; END IF;
   IF r->'viewer'->>'state' <> 'CA:AB' OR r->'viewer'->>'city' <> 'calgary' OR (r->'viewer'->>'has_location')::boolean IS NOT TRUE
-     OR (r->'viewer'->>'country_pool')::int <> 15 THEN
+     OR (r->'viewer'->>'country_pool')::int <> 17 THEN
     RAISE EXCEPTION 'FAIL viewer block %', r->'viewer';
   END IF;
-  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9301, 'Canada', 'CA:AB', 'calgary') WHERE rank = 0) <> 8
-     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9301, 'Canada', 'CA:AB', 'calgary') WHERE rank = 1) <> 3
-     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9301, 'Canada', 'CA:AB', 'calgary') WHERE rank = 2) <> 4 THEN
+  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9301, 'CA', 'CA:AB', 'calgary') WHERE rank = 0) <> 8
+     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9301, 'CA', 'CA:AB', 'calgary') WHERE rank = 1) <> 3
+     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9301, 'CA', 'CA:AB', 'calgary') WHERE rank = 2) <> 6 THEN
     RAISE EXCEPTION 'FAIL AB rank counts';
   END IF;
-  RAISE NOTICE 'PASS AB viewer = Alberta viewer: 8 Calgary at rank 0, 3 Edmonton at rank 1, 4 other Canada at rank 2';
+  RAISE NOTICE 'PASS AB viewer = Alberta viewer: 8 Calgary at rank 0, 3 Edmonton at rank 1, 6 other Canada at rank 2';
 
   -- SP viewer and a messy-spelling viewer
   PERFORM public._as(9303); r := public.find_clinic_prospects();
   PERFORM public._as(9304); r2 := public.find_clinic_prospects();
   IF public._ids(r) <> public._ids(r2) THEN RAISE EXCEPTION 'FAIL SP viewers differ'; END IF;
-  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9303, 'Brazil', 'BR:SP', 'sao paulo') WHERE rank = 0) <> 5
-     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9303, 'Brazil', 'BR:SP', 'sao paulo') WHERE rank = 1) <> 2 THEN
+  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9303, 'BR', 'BR:SP', 'sao paulo') WHERE rank = 0) <> 5
+     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9303, 'BR', 'BR:SP', 'sao paulo') WHERE rank = 1) <> 2 THEN
     RAISE EXCEPTION 'FAIL SP rank counts';
   END IF;
   IF (SELECT array_agg(x ORDER BY x) FROM (SELECT (c->>'id')::bigint x FROM jsonb_array_elements(r->'clinics') WITH ORDINALITY y(c, i) WHERE i <= 5) s)
@@ -275,8 +297,8 @@ BEGIN
   RAISE NOTICE 'PASS SP viewer: 5 São Paulo city rows (all spellings) at rank 0, 2 Campinas at rank 1';
 
   -- unknown viewer state: city + country fallback gives Calgary at rank 0, no rank 1
-  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9305, 'Canada', public.prospect_region_key('Prov of Alberta','Canada'), 'calgary') WHERE rank = 0) <> 8
-     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9305, 'Canada', public.prospect_region_key('Prov of Alberta','Canada'), 'calgary') WHERE rank = 1) <> 0 THEN
+  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9305, 'CA', public.prospect_region_key('Prov of Alberta','Canada'), 'calgary') WHERE rank = 0) <> 8
+     OR (SELECT count(*) FROM public.prospect_pool_rows_local(9305, 'CA', public.prospect_region_key('Prov of Alberta','Canada'), 'calgary') WHERE rank = 1) <> 0 THEN
     RAISE EXCEPTION 'FAIL city+country fallback';
   END IF;
   -- city-only viewer (no state, no country): Calgary rows rank 0
@@ -284,20 +306,20 @@ BEGIN
   RAISE NOTICE 'PASS city + country fallback when state keys are not both recognised';
 
   -- Springfield IL viewer: Springfield IL rank 0, Springfield MO never rank 0/1, Chicago IL rank 1
-  IF (SELECT array_agg(id ORDER BY id) FROM public.prospect_pool_rows_local(9306, 'United States', 'US:IL', 'springfield') WHERE rank = 0) <> ARRAY[8050]::bigint[]
-     OR (SELECT rank FROM public.prospect_pool_rows_local(9306, 'United States', 'US:IL', 'springfield') WHERE id = 8051) <> 2
-     OR (SELECT rank FROM public.prospect_pool_rows_local(9306, 'United States', 'US:IL', 'springfield') WHERE id = 8052) <> 1 THEN
+  IF (SELECT array_agg(id ORDER BY id) FROM public.prospect_pool_rows_local(9306, 'US', 'US:IL', 'springfield') WHERE rank = 0) <> ARRAY[8050]::bigint[]
+     OR (SELECT rank FROM public.prospect_pool_rows_local(9306, 'US', 'US:IL', 'springfield') WHERE id = 8051) <> 2
+     OR (SELECT rank FROM public.prospect_pool_rows_local(9306, 'US', 'US:IL', 'springfield') WHERE id = 8052) <> 1 THEN
     RAISE EXCEPTION 'FAIL Springfield guard';
   END IF;
   RAISE NOTICE 'PASS recognised but different states never match on city (Springfield IL vs MO)';
 
   -- Mexico / Québec / Egypt raw
-  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9307, 'Mexico', 'MX:NLE', 'monterrey') WHERE rank = 0) <> 2 THEN RAISE EXCEPTION 'FAIL NL'; END IF;
+  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9307, 'MX', 'MX:NLE', 'monterrey') WHERE rank = 0) <> 2 THEN RAISE EXCEPTION 'FAIL NL'; END IF;
   PERFORM public._as(9308); r := public.find_clinic_prospects();
   IF (r->'clinics'->0->>'id')::bigint <> 8042 THEN RAISE EXCEPTION 'FAIL CDMX first: %', r->'clinics'; END IF;
-  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9309, 'Canada', 'CA:QC', 'montreal') WHERE rank = 0) <> 2 THEN RAISE EXCEPTION 'FAIL QC'; END IF;
-  IF (SELECT array_agg(id ORDER BY id) FROM public.prospect_pool_rows_local(9313, 'Egypt', 'raw:cairo', 'cairo') WHERE rank = 0) <> ARRAY[8060]::bigint[]
-     OR (SELECT rank FROM public.prospect_pool_rows_local(9313, 'Egypt', 'raw:cairo', 'cairo') WHERE id = 8061) <> 1 THEN
+  IF (SELECT count(*) FROM public.prospect_pool_rows_local(9309, 'CA', 'CA:QC', 'montreal') WHERE rank = 0) <> 2 THEN RAISE EXCEPTION 'FAIL QC'; END IF;
+  IF (SELECT array_agg(id ORDER BY id) FROM public.prospect_pool_rows_local(9313, 'raw:egypt', 'raw:cairo', 'cairo') WHERE rank = 0) <> ARRAY[8060]::bigint[]
+     OR (SELECT rank FROM public.prospect_pool_rows_local(9313, 'raw:egypt', 'raw:cairo', 'cairo') WHERE id = 8061) <> 1 THEN
     RAISE EXCEPTION 'FAIL Egypt raw/New Cairo';
   END IF;
   RAISE NOTICE 'PASS NL/Nuevo León, CDMX/Ciudad de México, QC/Québec, Egypt raw keys; New Cairo stays rank 1 for Cairo';
@@ -313,6 +335,33 @@ BEGIN
   END IF;
   IF r ? 'country_pool' THEN RAISE EXCEPTION 'FAIL country_pool leaked to top level'; END IF;
   RAISE NOTICE 'PASS L-1 viewer.has_location / viewer.country_pool';
+
+  -- LOW-1: country compares by key on both sides ('canada' viewer, 'CANADA' pool row)
+  PERFORM public._as(9301); r := public.find_clinic_prospects();
+  PERFORM public._as(9314); r2 := public.find_clinic_prospects();
+  IF public._ids(r) <> public._ids(r2) OR (r2->'viewer'->>'country_pool')::int <> 17
+     OR NOT public._ids(r2) @> ARRAY[8024,8025]::bigint[] THEN
+    RAISE EXCEPTION 'FAIL ''canada'' viewer: % pool %', public._ids(r2), r2->'viewer'->>'country_pool';
+  END IF;
+  IF (SELECT rank FROM public.prospect_pool_rows_local(9314, 'CA', 'CA:AB', 'calgary') WHERE id = 8025) <> 2 THEN
+    RAISE EXCEPTION 'FAIL ''CANADA'' pool row not same-country';
+  END IF;
+  PERFORM public._as(9316); r := public.find_clinic_prospects();
+  IF (r->'viewer'->>'country_pool')::int <> 3 OR (r->'clinics'->0->>'id')::bigint <> 8060 THEN
+    RAISE EXCEPTION 'FAIL ''egypt'' viewer: %', r;
+  END IF;
+  RAISE NOTICE 'PASS lower-case country (''canada'', ''CANADA'', ''egypt'') ranks and counts like the canonical name';
+
+  -- LOW-2: no-country NL viewer: Monterrey by city fallback, Newfoundland (CA:NL) never same-region
+  PERFORM public._as(9315); r := public.find_clinic_prospects();
+  IF r->'viewer'->>'state' <> 'raw:nl'
+     OR (SELECT array_agg(id ORDER BY id) FROM public.prospect_pool_rows_local(9315, NULL, 'raw:nl', 'monterrey') WHERE rank = 0) <> ARRAY[8040,8041]::bigint[]
+     OR EXISTS (SELECT 1 FROM public.prospect_pool_rows_local(9315, NULL, 'raw:nl', 'monterrey') WHERE rank = 1)
+     OR (SELECT rank FROM public.prospect_pool_rows_local(9315, NULL, 'raw:nl', 'monterrey') WHERE id = 8024) IS NOT NULL
+     OR (r->'clinics'->0->>'id')::bigint NOT IN (8040, 8041) THEN
+    RAISE EXCEPTION 'FAIL no-country NL viewer: viewer % clinics %', r->'viewer', public._ids(r);
+  END IF;
+  RAISE NOTICE 'PASS no-country NL viewer: NL stays raw, Monterrey via city fallback, Newfoundland not same-region';
 
   -- Free gating unchanged: <= 20 rows, locked counts only
   PERFORM public._as(9301); r := public.find_clinic_prospects('Brazil', 'São Paulo', 100, 0);
@@ -345,6 +394,15 @@ BEGIN
   IF (r->'page'->>'limit')::int <> 100 OR r->'locked' <> 'null'::jsonb THEN RAISE EXCEPTION 'FAIL premium cap'; END IF;
   IF (r->'clinics'->0->>'id')::bigint NOT IN (8001,8002,8003,8004,8005,8009,8010,8011) THEN RAISE EXCEPTION 'FAIL premium local first: %', r->'clinics'->0; END IF;
   RAISE NOTICE 'PASS premium city filter by key, merged city_counts, 100 cap, local rows first';
+  r := public.find_clinic_prospects('canada', NULL, 100, 0);
+  IF (r->'page'->>'filtered_total')::int <> 17 THEN RAISE EXCEPTION 'FAIL premium ''canada'' filter: %', r->'page'; END IF;
+  r := public.find_clinic_prospects('Canada', 'calgary', 100, 0);
+  IF (r->'page'->>'filtered_total')::int <> 8 THEN RAISE EXCEPTION 'FAIL premium Canada/calgary: %', r->'page'; END IF;
+  IF (SELECT count(*) FROM jsonb_array_elements(r->'country_counts') c WHERE public.prospect_country_code(c->>'country') = 'CA') <> 1
+     OR (SELECT (c->>'count')::int FROM jsonb_array_elements(r->'country_counts') c WHERE c->>'country' = 'Canada') <> 17 THEN
+    RAISE EXCEPTION 'FAIL premium country pills not merged: %', r->'country_counts';
+  END IF;
+  RAISE NOTICE 'PASS premium country filter/pills by country key (''canada'' = ''Canada'' = ''CANADA'', one pill)';
 END $$;
 
 -- as the real roles

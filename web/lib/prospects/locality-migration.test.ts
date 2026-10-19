@@ -19,7 +19,7 @@ const NEW_FNS = [
 ];
 
 function fnBlocks(sql: string): string[] {
-  return sql.split(/(?=CREATE OR REPLACE FUNCTION )/).slice(1).map((b) => b.slice(0, b.indexOf('\n$$;') + 4));
+  return sql.split(/(?=CREATE (?:OR REPLACE )?FUNCTION )/).slice(1).map((b) => b.slice(0, b.indexOf('\n$$;') + 4));
 }
 
 test('000933: one transaction with lock_timeout, and flagged for renumbering', () => {
@@ -88,4 +88,41 @@ test('000933 region maps: AB/Alberta, SP/São Paulo, QC/Québec, NL/Nuevo León 
   assert.equal(codes('BR').size, 27);
   assert.equal(codes('MX').size, 32);
   assert.equal(codes('US').size, 52);
+});
+
+function jsonMap(marker: string): Record<string, string> {
+  const i = mig.indexOf(marker);
+  assert.ok(i > 0, marker);
+  const start = mig.indexOf("'{", i) + 1;
+  return JSON.parse(mig.slice(start, mig.indexOf("}'::jsonb", start) + 1));
+}
+
+test('000933: no-country region map omits every code/name that names a state in two of US/CA/BR/MX (and CA)', () => {
+  const nocc = jsonMap('WHEN v.cc IS NULL THEN coalesce(');
+  const bycc = jsonMap("ELSE coalesce(v.cc || ':' || (");
+  const countries = new Map<string, Set<string>>();
+  for (const k of Object.keys(bycc)) {
+    const [cc, alias] = [k.slice(0, 2), k.slice(3)];
+    if (!countries.has(alias)) countries.set(alias, new Set());
+    countries.get(alias)!.add(cc);
+  }
+  const colliding = [...countries].filter(([, s]) => s.size > 1).map(([a]) => a).sort();
+  assert.deepEqual(colliding, ['al', 'bc', 'df', 'distrito federal', 'ma', 'ms', 'mt', 'nl', 'pa', 'pe', 'pr', 'que', 'sc']);
+  for (const a of [...colliding, 'ca']) assert.equal(nocc[a], undefined, `no-country map must not resolve '${a}'`);
+  for (const [a, key] of Object.entries(nocc)) {
+    assert.equal(countries.get(a)?.size, 1, a);
+    assert.equal(bycc[`${key.slice(0, 2)}|${a}`], key.slice(3), a);
+  }
+  assert.equal(nocc['nuevo leon'], 'MX:NLE');
+  assert.equal(nocc['ab'], 'CA:AB');
+});
+
+test('000933: countries are compared by prospect_country_code() key, never by raw string', () => {
+  const body = mig.replace(/^--.*$/gm, '');
+  assert.ok(!/\b(?:[a-z]+\.)?country\s*(?:=|IS NOT DISTINCT FROM)\s*(?:p_country|v_country|v_fcountry)\b/.test(body));
+  assert.ok(!/'XX'/.test(body));
+  assert.match(body, /p_country IS NULL OR co\.country_key = p_country/);
+  assert.match(body, /v_fcountry text := public\.prospect_country_code\(p_country\);/);
+  assert.equal((body.match(/p\.country_key = v_ckey/g) || []).length, 2);
+  assert.equal((body.match(/p\.country_key = v_fcountry/g) || []).length, 2);
 });
