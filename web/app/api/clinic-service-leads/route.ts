@@ -14,6 +14,12 @@ import {
   parseClinicLead,
   planClinicLeadMail,
 } from '@/lib/clinic-service-lead';
+import {
+  clinicLeadConfirmationKey,
+  isConfirmationKeyConflict,
+  isLeadsTableMissing,
+  shouldSendConfirmation,
+} from '@/lib/clinic-lead-confirmation';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,26 +82,6 @@ async function sendResendEmail(opts: {
   return { ok: true };
 }
 
-async function confirmationAlreadySent(opts: {
-  email: string;
-  description: string;
-}): Promise<boolean> {
-  if (!hasServiceRole()) return false;
-  try {
-    const admin = getSupabaseAdmin();
-    const { data } = await admin
-      .from('clinic_service_leads')
-      .select('id')
-      .eq('email', opts.email)
-      .eq('description', opts.description)
-      .eq('confirmation_sent', true)
-      .limit(1);
-    return Array.isArray(data) && data.length > 0;
-  } catch {
-    return false;
-  }
-}
-
 /**
  * POST /api/clinic-service-leads
  * Guest clinic lead from the logged-out landing. Inserts a new clinic/owner
@@ -147,16 +133,12 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const alreadySent = parsed.lead.email
-      ? await confirmationAlreadySent({
-          email: parsed.lead.email,
-          description: parsed.lead.description,
-        })
-      : false;
-    const plan = planClinicLeadMail({
-      email: parsed.lead.email,
-      confirmationAlreadySent: alreadySent,
-    });
+    // One confirmation per (email, description, UTC day): the unique
+    // confirmation_key on clinic_service_leads (000930) is the claim, so a
+    // double-click or a retry after a 503 cannot send a second one.
+    const confirmationKey = clinicLeadConfirmationKey(parsed.lead.email, parsed.lead.description);
+    let claimedKey = false;
+    let lostClaim = false;
 
     let stored = false;
     let storedId: string | null = null;
@@ -203,16 +185,32 @@ export async function POST(req: NextRequest) {
           confirmation_sent: false,
           organization_id: organizationId,
           service_request_id: serviceRequestId,
+          confirmation_key: confirmationKey,
         };
         let { data, error } = await admin
           .from('clinic_service_leads')
           .insert(leadRow)
           .select('id')
           .maybeSingle();
-        if (error && /organization_id|service_request_id|model|column|schema cache/i.test(error.message || '')) {
+        if (error && isConfirmationKeyConflict(error)) {
+          // Same request already confirmed today: keep the row, skip the email.
+          lostClaim = true;
+          leadRow.confirmation_key = null;
+          ({ data, error } = await admin
+            .from('clinic_service_leads')
+            .insert(leadRow)
+            .select('id')
+            .maybeSingle());
+        }
+        if (
+          error &&
+          !isLeadsTableMissing(error) &&
+          /organization_id|service_request_id|model|confirmation_key|column|schema cache/i.test(error.message || '')
+        ) {
           delete leadRow.organization_id;
           delete leadRow.service_request_id;
           delete leadRow.model;
+          delete leadRow.confirmation_key;
           ({ data, error } = await admin
             .from('clinic_service_leads')
             .insert(leadRow)
@@ -222,13 +220,26 @@ export async function POST(req: NextRequest) {
         if (!error) {
           stored = true;
           storedId = data?.id ? String(data.id) : null;
-        } else if (!/schema cache|does not exist|relation/i.test(error.message || '')) {
+          claimedKey = !lostClaim && leadRow.confirmation_key != null;
+        } else if (isLeadsTableMissing(error)) {
+          console.warn('[clinic-service-leads] clinic_service_leads missing; lead not stored, no confirmation dedupe');
+        } else {
           console.error('[clinic-service-leads] persist', error.message);
         }
       } catch (e) {
         console.error('[clinic-service-leads] persist', e);
       }
     }
+
+    const plan = planClinicLeadMail({
+      email: parsed.lead.email,
+      confirmationAlreadySent: !shouldSendConfirmation({
+        email: parsed.lead.email,
+        stored,
+        claimedKey,
+        lostClaim,
+      }),
+    });
 
     const subject = clinicLeadSubject(parsed.lead);
     const text = clinicLeadText({
@@ -263,6 +274,17 @@ export async function POST(req: NextRequest) {
     }
 
     if (hasServiceRole() && !serviceRequestId) {
+      // No confirmation goes out on this path; free the claim for the retry.
+      if (claimedKey && storedId) {
+        try {
+          await getSupabaseAdmin()
+            .from('clinic_service_leads')
+            .update({ confirmation_key: null })
+            .eq('id', storedId);
+        } catch {
+          /* ignore */
+        }
+      }
       console.error('[clinic-service-leads] missing service_requests row', {
         clinic: parsed.lead.clinicName,
         organizationId,
@@ -303,6 +325,17 @@ export async function POST(req: NextRequest) {
       confirmed = confirm.ok;
       if (!confirm.ok) {
         console.error('[clinic-service-leads] confirmation', confirm.error);
+        if (claimedKey && storedId && hasServiceRole()) {
+          // Release the claim so a retry can still confirm.
+          try {
+            await getSupabaseAdmin()
+              .from('clinic_service_leads')
+              .update({ confirmation_key: null })
+              .eq('id', storedId);
+          } catch {
+            /* ignore */
+          }
+        }
       } else if (stored && storedId && hasServiceRole()) {
         try {
           await getSupabaseAdmin()
