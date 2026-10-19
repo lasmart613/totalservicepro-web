@@ -5,26 +5,44 @@
  * Schedule: hourly at :23 (UTC cron). Netlify does not expose scheduled
  * functions at a URL in production, so this cannot be called publicly; it
  * only runs on schedule for the published deploy, or from "Run now" in the
- * Netlify UI. It runs no work in Deploy Previews unless someone presses
- * Run now there.
+ * Netlify UI. "Run now" on a Deploy Preview or branch deploy would use the
+ * site's production env (same Supabase, same Stripe), so this does nothing
+ * unless the deploy context is production (Netlify's context.deploy.context,
+ * or CONTEXT=production). Each run stops starting new rows after 18 s.
  *
  * Needs NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL), SUPABASE_SERVICE_ROLE_KEY
  * and the Stripe secret (STRIPE_SECRET_KEY or STRIPE_SECRET), all with the
  * Functions scope, and migration 000928 applied. Without the Supabase env it
  * logs an error and writes nothing; without 000928 it finds no candidates.
- * Set PAST_DUE_DOWNGRADE_DISABLED=1 to turn the 14-day downgrade off (here
- * and in the webhook) without a deploy.
+ * Set PAST_DUE_DOWNGRADE_DISABLED to 1, true or yes to turn the 14-day
+ * downgrade off (here and in the webhook) without a deploy. The clock keeps
+ * running while it is on.
  *
  * Imports are relative (no @/ alias) so the default function bundler can
  * resolve the whole module graph. No [functions] block in netlify.toml.
  */
 
 import { createNodeServiceClient } from '../../lib/supabase/node-service-client.ts';
-import { pastDueDowngradeDisabled } from '../../lib/billing/past-due.ts';
+import {
+  isProductionDeploy,
+  pastDueDowngradeDisabled,
+  type NetlifyDeployContextLike,
+} from '../../lib/billing/past-due.ts';
 import { runPastDueSweep } from '../../lib/billing/past-due-sweep.ts';
 import { listLiveSubscriptionsForCustomer, retrieveStripeSubscription } from '../../lib/billing/stripe-subscription.ts';
 
-const pastDueDowngrade = async (): Promise<void> => {
+const pastDueDowngrade = async (_req?: Request, context?: NetlifyDeployContextLike): Promise<void> => {
+  if (!isProductionDeploy(context)) {
+    console.log(
+      JSON.stringify({
+        event: 'past-due-downgrade',
+        ok: true,
+        skipped: 'not_production',
+        context: context?.deploy?.context ?? process.env.CONTEXT ?? null,
+      })
+    );
+    return;
+  }
   if (pastDueDowngradeDisabled()) {
     console.log(JSON.stringify({ event: 'past-due-downgrade', ok: true, disabled: true }));
     return;

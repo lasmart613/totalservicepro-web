@@ -4,7 +4,11 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  isProductionDeploy,
   missingPastDueColumn,
+  PAST_DUE_RECHECK_HOURS,
+  PAST_DUE_SWEEP_BUDGET_MS,
+  pastDueRecheckCutoffIso,
   PAST_DUE_DOWNGRADE_DAYS,
   pastDueCutoffIso,
   pastDueDays,
@@ -45,16 +49,23 @@ test('the sweep cutoff is exactly 14 days before now', () => {
   assert.equal(pastDueCutoffIso(after(14 * DAY)), SINCE);
 });
 
-test('PAST_DUE_DOWNGRADE_DISABLED is only on for exactly "1"', () => {
+test('PAST_DUE_DOWNGRADE_DISABLED parses like DIRECTORY_TURNSTILE_ENABLED (1/true/yes, any case, trimmed)', () => {
   const prior = process.env.PAST_DUE_DOWNGRADE_DISABLED;
+  const originalWarn = console.warn;
+  console.warn = () => {};
   try {
     delete process.env.PAST_DUE_DOWNGRADE_DISABLED;
     assert.equal(pastDueDowngradeDisabled(), false);
-    process.env.PAST_DUE_DOWNGRADE_DISABLED = '0';
-    assert.equal(pastDueDowngradeDisabled(), false);
-    process.env.PAST_DUE_DOWNGRADE_DISABLED = ' 1 ';
-    assert.equal(pastDueDowngradeDisabled(), true);
+    for (const off of ['', '0', 'false', 'no', 'off', 'disabled']) {
+      process.env.PAST_DUE_DOWNGRADE_DISABLED = off;
+      assert.equal(pastDueDowngradeDisabled(), false, off);
+    }
+    for (const on of [' 1 ', 'true', 'TRUE', 'True', 'yes', ' YES\t']) {
+      process.env.PAST_DUE_DOWNGRADE_DISABLED = on;
+      assert.equal(pastDueDowngradeDisabled(), true, on);
+    }
   } finally {
+    console.warn = originalWarn;
     if (prior === undefined) delete process.env.PAST_DUE_DOWNGRADE_DISABLED;
     else process.env.PAST_DUE_DOWNGRADE_DISABLED = prior;
   }
@@ -83,7 +94,7 @@ test('migration 000928 follows the migration rules and has an exact rollback', (
   assert.doesNotMatch(up, /GRANT /);
   // Drift guard on the one function it creates (or re-creates on a re-run).
   assert.match(up, /exists with another body; refusing to overwrite/);
-  assert.match(up, /<> '2a0d072a45f52660ba23f4822738c26a'/);
+  assert.match(up, /<> 'b967b777d5f8d78d088c57cb8eee3785'/);
   // Conservative backfill: apply time, never retroactive.
   assert.match(up, /UPDATE public\.subscriptions\s+SET past_due_since = now\(\)\s+WHERE status = 'grace_period'\s+AND past_due_since IS NULL/);
   assert.doesNotMatch(up, /current_period_(start|end)|interval '/i);
@@ -92,7 +103,7 @@ test('migration 000928 follows the migration rules and has an exact rollback', (
   assert.match(down, /DROP FUNCTION IF EXISTS public\.subscriptions_past_due_clock\(\);/);
   assert.match(down, /DROP INDEX IF EXISTS public\.subscriptions_past_due_since_idx;/);
   assert.match(down, /ALTER TABLE public\.subscriptions DROP COLUMN IF EXISTS past_due_since;/);
-  assert.equal((down.match(/^(DROP|ALTER|CREATE|UPDATE|GRANT|REVOKE)\b/gm) || []).length, 4);
+  assert.equal((down.match(/^(DROP|ALTER|CREATE|UPDATE|GRANT|REVOKE)\b/gm) || []).length, 5);
   assert.ok(existsSync(join(web, 'supabase/tests/20261018_subscriptions_past_due_clock.sql')));
 });
 
@@ -101,6 +112,10 @@ test('scheduled function: hourly, env checked, kill switch, no URL handler outpu
   assert.match(fn, /export const config = \{\s*schedule: '23 \* \* \* \*',?\s*\}/);
   assert.match(fn, /SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(fn, /pastDueDowngradeDisabled\(\)/);
+  // Production only: "Run now" on a preview would use the production env.
+  assert.match(fn, /async \(_req\?: Request, context\?: NetlifyDeployContextLike\)/);
+  assert.match(fn, /if \(!isProductionDeploy\(context\)\) \{[\s\S]*?skipped: 'not_production'[\s\S]*?return;/);
+  assert.ok(fn.indexOf('isProductionDeploy(context)') < fn.indexOf('createNodeServiceClient(url'), 'gate runs before any client is built');
   assert.match(fn, /createNodeServiceClient\(/);
   assert.match(fn, /runPastDueSweep\(/);
   assert.doesNotMatch(fn, /new Response\(/);
@@ -146,4 +161,27 @@ test('webhook route documents the 14-day past_due rule', () => {
   const src = readFileSync(join(web, 'app/api/billing/upgrade/webhook/route.ts'), 'utf8');
   assert.match(src, /past_due stays Premium for 14 days/);
   assert.doesNotMatch(src, /past_due included\) it\s+\* is logged and does not change the plan/);
+});
+
+test('isProductionDeploy: only the production deploy context runs the sweep', () => {
+  assert.equal(isProductionDeploy({ deploy: { context: 'production' } }, {}), true);
+  for (const ctx of ['deploy-preview', 'branch-deploy', 'dev', 'preview']) {
+    assert.equal(isProductionDeploy({ deploy: { context: ctx } }, {}), false, ctx);
+    // The handler's context wins over a CONTEXT env that says production.
+    assert.equal(isProductionDeploy({ deploy: { context: ctx } }, { CONTEXT: 'production' }), false, ctx);
+  }
+  assert.equal(isProductionDeploy(undefined, { CONTEXT: 'production' }), true, 'CONTEXT env fallback');
+  assert.equal(isProductionDeploy(undefined, { CONTEXT: 'deploy-preview' }), false);
+  assert.equal(isProductionDeploy(undefined, {}), false, 'no context: do nothing');
+  assert.equal(isProductionDeploy({ deploy: null }, {}), false);
+});
+
+test('sweep constants: 18 s budget, 23 h recheck window', () => {
+  assert.equal(PAST_DUE_SWEEP_BUDGET_MS, 18_000);
+  assert.equal(PAST_DUE_RECHECK_HOURS, 23);
+  assert.equal(pastDueRecheckCutoffIso(new Date(SINCE)), new Date(Date.parse(SINCE) - 23 * 60 * 60 * 1000).toISOString());
+  const sweep = readFileSync(join(here, 'past-due-sweep.ts'), 'utf8');
+  assert.match(sweep, /\.or\(`past_due_checked_at\.is\.null,past_due_checked_at\.lte\."\$\{pastDueRecheckCutoffIso\(now\)\}"`\)/);
+  assert.match(sweep, /\.order\('past_due_checked_at', \{ ascending: true, nullsFirst: true \}\)/);
+  assert.match(missingPastDueColumn('column subscriptions.past_due_checked_at does not exist') ? 'y' : 'n', /y/);
 });

@@ -5,8 +5,15 @@
  * function netlify/functions/past-due-downgrade.mts.
  *
  * Candidates: Stripe ledger rows (platform 'stripe', id 'sub_...') in
- * 'grace_period' whose tier is not yet 'free' and whose past_due_since is at
- * least 14 days old. Each one is re-read from Stripe first:
+ * 'grace_period' whose tier is not yet 'free', whose past_due_since is at
+ * least 14 days old, and that the sweep has not looked at in the last 23
+ * hours (past_due_checked_at). Never-checked rows come first, then the
+ * least recently checked, then the oldest clock. Every row looked at is
+ * stamped, so refused rows (complimentary, another live subscription,
+ * deleted in Stripe, unhandled status, errors) rotate to the back instead of
+ * starving real candidates (QA LM-1). A run stops starting new rows after
+ * 18 s (Netlify stops scheduled functions at 30 s) and handles at most 50.
+ * Each one is re-read from Stripe first:
  * - past_due: applyPastDueDowngradeIfDue (same guards as unpaid);
  * - canceled / unpaid / incomplete_expired: applyStripePremiumDowngrade,
  *   exactly as the webhook would have done;
@@ -27,7 +34,14 @@ import {
   subscriptionStatusEndsPremium,
   writeSubscriptionLedgerStatus,
 } from './apply-org-downgrade.ts';
-import { missingPastDueColumn, pastDueCutoffIso, pastDueDowngradeDisabled, pastDueDowngradeDue } from './past-due.ts';
+import {
+  missingPastDueColumn,
+  PAST_DUE_SWEEP_BUDGET_MS,
+  pastDueCutoffIso,
+  pastDueDowngradeDisabled,
+  pastDueDowngradeDue,
+  pastDueRecheckCutoffIso,
+} from './past-due.ts';
 import { isStripeResourceMissing, type StripeObject } from './stripe-subscription.ts';
 import { subscriptionGrantsPremium, type StripeSubscriptionLike } from './upgrade-session.ts';
 
@@ -48,6 +62,8 @@ export type PastDueSweepSummary = {
   error?: string;
   candidates: number;
   downgraded: number;
+  /** True when the time budget stopped the run before every row was looked at. */
+  budgetExhausted?: boolean;
   results: PastDueSweepRowResult[];
 };
 
@@ -60,6 +76,23 @@ type LedgerRow = {
   past_due_since?: string | null;
 };
 
+/**
+ * Mark the row as looked at before any Stripe call, so a refusal, an error
+ * or a run killed mid-row still rotates it to the back of the queue. Best
+ * effort: a failed stamp is logged and the row is still processed.
+ */
+async function stampChecked(writer: SupabaseClient, subscriptionId: string, now: Date): Promise<void> {
+  try {
+    const { error } = await writer
+      .from('subscriptions')
+      .update({ past_due_checked_at: now.toISOString() })
+      .eq('stripe_subscription_id', subscriptionId);
+    if (error) console.warn('[billing] past_due sweep could not stamp past_due_checked_at', { subscriptionId, message: error.message });
+  } catch (err) {
+    console.warn('[billing] past_due sweep could not stamp past_due_checked_at', { subscriptionId, err });
+  }
+}
+
 function orgIdText(value: unknown): string | null {
   return value == null || String(value).trim() === '' ? null : String(value);
 }
@@ -71,20 +104,29 @@ export async function runPastDueSweep(input: {
   retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
   now?: Date;
   limit?: number;
+  /** Stop starting new rows after this many ms (default 18 000). */
+  budgetMs?: number;
+  /** Monotonic-ish clock for the budget (tests). Defaults to Date.now. */
+  clock?: () => number;
 }): Promise<PastDueSweepSummary> {
   const summary: PastDueSweepSummary = { ok: true, candidates: 0, downgraded: 0, results: [] };
   if (pastDueDowngradeDisabled()) return { ...summary, disabled: true };
 
   const now = input.now || new Date();
+  const clock = input.clock || Date.now;
+  const started = clock();
+  const budgetMs = Math.max(0, input.budgetMs ?? PAST_DUE_SWEEP_BUDGET_MS);
   const limit = Math.max(1, Math.min(input.limit ?? PAST_DUE_SWEEP_LIMIT, 200));
   const { data, error } = await input.writer
     .from('subscriptions')
-    .select('stripe_subscription_id, organization_id, status, tier, platform, past_due_since')
+    .select('stripe_subscription_id, organization_id, status, tier, platform, past_due_since, past_due_checked_at')
     .eq('platform', 'stripe')
     .eq('status', 'grace_period')
     .neq('tier', 'free')
     .not('past_due_since', 'is', null)
     .lte('past_due_since', pastDueCutoffIso(now))
+    .or(`past_due_checked_at.is.null,past_due_checked_at.lte."${pastDueRecheckCutoffIso(now)}"`)
+    .order('past_due_checked_at', { ascending: true, nullsFirst: true })
     .order('past_due_since', { ascending: true })
     .limit(limit);
   if (error) {
@@ -105,8 +147,13 @@ export async function runPastDueSweep(input: {
     ) {
       continue;
     }
+    if (clock() - started >= budgetMs) {
+      summary.budgetExhausted = true;
+      break;
+    }
     summary.candidates += 1;
     const organizationId = orgIdText(row.organization_id);
+    await stampChecked(input.writer, subscriptionId, now);
     try {
       let subscription: StripeObject;
       try {

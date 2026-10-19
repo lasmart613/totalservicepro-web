@@ -48,6 +48,7 @@ const PAST_DUE_STATUS = 'past_due';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isComplimentaryGrant } from '../complimentary-premium.ts';
 import {
+  compareAndSetPastDueLedger,
   pastDueDays,
   pastDueDowngradeDisabled,
   pastDueDowngradeDue,
@@ -383,6 +384,13 @@ export async function applyStripePremiumDowngrade(input: {
   listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
   retrieveSubscription?: (subscriptionId: string) => Promise<StripeObject>;
   retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
+  /**
+   * Last check right before the plan write (14-day past_due path only).
+   * Returns a refusal reason to write nothing, or null to go ahead.
+   */
+  beforeWrite?: () => Promise<string | null>;
+  /** The caller writes the ledger itself (14-day past_due path only). */
+  skipLedgerWrite?: boolean;
 }): Promise<{ downgraded: boolean; organizationId?: string | null; reason?: string }> {
   const subscription = input.subscription;
   const linked = await lookupStripeOrganization({
@@ -417,9 +425,14 @@ export async function applyStripePremiumDowngrade(input: {
     return { downgraded: false, organizationId, reason: 'live_subscription_remains' };
   }
 
+  if (input.beforeWrite) {
+    const refused = await input.beforeWrite();
+    if (refused) return { downgraded: false, organizationId, reason: refused };
+  }
+
   await writeOrgColumns(input.writer, organizationId, orgFreePlanFields());
 
-  if (linked.subscriptionId) {
+  if (linked.subscriptionId && !input.skipLedgerWrite) {
     const stripeStatus = String(subscription.status || '').toLowerCase() || 'canceled';
     await writeSubscriptionLedgerStatus(input.writer, linked.subscriptionId, stripeStatus, { clearTier: true });
   }
@@ -494,7 +507,8 @@ export async function applyPastDueDowngradeIfDue(input: {
   writer: SupabaseClient;
   subscription: StripeSubscriptionLike & StripeObject;
   listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
-  retrieveSubscription?: (subscriptionId: string) => Promise<StripeObject>;
+  /** Required: Stripe is re-read right before and right after the write. */
+  retrieveSubscription: (subscriptionId: string) => Promise<StripeObject>;
   retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
   now?: Date;
 }): Promise<PastDueCheck> {
@@ -515,13 +529,61 @@ export async function applyPastDueDowngradeIfDue(input: {
     return { downgraded: false, reason: 'past_due_grace', pastDueSince, pastDueDays: days };
   }
 
+  const seenSince = pastDueSince;
   const result = await applyStripePremiumDowngrade({
     writer: input.writer,
     subscription: input.subscription,
     listLiveSubscriptions: input.listLiveSubscriptions,
     retrieveSubscription: input.retrieveSubscription,
     retrieveCustomer: input.retrieveCustomer,
+    skipLedgerWrite: true,
+    // L-1: last checks right before the plan write. Stripe must still say
+    // past_due, and the ledger row must still be grace_period with the clock
+    // read above (a recovery sets it active and clears the clock).
+    beforeWrite: async () => {
+      let fresh: StripeObject;
+      try {
+        fresh = await input.retrieveSubscription(subscriptionId);
+      } catch (err) {
+        if (isStripeResourceMissing(err)) return 'subscription_missing';
+        throw err;
+      }
+      if (!isPastDueStatus(fresh?.status)) return 'stripe_status_changed';
+      const still = await compareAndSetPastDueLedger(input.writer, subscriptionId, seenSince, {});
+      return still ? null : 'past_due_clock_changed';
+    },
   });
+  if (result.downgraded) {
+    // Ledger tier follows only while the row is still the same past_due
+    // episode; a recovery that landed after the plan write keeps its row.
+    await compareAndSetPastDueLedger(input.writer, subscriptionId, seenSince, { tier: 'free' });
+    // L-1: a recovery that landed while we wrote. Stripe is read once more;
+    // active or trialing re-applies Premium through the normal recovery path.
+    let after: StripeObject | null = null;
+    try {
+      after = await input.retrieveSubscription(subscriptionId);
+    } catch (err) {
+      console.warn('[billing] past_due post-write Stripe check skipped', { subscriptionId, err });
+    }
+    if (after && subscriptionGrantsPremium(typeof after.status === 'string' ? after.status : null)) {
+      const healed = await applyPaidSubscriptionRecord({
+        writer: input.writer,
+        subscription: after as StripeSubscriptionLike & StripeObject,
+      });
+      console.warn('[billing] past_due downgrade undone; the subscription recovered during the write', {
+        subscriptionId,
+        organizationId: result.organizationId ?? null,
+        reapplied: healed.ok,
+      });
+      return {
+        downgraded: false,
+        organizationId: result.organizationId,
+        reason: 'recovered_during_write',
+        pastDueSince,
+        pastDueDays: days,
+      };
+    }
+  }
   console.info('[billing] past_due 14-day check', {
     subscriptionId,
     organizationId: result.organizationId ?? null,
