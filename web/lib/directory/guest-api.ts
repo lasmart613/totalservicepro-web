@@ -19,8 +19,6 @@ export const GUEST_DIRECTORY_MAX_PAGE = 200;
 const IMPORT_NOTE = /(^|[^a-z])(re)?import\s*:/i;
 const REGIONS = new Set(['Northeast', 'Midwest', 'South', 'West', 'Canada']);
 
-/** PostgREST .or() filter for the signed-in directory: drop rows tagged as clinic imports (keeps NULL notes). */
-export const DIRECTORY_NOT_IMPORTED_OR = 'notes.is.null,notes.not.imatch."(^|[^a-z])(re)?import[[:space:]]*:"';
 
 export type PublicDirectoryRow = {
   id?: number | string | null;

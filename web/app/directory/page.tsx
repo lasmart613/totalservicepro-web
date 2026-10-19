@@ -16,7 +16,6 @@ import { Header } from '@/components/Header';
 import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
-import { DIRECTORY_NOT_IMPORTED_OR } from '@/lib/directory/guest-api';
 import { isServiceOrgType } from '@/lib/org-types';
 import { orgTypeLabel } from '@/lib/labels';
 import { useSignedIn } from '@/lib/use-signed-in';
@@ -113,40 +112,21 @@ export default function DirectoryPage() {
         setMyOrgId(orgId);
       }
 
-      // Free public directory listings — page until a short range, no silent 500 cap
-      const listedSelect =
-        'id, name, type, city, state, phone, email, website, logo_url, list_in_directory, is_active';
+      // Free public directory listings. Server route (service role) since 000932:
+      // the import/prospect/lead markers are private columns.
       let listed: OrgRow[] = [];
-      const q1 = await fetchAllPages<OrgRow>((from, to) =>
-        supabase
-          .from('organizations')
-          .select(listedSelect)
-          .eq('list_in_directory', true)
-          .or(DIRECTORY_NOT_IMPORTED_OR)
-          .order('name')
-          .range(from, to)
-      );
-
-      if (q1.error) {
-        console.warn('directory list', q1.error);
-        if (/list_in_directory|column/i.test(q1.error.message || '')) {
-          setNote(
-            'Directory listing needs the list_in_directory column (migration). Orgs can opt in from Company Profile once applied.'
-          );
-        } else {
-          const q2 = await fetchAllPages<OrgRow>((from, to) =>
-            supabase
-              .from('organizations')
-              .select(listedSelect)
-              .eq('list_in_directory', true)
-              .or(DIRECTORY_NOT_IMPORTED_OR)
-              .order('name')
-              .range(from, to)
-          );
-          listed = (q2.data || []).filter((o: any) => o.is_active !== false);
-        }
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const res = await fetch('/api/directory/listed', {
+        cache: 'no-store',
+        headers: session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {},
+      });
+      const json = await res.json().catch(() => ({}));
+      if (res.ok && Array.isArray(json?.listings)) {
+        listed = (json.listings as OrgRow[]).filter((o) => o.is_active !== false);
       } else {
-        listed = (q1.data || []).filter((o: any) => o.is_active !== false);
+        console.warn('directory list', res.status, json?.error);
       }
       setAllListed(listed);
       setNote(
