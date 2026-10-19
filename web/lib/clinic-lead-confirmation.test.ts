@@ -75,6 +75,8 @@ test('route and migration wiring', () => {
   const mig = readFileSync(join(here, '../supabase/migrations/20261018_000930_clinic_service_leads.sql'), 'utf8');
   assert.match(mig, /CREATE UNIQUE INDEX IF NOT EXISTS clinic_service_leads_confirmation_key_key/);
   assert.match(mig, /claimed_at timestamptz/);
+  assert.match(mig, /send_attempted_at timestamptz/);
+  assert.match(handler, /\.is\('send_attempted_at', null\)/);
   assert.match(mig, /REVOKE ALL ON TABLE public\.clinic_service_leads FROM PUBLIC, anon, authenticated/);
   assert.match(mig, /SET LOCAL lock_timeout = '5s'/);
 });

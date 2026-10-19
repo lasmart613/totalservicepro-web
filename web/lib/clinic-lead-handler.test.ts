@@ -21,9 +21,9 @@ function hangUntilAbort(signal: AbortSignal): Promise<never> {
 type Row = Record<string, unknown>;
 type DbErr = { code: string; message: string } | null;
 
-function fakeAdmin(opts: { failRelease?: boolean; leadInsertError?: DbErr } = {}) {
+function fakeAdmin(opts: { failRelease?: boolean; failFlag?: boolean; failMarker?: boolean; leadInsertError?: DbErr } = {}) {
   const tables: Record<string, Row[]> = { organizations: [], service_requests: [], clinic_service_leads: [] };
-  const log = { leadInserts: [] as Row[] };
+  const log = { leadInserts: [] as Row[], flagAttempts: 0 };
   let seq = 0;
   class Q {
     op: 'insert' | 'update' | 'select' = 'select';
@@ -37,6 +37,7 @@ function fakeAdmin(opts: { failRelease?: boolean; leadInsertError?: DbErr } = {}
     update(row: Row) { this.op = 'update'; this.row = { ...row }; return this; }
     select() { this.returning = true; return this; }
     eq(c: string, v: unknown) { this.filterCols.push(c); this.filters.push((r) => r[c] === v); return this; }
+    is(c: string, v: null) { this.filters.push((r) => (r[c] ?? null) === v); return this; }
     lt(c: string, v: string) { this.filters.push((r) => r[c] != null && String(r[c]) < v); return this; }
     single() { this.one = true; return this; }
     maybeSingle() { this.one = true; return this; }
@@ -56,6 +57,13 @@ function fakeAdmin(opts: { failRelease?: boolean; leadInsertError?: DbErr } = {}
         return { data: this.one ? { id: r.id } : [{ id: r.id }], error: null };
       }
       if (this.op === 'update') {
+        if ('confirmation_sent' in this.row) log.flagAttempts++;
+        if (opts.failFlag && this.row.confirmation_sent === true) {
+          return { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } };
+        }
+        if (opts.failMarker && 'send_attempted_at' in this.row) {
+          return { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } };
+        }
         if (opts.failRelease && this.row.confirmation_key === null && this.filterCols.includes('id')) {
           return { data: null, error: { code: '57014', message: 'canceling statement due to statement timeout' } };
         }
@@ -71,6 +79,13 @@ function fakeAdmin(opts: { failRelease?: boolean; leadInsertError?: DbErr } = {}
   }
   const admin = { from: (t: string) => new Q(t) } as unknown as SupabaseClient;
   return { admin, tables, log };
+}
+
+/** A healthy fake admin that shares an existing leads array. */
+function fakeAdminWithRows(rows: Row[]): SupabaseClient {
+  const fresh = fakeAdmin();
+  fresh.tables.clinic_service_leads = rows;
+  return fresh.admin;
 }
 
 const LEAD = {
@@ -179,30 +194,111 @@ test('503 path (no service request) releases the claim; retry confirms once', as
   }
 });
 
-test('a failed release is logged, and the stuck claim is retaken after 10 minutes', async () => {
+test('L-A: flag write fails after a real send -> retried 3x, and the row is never retaken (no 2nd email)', async () => {
+  const c = captureConsole();
+  try {
+    const db = fakeAdmin({ failFlag: true });
+    let t = new Date('2026-10-19T03:00:00Z');
+    const now = () => t;
+    const m1 = mailer({ team: 'ok', confirm: 'ok' });
+    const r1 = await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m1.send, now });
+    assert.equal(r1.body.confirmed, true);
+    assert.equal(m1.confirms(), 1);
+    assert.equal(db.log.flagAttempts, 3, 'flag write retried');
+    assert.equal(c.lines.filter((l) => /confirmation_sent flag attempt/.test(l)).length, 3);
+    const row = leadRows(db)[0];
+    assert.equal(row.confirmation_sent, false);
+    assert.notEqual(row.send_attempted_at ?? null, null, 'marker written before the send');
+    assert.notEqual(row.confirmation_key, null, 'claim kept (not released after a real send)');
+    for (const later of ['2026-10-19T03:11:00Z', '2026-10-19T05:00:00Z']) {
+      t = new Date(later);
+      const m = mailer({ team: 'ok', confirm: 'ok' });
+      const r = await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m.send, now });
+      assert.equal(m.confirms(), 0, `no second confirmation at ${later}`);
+      assert.equal(r.body.confirmed, false);
+    }
+  } finally {
+    c.restore();
+  }
+});
+
+test('flag write that fails once then succeeds is retried and lands', async () => {
+  const c = captureConsole();
+  try {
+    const db = fakeAdmin();
+    const realFrom = db.admin.from.bind(db.admin);
+    let failures = 1;
+    (db.admin as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+      const q = realFrom(t) as unknown as { run: () => unknown; op: string; row: Row };
+      const orig = q.run.bind(q);
+      q.run = () => (q.op === 'update' && q.row.confirmation_sent === true && failures-- > 0
+        ? { data: null, error: { code: '57014', message: 'timeout' } } : orig());
+      return q;
+    };
+    const m = mailer({ team: 'ok', confirm: 'ok' });
+    await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m.send });
+    assert.equal(leadRows(db)[0].confirmation_sent, true);
+  } finally {
+    c.restore();
+  }
+});
+
+test('marker write fails -> no send, claim released, retry confirms once', async () => {
+  const c = captureConsole();
+  try {
+    const db = fakeAdmin({ failMarker: true });
+    const m1 = mailer({ team: 'ok', confirm: 'ok' });
+    const r1 = await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m1.send });
+    assert.equal(m1.confirms(), 0);
+    assert.equal(r1.body.confirmed, false);
+    assert.equal(leadRows(db)[0].confirmation_key, null);
+    assert.ok(c.lines.some((l) => /send marker failed/.test(l)));
+    const db2 = db; // marker writes work again
+    (db2 as unknown as { admin: SupabaseClient }).admin = fakeAdminWithRows(leadRows(db));
+    const m2 = mailer({ team: 'ok', confirm: 'ok' });
+    const r2 = await handleClinicLeadPost({ ...LEAD }, { admin: db2.admin, send: m2.send });
+    assert.equal(m2.confirms(), 1);
+    assert.equal(r2.body.confirmed, true);
+  } finally {
+    c.restore();
+  }
+});
+
+test('stuck claim with NO send attempt (release failed after a skipped send) is retaken after 10 minutes', async () => {
+  const c = captureConsole();
+  try {
+    const db = fakeAdmin({ failRelease: true, failMarker: true });
+    let t = new Date('2026-10-19T03:00:00Z');
+    const now = () => t;
+    await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: mailer({ team: 'ok', confirm: 'ok' }).send, now });
+    assert.ok(c.lines.some((l) => /release claim failed/.test(l)), c.lines.join('\n'));
+    assert.notEqual(leadRows(db)[0].confirmation_key, null, 'claim stuck');
+    assert.equal(leadRows(db)[0].send_attempted_at ?? null, null, 'send never ran');
+    const healthy = fakeAdminWithRows(leadRows(db));
+    t = new Date('2026-10-19T03:05:00Z');
+    const m2 = mailer({ team: 'ok', confirm: 'ok' });
+    await handleClinicLeadPost({ ...LEAD }, { admin: healthy, send: m2.send, now });
+    assert.equal(m2.confirms(), 0, 'still fresh at 5 min');
+    t = new Date('2026-10-19T03:11:00Z');
+    const m3 = mailer({ team: 'ok', confirm: 'ok' });
+    await handleClinicLeadPost({ ...LEAD }, { admin: healthy, send: m3.send, now });
+    assert.equal(m3.confirms(), 1, 'retaken at 11 min');
+  } finally {
+    c.restore();
+  }
+});
+
+test('a provider-rejected send whose release also fails stays claimed (fail closed: no retake)', async () => {
   const c = captureConsole();
   try {
     const db = fakeAdmin({ failRelease: true });
     let t = new Date('2026-10-19T03:00:00Z');
     const now = () => t;
-    const m1 = mailer({ team: 'ok', confirm: 'fail' });
-    await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m1.send, now });
-    assert.ok(c.lines.some((l) => /release claim failed/.test(l)), c.lines.join('\n'));
-    assert.notEqual(leadRows(db)[0].confirmation_key, null, 'claim stuck');
-
-    t = new Date('2026-10-19T03:05:00Z'); // 5 min: still fresh, no confirmation
-    const m2 = mailer({ team: 'ok', confirm: 'ok' });
-    await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m2.send, now });
-    assert.equal(m2.confirms(), 0);
-
-    t = new Date('2026-10-19T03:11:00Z'); // 11 min: stale, retaken
-    const m3 = mailer({ team: 'ok', confirm: 'ok' });
-    const r3 = await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: m3.send, now });
-    assert.equal(m3.confirms(), 1);
-    assert.equal(r3.body.confirmed, true);
-    const claimed = leadRows(db).filter((r) => r.confirmation_key != null);
-    assert.equal(claimed.length, 1);
-    assert.equal(claimed[0].confirmation_sent, true);
+    await handleClinicLeadPost({ ...LEAD }, { admin: db.admin, send: mailer({ team: 'ok', confirm: 'fail' }).send, now });
+    t = new Date('2026-10-19T03:30:00Z');
+    const m = mailer({ team: 'ok', confirm: 'ok' });
+    await handleClinicLeadPost({ ...LEAD }, { admin: fakeAdminWithRows(leadRows(db)), send: m.send, now });
+    assert.equal(m.confirms(), 0);
   } finally {
     c.restore();
   }

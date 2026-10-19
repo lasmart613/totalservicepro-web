@@ -20,7 +20,8 @@
 -- confirmation was already claimed, so the route stores the row without the
 -- key and skips the confirmation. The route releases the key in a finally
 -- block unless the email was sent; a claim older than ~10 minutes that never
--- got confirmation_sent can be retaken (process killed mid-send).
+-- got confirmation_sent AND never started a send (send_attempted_at IS NULL,
+-- written before every send) can be retaken.
 --
 -- No functions are created (no SECURITY DEFINER surface). Independent of
 -- 000927 / 000928 / 000929 (no shared objects); any order is fine.
@@ -81,7 +82,8 @@ CREATE TABLE IF NOT EXISTS public.clinic_service_leads (
   organization_id bigint REFERENCES public.organizations(id) ON DELETE SET NULL,
   service_request_id uuid REFERENCES public.service_requests(id) ON DELETE SET NULL,
   confirmation_key text,
-  claimed_at timestamptz
+  claimed_at timestamptz,
+  send_attempted_at timestamptz
 );
 -- Columns added by 000001..000003 if an older copy of the table exists.
 ALTER TABLE public.clinic_service_leads
@@ -91,7 +93,8 @@ ALTER TABLE public.clinic_service_leads
   ADD COLUMN IF NOT EXISTS organization_id bigint REFERENCES public.organizations(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS service_request_id uuid REFERENCES public.service_requests(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS confirmation_key text,
-  ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
+  ADD COLUMN IF NOT EXISTS claimed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS send_attempted_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS clinic_service_leads_created_at_idx ON public.clinic_service_leads (created_at DESC);
 CREATE INDEX IF NOT EXISTS clinic_service_leads_organization_id_idx ON public.clinic_service_leads (organization_id);
@@ -110,7 +113,9 @@ COMMENT ON COLUMN public.clinic_service_leads.service_request_id IS
 COMMENT ON COLUMN public.clinic_service_leads.confirmation_key IS
   'md5(lower(email)|description)|UTC day. Unique when set: at most one confirmation email per request per day.';
 COMMENT ON COLUMN public.clinic_service_leads.claimed_at IS
-  'When confirmation_key was claimed. A claim older than ~10 minutes with confirmation_sent=false may be retaken by the route.';
+  'When confirmation_key was claimed. A claim older than ~10 minutes with confirmation_sent=false and send_attempted_at IS NULL may be retaken by the route.';
+COMMENT ON COLUMN public.clinic_service_leads.send_attempted_at IS
+  'Written before the confirmation send. A row with this set is never retaken, so a send whose confirmation_sent write failed cannot be repeated.';
 
 ALTER TABLE public.clinic_service_leads ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.clinic_service_leads FROM PUBLIC, anon, authenticated;
@@ -121,12 +126,18 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.clinic_service_leads TO ser
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_index
-    WHERE indexrelid = to_regclass('public.clinic_service_leads_confirmation_key_key')
-      AND indrelid = 'public.clinic_service_leads'::regclass
-      AND indisunique
+    SELECT 1
+    FROM pg_index i
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+    WHERE i.indexrelid = to_regclass('public.clinic_service_leads_confirmation_key_key')
+      AND i.indrelid = 'public.clinic_service_leads'::regclass
+      AND i.indisunique
+      AND i.indnatts = 1
+      AND i.indexprs IS NULL
+      AND a.attname = 'confirmation_key'
+      AND pg_get_expr(i.indpred, i.indrelid) = '(confirmation_key IS NOT NULL)'
   ) THEN
-    RAISE EXCEPTION '000930 drift: clinic_service_leads_confirmation_key_key is not a unique index on clinic_service_leads';
+    RAISE EXCEPTION '000930 drift: clinic_service_leads_confirmation_key_key must be UNIQUE (confirmation_key) WHERE confirmation_key IS NOT NULL';
   END IF;
   IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clinic_service_leads') THEN
     RAISE EXCEPTION '000930 drift: unexpected policy on public.clinic_service_leads';
