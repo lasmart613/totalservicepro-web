@@ -48,6 +48,15 @@ export type ProspectPayload = {
   page: ProspectPage;
   /** Free only (server-set). null for Premium: no upgrade CTA. */
   locked: { area: number; total: number } | null;
+  /** The caller's own location as the server saw it (000933). null from an older RPC. */
+  viewer: ProspectViewer | null;
+};
+
+export type ProspectViewer = {
+  /** The org has any of country, state or city. */
+  has_location: boolean;
+  /** Pool clinics in the viewer's country; null when the org has no country. */
+  country_pool: number | null;
 };
 
 export type ProspectLoad =
@@ -103,8 +112,38 @@ export function parseProspectResponse(data: unknown, error: { message?: string; 
               total: Number((j.locked as Record<string, unknown>).total) || 0,
             }
           : null,
+      viewer: parseViewer(j.viewer),
     },
   };
+}
+
+function parseViewer(v: unknown): ProspectViewer | null {
+  if (!v || typeof v !== 'object') return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.has_location !== 'boolean') return null;
+  const n = o.country_pool;
+  return {
+    has_location: o.has_location,
+    country_pool: typeof n === 'number' && Number.isFinite(n) ? n : null,
+  };
+}
+
+export const EMPTY_NO_LOCATION = 'No clinics near your address yet. Add your city, state and country in Company Profile.';
+export const EMPTY_COUNTRY_NOT_IN_POOL = 'We don’t have clinics in your country yet. More regions are coming.';
+export const EMPTY_NO_COUNTRY = 'No clinics near you yet. Add your country in Company Profile so we can match clinics in your area.';
+export const EMPTY_FILTERS = 'No clinics match these filters.';
+
+/**
+ * Copy for an empty clinic list. Only an org with no location at all is told
+ * to add an address; an org whose country has no pool clinics yet is told so.
+ */
+export function emptyStateKey(data: ProspectPayload | null): string {
+  if (data?.tier === 'premium') return EMPTY_FILTERS;
+  const v = data?.viewer;
+  if (!v || !v.has_location) return EMPTY_NO_LOCATION;
+  if (v.country_pool === 0) return EMPTY_COUNTRY_NOT_IN_POOL;
+  if (v.country_pool === null) return EMPTY_NO_COUNTRY;
+  return EMPTY_NO_LOCATION;
 }
 
 /** Message key for an add_prospect_customer() refusal. */
@@ -120,7 +159,8 @@ export function addErrorKey(code: unknown): string {
     case 'not_authenticated':
       return 'Join or create a company before adding customers.';
     case 'daily_cap':
-      return 'You reached today’s limit for adding clinics. Try again tomorrow.';
+      // Rolling 24 h cap (50 per org), not a calendar day.
+      return 'You reached the limit for adding clinics in the last 24 hours. You can add more within 24 hours.';
     default:
       return 'Could not add this clinic.';
   }
