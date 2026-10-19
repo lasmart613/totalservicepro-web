@@ -47,8 +47,11 @@ test('guest directory still hides inactive orgs and signed-in directory needs li
   assert.match(api, /row\.is_active === false\) return false/);
   const rpc = readFileSync(join(web, 'supabase/migrations/20261018_000931_public_directory_page.sql'), 'utf8');
   assert.match(rpc, /o\.is_active IS DISTINCT FROM false/);
-  const page = readFileSync(join(web, 'app/directory/page.tsx'), 'utf8');
-  assert.match(page, /\.eq\('list_in_directory', true\)/);
+  // Signed-in list moved to /api/directory/listed (service role; 000932 made the markers private).
+  const listed = readFileSync(join(web, 'lib/directory/listed.ts'), 'utf8');
+  assert.match(listed, /\.eq\('list_in_directory', true\)/);
+  assert.match(listed, /row\.list_in_directory !== true\) return false/);
+  assert.match(listed, /row\.is_active === false\) return false/);
 });
 
 test('edge function CORS default is the medicalrepairnetwork.com apex and www', () => {
