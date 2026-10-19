@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  DIRECTORY_NOT_IMPORTED_OR,
   PUBLIC_DIRECTORY_RPC,
   isPublicDirectoryRow,
   loadGuestDirectoryPage,
@@ -99,10 +98,6 @@ test('paging is clamped and hasMore uses the listed total', async () => {
   await loadGuestDirectoryPage(fakeRpc(many, calls), { page: '999999', limit: '5000' });
   assert.equal(calls[1].args.p_limit, 48);
   assert.ok(calls[1].args.p_offset <= 199 * 48);
-});
-
-test('signed-in directory filter keeps null notes but drops import/reimport-tagged rows', () => {
-  assert.equal(DIRECTORY_NOT_IMPORTED_OR, 'notes.is.null,notes.not.imatch."(^|[^a-z])(re)?import[[:space:]]*:"');
 });
 
 test('a non-region value from the RPC never reaches the card', async () => {

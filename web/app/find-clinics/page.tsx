@@ -200,13 +200,13 @@ export default function FindClinicsPage() {
     setAdding(String(id));
     try {
       const { data: res, error } = await supabase.rpc('add_prospect_customer', { p_clinic_id: Number(id) });
-      const j = (res || {}) as { ok?: boolean; error?: string };
+      const j = (res || {}) as { ok?: boolean; error?: string; status?: string };
       if (error || !j.ok) {
         if (error) console.error('[find-clinics] add_prospect_customer failed', error);
         toast.error(t(addErrorKey(error ? undefined : j.error)));
         return;
       }
-      toast.success(t('Added to your customers.'));
+      toast.success(j.status === 'already_linked' ? t('Already in your customers') : t('Added to your customers.'));
       setLoad((prev) =>
         prev && prev.ok
           ? {
