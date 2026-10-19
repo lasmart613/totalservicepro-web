@@ -84,8 +84,9 @@ import { addErrorKey, parseProspectResponse, upgradeCta } from './find-clinics.t
 test('parseProspectResponse maps server answers', () => {
   assert.deepEqual(parseProspectResponse(null, { code: 'PGRST202', message: 'x' }), { ok: false, reason: 'unavailable' });
   assert.deepEqual(parseProspectResponse({ error: 'not_service_org' }, null), { ok: false, reason: 'not_service_org' });
-  const ok = parseProspectResponse({ tier: 'free', total: 3, clinics: [{ id: 1, name: 'A' }], aggregates: [] }, null);
+  const ok = parseProspectResponse({ tier: 'free', total: 3, clinics: [{ id: 1, name: 'A' }], area_counts: [{ country: 'India', city: 'Pune', count: 2 }], country_counts: [{ country: 'India', count: 2 }], page: { limit: 20, offset: 0, filtered_total: 1, has_more: false } }, null);
   assert.ok(ok.ok && ok.data.tier === 'free' && ok.data.free_limit === 20 && ok.data.clinics.length === 1);
+  assert.ok(ok.ok && ok.data.aggregates.length === 1 && ok.data.country_counts[0].count === 2 && ok.data.page.has_more === false);
   const prem = parseProspectResponse({ tier: 'premium', total: 0 }, null);
   assert.ok(prem.ok && prem.data.tier === 'premium' && prem.data.clinics.length === 0);
   assert.equal(addErrorKey('daily_cap'), 'You reached today’s limit for adding clinics. Try again tomorrow.');

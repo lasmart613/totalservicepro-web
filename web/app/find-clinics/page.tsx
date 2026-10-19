@@ -17,9 +17,7 @@ import { documentDirection, fillTemplate } from '@/lib/i18n/translate-app';
 import { countryLabel } from '@/lib/countries';
 import {
   ALL_COUNTRIES,
-  cityOptions,
   countryPills,
-  filterByCity,
   filterByCountry,
   nextPillIndex,
   type CountryPill,
@@ -28,6 +26,7 @@ import {
   addErrorKey,
   parseProspectResponse,
   upgradeCta,
+  PROSPECT_PAGE_SIZE,
   type ProspectLoad,
 } from '@/lib/prospects/find-clinics';
 
@@ -134,38 +133,59 @@ export default function FindClinicsPage() {
   const [country, setCountry] = useState<string>(ALL_COUNTRIES);
   const [city, setCity] = useState('');
   const [adding, setAdding] = useState<string | null>(null);
+  const [areaCountry, setAreaCountry] = useState<string>(ALL_COUNTRIES);
 
-  const refresh = useCallback(async () => {
-    const { data, error } = await supabase.rpc('find_clinic_prospects');
-    setLoad(parseProspectResponse(data, error));
-  }, [supabase]);
+  const [loadingMore, setLoadingMore] = useState(false);
+
+  // Filtering, paging and counts all happen in find_clinic_prospects (server).
+  const fetchPage = useCallback(
+    async (opts: { country: string; city: string; offset: number }) => {
+      const { data, error } = await supabase.rpc('find_clinic_prospects', {
+        p_country: opts.country === ALL_COUNTRIES ? null : opts.country,
+        p_city: opts.city || null,
+        p_limit: PROSPECT_PAGE_SIZE,
+        p_offset: opts.offset,
+      });
+      return parseProspectResponse(data, error);
+    },
+    [supabase],
+  );
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let cancelled = false;
+    void fetchPage({ country, city, offset: 0 }).then((res) => {
+      if (!cancelled) setLoad(res);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPage, country, city]);
+
+  async function loadMore() {
+    if (!load || !load.ok) return;
+    setLoadingMore(true);
+    try {
+      const res = await fetchPage({ country, city, offset: load.data.clinics.length });
+      if (res.ok) {
+        setLoad({ ok: true, data: { ...res.data, clinics: [...load.data.clinics, ...res.data.clinics] } });
+      }
+    } finally {
+      setLoadingMore(false);
+    }
+  }
 
   const data = load && load.ok ? load.data : null;
   const premium = data?.tier === 'premium';
   const cta = upgradeCta(data);
 
-  // Premium: pills from the returned clinics. Free: from the counts by area.
-  const pills = useMemo(() => {
-    if (!data) return [];
-    return premium ? countryPills(data.clinics) : countryPills(data.aggregates, (a) => a.count);
-  }, [data, premium]);
+  // Pills: server GROUP BY counts (Premium: whole pool; Free: gated rows).
+  const pills = useMemo(() => (data ? countryPills(data.country_counts, (c) => c.count) : []), [data]);
 
-  const clinics = useMemo(() => {
-    if (!data) return [];
-    const byCountry = premium ? filterByCountry(data.clinics, country) : data.clinics;
-    return premium ? filterByCity(byCountry, city) : byCountry;
-  }, [data, premium, country, city]);
+  const clinics = data ? data.clinics : [];
+  const cities = data && premium ? data.city_counts.map((c) => c.city) : [];
 
-  const cities = useMemo(
-    () => (data && premium ? cityOptions(filterByCountry(data.clinics, country)) : []),
-    [data, premium, country],
-  );
-
-  const areas = useMemo(() => (data && !premium ? filterByCountry(data.aggregates, country) : []), [data, premium, country]);
+  // Free: area rows are filtered on screen (already aggregates, top 300 groups).
+  const areas = useMemo(() => (data && !premium ? filterByCountry(data.aggregates, areaCountry) : []), [data, premium, areaCountry]);
 
   async function addCustomer(id: string | number) {
     setAdding(String(id));
@@ -305,6 +325,14 @@ export default function FindClinicsPage() {
               </div>
             )}
 
+            {premium && data!.page.has_more && (
+              <div className="mb-8 text-center">
+                <button type="button" className="btn btn-secondary" disabled={loadingMore} onClick={() => void loadMore()}>
+                  {loadingMore ? t('Loading clinics...') : t('Load more')}
+                </button>
+              </div>
+            )}
+
             {cta && <UpgradeCta area={cta.area} total={cta.total} />}
 
             {!premium && data!.aggregates.length > 0 && (
@@ -313,7 +341,7 @@ export default function FindClinicsPage() {
                   {t('More clinics by area')}
                 </h2>
                 {cta && <UpgradeCta area={cta.area} total={cta.total} compact />}
-                <CountryPills pills={pills} selected={country} rtl={rtl} onSelect={setCountry} />
+                <CountryPills pills={pills} selected={areaCountry} rtl={rtl} onSelect={setAreaCountry} />
                 <ul className="card divide-y divide-[var(--border)]">
                   {areas.map((a, i) => (
                     <li key={`${a.country}-${a.city}-${i}`} className="flex justify-between gap-3 px-4 py-2 text-sm">
@@ -321,7 +349,7 @@ export default function FindClinicsPage() {
                         {[a.city || t('Unknown area'), a.country ? countryLabel(a.country, locale) : null].filter(Boolean).join(', ')}
                       </bdi>
                       <span className="text-[var(--text3)]">
-                        {fillTemplate(t('{count} clinics'), { count: a.count.toLocaleString(locale) })}
+                        {fillTemplate(t('Clinics: {count}'), { count: a.count.toLocaleString(locale) })}
                       </span>
                     </li>
                   ))}

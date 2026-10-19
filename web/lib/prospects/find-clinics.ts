@@ -24,12 +24,25 @@ export type ProspectClinic = {
 
 export type ProspectAggregate = { country: string | null; city: string | null; count: number };
 
+export type ProspectCountryCount = { country: string | null; count: number };
+export type ProspectCityCount = { city: string; count: number };
+export type ProspectPage = { limit: number; offset: number; filtered_total: number; has_more: boolean };
+
+/** Hard page size the RPC enforces (find_clinic_prospects caps p_limit at 100). */
+export const PROSPECT_PAGE_SIZE = 50;
+
 export type ProspectPayload = {
   tier: 'free' | 'premium';
   total: number;
   free_limit: number;
   clinics: ProspectClinic[];
+  /** Free: gated rows by (country, city), top 300 groups. Premium: []. */
   aggregates: ProspectAggregate[];
+  /** Server GROUP BY counts per country (Free: gated rows; Premium: whole pool). */
+  country_counts: ProspectCountryCount[];
+  /** Premium: cities within the selected country, top 300. */
+  city_counts: ProspectCityCount[];
+  page: ProspectPage;
   /** Free only (server-set). null for Premium: no upgrade CTA. */
   locked: { area: number; total: number } | null;
 };
@@ -56,7 +69,15 @@ export function parseProspectResponse(data: unknown, error: { message?: string; 
       total: Number(j.total) || 0,
       free_limit: Number(j.free_limit) || 20,
       clinics: Array.isArray(j.clinics) ? (j.clinics as ProspectClinic[]) : [],
-      aggregates: Array.isArray(j.aggregates) ? (j.aggregates as ProspectAggregate[]) : [],
+      aggregates: Array.isArray(j.area_counts) ? (j.area_counts as ProspectAggregate[]) : [],
+      country_counts: Array.isArray(j.country_counts) ? (j.country_counts as ProspectCountryCount[]) : [],
+      city_counts: Array.isArray(j.city_counts) ? (j.city_counts as ProspectCityCount[]) : [],
+      page: {
+        limit: Number((j.page as Record<string, unknown> | undefined)?.limit) || 0,
+        offset: Number((j.page as Record<string, unknown> | undefined)?.offset) || 0,
+        filtered_total: Number((j.page as Record<string, unknown> | undefined)?.filtered_total) || 0,
+        has_more: (j.page as Record<string, unknown> | undefined)?.has_more === true,
+      },
       locked:
         j.tier !== 'premium' && j.locked && typeof j.locked === 'object'
           ? {
