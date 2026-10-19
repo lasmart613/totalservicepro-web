@@ -12,6 +12,8 @@
 --   known country leaves the row NULL):
 --     2684-2848 Egypt (notes say "Import: egypt-clinics-1018", not intl-...)
 --     2849-2979 United Arab Emirates, 2980-3138 Saudi Arabia, 3139-3505 India
+--     (pool 'intl-clinics-1018'); 3506-3843 Mexico, 3844-4817 Canada,
+--     4818-5428 Brazil ("Import: amer-clinics-1018", pool 'amer-clinics-1018')
 --   Every other org: signals from phone prefix (+1 -> United States, or
 --   Canada with a Canadian province; +20/+971/+966/+91/+52/+55; a bare
 --   10-digit number counts as +1), state/province (US codes and names,
@@ -19,9 +21,11 @@
 --   suffix and a US ZIP. The row is set only when every present signal
 --   agrees; an unknown '+' prefix or any disagreement leaves it NULL.
 --
--- Expected on prod (read-only replica of this logic, 2026-10-18, 2,745 orgs):
---   United States 1,860 | India 367 | Egypt 168 | Saudi Arabia 159 |
---   United Arab Emirates 131 | NULL 60 ; prospect_pool marked: 822
+-- Expected on prod (read-only replica of this logic, 2026-10-18 20:20 MST, 4,668 orgs):
+--   United States 1,860 | Canada 974 | Brazil 611 | India 367 | Mexico 338 |
+--   Egypt 168 | Saudi Arabia 159 | United Arab Emirates 131 | NULL 60
+--   prospect_pool: intl-clinics-1018 822, amer-clinics-1018 1,923
+--   No id-range/notes mismatches in any batch.
 BEGIN;
 SET LOCAL lock_timeout = '5s';
 
@@ -54,6 +58,9 @@ sig AS (
       WHEN s.id BETWEEN 2849 AND 2979 THEN 'United Arab Emirates'
       WHEN s.id BETWEEN 2980 AND 3138 THEN 'Saudi Arabia'
       WHEN s.id BETWEEN 3139 AND 3505 THEN 'India'
+      WHEN s.id BETWEEN 3506 AND 3843 THEN 'Mexico'
+      WHEN s.id BETWEEN 3844 AND 4817 THEN 'Canada'
+      WHEN s.id BETWEEN 4818 AND 5428 THEN 'Brazil'
     END AS batch_country,
     substring(coalesce(s.notes, '') FROM '(?n)^Country:[ \t]*([^\r\n]+?)[ \t]*$') AS note_country,
     CASE
@@ -119,7 +126,7 @@ dec AS (
 )
  SELECT d.id, d.old_country, d.old_pool, d.new_country,
         CASE WHEN d.batch_country IS NOT NULL AND d.new_country = d.batch_country
-             THEN 'intl-clinics-1018' END AS new_pool
+             THEN CASE WHEN d.id <= 3505 THEN 'intl-clinics-1018' ELSE 'amer-clinics-1018' END END AS new_pool
    FROM dec d;
 
 -- Backup first (once per row for this label)

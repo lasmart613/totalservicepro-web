@@ -7,7 +7,8 @@
 SET LOCAL lock_timeout = '5s';
 
 DROP FUNCTION IF EXISTS public.add_prospect_customer(bigint);
-DROP FUNCTION IF EXISTS public.find_clinic_prospects();
+DROP FUNCTION IF EXISTS public.find_clinic_prospects(text, text, int, int);
+DROP FUNCTION IF EXISTS public.prospect_pool_rows(bigint, text, text, text);
 DROP FUNCTION IF EXISTS public.prospect_state_key(text);
 DROP FUNCTION IF EXISTS public.org_is_paid_entitled(bigint);
 DROP TABLE IF EXISTS public.prospect_customer_links;

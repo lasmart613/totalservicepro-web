@@ -94,6 +94,12 @@ SELECT id, 'Imported ' || id, 'laser_clinic', 'Street ' || id || ', City, ' || c
        'Country: ' || c || E'\nImport: ' || CASE WHEN c = 'Egypt' THEN 'egypt-clinics-1018' ELSE 'intl-clinics-1018' END
   FROM (VALUES (2684, 'Egypt', '+20'), (2700, 'Egypt', '+20'), (2849, 'United Arab Emirates', '+971'),
                (2980, 'Saudi Arabia', '+966'), (3139, 'India', '+91'), (3505, 'India', '+91')) v(id, c, p);
+INSERT INTO public.organizations (id, name, type, city, phone, notes)
+SELECT id, 'Amer ' || id, 'laser_clinic', 'Town', p || ' 555 0000', 'Country: ' || c || E'\nImport: amer-clinics-1018'
+  FROM (VALUES (3506, 'Mexico', '+52'), (3844, 'Canada', '+1'), (4818, 'Brazil', '+55')) v(id, c, p);
+-- mismatch: in the Brazil range but tagged Mexico -> NULL, not pooled
+INSERT INTO public.organizations (id, name, type, city, notes) VALUES
+ (5000, 'Amer Mismatch', 'laser_clinic', 'Town', E'Country: Mexico\nImport: amer-clinics-1018');
 -- mismatch: in the India range but tagged Saudi Arabia -> must stay NULL
 INSERT INTO public.organizations (id, name, type, city, notes) VALUES
  (3300, 'Mismatch Clinic', 'laser_clinic', 'Delhi', E'Country: Saudi Arabia\nImport: intl-clinics-1018');
@@ -122,11 +128,11 @@ DO $$ BEGIN
   EXCEPTION WHEN check_violation THEN NULL; END;
   IF NOT has_column_privilege('authenticated', 'public.organizations', 'country', 'UPDATE') THEN RAISE EXCEPTION 'FAIL no UPDATE(country)'; END IF;
   IF has_column_privilege('authenticated', 'public.organizations', 'prospect_pool', 'UPDATE') THEN RAISE EXCEPTION 'FAIL prospect_pool writable'; END IF;
-  IF has_function_privilege('anon', 'public.find_clinic_prospects()', 'EXECUTE') THEN RAISE EXCEPTION 'FAIL anon can execute find'; END IF;
+  IF has_function_privilege('anon', 'public.find_clinic_prospects(text,text,int,int)', 'EXECUTE') THEN RAISE EXCEPTION 'FAIL anon can execute find'; END IF;
   IF has_function_privilege('anon', 'public.add_prospect_customer(bigint)', 'EXECUTE') THEN RAISE EXCEPTION 'FAIL anon can execute add'; END IF;
-  IF has_function_privilege('authenticated', 'public.org_is_paid_entitled(bigint)', 'EXECUTE') THEN RAISE EXCEPTION 'FAIL helper exposed'; END IF;
+  IF has_function_privilege('authenticated', 'public.org_is_paid_entitled(bigint)', 'EXECUTE') OR has_function_privilege('authenticated', 'public.prospect_pool_rows(bigint,text,text,text)', 'EXECUTE') THEN RAISE EXCEPTION 'FAIL helper exposed'; END IF;
   IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'public'
-               AND p.proname IN ('find_clinic_prospects','add_prospect_customer','org_is_paid_entitled','prospect_state_key')
+               AND p.proname IN ('find_clinic_prospects','add_prospect_customer','org_is_paid_entitled','prospect_state_key','prospect_pool_rows')
                AND (NOT p.prosecdef OR NOT (p.proconfig @> ARRAY['search_path=""']))) THEN
     RAISE EXCEPTION 'FAIL definer/search_path';
   END IF;
@@ -134,21 +140,25 @@ DO $$ BEGIN
 END $$;
 
 -- ---------------------------------------------------------------- backfill
+UPDATE public.organizations SET country = 'Norway' WHERE id = 9203;  -- pre-existing value must survive both ways
+CREATE TABLE public._pre_backfill AS SELECT md5(string_agg(id || ':' || coalesce(country, '~') || ':' || coalesce(prospect_pool, '~'), ',' ORDER BY id)) h FROM public.organizations;
 \ir ../oneoff/20261018_country_backfill.sql
 DO $$ DECLARE r record; BEGIN
   FOR r IN SELECT * FROM (VALUES
     (2684, 'Egypt'), (2700, 'Egypt'), (2849, 'United Arab Emirates'), (2980, 'Saudi Arabia'), (3139, 'India'), (3505, 'India'),
     (9001, 'United States'), (9002, 'United States'), (9003, 'United States'), (9201, 'Canada'), (9202, 'Egypt'),
-    (9205, 'United States'), (9206, 'Mexico'), (9101, 'United States')) v(id, c) LOOP
+    (9205, 'United States'), (9206, 'Mexico'), (9101, 'United States'),
+    (3506, 'Mexico'), (3844, 'Canada'), (4818, 'Brazil')) v(id, c) LOOP
     IF (SELECT country FROM public.organizations WHERE id = r.id) IS DISTINCT FROM r.c THEN
       RAISE EXCEPTION 'FAIL backfill % expected % got %', r.id, r.c, (SELECT country FROM public.organizations WHERE id = r.id);
     END IF;
   END LOOP;
-  IF (SELECT count(*) FROM public.organizations WHERE id IN (3300, 9203, 9204) AND country IS NULL) <> 3 THEN RAISE EXCEPTION 'FAIL ambiguous rows filled'; END IF;
-  IF (SELECT count(*) FROM public.organizations WHERE prospect_pool = 'intl-clinics-1018') <> 6 THEN RAISE EXCEPTION 'FAIL pool marker count'; END IF;
+  IF (SELECT count(*) FROM public.organizations WHERE id IN (3300, 5000, 9204) AND country IS NULL) <> 3 OR (SELECT country FROM public.organizations WHERE id = 9203) <> 'Norway' THEN RAISE EXCEPTION 'FAIL ambiguous rows filled'; END IF;
+  IF (SELECT count(*) FROM public.organizations WHERE prospect_pool = 'intl-clinics-1018') <> 6
+     OR (SELECT count(*) FROM public.organizations WHERE prospect_pool = 'amer-clinics-1018') <> 3 THEN RAISE EXCEPTION 'FAIL pool marker count'; END IF;
   IF (SELECT prospect_pool FROM public.organizations WHERE id = 3300) IS NOT NULL THEN RAISE EXCEPTION 'FAIL mismatch marked as pool'; END IF;
   IF (SELECT count(*) FROM public.migration_backup WHERE label = 'country-backfill-1018') <>
-     (SELECT count(*) FROM public.organizations WHERE country IS NOT NULL OR prospect_pool IS NOT NULL) THEN
+     (SELECT count(*) FROM public.organizations WHERE (country IS NOT NULL AND id <> 9203) OR prospect_pool IS NOT NULL) THEN
     RAISE EXCEPTION 'FAIL backup row count';
   END IF;
   RAISE NOTICE 'PASS backfill';
@@ -207,18 +217,21 @@ DO $$ DECLARE j jsonb := public.find_clinic_prospects(); t text; BEGIN
   IF j->>'tier' <> 'free' THEN RAISE EXCEPTION 'FAIL free tier %', j->>'tier'; END IF;
   IF jsonb_array_length(j->'clinics') <> 20 THEN RAISE EXCEPTION 'FAIL free rows %', jsonb_array_length(j->'clinics'); END IF;
   IF EXISTS (SELECT 1 FROM jsonb_array_elements(j->'clinics') e WHERE e->>'city' <> 'Phoenix') THEN RAISE EXCEPTION 'FAIL free non-local row'; END IF;
-  IF (SELECT sum((e->>'count')::int) FROM jsonb_array_elements(j->'aggregates') e) + 20 <> (j->>'total')::int THEN RAISE EXCEPTION 'FAIL aggregates do not add up'; END IF;
-  IF EXISTS (SELECT 1 FROM jsonb_array_elements(j->'aggregates') e, jsonb_object_keys(e) k WHERE k NOT IN ('country','city','count')) THEN
+  IF (SELECT sum((e->>'count')::int) FROM jsonb_array_elements(j->'area_counts') e) + 20 <> (j->>'total')::int
+     OR (SELECT sum((e->>'count')::int) FROM jsonb_array_elements(j->'country_counts') e) + 20 <> (j->>'total')::int THEN RAISE EXCEPTION 'FAIL aggregates do not add up'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(j->'area_counts') e, jsonb_object_keys(e) k WHERE k NOT IN ('country','city','count'))
+     OR EXISTS (SELECT 1 FROM jsonb_array_elements(j->'country_counts') e, jsonb_object_keys(e) k WHERE k NOT IN ('country','count')) THEN
     RAISE EXCEPTION 'FAIL aggregate leaks a field';
   END IF;
   -- names / contacts / emails / phones / ids of the other rows never appear
-  IF t ~ 'Imported |imp[0-9]+@|Contact [0-9]|\+20 555|Local Clinic (2[1-9]|30)"|local(2[1-9]|30)@|Dr Local (2[1-9]|30)"' THEN
+  IF jsonb_array_length(public.find_clinic_prospects('India', NULL, 100, 0)->'clinics') <> 20 THEN RAISE EXCEPTION 'FAIL free filter/page params widen access'; END IF;
+  IF t ~ 'Amer |Imported |imp[0-9]+@|Contact [0-9]|\+20 555|Local Clinic (2[1-9]|30)"|local(2[1-9]|30)@|Dr Local (2[1-9]|30)"' THEN
     RAISE EXCEPTION 'FAIL free payload leaks gated rows';
   END IF;
   IF t ~ '"id": (2684|2700|2849|2980|3139|3505)\M' THEN RAISE EXCEPTION 'FAIL free payload leaks ids'; END IF;
   IF (public.add_prospect_customer(2684))->>'error' <> 'premium_required' THEN RAISE EXCEPTION 'FAIL free add allowed'; END IF;
   -- CTA counts: 10 more AZ/US local rows (5 Phoenix + 5 Mesa) gated, 16 gated in total
-  IF j->'locked' <> '{"area": 10, "total": 16}'::jsonb THEN RAISE EXCEPTION 'FAIL free locked counts %', j->'locked'; END IF;
+  IF j->'locked' <> '{"area": 10, "total": 19}'::jsonb THEN RAISE EXCEPTION 'FAIL free locked counts %', j->'locked'; END IF;
   RAISE NOTICE 'PASS free: 20 local rows + counts only';
 END $$;
 
@@ -233,12 +246,18 @@ END $$;
 SELECT pg_temp.as_user('00000000-0000-0000-0000-00000000000b');
 DO $$ DECLARE j jsonb := public.find_clinic_prospects(); BEGIN
   IF j->>'tier' <> 'premium' THEN RAISE EXCEPTION 'FAIL premium tier'; END IF;
-  IF jsonb_array_length(j->'clinics') <> 36 OR (j->>'total')::int <> 36 THEN RAISE EXCEPTION 'FAIL premium rows %', jsonb_array_length(j->'clinics'); END IF;
-  IF jsonb_array_length(j->'aggregates') <> 0 THEN RAISE EXCEPTION 'FAIL premium aggregates'; END IF;
+  IF jsonb_array_length(j->'clinics') <> 39 OR (j->>'total')::int <> 39 THEN RAISE EXCEPTION 'FAIL premium rows %', jsonb_array_length(j->'clinics'); END IF;
+  IF jsonb_array_length(j->'area_counts') <> 0 THEN RAISE EXCEPTION 'FAIL premium area counts'; END IF;
+  -- server-side filter + paging
+  IF (public.find_clinic_prospects('India', NULL, 50, 0)->'page'->>'filtered_total')::int <> 2 THEN RAISE EXCEPTION 'FAIL country filter'; END IF;
+  IF jsonb_array_length(public.find_clinic_prospects(NULL, 'mesa', 50, 0)->'clinics') <> 5 THEN RAISE EXCEPTION 'FAIL city filter'; END IF;
+  IF jsonb_array_length(public.find_clinic_prospects(NULL, NULL, 10, 30)->'clinics') <> 9
+     OR (public.find_clinic_prospects(NULL, NULL, 10, 20)->'page'->>'has_more')::boolean IS NOT TRUE THEN RAISE EXCEPTION 'FAIL paging'; END IF;
+  IF (public.find_clinic_prospects(NULL, NULL, 100000, 0)->'page'->>'limit')::int <> 100 THEN RAISE EXCEPTION 'FAIL page cap'; END IF;
   IF j->'locked' <> 'null'::jsonb THEN RAISE EXCEPTION 'FAIL premium gets upgrade CTA counts'; END IF;
   IF NOT EXISTS (SELECT 1 FROM jsonb_array_elements(j->'clinics') e WHERE e->>'email' = 'imp3505@example.test' AND e->>'contact_name' = 'Contact 3505'
                  AND e->>'laser_models' = 'Candela GentleLase' AND e->>'country' = 'India') THEN RAISE EXCEPTION 'FAIL premium missing fields'; END IF;
-  IF EXISTS (SELECT 1 FROM jsonb_array_elements(j->'clinics') e WHERE (e->>'id')::bigint = 3300) THEN RAISE EXCEPTION 'FAIL unmarked org in pool'; END IF;
+  IF EXISTS (SELECT 1 FROM jsonb_array_elements(j->'clinics') e WHERE (e->>'id')::bigint IN (3300, 5000)) THEN RAISE EXCEPTION 'FAIL unmarked org in pool'; END IF;
   RAISE NOTICE 'PASS premium gets everything';
 END $$;
 
@@ -252,7 +271,8 @@ DO $$ BEGIN
   IF (public.add_prospect_customer(2684))->>'status' <> 'linked' THEN RAISE EXCEPTION 'FAIL add'; END IF;
   IF (public.add_prospect_customer(2684))->>'status' <> 'already_linked' THEN RAISE EXCEPTION 'FAIL idempotent'; END IF;
   IF (public.add_prospect_customer(9004))->>'error' <> 'not_found' THEN RAISE EXCEPTION 'FAIL non-pool org linked'; END IF;
-  IF (public.add_prospect_customer(3300))->>'error' <> 'not_found' THEN RAISE EXCEPTION 'FAIL unmarked org linked'; END IF;
+  IF (public.add_prospect_customer(3300))->>'error' <> 'not_found' OR (public.add_prospect_customer(5000))->>'error' <> 'not_found' THEN RAISE EXCEPTION 'FAIL unmarked org linked'; END IF;
+  IF (public.add_prospect_customer(4818))->>'status' <> 'linked' THEN RAISE EXCEPTION 'FAIL amer pool add'; END IF;
   IF (SELECT (e->>'is_customer')::boolean FROM jsonb_array_elements(public.find_clinic_prospects()->'clinics') e WHERE (e->>'id')::bigint = 2684) IS NOT TRUE THEN
     RAISE EXCEPTION 'FAIL is_customer flag';
   END IF;
@@ -263,6 +283,7 @@ DO $$ BEGIN
   IF (SELECT count(*) FROM public.prospect_customer_links WHERE service_organization_id = 9002 AND customer_organization_id = 2684) <> 1 THEN RAISE EXCEPTION 'FAIL audit'; END IF;
   IF (SELECT count(*) FROM public.service_reports) <> 0 THEN RAISE EXCEPTION 'FAIL history touched'; END IF;
   -- source of the add RPC writes only organization_customers + its audit table
+  IF (SELECT count(*) FROM public.organization_customers WHERE customer_organization_id = 5000) <> 0 THEN RAISE EXCEPTION 'FAIL'; END IF;
   IF (SELECT prosrc FROM pg_proc WHERE proname = 'add_prospect_customer') ~* '(service_reports|equipment|history|grant)' THEN
     RAISE EXCEPTION 'FAIL add RPC references history objects';
   END IF;
@@ -280,14 +301,15 @@ RESET ROLE;
 -- ---------------------------------------------------------------- rollbacks
 \ir ../oneoff/20261018_country_backfill_rollback.sql
 DO $$ BEGIN
-  IF EXISTS (SELECT 1 FROM public.organizations WHERE country IS NOT NULL OR prospect_pool IS NOT NULL) THEN RAISE EXCEPTION 'FAIL backfill rollback'; END IF;
+  IF (SELECT md5(string_agg(id || ':' || coalesce(country, '~') || ':' || coalesce(prospect_pool, '~'), ',' ORDER BY id)) FROM public.organizations)
+     <> (SELECT h FROM public._pre_backfill) THEN RAISE EXCEPTION 'FAIL backfill rollback not exact'; END IF;
   RAISE NOTICE 'PASS backfill rollback';
 END $$;
 \ir ../migrations/20261018_000929_organizations_country_rollback.sql
 DO $$ BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'organizations' AND column_name IN ('country','prospect_pool'))
      OR to_regclass('public.prospect_customer_links') IS NOT NULL
-     OR EXISTS (SELECT 1 FROM pg_proc WHERE proname IN ('find_clinic_prospects','add_prospect_customer','org_is_paid_entitled','prospect_state_key'))
+     OR EXISTS (SELECT 1 FROM pg_proc WHERE proname IN ('find_clinic_prospects','add_prospect_customer','org_is_paid_entitled','prospect_state_key','prospect_pool_rows'))
      OR EXISTS (SELECT 1 FROM pg_indexes WHERE indexname IN ('organizations_country_idx','organizations_prospect_pool_idx')) THEN
     RAISE EXCEPTION 'FAIL migration rollback left objects';
   END IF;
