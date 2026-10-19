@@ -63,3 +63,51 @@ export async function withOrgPrivateFields<T extends { id?: unknown } | null>(cl
   const priv = await loadOrgPrivateFields(client, row.id as string | number);
   return priv ? ({ ...row, ...priv } as T) : row;
 }
+
+const normPrivate = (v: unknown): string | null => {
+  const s = v == null ? '' : String(v).trim();
+  return s ? s : null;
+};
+
+/**
+ * Private-field part of an org update (QA #325 M-1). Notes / tax_id go in the
+ * update ONLY when they were loaded (baseline non-null) AND the value changed.
+ * A failed or missing org_private_fields load (baseline null) never writes them,
+ * so a save can't wipe notes the editor never saw. Clearing a loaded non-empty
+ * value also sets clear_<field>: true for the server guard.
+ */
+export function privateFieldsPatch(
+  baseline: OrgPrivateFields | null,
+  next: { notes?: unknown; tax_id?: unknown }
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (!baseline) return out;
+  for (const key of ['notes', 'tax_id'] as const) {
+    if (!(key in next)) continue;
+    const before = normPrivate(baseline[key]);
+    const after = normPrivate(next[key]);
+    if (before === after) continue;
+    out[key] = after;
+    if (after === null) out[`clear_${key}`] = true;
+  }
+  return out;
+}
+
+/**
+ * Server guard for routes that save notes / tax_id: an empty value is dropped
+ * unless the client explicitly asked to clear it (clear_notes / clear_tax_id).
+ */
+export function guardPrivateFieldWipe(payload: Record<string, unknown>, body: Record<string, unknown>): string[] {
+  const dropped: string[] = [];
+  for (const key of ['notes', 'tax_id'] as const) {
+    if (!(key in payload)) continue;
+    if (normPrivate(payload[key]) === null && body[`clear_${key}`] !== true) {
+      delete payload[key];
+      dropped.push(key);
+    }
+  }
+  return dropped;
+}
+
+/** Columns /api/org/profile returns to the saving member: readable + its own notes/tax_id. */
+export const ORG_PROFILE_RESPONSE_COLUMNS = `${ORG_READABLE_COLUMNS}, notes, tax_id`;

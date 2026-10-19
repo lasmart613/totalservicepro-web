@@ -18,6 +18,7 @@
 --   * Stripe / lead / prospect / trial / creator-shop columns are server-only
 --     (service role, unchanged). God admin flows use the service role.
 --   * INSERT/UPDATE column grants are untouched (orgs still save notes/tax_id).
+--   * MAINTAIN on organizations is revoked from anon and authenticated.
 --   * public_directory_page (000931) is re-created with a prospect_pool fix:
 --     prod prospect_pool is TEXT ('amer-clinics-1018' etc.), so 000931's
 --     "NOT IN ('true','t')" never excluded it. Now: excluded unless empty/false.
@@ -65,6 +66,10 @@ BEGIN
     RAISE EXCEPTION '000932 drift: a public.org_private_fields not created by 000932 already exists';
   END IF;
 END $$;
+
+-- MAINTAIN (VACUUM/ANALYZE/REINDEX/REFRESH/CLUSTER/LOCK, PG17) is not needed by
+-- anon/authenticated. Prod granted it via the default ACL; the rollback restores it.
+REVOKE MAINTAIN ON public.organizations FROM anon, authenticated;
 
 -- Column privileges: table-level SELECT off, every non-private column back on.
 REVOKE SELECT ON public.organizations FROM anon, authenticated;
@@ -286,6 +291,6 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.public_directory_page(text[], integer, integer) IS
-  '000931: logged-out directory page. Listed, active, non-import, non-prospect, non-lead orgs only; id/type/region; listed-only total. (000932: prospect_pool text fix)';
+  '000932: logged-out directory page (from 000931; prospect_pool text fix). Listed, active, non-import, non-prospect, non-lead orgs only; id/type/region; listed-only total.';
 
 COMMIT;

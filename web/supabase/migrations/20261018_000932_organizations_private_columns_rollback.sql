@@ -1,4 +1,4 @@
--- Rollback for 000932. Restores table-level SELECT on public.organizations for
+-- Rollback for 000932. Restores table-level SELECT and MAINTAIN on public.organizations for
 -- anon and authenticated (the pre-000932 state: no column-level SELECT grants),
 -- drops org_private_fields, and restores the 000931 public_directory_page body.
 -- No data changes. App code from the 000932 PR keeps working after rollback
@@ -35,6 +35,7 @@ BEGIN
   END IF;
 END $$;
 GRANT SELECT ON public.organizations TO anon, authenticated;
+GRANT MAINTAIN ON public.organizations TO anon, authenticated;
 
 -- 000931 body, verbatim.
 CREATE OR REPLACE FUNCTION public.public_directory_page(
