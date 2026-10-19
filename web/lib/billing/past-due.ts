@@ -28,17 +28,69 @@
  * or any other premium_grant) has no Stripe ledger row and is refused by
  * stripeDowngradeBlockedByComplimentary even if one is linked.
  *
- * PAST_DUE_DOWNGRADE_DISABLED=1 turns both callers off without a deploy
- * (past_due then keeps Premium, the pre-000928 behaviour).
+ * PAST_DUE_DOWNGRADE_DISABLED (1, true or yes, any case) turns both callers
+ * off without a deploy (past_due then keeps Premium, the pre-000928
+ * behaviour). The clock keeps running while it is on: turning it off again
+ * downgrades every subscription already 14+ days past_due on the next sweep,
+ * so check the candidate count first (see the PR runbook).
+ *
+ * Races with a recovery (QA L-1): right before the plan write the
+ * subscription is re-read from Stripe and the ledger row is compare-and-set
+ * on (status grace_period, the same past_due_since). Right after it Stripe is
+ * read once more; if the subscription recovered in between, Premium is
+ * re-applied through applyPaidSubscriptionRecord (the normal recovery path).
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
 export const PAST_DUE_DOWNGRADE_DAYS = 14;
+/** The sweep looks at a refused row again only after this many hours. */
+export const PAST_DUE_RECHECK_HOURS = 23;
+/** Same budget as the manual-index catch-up; Netlify stops scheduled functions at 30 s. */
+export const PAST_DUE_SWEEP_BUDGET_MS = 18_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+let disabledWarned = false;
+
+/** Same parsing as DIRECTORY_TURNSTILE_ENABLED: 1, true or yes, any case, trimmed. */
 export function pastDueDowngradeDisabled(): boolean {
-  return String(process.env.PAST_DUE_DOWNGRADE_DISABLED ?? '').trim() === '1';
+  const value = String(process.env.PAST_DUE_DOWNGRADE_DISABLED ?? '').trim().toLowerCase();
+  const on = value === '1' || value === 'true' || value === 'yes';
+  if (on && !disabledWarned) {
+    disabledWarned = true;
+    console.warn(
+      '[billing] PAST_DUE_DOWNGRADE_DISABLED is on: past_due subscriptions keep Premium. The 14-day clock keeps running; turning this off downgrades every subscription already 14+ days past_due on the next sweep.'
+    );
+  }
+  return on;
+}
+
+/** Tests only: let the next pastDueDowngradeDisabled() warn again. */
+export function resetPastDueDisabledWarning(): void {
+  disabledWarned = false;
+}
+
+export type NetlifyDeployContextLike = { deploy?: { context?: string | null } | null } | null | undefined;
+
+/**
+ * The sweep acts only on the production deploy. "Run now" on a Deploy
+ * Preview or branch deploy runs with the site's production env (same
+ * Supabase, same Stripe key), so anything but production does nothing.
+ * Netlify passes the deploy context to the handler (context.deploy.context);
+ * CONTEXT=production is accepted as the equivalent env flag.
+ */
+export function isProductionDeploy(
+  context?: NetlifyDeployContextLike,
+  env: Record<string, string | undefined> = process.env
+): boolean {
+  const fromContext = String(context?.deploy?.context ?? '').trim().toLowerCase();
+  if (fromContext) return fromContext === 'production';
+  return String(env.CONTEXT ?? '').trim().toLowerCase() === 'production';
+}
+
+/** ISO time before which a refused row may be looked at again. */
+export function pastDueRecheckCutoffIso(now: Date = new Date()): string {
+  return new Date(now.getTime() - PAST_DUE_RECHECK_HOURS * 60 * 60 * 1000).toISOString();
 }
 
 function toTime(value: string | Date | null | undefined): number | null {
@@ -75,7 +127,30 @@ export function pastDueDays(pastDueSince: string | Date | null | undefined, now:
 }
 
 export function missingPastDueColumn(message?: string | null): boolean {
-  return /past_due_since/i.test(String(message || ''));
+  return /past_due_since|past_due_checked_at/i.test(String(message || ''));
+}
+
+/**
+ * Compare-and-set on the ledger row: succeeds only while the row is still in
+ * grace_period with exactly the clock that was read. A recovery (ledger set
+ * to active, which clears the clock) or a new subscription id makes it fail.
+ * fields are written only when it matches.
+ */
+export async function compareAndSetPastDueLedger(
+  writer: SupabaseClient,
+  subscriptionId: string,
+  pastDueSince: string,
+  fields: Record<string, unknown>
+): Promise<boolean> {
+  const { data, error } = await writer
+    .from('subscriptions')
+    .update({ ...fields, updated_at: new Date().toISOString() })
+    .eq('stripe_subscription_id', subscriptionId)
+    .eq('status', 'grace_period')
+    .eq('past_due_since', pastDueSince)
+    .select('stripe_subscription_id');
+  if (error) throw new Error(error.message || 'past_due ledger compare-and-set failed');
+  return Array.isArray(data) ? data.length > 0 : data != null;
 }
 
 /**

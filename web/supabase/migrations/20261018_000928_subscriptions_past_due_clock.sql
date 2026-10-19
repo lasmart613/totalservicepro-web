@@ -7,19 +7,31 @@ SET LOCAL lock_timeout = '5s';
 -- "past_due since" timestamp, so this records one in the ledger:
 --
 --   subscriptions.past_due_since timestamptz (nullable, additive)
+--     Only the trigger writes it; any value a writer supplies is ignored.
 --     Set to now() when a Stripe row (stripe_subscription_id 'sub_...')
---     enters status 'grace_period' (the ledger value for Stripe past_due).
---     Kept unchanged while the row stays past_due, so later past_due writes
---     (webhook replays, invoice.payment_failed retries) never restart or move
---     the clock. Cleared when the row goes back to 'active' (Stripe active or
---     trialing: recovery). A new stripe_subscription_id on the row starts
---     fresh. 'expired' / 'cancelled' leave it as history.
+--     enters status 'grace_period' (the ledger value for Stripe past_due)
+--     with no clock. Kept unchanged while the subscription id stays the same
+--     and the status is not 'active': later past_due writes (webhook replays,
+--     invoice.payment_failed retries) and 'expired' / 'cancelled' never set,
+--     move or clear it. Cleared when the row goes back to 'active' (Stripe
+--     active or trialing: recovery). An INSERT, or a new
+--     stripe_subscription_id, starts with no clock unless the status is
+--     'grace_period' (then now()). Non-Stripe rows never have one.
+--   subscriptions.past_due_checked_at timestamptz (nullable, additive)
+--     Written only by the hourly sweep after it looks at a row. The sweep
+--     skips rows checked in the last 23 hours and takes never-checked rows
+--     first, so refused rows (complimentary, another live subscription,
+--     deleted in Stripe, unhandled status) rotate out instead of starving
+--     real candidates. The trigger clears it whenever the clock is cleared or
+--     restarted.
 --   trigger subscriptions_past_due_clock (BEFORE INSERT OR UPDATE OF status,
---     past_due_since, stripe_subscription_id), function
+--     past_due_since, stripe_subscription_id, past_due_checked_at), function
 --     public.subscriptions_past_due_clock(): SECURITY DEFINER, search_path '',
 --     no EXECUTE for PUBLIC / anon / authenticated / service_role (trigger
 --     functions fire without EXECUTE).
 --   partial index subscriptions_past_due_since_idx for the hourly sweep.
+--   The trigger also fires on UPDATE OF past_due_checked_at, so that column
+--   cannot be set on a row without a clock.
 --
 -- Existing past_due rows: conservative start. Any Stripe row already in
 -- 'grace_period' with no clock gets past_due_since = now() at apply time
@@ -54,22 +66,25 @@ BEGIN
 END $$;
 
 -- Drift guard: the trigger function is new. On a re-run it must be this
--- migration's own body (md5 2a0d072a45f52660ba23f4822738c26a); anything
+-- migration's own body (md5 b967b777d5f8d78d088c57cb8eee3785); anything
 -- else is refused instead of overwritten.
 DO $$
 BEGIN
   IF to_regprocedure('public.subscriptions_past_due_clock()') IS NOT NULL THEN
     IF pg_catalog.md5(pg_catalog.pg_get_functiondef(to_regprocedure('public.subscriptions_past_due_clock()')))
-       <> '2a0d072a45f52660ba23f4822738c26a' THEN
+       <> 'b967b777d5f8d78d088c57cb8eee3785' THEN
       RAISE EXCEPTION '000928: public.subscriptions_past_due_clock() exists with another body; refusing to overwrite';
     END IF;
   END IF;
 END $$;
 
 ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS past_due_since timestamptz;
+ALTER TABLE public.subscriptions ADD COLUMN IF NOT EXISTS past_due_checked_at timestamptz;
 
 COMMENT ON COLUMN public.subscriptions.past_due_since IS
-  'When this Stripe subscription entered past_due (ledger grace_period). Set and kept by trigger subscriptions_past_due_clock; cleared on active. 14 days after it the org is downgraded (000928).';
+  'When this Stripe subscription entered past_due (ledger grace_period). Written only by trigger subscriptions_past_due_clock; cleared on active. 14 days after it the org is downgraded (000928).';
+COMMENT ON COLUMN public.subscriptions.past_due_checked_at IS
+  'Last time the hourly past_due sweep looked at this row (000928). Rows checked in the last 23 hours are skipped so refused rows rotate out.';
 
 CREATE OR REPLACE FUNCTION public.subscriptions_past_due_clock()
  RETURNS trigger
@@ -79,24 +94,29 @@ CREATE OR REPLACE FUNCTION public.subscriptions_past_due_clock()
 AS $function$
 DECLARE
   same_sub boolean;
+  prior timestamptz;
 BEGIN
-  IF NEW.stripe_subscription_id IS NULL OR NEW.stripe_subscription_id NOT LIKE 'sub\_%' THEN
-    RETURN NEW;
-  END IF;
   same_sub := TG_OP = 'UPDATE'
     AND OLD.stripe_subscription_id IS NOT DISTINCT FROM NEW.stripe_subscription_id;
-  IF NEW.status = 'active' THEN
+  -- The only clock a row can carry is the one this trigger already stored
+  -- for the same subscription. A supplied value is never accepted.
+  prior := CASE WHEN same_sub THEN OLD.past_due_since END;
+  IF NEW.stripe_subscription_id IS NULL OR NEW.stripe_subscription_id NOT LIKE 'sub\_%' THEN
+    NEW.past_due_since := NULL;
+  ELSIF NEW.status = 'active' THEN
     NEW.past_due_since := NULL;
   ELSIF NEW.status = 'grace_period' THEN
-    IF same_sub AND OLD.past_due_since IS NOT NULL THEN
-      -- Still the same past_due episode: the clock never moves or restarts.
-      NEW.past_due_since := OLD.past_due_since;
-    ELSE
-      -- A new past_due episode starts now; a writer cannot backdate it.
-      NEW.past_due_since := now();
-    END IF;
-  ELSIF TG_OP = 'UPDATE' AND NOT same_sub THEN
-    NEW.past_due_since := NULL;
+    -- Same subscription with a clock: the same past_due episode (or a return
+    -- from expired); the clock never moves. Otherwise it starts now.
+    NEW.past_due_since := CASE WHEN prior IS NOT NULL THEN prior ELSE now() END;
+  ELSE
+    -- expired / cancelled: keep the stored clock as history; never accept
+    -- one on an INSERT or a new subscription id.
+    NEW.past_due_since := prior;
+  END IF;
+  IF NEW.past_due_since IS NULL
+     OR (TG_OP = 'UPDATE' AND NEW.past_due_since IS DISTINCT FROM OLD.past_due_since) THEN
+    NEW.past_due_checked_at := NULL;
   END IF;
   RETURN NEW;
 END;
@@ -107,7 +127,7 @@ REVOKE ALL ON FUNCTION public.subscriptions_past_due_clock() FROM anon, authenti
 
 DROP TRIGGER IF EXISTS subscriptions_past_due_clock ON public.subscriptions;
 CREATE TRIGGER subscriptions_past_due_clock
-  BEFORE INSERT OR UPDATE OF status, past_due_since, stripe_subscription_id
+  BEFORE INSERT OR UPDATE OF status, past_due_since, stripe_subscription_id, past_due_checked_at
   ON public.subscriptions
   FOR EACH ROW EXECUTE FUNCTION public.subscriptions_past_due_clock();
 

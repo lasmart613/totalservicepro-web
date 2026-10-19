@@ -132,7 +132,11 @@ BEGIN
                  AND indexdef LIKE '%WHERE (status = ''grace_period''::text)%') THEN
     RAISE EXCEPTION 'FAILED: partial index';
   END IF;
-  RAISE NOTICE 'PASS objects: column, SECURITY DEFINER trigger fn (search_path '''', no EXECUTE grants), trigger, partial index';
+  IF NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'public.subscriptions'::regclass
+                 AND attname = 'past_due_checked_at' AND atttypid = 'timestamptz'::regtype AND NOT attnotnull AND NOT attisdropped) THEN
+    RAISE EXCEPTION 'FAILED: past_due_checked_at column';
+  END IF;
+  RAISE NOTICE 'PASS objects: columns (past_due_since, past_due_checked_at), SECURITY DEFINER trigger fn (search_path '''', no EXECUTE grants), trigger, partial index';
 
   -- Conservative backfill: only the Stripe past_due row, clock = apply time.
   IF (SELECT past_due_since FROM public.subscriptions WHERE stripe_subscription_id = 'sub_pre_pastdue') IS DISTINCT FROM now() THEN
@@ -248,6 +252,82 @@ DO $$ BEGIN
   RAISE NOTICE 'PASS inserts: grace starts now (backdate ignored); active and non-Stripe rows get no clock';
 END $$;
 
+-- L-2 (QA #321): a writer can never supply a clock. Only the trigger sets
+-- it (now(), when a Stripe row first enters grace_period); expired /
+-- cancelled rows keep the stored clock; inserts and new ids carry none.
+SET LOCAL ROLE service_role;
+-- sub_pre_active: in grace since now() (episode 2). Move to expired, then try
+-- to forge a 400-day clock on the expired row and walk it back to grace.
+UPDATE public.subscriptions SET status = 'expired' WHERE stripe_subscription_id = 'sub_pre_active';
+UPDATE public.subscriptions SET past_due_since = now() - interval '400 days' WHERE stripe_subscription_id = 'sub_pre_active';
+UPDATE public.subscriptions SET status = 'cancelled', past_due_since = now() - interval '90 days' WHERE stripe_subscription_id = 'sub_pre_active';
+UPDATE public.subscriptions SET status = 'grace_period', past_due_since = now() - interval '20 days' WHERE stripe_subscription_id = 'sub_pre_active';
+DO $$ BEGIN
+  IF (SELECT past_due_since FROM public.subscriptions WHERE stripe_subscription_id = 'sub_pre_active') IS DISTINCT FROM now() THEN
+    RAISE EXCEPTION 'FAILED L-2: a clock forged on an expired/cancelled row survived into grace_period';
+  END IF;
+  RAISE NOTICE 'PASS L-2: forging past_due_since on expired/cancelled rows is ignored; grace keeps the genuine clock';
+END $$;
+-- Expired / cancelled with no stored clock: a supplied value is dropped.
+UPDATE public.subscriptions SET past_due_since = now() - interval '30 days'
+WHERE stripe_subscription_id = 'sub_new_cancelled';
+INSERT INTO public.subscriptions (user_id, platform, tier, status, stripe_subscription_id, organization_id, past_due_since) VALUES
+  ('00000000-0000-0000-0000-000000000009', 'stripe', 'free', 'expired', 'sub_ins_expired', 2655, now() - interval '50 days');
+DO $$ BEGIN
+  IF (SELECT past_due_since FROM public.subscriptions WHERE stripe_subscription_id = 'sub_new_cancelled') IS NOT NULL
+     OR (SELECT past_due_since FROM public.subscriptions WHERE stripe_subscription_id = 'sub_ins_expired') IS NOT NULL THEN
+    RAISE EXCEPTION 'FAILED L-2: a supplied clock was kept on a clockless cancelled row or an expired insert';
+  END IF;
+  RAISE NOTICE 'PASS L-2: a supplied clock is dropped on an expired INSERT and on a clockless cancelled row';
+END $$;
+-- A new subscription id on an expired row with a supplied clock: none.
+UPDATE public.subscriptions SET stripe_subscription_id = 'sub_ins_expired2', past_due_since = now() - interval '60 days'
+WHERE stripe_subscription_id = 'sub_ins_expired';
+-- Then grace on that new id starts at now(), not at the supplied time.
+UPDATE public.subscriptions SET status = 'grace_period' WHERE stripe_subscription_id = 'sub_ins_expired2';
+-- Non-Stripe rows never carry a clock, even when one is supplied.
+UPDATE public.subscriptions SET past_due_since = now() - interval '60 days' WHERE platform = 'manual';
+DO $$ BEGIN
+  IF (SELECT past_due_since FROM public.subscriptions WHERE stripe_subscription_id = 'sub_ins_expired2') IS DISTINCT FROM now() THEN
+    RAISE EXCEPTION 'FAILED L-2: new id + grace must start now()';
+  END IF;
+  IF EXISTS (SELECT 1 FROM public.subscriptions WHERE platform = 'manual' AND past_due_since IS NOT NULL) THEN
+    RAISE EXCEPTION 'FAILED L-2: a non-Stripe row kept a supplied clock';
+  END IF;
+  RAISE NOTICE 'PASS L-2: a new id ignores a supplied clock (grace starts now); non-Stripe rows never keep one';
+END $$;
+RESET ROLE;
+
+-- past_due_checked_at (LM-1): kept while the clock is unchanged, cleared when
+-- the clock is cleared or restarted, and dropped on rows without a clock.
+SET LOCAL ROLE service_role;
+UPDATE public.subscriptions SET past_due_checked_at = now() WHERE stripe_subscription_id IN ('sub_ins_grace', 'sub_new_pastdue', 'sub_pre_active');
+UPDATE public.subscriptions SET past_due_checked_at = now() WHERE stripe_subscription_id = 'sub_new_cancelled';
+DO $$ BEGIN
+  IF (SELECT count(*) FROM public.subscriptions WHERE past_due_checked_at = now()
+        AND stripe_subscription_id IN ('sub_ins_grace', 'sub_new_pastdue', 'sub_pre_active')) <> 3 THEN
+    RAISE EXCEPTION 'FAILED: the sweep must be able to stamp past_due_checked_at on clocked rows';
+  END IF;
+  IF (SELECT past_due_checked_at FROM public.subscriptions WHERE stripe_subscription_id = 'sub_new_cancelled') IS NOT NULL THEN
+    RAISE EXCEPTION 'FAILED: past_due_checked_at must not stick on a row without a clock';
+  END IF;
+  RAISE NOTICE 'PASS checked_at: stamped on clocked rows, dropped on a clockless row';
+END $$;
+UPDATE public.subscriptions SET status = 'grace_period', updated_at = now() WHERE stripe_subscription_id = 'sub_ins_grace';
+UPDATE public.subscriptions SET status = 'active' WHERE stripe_subscription_id = 'sub_pre_active';
+DO $$ BEGIN
+  IF (SELECT past_due_checked_at FROM public.subscriptions WHERE stripe_subscription_id = 'sub_ins_grace') IS DISTINCT FROM now() THEN
+    RAISE EXCEPTION 'FAILED: a replayed grace write must keep past_due_checked_at';
+  END IF;
+  IF (SELECT past_due_checked_at FROM public.subscriptions WHERE stripe_subscription_id = 'sub_pre_active') IS NOT NULL THEN
+    RAISE EXCEPTION 'FAILED: recovery must clear past_due_checked_at';
+  END IF;
+  RAISE NOTICE 'PASS checked_at: kept on a grace replay, cleared on recovery';
+END $$;
+UPDATE public.subscriptions SET status = 'grace_period' WHERE stripe_subscription_id = 'sub_pre_active';
+UPDATE public.subscriptions SET past_due_checked_at = NULL WHERE stripe_subscription_id IN ('sub_ins_grace', 'sub_new_pastdue');
+RESET ROLE;
+
 -- Clients still cannot write the table (unchanged grants).
 DO $$ BEGIN
   IF has_table_privilege('authenticated', 'public.subscriptions', 'UPDATE')
@@ -269,7 +349,8 @@ BEGIN
   SELECT array_agg(stripe_subscription_id ORDER BY stripe_subscription_id) INTO due
   FROM public.subscriptions
   WHERE platform = 'stripe' AND status = 'grace_period' AND tier <> 'free'
-    AND past_due_since IS NOT NULL AND past_due_since <= now() - interval '14 days';
+    AND past_due_since IS NOT NULL AND past_due_since <= now() - interval '14 days'
+    AND (past_due_checked_at IS NULL OR past_due_checked_at <= now() - interval '23 hours');
   IF due IS DISTINCT FROM ARRAY['sub_new_pastdue'] THEN
     RAISE EXCEPTION 'FAILED: sweep selection %', due;
   END IF;
@@ -308,7 +389,7 @@ DO $$ BEGIN RAISE NOTICE 'PASS drift guard refuses a foreign subscriptions_past_
 DO $$ BEGIN RAISE EXCEPTION 'FAILED: drift guard did not refuse a foreign body'; END $$;
 \endif
 DO $$ BEGIN
-  IF md5(pg_get_functiondef('public.subscriptions_past_due_clock()'::regprocedure)) <> '2a0d072a45f52660ba23f4822738c26a' THEN
+  IF md5(pg_get_functiondef('public.subscriptions_past_due_clock()'::regprocedure)) <> 'b967b777d5f8d78d088c57cb8eee3785' THEN
     RAISE EXCEPTION 'FAILED: savepoint rollback did not restore the 000928 body';
   END IF;
   RAISE NOTICE 'PASS the applied body has the md5 the drift guard records';
