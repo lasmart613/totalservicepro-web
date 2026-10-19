@@ -444,7 +444,11 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
 });
 
 test('clinic-service-leads API creates a guest org plus a real service_requests row', () => {
-  const route = readFileSync(join(here, '../app/api/clinic-service-leads/route.ts'), 'utf8');
+  const route = [
+    readFileSync(join(here, '../app/api/clinic-service-leads/route.ts'), 'utf8'),
+    readFileSync(join(here, './clinic-lead-handler.ts'), 'utf8'),
+    readFileSync(join(here, './clinic-lead-mail.ts'), 'utf8'),
+  ].join('\n');
   const migration = readFileSync(
     join(here, '../supabase/migrations/20260904_000000_clinic_service_leads.sql'),
     'utf8'

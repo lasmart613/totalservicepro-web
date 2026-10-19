@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { clinicLeadClientIp } from '@/lib/clinic-lead-confirmation';
 import {
   parseProductIssue,
   planProductIssueMail,
@@ -21,12 +22,9 @@ const recentByIp = new Map<string, number[]>();
 const RATE_WINDOW_MS = 10 * 60 * 1000;
 const RATE_MAX = 6;
 
+// Netlify's client IP first, else the last (proxy-appended) XFF hop.
 function clientIp(req: NextRequest): string {
-  return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
-    req.headers.get('x-real-ip') ||
-    'unknown'
-  );
+  return clinicLeadClientIp((name) => req.headers.get(name));
 }
 
 function rateLimited(ip: string): boolean {
