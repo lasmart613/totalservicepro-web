@@ -124,7 +124,9 @@ test('logged-out directory redacts PII and sends card clicks to signup', () => {
   assert.doesNotMatch(api, /getSupabaseAdmin|hasServiceRole|SERVICE_ROLE/);
   assert.doesNotMatch(api, /from\(\s*['"]organizations['"]/);
   assert.doesNotMatch(api, /error\.message|message \}/);
-  assert.match(page, /\.eq\('list_in_directory', true\)\s*\.or\(DIRECTORY_NOT_IMPORTED_OR\)/);
+  // Signed-in list comes from the server route (000932 made notes private).
+  assert.match(page, /fetch\('\/api\/directory\/listed'/);
+  assert.doesNotMatch(page, /from\(\s*['"]organizations['"]/);
   assert.match(ui, /blur-\[7px\]/);
   assert.match(ui, /placeholder/);
   assert.match(card, /directoryHref/);
