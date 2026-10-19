@@ -22,7 +22,9 @@ test('public share row drops serial, error codes, preferred date and org id', ()
     assert.ok(!(banned in out), banned);
   }
   assert.equal(out.organization_name, 'QA Clinic');
-  assert.equal(out.city, 'Phoenix');
+  // F-2: the requesting org's city is never used; only the request's own city.
+  assert.equal(out.city, null);
+  assert.ok(!JSON.stringify(out).includes('Phoenix'));
   assert.equal(out.state, 'AZ');
   assert.equal(out._public_share, true);
   assert.ok(!JSON.stringify(out).includes('SN-SECRET'));
