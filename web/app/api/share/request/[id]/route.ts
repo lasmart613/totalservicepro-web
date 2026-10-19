@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { publicShareRequestRow, SHARE_REQUEST_SELECT } from '@/lib/share-request-public';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Public share endpoint for RFQs.
- * Returns safe fields for open/bidding requests so logged-out invitees can preview
- * and get a signup CTA. Bids and private contacts are never included.
+ * Returns the open_service_requests column set (minus budget) for open/bidding requests so
+ * logged-out invitees can preview and get a signup CTA. Serial numbers, error
+ * codes, budget, bids and private contacts are never included.
  */
 export async function GET(
   _req: NextRequest,
@@ -30,17 +32,17 @@ export async function GET(
     }
 
     const admin = getSupabaseAdmin();
-    const { data, error } = await admin
+    const { data: found, error } = await admin
       .from('service_requests')
-      .select(
-        'id, title, description, status, urgency, manufacturer, model, serial_number, service_type, preferred_date, error_codes, city, state, location, category, created_at, organization_id, budget_max'
-      )
+      // open_service_requests column set minus budget (no serial, error codes, preferred date, budget).
+      .select(SHARE_REQUEST_SELECT)
       .eq('id', id)
       .maybeSingle();
+    const data = (found as Record<string, any> | null) ?? null;
 
     if (error) {
       console.error('[share/request]', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ error: 'Share preview unavailable' }, { status: 500 });
     }
     if (!data) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -59,51 +61,25 @@ export async function GET(
       );
     }
 
-    let orgName: string | null = null;
+    let org: { name?: string | null; city?: string | null; state?: string | null } | null = null;
     if (data.organization_id != null) {
       try {
-        const { data: org } = await admin
+        const { data: found } = await admin
           .from('organizations')
           .select('name, city, state')
           .eq('id', data.organization_id)
           .maybeSingle();
-        if (org) {
-          orgName = org.name || null;
-          if (!data.city && org.city) (data as any).city = org.city;
-          if (!data.state && org.state) (data as any).state = org.state;
-        }
+        org = found || null;
       } catch {
         /* ignore */
       }
     }
 
-    // Strip anything that shouldn't be public
-    const publicRow = {
-      id: data.id,
-      title: data.title,
-      description: data.description,
-      status: data.status,
-      urgency: data.urgency,
-      manufacturer: data.manufacturer,
-      model: data.model,
-      serial_number: data.serial_number,
-      service_type: data.service_type,
-      preferred_date: data.preferred_date,
-      error_codes: data.error_codes,
-      city: data.city,
-      state: data.state,
-      location: data.location,
-      category: data.category,
-      created_at: data.created_at,
-      budget_max: data.budget_max,
-      organization_name: orgName,
-      // Never expose posted_by, contacts, awarded_bid, etc.
-      _public_share: true,
-    };
+    const publicRow = publicShareRequestRow(data, org);
 
     return NextResponse.json({ request: publicRow });
   } catch (e: any) {
     console.error('[share/request]', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: 'Server error' }, { status: 500 });
   }
 }

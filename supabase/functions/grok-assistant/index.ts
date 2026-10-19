@@ -51,6 +51,7 @@ import {
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
 import { pendingIndexIds } from '../_shared/index-pending.ts'
 import { extractFaultCodes, literalSubstringPattern, stripIlikeReserved } from './fault-codes.ts'
+import { finalizeUsage, releaseUsage, reserveUsage, USAGE_UNAVAILABLE_BODY } from '../_shared/usage-cap.ts'
 import {
   attributeCitations,
   effectivePageCount,
@@ -845,12 +846,6 @@ const ZAPP_VOICE_PROMPT = `You are Zapp, the AI inside Total Service Pro — wit
 One short Zapp-ism, then the technical answer.`
 
 const VOICE_PROMPT_PLAIN = `You are Zapp, an AI for Total Service Pro. Spoken: 4-7 sentences, no markdown. RETRIEVED MANUAL CONTENT / attached PDFs are authoritative. FAULT CODE LOOKUP RESULT is fallback only. Never fabricate. If sources insufficient, say so. End with: — Source: [source name].`
-
-async function logUsage(s: any, uid: string, t: string, n: number) {
-  try {
-    await s.from('api_usage').insert({ user_id: uid, request_type: t, tokens_used: n })
-  } catch (_e) {}
-}
 
 async function getDailyUsage(s: any, uid: string): Promise<{ text: number; voice: number }> {
   const today = new Date()
@@ -2248,6 +2243,8 @@ function formatManualContext(parts: Retrieved[], selectedLabel: string, emptyHin
 }
 
 serve(async (req) => {
+  // A reserved daily-cap slot not yet finalised; refunded if the request throws.
+  let pendingUsage: { db: any; id: string; uid: string } | null = null
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   try {
     const authHeader = req.headers.get('Authorization')
@@ -2324,21 +2321,6 @@ serve(async (req) => {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
-      const usage = await getDailyUsage(db, uid)
-      if (usage.text >= limits.text)
-        return new Response(
-          JSON.stringify({
-            error: 'daily_limit_reached',
-            message:
-              effectiveTier === 'free'
-                ? `Free limit: ${limits.text}/day. Upgrade for 50/day.`
-                : `Daily text limit: ${limits.text}/day.`,
-            used: usage.text,
-            limit: limits.text,
-          }),
-          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
-
       let manualLabel = ''
       let manualMeta: any = null
       let rawPath = String(manualPath || '').trim()
@@ -2397,6 +2379,10 @@ serve(async (req) => {
         }
       } catch (_e) {}
 
+      // Collection search runs only for a selected manual the caller may read
+      // (passed requestedManualDecision below). No manual, no search (000927).
+      let manualReadable = false
+
       // A selected manual must be in the caller's library (organization_manuals /
       // user_manuals) or the shared catalog, as in get-manual-url, before the
       // index is read or any PDF is attached.
@@ -2416,7 +2402,36 @@ serve(async (req) => {
             status: scope.status,
             headers: { ...corsHeaders, 'Content-Type': 'application/json' },
           })
+        manualReadable = !!manualMeta
       }
+
+      // Daily cap: reserve the slot atomically before any xAI call (000927).
+      // Fails closed: if the cap cannot be checked, no AI call is made.
+      const reservation = await reserveUsage(db, uid, 'grok_chat', limits.text)
+      if (reservation.status === 'unavailable') {
+        console.error('[grok-assistant] usage reserve failed', reservation.reason)
+        return new Response(JSON.stringify(USAGE_UNAVAILABLE_BODY), {
+          status: 503,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      if (reservation.status === 'limit')
+        return new Response(
+          JSON.stringify({
+            error: 'daily_limit_reached',
+            message:
+              effectiveTier === 'free'
+                ? `Free limit: ${limits.text}/day. Upgrade for 50/day.`
+                : `Daily text limit: ${limits.text}/day.`,
+            used: reservation.used,
+            limit: limits.text,
+          }),
+          { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      const usageId = reservation.id
+      pendingUsage = { db, id: usageId, uid }
+      // usage.text + 1 below is this request's slot.
+      const usage = { text: reservation.used - 1, voice: (await getDailyUsage(db, uid)).voice }
 
       const nonSys = messages.filter((m: any) => m.role !== 'system')
       const lastUser = [...nonSys].reverse().find((m: any) => m.role === 'user')
@@ -2482,7 +2497,7 @@ serve(async (req) => {
 
       let citationIndexText = ''
       let citationQuery = userText
-      if (userText) {
+      if (userText && manualReadable) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
           citationQuery = sq
@@ -2786,7 +2801,8 @@ serve(async (req) => {
               const rd = await rr.json()
               const txt = textFromResponses(rd)
               if (txt) {
-                await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
+                await finalizeUsage(db, usageId, rd.usage?.total_tokens || 0)
+                pendingUsage = null
                 const settled = settleReply(txt)
                 const content = settled.declined
                   ? settled.text.trim()
@@ -2868,7 +2884,8 @@ serve(async (req) => {
                 const rd = await rr.json()
                 const txt = textFromResponses(rd)
                 if (txt) {
-                  await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
+                  await finalizeUsage(db, usageId, rd.usage?.total_tokens || 0)
+                  pendingUsage = null
                   const settled = settleReply(txt)
                   const content = settled.declined
                     ? settled.text.trim()
@@ -2933,6 +2950,9 @@ serve(async (req) => {
       )
       if (!xr?.ok) {
         const e = xr ? await xr.text() : 'timeout'
+        // Upstream failed: refund the reserved slot.
+        await releaseUsage(db, usageId, uid)
+        pendingUsage = null
         return new Response(JSON.stringify({ error: `AI error (${xr?.status ?? 'timeout'})`, details: e }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -2960,7 +2980,8 @@ serve(async (req) => {
               : settled.text
         }
       }
-      await logUsage(db, uid, 'grok_chat', xd.usage?.total_tokens || 0)
+      await finalizeUsage(db, usageId, xd.usage?.total_tokens || 0)
+      pendingUsage = null
       xd._usage = {
         text: { used: usage.text + 1, limit: limits.text },
         voice: { used: usage.voice, limit: limits.voice },
@@ -3069,18 +3090,26 @@ serve(async (req) => {
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
-      const usage = await getDailyUsage(db, uid)
-      if (usage.voice >= limits.voice)
+      const ttsSlot = await reserveUsage(db, uid, 'grok_tts', limits.voice)
+      if (ttsSlot.status === 'unavailable') {
+        console.error('[grok-assistant] tts usage reserve failed', ttsSlot.reason)
+        return new Response(JSON.stringify(USAGE_UNAVAILABLE_BODY), {
+          status: 503,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      if (ttsSlot.status === 'limit')
         return new Response(
           JSON.stringify({
             error: 'daily_limit_reached',
             message:
               effectiveTier === 'free' ? `Free limit: ${limits.voice} voice/day.` : `Daily voice limit: ${limits.voice}/day.`,
-            used: usage.voice,
+            used: ttsSlot.used,
             limit: limits.voice,
           }),
           { status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
         )
+      pendingUsage = { db, id: ttsSlot.id, uid }
       const VOICES = ['eve', 'ara', 'rex', 'sal', 'leo', 'sage']
       const voice = VOICES.includes(voiceId) ? voiceId : 'sage'
       const tr = await fetch('https://api.x.ai/v1/tts', {
@@ -3094,12 +3123,15 @@ serve(async (req) => {
       })
       if (!tr.ok) {
         const e = await tr.text()
+        await releaseUsage(db, ttsSlot.id, uid)
+        pendingUsage = null
         return new Response(JSON.stringify({ error: 'TTS error', details: e }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
-      await logUsage(db, uid, 'grok_tts', Math.min(text.length, 4096))
+      await finalizeUsage(db, ttsSlot.id, Math.min(text.length, 4096))
+      pendingUsage = null
       return new Response(await tr.arrayBuffer(), {
         status: 200,
         headers: {
@@ -3115,6 +3147,7 @@ serve(async (req) => {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (error) {
+    if (pendingUsage) await releaseUsage(pendingUsage.db, pendingUsage.id, pendingUsage.uid)
     return new Response(JSON.stringify({ error: (error as Error).message }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

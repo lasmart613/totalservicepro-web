@@ -1,6 +1,7 @@
 'use client';
 import { useFormatDate } from '@/lib/use-format-date';
 import { useT } from '@/lib/fa/locale';
+import { LOGO_ACCEPT } from '@/lib/customer-logo';
 
 import React, { useEffect, useState } from 'react';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -167,14 +168,14 @@ export function CompanyBrandingEditor({
               <img src={logoUrl} alt={t('Company logo')} className="mx-auto max-h-20" />
             ) : (
               <div className="text-sm text-[var(--text2)]">
-                {uploadingLogo ? t('Uploading...') : t('Tap to choose a logo (PNG, JPG, WebP, or SVG)')}
+                {uploadingLogo ? t('Uploading...') : t('Tap to choose a logo (PNG, JPG, or WebP)')}
               </div>
             )}
           </div>
           <input
             id="brandLogoInput"
             type="file"
-            accept="image/*"
+            accept={LOGO_ACCEPT}
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

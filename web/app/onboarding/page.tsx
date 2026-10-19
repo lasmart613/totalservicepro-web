@@ -28,6 +28,7 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 
 import { OrgTypeStep, type OrgType } from './org-type-step';
 import { onboardingOrgUpdatePayload } from '@/lib/onboarding-org-update';
+import { logoContentType, logoExtension, validateLogoFile } from '@/lib/customer-logo';
 type TeamMember = {
   id: string;
   email: string;
@@ -422,8 +423,9 @@ export default function Onboarding() {
   }
 
   function acceptLogoFile(file: File) {
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Max 5MB');
+    const invalid = validateLogoFile(file);
+    if (invalid) {
+      alert(invalid);
       return;
     }
     setLogoFile(file);
@@ -529,10 +531,12 @@ export default function Onboarding() {
       } else if (orgType === 'supplier') oType = 'parts_supplier';
 
       let logoUrl = logoPreview;
-      if (logoFile) {
-        const ext = logoFile.name.split('.').pop() || 'png';
-        const path = `${currentUser.id}/onboard-logo-${Date.now()}.${ext}`;
-        const { error: upErr } = await supabase.storage.from('logos').upload(path, logoFile, { upsert: true });
+      if (logoFile && !validateLogoFile(logoFile)) {
+        // {uid}/ is the only logos prefix a user may write before their org exists (000927).
+        const path = `${currentUser.id}/onboard-logo-${Date.now()}.${logoExtension(logoFile)}`;
+        const { error: upErr } = await supabase.storage
+          .from('logos')
+          .upload(path, logoFile, { upsert: true, contentType: logoContentType(logoFile) });
         if (!upErr) {
           const { data } = supabase.storage.from('logos').getPublicUrl(path);
           logoUrl = data.publicUrl;

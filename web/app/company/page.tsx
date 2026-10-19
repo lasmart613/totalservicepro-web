@@ -940,7 +940,7 @@ function CompanyProfile() {
               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo || removingLogo} className="btn btn-secondary mt-2 text-sm">
                 {uploadingLogo ? t('Uploading...') : org.logo_url ? t('Replace logo') : t('Choose & Upload Logo')}
               </button>
-              <p className="text-xs text-[var(--text3)] mt-2">{t('PNG, JPG, WebP, or SVG. Max 2 MB.')}</p>
+              <p className="text-xs text-[var(--text3)] mt-2">{t('PNG, JPG, or WebP. Max 2 MB.')}</p>
             </div>
 
             <div className="md:col-span-2">

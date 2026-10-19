@@ -11,6 +11,7 @@ import {
 import { pickCrmReachEmail } from '@/lib/customer-contacts';
 import { sendCustomerInviteEmail } from '@/lib/customer-invite-client';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { useT } from '@/lib/fa/locale';
 
 type Props = {
   serviceOrgId: string | number | null;
@@ -20,6 +21,7 @@ type Props = {
 };
 
 export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName }: Props) {
+  const t = useT();
   const supabase = getSupabaseClient();
   const [form, setForm] = useState<CustomerInfoFormValues>(() => {
     const next = emptyCustomerForm();
@@ -43,17 +45,15 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName
         logoFile,
       });
       if (created.detailsWarning) toast.error(created.detailsWarning);
+      // Own toast (translated) so the logo outcome shows on every invite path.
+      if (created.logoWarning) toast.error(t(created.logoWarning));
 
       const emailOnFile = pickCrmReachEmail({
         directoryContacts: form.directory,
         officeEmail: form.email,
       }).email;
       if (!emailOnFile) {
-        toast.success(
-          created.logoWarning
-            ? `Customer added. Invite not sent — no email on file. ${created.logoWarning}`
-            : 'Customer added. Invite not sent — no email on file.'
-        );
+        toast.success('Customer added. Invite not sent — no email on file.');
       } else {
         const { data: sessionData } = await supabase.auth.getSession();
         const access = sessionData.session?.access_token;
