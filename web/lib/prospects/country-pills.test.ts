@@ -1,0 +1,106 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  ALL_COUNTRIES,
+  cityOptions,
+  countryPills,
+  filterByCity,
+  filterByCountry,
+  nextPillIndex,
+} from './country-pills.ts';
+import { countryLabel, countryOptions, normalizeCountryName } from '../countries.ts';
+
+const rows = [
+  { id: 1, country: 'India', city: 'Pune' },
+  { id: 2, country: 'India', city: 'pune ' },
+  { id: 3, country: 'Egypt', city: 'Cairo' },
+  { id: 4, country: null, city: null },
+  { id: 5, country: ' ', city: 'X' },
+  { id: 6, country: 'United States', city: 'Phoenix' },
+  { id: 7, country: 'Egypt', city: 'Giza' },
+];
+
+test('pills: All first with the total, then countries by count then name', () => {
+  assert.deepEqual(countryPills(rows), [
+    { key: ALL_COUNTRIES, country: null, count: 7 },
+    { key: 'Egypt', country: 'Egypt', count: 2 },
+    { key: 'India', country: 'India', count: 2 },
+    { key: 'United States', country: 'United States', count: 1 },
+  ]);
+});
+
+test('pills only come from the rows given (no rows -> All 0 only)', () => {
+  assert.deepEqual(countryPills([]), [{ key: ALL_COUNTRIES, country: null, count: 0 }]);
+});
+
+test('aggregate rows count with a weight', () => {
+  const aggs = [
+    { country: 'India', city: 'Pune', count: 40 },
+    { country: 'India', city: 'Delhi', count: 2 },
+    { country: null, city: null, count: 3 },
+  ];
+  assert.deepEqual(countryPills(aggs, (a) => a.count), [
+    { key: ALL_COUNTRIES, country: null, count: 45 },
+    { key: 'India', country: 'India', count: 42 },
+  ]);
+});
+
+test('filterByCountry: All returns everything; a country returns its rows', () => {
+  assert.equal(filterByCountry(rows, ALL_COUNTRIES).length, 7);
+  assert.deepEqual(filterByCountry(rows, 'Egypt').map((r) => r.id), [3, 7]);
+  assert.deepEqual(filterByCountry(rows, 'Nowhere'), []);
+});
+
+test('city options and filter are case/space-insensitive', () => {
+  assert.deepEqual(cityOptions(rows), ['Cairo', 'Giza', 'Phoenix', 'Pune', 'X']);
+  assert.deepEqual(filterByCity(rows, 'PUNE').map((r) => r.id), [1, 2]);
+  assert.equal(filterByCity(rows, '').length, 7);
+});
+
+test('arrow keys wrap and flip in RTL', () => {
+  assert.equal(nextPillIndex(0, 'ArrowRight', 3, false), 1);
+  assert.equal(nextPillIndex(0, 'ArrowLeft', 3, false), 2);
+  assert.equal(nextPillIndex(0, 'ArrowLeft', 3, true), 1);
+  assert.equal(nextPillIndex(2, 'Home', 3, true), 0);
+  assert.equal(nextPillIndex(0, 'End', 3, false), 2);
+  assert.equal(nextPillIndex(1, 'a', 3, false), 1);
+});
+
+test('country names: stored English, localized label, sorted options', () => {
+  assert.equal(normalizeCountryName(' united arab emirates '), 'United Arab Emirates');
+  assert.equal(normalizeCountryName('Atlantis'), null);
+  assert.equal(countryLabel('Egypt', 'en'), 'Egypt');
+  assert.notEqual(countryLabel('Egypt', 'ar'), 'Egypt');
+  const opts = countryOptions('en');
+  assert.ok(opts.every((o, i) => i === 0 || opts[i - 1].label.localeCompare(o.label) <= 0));
+  assert.ok(countryOptions('ar').some((o) => o.value === 'Saudi Arabia' && o.label !== 'Saudi Arabia'));
+  for (const name of ['United States', 'Egypt', 'United Arab Emirates', 'Saudi Arabia', 'India', 'Canada', 'Mexico', 'Brazil']) {
+    assert.equal(normalizeCountryName(name), name);
+  }
+});
+
+import { addErrorKey, parseProspectResponse, upgradeCta } from './find-clinics.ts';
+
+test('parseProspectResponse maps server answers', () => {
+  assert.deepEqual(parseProspectResponse(null, { code: 'PGRST202', message: 'x' }), { ok: false, reason: 'unavailable' });
+  assert.deepEqual(parseProspectResponse({ error: 'not_service_org' }, null), { ok: false, reason: 'not_service_org' });
+  const ok = parseProspectResponse({ tier: 'free', total: 3, clinics: [{ id: 1, name: 'A' }], aggregates: [] }, null);
+  assert.ok(ok.ok && ok.data.tier === 'free' && ok.data.free_limit === 20 && ok.data.clinics.length === 1);
+  const prem = parseProspectResponse({ tier: 'premium', total: 0 }, null);
+  assert.ok(prem.ok && prem.data.tier === 'premium' && prem.data.clinics.length === 0);
+  assert.equal(addErrorKey('daily_cap'), 'You reached today’s limit for adding clinics. Try again tomorrow.');
+  assert.equal(addErrorKey('whatever'), 'Could not add this clinic.');
+});
+
+test('upgrade CTA: only from a free answer with server counts; never for Premium', () => {
+  const free = parseProspectResponse({ tier: 'free', total: 170, clinics: [], aggregates: [], locked: { area: 142, total: 2400 } }, null);
+  assert.ok(free.ok);
+  assert.deepEqual(upgradeCta(free.ok ? free.data : null), { area: 142, total: 2400 });
+  // Premium (incl. complimentary) — even if a locked object were present, no CTA
+  const prem = parseProspectResponse({ tier: 'premium', total: 9, clinics: [], aggregates: [], locked: { area: 1, total: 2 } }, null);
+  assert.ok(prem.ok && prem.data.locked === null);
+  assert.equal(upgradeCta(prem.ok ? prem.data : null), null);
+  const none = parseProspectResponse({ tier: 'free', total: 5, clinics: [], aggregates: [], locked: { area: 0, total: 0 } }, null);
+  assert.equal(upgradeCta(none.ok ? none.data : null), null);
+  assert.equal(upgradeCta(null), null);
+});
