@@ -42,6 +42,7 @@ import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
 import { useT } from '@/lib/fa/locale';
 import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
+import { ORG_READABLE_COLUMNS, withOrgPrivateFields } from '@/lib/org-columns';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -288,7 +289,7 @@ export default function CustomerProfilePage() {
       {
         const { data, error } = await supabase
           .from('organizations')
-          .select('*')
+          .select(ORG_READABLE_COLUMNS)
           .eq('id', id)
           .maybeSingle();
         if (error) {
@@ -296,7 +297,7 @@ export default function CustomerProfilePage() {
           const slim = await supabase
             .from('organizations')
             .select(
-              'id, name, type, address, city, state, zip, phone, email, website, notes, biz_type, facility_type, specialties, laser_models, logo_url'
+              'id, name, type, address, city, state, zip, phone, email, website, biz_type, facility_type, specialties, laser_models, logo_url'
             )
             .eq('id', id)
             .maybeSingle();
@@ -305,6 +306,9 @@ export default function CustomerProfilePage() {
           org = (data as CustomerOrg) || null;
         }
       }
+
+      // 000932: notes come from org_private_fields (CRM creator / members only).
+      if (org) org = await withOrgPrivateFields(supabase, org);
 
       if (!org) {
         setNotFound(true);

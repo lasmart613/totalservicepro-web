@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
 
 export default function AdminSettings() {
   const [org, setOrg] = useState<any>(null);
@@ -24,7 +25,7 @@ export default function AdminSettings() {
       if (profile?.organization_id) {
         const { data } = await supabase
           .from('organizations')
-          .select('*')
+          .select(ORG_READABLE_COLUMNS)
           .eq('id', profile.organization_id)
           .single();
 

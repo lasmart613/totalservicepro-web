@@ -38,6 +38,7 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 import { showCompanyJustSetupBanner } from '@/lib/customer-invite-client';
+import { ORG_READABLE_COLUMNS, withOrgPrivateFields } from '@/lib/org-columns';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -253,11 +254,12 @@ function CompanyProfile() {
         setLinkedOrgId(prof.organization_id);
         const { data: orgData } = await supabase
           .from('organizations')
-          .select('*')
+          .select(ORG_READABLE_COLUMNS)
           .eq('id', prof.organization_id)
           .single();
         if (orgData) {
-          setOrg(orgData);
+          // 000932: notes / tax_id are not selectable; members get them from org_private_fields.
+          setOrg(await withOrgPrivateFields(supabase, orgData as any));
           // No POST /api/org/founder on load. Setup (onboarding, pending signup,
           // and the create-on-save below) already links the founder. On every
           // visit it re-granted the signup trial after expiry and reset the

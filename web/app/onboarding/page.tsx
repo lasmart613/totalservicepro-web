@@ -31,6 +31,7 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { OrgTypeStep, type OrgType } from './org-type-step';
 import { onboardingOrgUpdatePayload } from '@/lib/onboarding-org-update';
 import { logoContentType, logoExtension, validateLogoFile } from '@/lib/customer-logo';
+import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
 type TeamMember = {
   id: string;
   email: string;
@@ -135,7 +136,7 @@ export default function Onboarding() {
 
       const { data: profile } = await supabase
         .from('user_profiles')
-        .select('*, organizations(*)')
+        .select(`*, organizations(${ORG_READABLE_COLUMNS})`)
         .eq('id', user.id)
         .maybeSingle();
 
@@ -203,7 +204,7 @@ export default function Onboarding() {
       if (!orgRow && profile?.organization_id) {
         const { data: fetchedOrg } = await supabase
           .from('organizations')
-          .select('*')
+          .select(ORG_READABLE_COLUMNS)
           .eq('id', profile.organization_id)
           .maybeSingle();
         orgRow = fetchedOrg;
