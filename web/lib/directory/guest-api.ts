@@ -30,7 +30,8 @@ export type PublicDirectoryRow = {
   list_in_directory?: boolean | null;
   is_active?: boolean | null;
   notes?: string | null;
-  prospect_pool?: boolean | null;
+  /** text in prod (e.g. 'amer-clinics-1018'); any non-empty, non-false value is a prospect. */
+  prospect_pool?: boolean | string | null;
   lead_source?: string | null;
 };
 
@@ -49,7 +50,10 @@ export function isPublicDirectoryRow(row: PublicDirectoryRow | null | undefined)
   if (row.list_in_directory === false) return false;
   if (row.is_active === false) return false;
   if (row.notes && IMPORT_NOTE.test(row.notes)) return false;
-  if (row.prospect_pool === true) return false;
+  if (row.prospect_pool != null && row.prospect_pool !== false) {
+    const pp = String(row.prospect_pool).trim().toLowerCase();
+    if (pp !== '' && pp !== 'false' && pp !== 'f') return false;
+  }
   if (row.lead_source != null && String(row.lead_source).trim() !== '') return false;
   return true;
 }

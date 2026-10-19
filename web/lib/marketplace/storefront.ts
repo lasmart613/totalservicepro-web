@@ -40,7 +40,6 @@ export type SellerStorefrontFields = OrgPlanFields & {
   phone?: string | null;
   city?: string | null;
   state?: string | null;
-  notes?: string | null;
   storefront_enabled?: boolean | null;
   storefront_slug?: string | null;
   storefront_bio?: string | null;
@@ -139,9 +138,8 @@ export function storefrontDisplayName(org: SellerStorefrontFields | null | undef
 }
 
 export function storefrontAbout(org: SellerStorefrontFields | null | undefined): string {
-  const bio = clipStorefrontBio(org?.storefront_bio);
-  if (bio) return bio;
-  return clipStorefrontBio(org?.notes);
+  // Never fall back to organizations.notes: it is private (000932).
+  return clipStorefrontBio(org?.storefront_bio);
 }
 
 export function isPublicStorefront(org: SellerStorefrontFields | null | undefined, now: Date = new Date()): boolean {
@@ -149,6 +147,13 @@ export function isPublicStorefront(org: SellerStorefrontFields | null | undefine
   if (!isSupplierOrgType(org.type)) return false;
   if (!supplierHasPaidStorefrontPlan(org, now)) return false;
   return isValidStorefrontSlug(org.storefront_slug);
+}
+
+/** A seller org as anyone may see it: storefront fields only for a public storefront, else { id, name, type }. */
+export function publicSellerView(org: SellerStorefrontFields | null | undefined, now: Date = new Date()): SellerStorefrontFields | null {
+  if (!org) return null;
+  if (isPublicStorefront(org, now)) return org;
+  return { id: org.id ?? null, name: org.name ?? null, type: org.type ?? null };
 }
 
 export function canManageSupplierStorefront(actor: ListingActor | null | undefined, orgType?: OrgTypeLike): boolean {

@@ -14,6 +14,7 @@ import {
   canManageSupplierStorefront,
   clipStorefrontBio,
   isPublicStorefront,
+  publicSellerView,
   isValidStorefrontSlug,
   slugifyStorefront,
   toPublicSellerCard,
@@ -22,11 +23,11 @@ import {
 } from './storefront.ts';
 
 export const STOREFRONT_ORG_SELECTS = [
-  'id, name, type, logo_url, website, email, phone, city, state, notes, is_premium, subscription_tier, plan, premium_until, premium_grant, storefront_enabled, storefront_slug, storefront_bio',
-  'id, name, type, logo_url, website, email, phone, city, state, notes, is_premium, subscription_tier, plan, premium_until, storefront_enabled, storefront_slug, storefront_bio',
-  'id, name, type, logo_url, website, email, phone, city, state, notes, is_premium, subscription_tier, plan, storefront_enabled, storefront_slug, storefront_bio',
-  'id, name, type, logo_url, website, email, phone, city, state, notes, is_premium, storefront_enabled, storefront_slug, storefront_bio',
-  'id, name, type, logo_url, website, email, phone, city, state, notes, is_premium',
+  'id, name, type, logo_url, website, email, phone, city, state, is_premium, subscription_tier, plan, premium_until, premium_grant, storefront_enabled, storefront_slug, storefront_bio',
+  'id, name, type, logo_url, website, email, phone, city, state, is_premium, subscription_tier, plan, premium_until, storefront_enabled, storefront_slug, storefront_bio',
+  'id, name, type, logo_url, website, email, phone, city, state, is_premium, subscription_tier, plan, storefront_enabled, storefront_slug, storefront_bio',
+  'id, name, type, logo_url, website, email, phone, city, state, is_premium, storefront_enabled, storefront_slug, storefront_bio',
+  'id, name, type, logo_url, website, email, phone, city, state, is_premium',
 ] as const;
 
 function missingColumn(message?: string): boolean {
@@ -35,6 +36,11 @@ function missingColumn(message?: string): boolean {
   );
 }
 
+/**
+ * The caller's OWN seller org (storefront management). Safe columns only:
+ * STOREFRONT_ORG_SELECTS never includes notes, tax_id or Stripe ids.
+ * For another org (a listing's seller) use loadPublicSellerOrg.
+ */
 export async function loadSellerOrg(orgId: string | number): Promise<SellerStorefrontFields | null> {
   if (!hasServiceRole()) return null;
   const admin = getSupabaseAdmin();
@@ -157,9 +163,17 @@ export async function requireStorefrontSeller(
   return { ok: true, caller, org, orgId: caller.orgId };
 }
 
+/**
+ * A listing's seller as seen by anyone: the storefront fields when the seller
+ * has a public storefront, otherwise only { id, name, type }.
+ */
+export async function loadPublicSellerOrg(orgId: string | number): Promise<SellerStorefrontFields | null> {
+  return publicSellerView(await loadSellerOrg(orgId));
+}
+
 export async function resolveListingStorefront(organizationId?: string | number | null) {
   if (organizationId == null) return null;
-  const org = await loadSellerOrg(organizationId);
+  const org = await loadPublicSellerOrg(organizationId);
   if (!org || !isPublicStorefront(org)) return null;
   const card = toPublicSellerCard(org);
   if (!card) return null;
