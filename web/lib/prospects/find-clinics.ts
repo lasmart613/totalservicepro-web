@@ -28,7 +28,10 @@ export type ProspectCountryCount = { country: string | null; count: number };
 export type ProspectCityCount = { city: string; count: number };
 export type ProspectPage = { limit: number; offset: number; filtered_total: number; has_more: boolean };
 
-/** Hard page size the RPC enforces (find_clinic_prospects caps p_limit at 100). */
+/**
+ * Rows the client requests per page (p_limit). The RPC separately clamps
+ * p_limit to a hard maximum of 100, so this is a request, not the cap.
+ */
 export const PROSPECT_PAGE_SIZE = 50;
 
 export type ProspectPayload = {
@@ -51,13 +54,28 @@ export type ProspectLoad =
   | { ok: true; data: ProspectPayload }
   | { ok: false; reason: 'unavailable' | 'not_service_org' | 'error'; message?: string };
 
+/** Our RPCs; only these being missing means "migration not applied yet". */
+const PROSPECT_RPCS = ['find_clinic_prospects', 'add_prospect_customer'];
+
+/**
+ * True only when PostgREST says the function itself is missing (PGRST202), or
+ * Postgres says one of OUR two functions does not exist. Any other error, even
+ * one mentioning "does not exist" (a table/column inside the RPC), is real.
+ */
+export function isRpcMissing(error: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === 'PGRST202') return true;
+  const msg = error.message || '';
+  return PROSPECT_RPCS.some((fn) =>
+    new RegExp(`function\\s+(public\\.)?${fn}\\b[^]*?does not exist|could not find the function\\s+(public\\.)?${fn}\\b`, 'i').test(msg),
+  );
+}
+
 export function parseProspectResponse(data: unknown, error: { message?: string; code?: string } | null): ProspectLoad {
   if (error) {
     const msg = error.message || '';
-    if (error.code === 'PGRST202' || /find_clinic_prospects|does not exist|schema cache/i.test(msg)) {
-      return { ok: false, reason: 'unavailable' };
-    }
-    return { ok: false, reason: 'error', message: msg };
+    if (isRpcMissing(error)) return { ok: false, reason: 'unavailable' };
+    return { ok: false, reason: 'error', message: msg || error.code || 'unknown error' };
   }
   const j = (data || {}) as Record<string, unknown>;
   if (j.error === 'not_service_org' || j.error === 'no_org') return { ok: false, reason: 'not_service_org' };
@@ -94,6 +112,13 @@ export function addErrorKey(code: unknown): string {
   switch (code) {
     case 'not_admin':
       return 'Only owners and admins can add customers.';
+    case 'premium_required':
+      return 'Adding clinics to your customers requires Premium.';
+    case 'not_service_org':
+      return 'Only service companies can add clinics as customers.';
+    case 'no_org':
+    case 'not_authenticated':
+      return 'Join or create a company before adding customers.';
     case 'daily_cap':
       return 'You reached today’s limit for adding clinics. Try again tomorrow.';
     default:

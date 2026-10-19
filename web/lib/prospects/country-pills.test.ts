@@ -79,7 +79,7 @@ test('country names: stored English, localized label, sorted options', () => {
   }
 });
 
-import { addErrorKey, parseProspectResponse, upgradeCta } from './find-clinics.ts';
+import { addErrorKey, isRpcMissing, parseProspectResponse, upgradeCta } from './find-clinics.ts';
 
 test('parseProspectResponse maps server answers', () => {
   assert.deepEqual(parseProspectResponse(null, { code: 'PGRST202', message: 'x' }), { ok: false, reason: 'unavailable' });
@@ -104,4 +104,35 @@ test('upgrade CTA: only from a free answer with server counts; never for Premium
   const none = parseProspectResponse({ tier: 'free', total: 5, clinics: [], aggregates: [], locked: { area: 0, total: 0 } }, null);
   assert.equal(upgradeCta(none.ok ? none.data : null), null);
   assert.equal(upgradeCta(null), null);
+});
+
+test('only a missing prospect RPC counts as "not available yet"', () => {
+  const un = { ok: false, reason: 'unavailable' };
+  assert.deepEqual(parseProspectResponse(null, { code: 'PGRST202', message: 'Could not find the function' }), un);
+  assert.deepEqual(parseProspectResponse(null, { code: '42883', message: 'function public.find_clinic_prospects(text, text, integer, integer) does not exist' }), un);
+  assert.deepEqual(parseProspectResponse(null, { message: 'Could not find the function public.find_clinic_prospects(p_city, p_country) in the schema cache' }), un);
+  assert.equal(isRpcMissing({ code: '42883', message: 'function public.add_prospect_customer(bigint) does not exist' }), true);
+});
+
+test('real SQL errors inside the RPC are surfaced, not hidden', () => {
+  for (const e of [
+    { code: '42P01', message: 'relation "public.prospect_customer_links" does not exist' },
+    { code: '42703', message: 'column o.prospect_pool does not exist' },
+    { code: '42883', message: 'function public.prospect_state_key(text) does not exist' },
+    { code: 'PGRST204', message: "Could not find the 'x' column of 'organizations' in the schema cache" },
+    { code: '57014', message: 'canceling statement due to statement timeout' },
+  ]) {
+    assert.equal(isRpcMissing(e), false, e.message);
+    assert.deepEqual(parseProspectResponse(null, e), { ok: false, reason: 'error', message: e.message });
+  }
+  assert.equal(isRpcMissing(null), false);
+});
+
+test('each add refusal has its own message', () => {
+  const keys = ['premium_required', 'not_service_org', 'no_org', 'daily_cap', 'not_admin', 'boom'].map(addErrorKey);
+  assert.equal(new Set(keys).size, keys.length);
+  assert.equal(addErrorKey('premium_required'), 'Adding clinics to your customers requires Premium.');
+  assert.equal(addErrorKey('not_service_org'), 'Only service companies can add clinics as customers.');
+  assert.equal(addErrorKey('no_org'), 'Join or create a company before adding customers.');
+  assert.equal(addErrorKey(undefined), 'Could not add this clinic.');
 });

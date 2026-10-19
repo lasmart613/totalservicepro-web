@@ -146,7 +146,9 @@ export default function FindClinicsPage() {
         p_limit: PROSPECT_PAGE_SIZE,
         p_offset: opts.offset,
       });
-      return parseProspectResponse(data, error);
+      const res = parseProspectResponse(data, error);
+      if (!res.ok && res.reason === 'error') console.error('[find-clinics] find_clinic_prospects failed', error ?? data);
+      return res;
     },
     [supabase],
   );
@@ -187,13 +189,20 @@ export default function FindClinicsPage() {
   // Free: area rows are filtered on screen (already aggregates, top 300 groups).
   const areas = useMemo(() => (data && !premium ? filterByCountry(data.aggregates, areaCountry) : []), [data, premium, areaCountry]);
 
+  // Synchronous guard: state updates are async, so a burst of clicks could
+  // otherwise fire several RPCs before the button re-renders as disabled.
+  const addInFlight = useRef(false);
+
   async function addCustomer(id: string | number) {
+    if (addInFlight.current) return;
+    addInFlight.current = true;
     setAdding(String(id));
     try {
       const { data: res, error } = await supabase.rpc('add_prospect_customer', { p_clinic_id: Number(id) });
       const j = (res || {}) as { ok?: boolean; error?: string };
       if (error || !j.ok) {
-        toast.error(t(addErrorKey(j.error)));
+        if (error) console.error('[find-clinics] add_prospect_customer failed', error);
+        toast.error(t(addErrorKey(error ? undefined : j.error)));
         return;
       }
       toast.success(t('Added to your customers.'));
@@ -209,6 +218,7 @@ export default function FindClinicsPage() {
           : prev,
       );
     } finally {
+      addInFlight.current = false;
       setAdding(null);
     }
   }
@@ -230,7 +240,9 @@ export default function FindClinicsPage() {
           <div className="card p-8 text-center text-[var(--text3)]">
             {load.reason === 'not_service_org'
               ? t('Find clinics is only available to service companies.')
-              : t('Find clinics is not available yet.')}
+              : load.reason === 'unavailable'
+                ? t('Find clinics is not available yet.')
+                : t('Could not load clinics. Please try again.')}
           </div>
         ) : (
           <>
@@ -312,7 +324,7 @@ export default function FindClinicsPage() {
                           <button
                             type="button"
                             className="btn btn-primary text-sm"
-                            disabled={adding === String(c.id)}
+                            disabled={adding !== null}
                             onClick={() => void addCustomer(c.id)}
                           >
                             {adding === String(c.id) ? t('Adding…') : t('Add to my customers')}
