@@ -1,4 +1,6 @@
 'use client';
+import { CountrySelect } from '@/components/CountrySelect';
+import { normalizeCountryName } from '@/lib/countries';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -229,6 +231,7 @@ export default function Onboarding() {
           address: o.address || prev.address || '',
           city: o.city || prev.city || '',
           state: o.state || prev.state || '',
+          country: o.country || prev.country || '',
           phone: o.phone || profile.phone || prev.phone || '',
           website: o.website || prev.website || ''
         }));
@@ -545,6 +548,7 @@ export default function Onboarding() {
         address: formData.address || null,
         city: formData.city || null,
         state: formData.state || null,
+        ...(normalizeCountryName(formData.country) ? { country: normalizeCountryName(formData.country) } : {}),
         phone: formData.phone || null,
         website: formData.website || null,
         supported_brands: selectedBrands.length ? selectedBrands : null,
@@ -566,8 +570,9 @@ export default function Onboarding() {
         if (!upd.ok) throw new Error(upd.error);
         const updatePayload = upd.payload;
         let { error: uErr } = await supabase.from('organizations').update(updatePayload).eq('id', orgId);
-        if (uErr && /list_in_directory|column/i.test(uErr.message || '')) {
+        if (uErr && /list_in_directory|country|column/i.test(uErr.message || '')) {
           delete updatePayload.list_in_directory;
+          if (/country/i.test(uErr.message || '')) delete updatePayload.country;
           ({ error: uErr } = await supabase.from('organizations').update(updatePayload).eq('id', orgId));
         }
         if (uErr) throw new Error(uErr.message || 'Could not save organization.');
@@ -580,6 +585,7 @@ export default function Onboarding() {
           .single();
         if (iErr && /list_in_directory|is_premium|premium_until|premium_grant|column/i.test(iErr.message || '')) {
           if (/list_in_directory/i.test(iErr.message || '')) delete orgPayload.list_in_directory;
+          if (/'country'|\bcountry\b/i.test(iErr.message || '')) delete orgPayload.country;
           if (missingComplimentaryColumn(iErr.message)) stripUnbackedComplimentaryPremium(orgPayload);
           if (/is_premium/i.test(iErr.message || '')) delete orgPayload.is_premium;
           ({ data: newOrg, error: iErr } = await supabase
@@ -905,6 +911,7 @@ export default function Onboarding() {
               <div><label className="label">{t('City')}</label><input className="input" value={formData.city||''} onChange={e=>updateForm('city',e.target.value)} /></div>
               <div><label className="label">{t('State')}</label><input className="input" value={formData.state||''} onChange={e=>updateForm('state',e.target.value)} /></div>
             </div>
+            <div><label className="label" htmlFor="onboarding-country">{t('Country')}</label><CountrySelect id="onboarding-country" value={formData.country} onChange={(country)=>updateForm('country',country||'')} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">{t('Phone')}</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
               <div><label className="label">{t('Website')}</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
