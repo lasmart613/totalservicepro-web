@@ -2,21 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { getMarketplaceCaller } from '@/lib/marketplace/caller';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { SHARE_LISTING_SELECTS, sanitizeShareListingDetails } from '@/lib/share-listing-public';
 
 export const dynamic = 'force-dynamic';
 
 /** marketplace_listings.id is a uuid; anything else is a 404 without touching the DB. */
 const LISTING_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-/**
- * Columns a public share preview may return. No serial_number (equipment
- * serials identify the owner's unit) and no Stripe product/price ids: the
- * share pages never read them. part_number stays (shown as the part number).
- */
-export const SHARE_LISTING_SELECTS = [
-  'id, title, description, status, condition, price, price_type, manufacturer, model, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength, organization_id',
-  'id, title, description, status, condition, price, price_type, manufacturer, model, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength',
-];
 
 /**
  * Public share endpoint for marketplace listings (equipment / parts / consumables).
@@ -73,16 +65,8 @@ export async function GET(
       );
     }
 
-    // Sanitize details — drop seller contact if present
-    let details = data.details;
-    if (details && typeof details === 'object') {
-      const d = { ...(details as Record<string, unknown>) };
-      delete d.seller_email;
-      delete d.seller_phone;
-      delete d.contact_email;
-      delete d.contact_phone;
-      details = d;
-    }
+    // Sanitize details: no seller contact, no Stripe keys.
+    const details = sanitizeShareListingDetails(data.details);
 
     return NextResponse.json({
       listing: {

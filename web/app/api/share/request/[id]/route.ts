@@ -4,6 +4,8 @@ import { publicShareRequestRow, SHARE_REQUEST_SELECT } from '@/lib/share-request
 
 export const dynamic = 'force-dynamic';
 
+const REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Public share endpoint for RFQs.
  * Returns the open_service_requests column set (minus budget) for open/bidding requests so
@@ -16,9 +18,10 @@ export async function GET(
 ) {
   try {
     const raw = await Promise.resolve(ctx.params);
-    const id = raw?.id;
-    if (!id) {
-      return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const id = String(raw?.id || '').trim();
+    // service_requests.id is a uuid: anything else is a 404 without a DB call.
+    if (!REQUEST_ID_RE.test(id)) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     if (!hasServiceRole()) {
