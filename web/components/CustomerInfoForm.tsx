@@ -32,6 +32,8 @@ type Props = {
   orgType?: string | null;
   /** Extra locations, rendered under the primary address. */
   afterAddress?: React.ReactNode;
+  /** false when the private notes could not be loaded (000932): show a status, not an empty editor. */
+  notesAvailable?: boolean;
 };
 
 export function CustomerInfoForm({
@@ -42,6 +44,7 @@ export function CustomerInfoForm({
   inviteHint,
   orgType,
   afterAddress,
+  notesAvailable = true,
 }: Props) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -215,13 +218,19 @@ export function CustomerInfoForm({
             <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
               Notes
             </label>
-            <textarea
-              className="input w-full min-h-[80px]"
-              placeholder="Account notes, preferences, access details…"
-              value={value.notes}
-              disabled={disabled}
-              onChange={(e) => setField('notes', e.target.value)}
-            />
+            {notesAvailable ? (
+              <textarea
+                className="input w-full min-h-[80px]"
+                placeholder="Account notes, preferences, access details…"
+                value={value.notes}
+                disabled={disabled}
+                onChange={(e) => setField('notes', e.target.value)}
+              />
+            ) : (
+              <p className="text-sm text-[var(--text3)]" role="status">
+                Notes unavailable right now
+              </p>
+            )}
           </div>
         </div>
       </div>

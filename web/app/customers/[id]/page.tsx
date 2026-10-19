@@ -42,7 +42,7 @@ import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
 import { useT } from '@/lib/fa/locale';
 import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
-import { ORG_READABLE_COLUMNS, withOrgPrivateFields } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, type OrgPrivateFields } from '@/lib/org-columns';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -166,6 +166,7 @@ export default function CustomerProfilePage() {
 
   // Editable form (same fields as Directory Add Customer)
   const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
+  const [privateBaseline, setPrivateBaseline] = useState<OrgPrivateFields | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
   const [locationRefresh, setLocationRefresh] = useState(0);
@@ -308,7 +309,10 @@ export default function CustomerProfilePage() {
       }
 
       // 000932: notes come from org_private_fields (CRM creator / members only).
-      if (org) org = await withOrgPrivateFields(supabase, org);
+      // null = not loaded: notes show as unavailable and saves never send them.
+      const priv = org ? await loadOrgPrivateFields(supabase, org.id as any) : null;
+      setPrivateBaseline(priv);
+      if (org && priv) org = { ...org, ...priv };
 
       if (!org) {
         setNotFound(true);
@@ -490,7 +494,10 @@ export default function CustomerProfilePage() {
     if (!canEdit || !customer?.id) return;
     setSaving(true);
     try {
-      const payload = await updateCustomerOrg(supabase, customer.id, form, { logoFile });
+      const payload = await updateCustomerOrg(supabase, customer.id, form, { logoFile, privateBaseline });
+      if (privateBaseline && 'notes' in payload) {
+        setPrivateBaseline({ ...privateBaseline, notes: (payload.notes as string | null) ?? null });
+      }
       setCustomer((prev) =>
         prev
           ? {
@@ -819,6 +826,7 @@ export default function CustomerProfilePage() {
               onChange={handleFormChange}
               disabled={!canEdit}
               orgType={customer.type}
+              notesAvailable={privateBaseline != null}
               onLogoFileChange={(file) => {
                 setLogoFile(file);
                 setDirty(true);

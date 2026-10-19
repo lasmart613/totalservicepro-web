@@ -38,7 +38,7 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 import { showCompanyJustSetupBanner } from '@/lib/customer-invite-client';
-import { ORG_READABLE_COLUMNS, withOrgPrivateFields } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, privateFieldsPatch, type OrgPrivateFields } from '@/lib/org-columns';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -102,6 +102,7 @@ function CompanyProfile() {
   const [showTeamPrompt, setShowTeamPrompt] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
   const [linkedOrgId, setLinkedOrgId] = useState<string | number | null>(null);
+  const [privateBaseline, setPrivateBaseline] = useState<OrgPrivateFields | null>(null);
   const [contacts, setContacts] = useState<any[]>([]);
   const [newContact, setNewContact] = useState({
     first_name: '',
@@ -259,7 +260,10 @@ function CompanyProfile() {
           .single();
         if (orgData) {
           // 000932: notes / tax_id are not selectable; members get them from org_private_fields.
-          setOrg(await withOrgPrivateFields(supabase, orgData as any));
+          // privateBaseline null = not loaded: the editor is read-only and saves never send notes.
+          const priv = await loadOrgPrivateFields(supabase, (orgData as any).id);
+          setPrivateBaseline(priv);
+          setOrg(priv ? { ...(orgData as any), ...priv } : orgData);
           // No POST /api/org/founder on load. Setup (onboarding, pending signup,
           // and the create-on-save below) already links the founder. On every
           // visit it re-granted the signup trial after expiry and reset the
@@ -491,7 +495,8 @@ function CompanyProfile() {
         email: currentOrg.email ?? null,
         website: currentOrg.website ?? null,
         contact_name: currentOrg.contact_name ?? null,
-        notes: currentOrg.notes ?? null,
+        // notes only when loaded AND changed (QA #325 M-1); see privateFieldsPatch.
+        ...privateFieldsPatch(privateBaseline, { notes: currentOrg.notes }),
         facility_type: currentOrg.facility_type ?? null,
         list_in_directory: !!currentOrg.list_in_directory,
         supported_brands: Array.isArray(currentOrg.supported_brands) ? currentOrg.supported_brands : null,
@@ -514,6 +519,12 @@ function CompanyProfile() {
       const saved = await saveOwnOrganizationProfile(access, updateData);
       if (!saved.ok || !saved.org) throw new Error(saved.error || 'Save did not persist.');
       setOrg({ ...currentOrg, ...saved.org, id: saved.org.id ?? saveId });
+      if (privateBaseline) {
+        setPrivateBaseline({
+          tax_id: (saved.org as any).tax_id ?? privateBaseline.tax_id,
+          notes: (saved.org as any).notes ?? null,
+        });
+      }
       const omitted = saved.omittedColumns || [];
       const followUps: string[] = [];
       if (omitted.includes('currency_code') || omitted.includes('number_format')) {
@@ -887,6 +898,11 @@ function CompanyProfile() {
               )}
               <div>
                 <label className="label">{ownerMode ? t('Notes / hours') : t('Notes')}</label>
+                {org?.id && !privateBaseline ? (
+                  <p className="text-sm text-[var(--text3)]" role="status">
+                    {t('Notes unavailable right now')}
+                  </p>
+                ) : (
                 <textarea
                   className="input min-h-[80px]"
                   value={org.notes || ''}
@@ -896,6 +912,7 @@ function CompanyProfile() {
                       ? t('Hours, access notes, parking, preferences…') : t('Internal notes')
                   }
                 />
+                )}
               </div>
               {!ownerMode && (
               <div>
