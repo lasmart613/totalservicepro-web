@@ -2,6 +2,8 @@
 -- before 000931). No data changes. Refuses to drop a same-named function that
 -- 000931 did not create. After rollback, deploy the previous /api/directory
 -- or the guest directory preview returns 503.
+BEGIN;
+
 SET LOCAL lock_timeout = '5s';
 
 DO $$
@@ -17,3 +19,5 @@ BEGIN
 END $$;
 
 DROP FUNCTION IF EXISTS public.public_directory_page(text[], integer, integer);
+
+COMMIT;

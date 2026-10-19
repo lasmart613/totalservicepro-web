@@ -25,9 +25,11 @@ const ORGS: (PublicDirectoryRow & { name: string; phone?: string })[] = [
   { id: 6, name: 'Prospect', type: 'laser_clinic', state: 'CA', list_in_directory: true, prospect_pool: true },
   { id: 7, name: 'Lead', type: 'laser_clinic', state: 'CA', list_in_directory: true, lead_source: 'find_a_rep' },
   { id: 8, name: 'Inactive', type: 'service_company', state: 'WA', list_in_directory: true, is_active: false },
+  { id: 10, name: 'Spaced Import', type: 'laser_clinic', state: 'CA', list_in_directory: true, notes: 'IMPORT : amer-clinics-1018' },
+  { id: 11, name: 'Reimport', type: 'laser_clinic', state: 'CA', list_in_directory: true, notes: 'reimport: intl-clinics-1018' },
   { id: 9, name: 'Listed Supplier', type: 'parts_supplier', state: 'OR', list_in_directory: true, notes: 'important: ships fast' },
 ];
-const FORBIDDEN = [2, 3, 4, 5, 6, 7, 8];
+const FORBIDDEN = [2, 3, 4, 5, 6, 7, 8, 10, 11];
 
 /** Mirrors the 000931 SQL filter. */
 function fakeRpc(source = ORGS, calls: unknown[] = []): DirectoryRpc {
@@ -36,10 +38,10 @@ function fakeRpc(source = ORGS, calls: unknown[] = []): DirectoryRpc {
     const listed = source
       .filter((o) => o.list_in_directory === true && o.is_active !== false)
       .filter((o) => !args.p_types || args.p_types.includes(String(o.type)))
-      .filter((o) => !/(^|[^a-z])import:/i.test(o.notes || ''))
+      .filter((o) => !/(^|[^a-z])(re)?import\s*:/i.test(o.notes || ''))
       .filter((o) => o.prospect_pool !== true && !(o.lead_source || '').trim())
       .sort((a, b) => Number(a.id) - Number(b.id));
-    const rows = listed.slice(args.p_offset, args.p_offset + args.p_limit).map((o) => ({ id: o.id, type: o.type, state: o.state }));
+    const rows = listed.slice(args.p_offset, args.p_offset + args.p_limit).map((o) => ({ id: o.id, type: o.type, region: o.state === 'CA' ? 'West' : o.state === 'OR' ? 'West' : null }));
     return { data: { rows, total: listed.length }, error: null };
   };
 }
@@ -56,6 +58,7 @@ test('logged-out page returns listed orgs only, with a listed-only total', async
   const blob = JSON.stringify(r);
   for (const o of ORGS) assert.doesNotMatch(blob, new RegExp(o.name));
   assert.doesNotMatch(blob, /555-0100|"CA"|"OR"/);
+  assert.deepEqual(r.listings.map((c) => c.region), ['West', 'West']);
 });
 
 test('imported, unlisted, prospect and lead orgs never appear on any filter or page', async () => {
@@ -97,13 +100,23 @@ test('paging is clamped and hasMore uses the listed total', async () => {
   assert.ok(calls[1].args.p_offset <= 199 * 48);
 });
 
-test('signed-in directory filter keeps null notes but drops import-tagged rows', () => {
-  assert.equal(DIRECTORY_NOT_IMPORTED_OR, 'notes.is.null,notes.not.ilike.*Import:*');
+test('signed-in directory filter keeps null notes but drops import/reimport-tagged rows', () => {
+  assert.equal(DIRECTORY_NOT_IMPORTED_OR, 'notes.is.null,notes.not.imatch."(^|[^a-z])(re)?import[[:space:]]*:"');
+});
+
+test('a non-region value from the RPC never reaches the card', async () => {
+  const rpc: DirectoryRpc = async () => ({ data: { rows: [{ id: 1, type: 'service_company', region: 'TX' }, { id: 2, type: 'service_company', region: 'South' }], total: 2 }, error: null });
+  const r = await loadGuestDirectoryPage(rpc, {});
+  assert.ok(r.ok);
+  if (r.ok) assert.deepEqual(r.listings.map((c) => c.region), [null, 'South']);
 });
 
 test('000931 migration: listed-only definer RPC, narrow grants, standards', () => {
   const sql = readFileSync(MIG, 'utf8');
-  assert.match(sql, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(sql, /^BEGIN;\s*\n\s*SET LOCAL lock_timeout = '5s';/m);
+  assert.match(sql.trimEnd(), /COMMIT;$/);
+  assert.match(sql, /region_map\(k, region\)/);
+  assert.match(sql, /\('TX', 'South'\)/);
   assert.match(sql, /SECURITY DEFINER\s+SET search_path = ''/);
   assert.match(sql, /o\.list_in_directory IS TRUE/);
   assert.match(sql, /o\.is_active IS DISTINCT FROM false/);
@@ -115,8 +128,10 @@ test('000931 migration: listed-only definer RPC, narrow grants, standards', () =
   assert.match(sql, /000931 drift/);
   assert.doesNotMatch(sql, /pg_catalog\.(extract|coalesce)\b/i);
   // Only id/type/state are emitted.
-  assert.match(sql, /jsonb_build_object\('id', p\.id, 'type', p\.type, 'state', p\.state\)/);
+  assert.match(sql, /jsonb_build_object\('id', p\.id, 'type', p\.type, 'region', p\.region\)/);
   const rb = readFileSync(RB, 'utf8');
   assert.match(rb, /DROP FUNCTION IF EXISTS public\.public_directory_page\(text\[\], integer, integer\)/);
   assert.match(rb, /rollback refused/);
+  assert.match(rb, /^BEGIN;/m);
+  assert.match(rb.trimEnd(), /COMMIT;$/);
 });

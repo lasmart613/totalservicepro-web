@@ -2,7 +2,7 @@
  * Logged-out directory page loader (GET /api/directory).
  * Reads through public.public_directory_page (000931) with the ANON key: no
  * service role. The RPC returns only listed, active, non-import,
- * non-prospect, non-lead orgs (id/type/state) and a listed-only total.
+ * non-prospect, non-lead orgs (id/type/region) and a listed-only total.
  * The row filter is repeated here as defense in depth.
  */
 import {
@@ -16,15 +16,17 @@ export const PUBLIC_DIRECTORY_RPC = 'public_directory_page';
 export const GUEST_DIRECTORY_MAX_PAGE = 200;
 
 /** Import tag written into organizations.notes by the clinic imports (e.g. "Import: intl-clinics-1018"). */
-const IMPORT_NOTE = /(^|[^a-z])import:/i;
+const IMPORT_NOTE = /(^|[^a-z])(re)?import\s*:/i;
+const REGIONS = new Set(['Northeast', 'Midwest', 'South', 'West', 'Canada']);
 
 /** PostgREST .or() filter for the signed-in directory: drop rows tagged as clinic imports (keeps NULL notes). */
-export const DIRECTORY_NOT_IMPORTED_OR = 'notes.is.null,notes.not.ilike.*Import:*';
+export const DIRECTORY_NOT_IMPORTED_OR = 'notes.is.null,notes.not.imatch."(^|[^a-z])(re)?import[[:space:]]*:"';
 
 export type PublicDirectoryRow = {
   id?: number | string | null;
   type?: string | null;
   state?: string | null;
+  region?: string | null;
   list_in_directory?: boolean | null;
   is_active?: boolean | null;
   notes?: string | null;
@@ -76,7 +78,12 @@ export async function loadGuestDirectoryPage(
   const safe = rows.filter(isPublicDirectoryRow).slice(0, pageSize);
   const total = typeof payload.total === 'number' && Number.isFinite(payload.total) ? payload.total : 0;
   // Only id/type/state go into the card builder.
-  const listings = safe.map((r) => redactDirectoryOrg({ id: r.id, type: r.type, state: r.state }));
+  // The RPC sends a region; the route coarsens again (a stray state becomes a region, anything else null).
+  const listings = safe.map((r) => {
+    const card = redactDirectoryOrg({ id: r.id, type: r.type, state: r.state });
+    if (!card.region && r.region && REGIONS.has(String(r.region))) card.region = String(r.region);
+    return card;
+  });
   return {
     ok: true,
     listings,
