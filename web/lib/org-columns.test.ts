@@ -3,7 +3,15 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ORG_PRIVATE_COLUMNS, ORG_READABLE_COLUMNS, loadOrgPrivateFields, withOrgPrivateFields } from './org-columns.ts';
+import {
+  ORG_PRIVATE_COLUMNS,
+  ORG_PROFILE_RESPONSE_COLUMNS,
+  ORG_READABLE_COLUMNS,
+  guardPrivateFieldWipe,
+  loadOrgPrivateFields,
+  privateFieldsPatch,
+  withOrgPrivateFields,
+} from './org-columns.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const web = join(here, '..');
@@ -60,8 +68,9 @@ test('F-3: no signed-in client selects * or a private column from organizations'
 test('F-3: own-org pages load tax_id/notes through org_private_fields', () => {
   for (const f of ['app/company/page.tsx', 'app/customers/[id]/page.tsx']) {
     const src = readFileSync(join(web, f), 'utf8');
-    assert.match(src, /withOrgPrivateFields\(supabase/, f);
+    assert.match(src, /loadOrgPrivateFields\(supabase/, f);
     assert.match(src, /select\(ORG_READABLE_COLUMNS\)/, f);
+    assert.match(src, /privateBaseline/, f);
   }
   for (const f of ['app/admin/settings/page.tsx', 'app/onboarding/page.tsx', 'app/reports/new/NewServiceReportClient.tsx']) {
     assert.match(readFileSync(join(web, f), 'utf8'), /ORG_READABLE_COLUMNS/, f);
@@ -103,4 +112,63 @@ test('F-3: 000932 standards: transaction, definer, grants, drift guards, exact r
   assert.match(rb, /GRANT SELECT ON public\.organizations TO anon, authenticated;/);
   assert.match(rb, /'prospect_pool', 'false'\) NOT IN \('true', 't'\)/);
   assert.match(rb, /'000931: logged-out directory page\./);
+});
+
+test('QA #325: 000932 comment, MAINTAIN revoke and exact rollback', () => {
+  const sql = readFileSync(MIG, 'utf8');
+  const rb = readFileSync(RB, 'utf8');
+  const comment = sql.match(/COMMENT ON FUNCTION public\.public_directory_page[^']*'([^']*)/);
+  assert.ok(comment);
+  assert.match(comment[1], /^000932:/);
+  assert.doesNotMatch(comment[1], /^000931:/);
+  assert.match(sql, /REVOKE MAINTAIN ON public\.organizations FROM anon, authenticated;/);
+  assert.match(rb, /GRANT MAINTAIN ON public\.organizations TO anon, authenticated;/);
+});
+
+test('QA #325 M-1: privateFieldsPatch only sends loaded, changed fields', () => {
+  // Load failed: never send notes/tax_id (a save would wipe them).
+  assert.deepEqual(privateFieldsPatch(null, { notes: '' }), {});
+  assert.deepEqual(privateFieldsPatch(null, { notes: 'x', tax_id: 'y' }), {});
+  // Loaded but unchanged: nothing.
+  assert.deepEqual(privateFieldsPatch({ notes: 'n', tax_id: null }, { notes: 'n' }), {});
+  assert.deepEqual(privateFieldsPatch({ notes: 'n', tax_id: null }, { notes: '  n  ' }), {});
+  assert.deepEqual(privateFieldsPatch({ notes: null, tax_id: null }, { notes: '' }), {});
+  // Changed: included.
+  assert.deepEqual(privateFieldsPatch({ notes: 'n', tax_id: null }, { notes: 'm' }), { notes: 'm' });
+  // Cleared on purpose: null plus an explicit clear flag for the server guard.
+  assert.deepEqual(privateFieldsPatch({ notes: 'n', tax_id: null }, { notes: '' }), { notes: null, clear_notes: true });
+});
+
+test('QA #325 M-1: guardPrivateFieldWipe drops empty notes/tax_id without a clear flag', () => {
+  const p1: Record<string, unknown> = { name: 'A', notes: null, tax_id: '' };
+  guardPrivateFieldWipe(p1, {});
+  assert.deepEqual(p1, { name: 'A' });
+  const p2: Record<string, unknown> = { notes: null };
+  guardPrivateFieldWipe(p2, { clear_notes: true });
+  assert.deepEqual(p2, { notes: null });
+  const p3: Record<string, unknown> = { notes: 'keep' };
+  guardPrivateFieldWipe(p3, {});
+  assert.deepEqual(p3, { notes: 'keep' });
+});
+
+test('QA #325: /api/org/profile guards wipes and returns readable columns only', () => {
+  const src = readFileSync(join(web, 'app/api/org/profile/route.ts'), 'utf8');
+  assert.match(src, /guardPrivateFieldWipe\(payload, body\)/);
+  assert.match(src, /select\(ORG_PROFILE_RESPONSE_COLUMNS\)/);
+  assert.doesNotMatch(src, /select\(['"]\*['"]\)/);
+  const cols = ORG_PROFILE_RESPONSE_COLUMNS.split(',').map((c) => c.trim());
+  for (const c of ['stripe_account_id', 'lead_source', 'prospect_pool', 'creator_shop_org_id', 'trial_granted_at']) {
+    assert.ok(!cols.includes(c), c);
+  }
+  assert.ok(cols.includes('notes') && cols.includes('tax_id'));
+});
+
+test('QA #325 M-1: notes-unavailable state replaces the editor', () => {
+  const form = readFileSync(join(web, 'components/CustomerInfoForm.tsx'), 'utf8');
+  assert.match(form, /notesAvailable/);
+  assert.match(form, /Notes unavailable right now/);
+  const company = readFileSync(join(web, 'app/company/page.tsx'), 'utf8');
+  assert.match(company, /Notes unavailable right now/);
+  assert.doesNotMatch(company, /notes: currentOrg\.notes \?\? null/);
+  assert.match(readFileSync(join(web, 'app/customers/[id]/page.tsx'), 'utf8'), /notesAvailable=\{privateBaseline != null\}/);
 });

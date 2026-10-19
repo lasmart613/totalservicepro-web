@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publicShareRequestRow } from './share-request-public.ts';
+import { sanitizeShareListingDetails } from './share-listing-public.ts';
 import { publicSellerView, storefrontAbout } from './marketplace/storefront.ts';
 
 const web = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,4 +47,28 @@ test('F-2: seller org view: non-storefront sellers expose only id/name/type; not
   const selects = server.slice(server.indexOf('STOREFRONT_ORG_SELECTS = ['), server.indexOf('] as const'));
   assert.doesNotMatch(selects, /\bnotes\b|tax_id|stripe_/);
   assert.match(server, /resolveListingStorefront[\s\S]{0,200}loadPublicSellerOrg\(organizationId\)/);
+});
+
+
+test('QA #325 L-1: share listing details drop every stripe* key and seller contact', () => {
+  const out = sanitizeShareListingDetails({
+    stripe_price_id: 'price_1',
+    stripe_product_id: 'prod_1',
+    stripe_price_cents: 100,
+    StripeAccount: 'acct_1',
+    seller_email: 'a@b.c',
+    contact_phone: '1',
+    hours: 1200,
+  });
+  assert.deepEqual(out, { hours: 1200 });
+  assert.equal(sanitizeShareListingDetails(null), null);
+  assert.match(read('app/api/share/listing/[id]/route.ts'), /sanitizeShareListingDetails\(data\.details\)/);
+});
+
+test('QA #325: /api/share/request/<non-uuid> is a 404 before any DB call', () => {
+  const src = read('app/api/share/request/[id]/route.ts');
+  const guard = src.indexOf('REQUEST_ID_RE.test(id)');
+  assert.ok(guard > 0);
+  assert.ok(guard < src.indexOf('getSupabaseAdmin('), 'uuid check precedes the DB client');
+  assert.match(src.slice(guard, guard + 200), /status: 404/);
 });
