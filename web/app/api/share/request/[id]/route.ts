@@ -4,6 +4,8 @@ import { publicShareRequestRow, SHARE_REQUEST_SELECT } from '@/lib/share-request
 
 export const dynamic = 'force-dynamic';
 
+const REQUEST_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * Public share endpoint for RFQs.
  * Returns the open_service_requests column set (minus budget) for open/bidding requests so
@@ -16,17 +18,15 @@ export async function GET(
 ) {
   try {
     const raw = await Promise.resolve(ctx.params);
-    const id = raw?.id;
-    if (!id) {
-      return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const id = String(raw?.id || '').trim();
+    // service_requests.id is a uuid: anything else is a 404 without a DB call.
+    if (!REQUEST_ID_RE.test(id)) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     if (!hasServiceRole()) {
       return NextResponse.json(
-        {
-          error: 'Share preview unavailable',
-          hint: 'Add SUPABASE_SERVICE_ROLE_KEY to Netlify, or run public SELECT policies on service_requests.',
-        },
+        { error: 'Share preview unavailable' },
         { status: 503 }
       );
     }
@@ -61,12 +61,12 @@ export async function GET(
       );
     }
 
-    let org: { name?: string | null; city?: string | null; state?: string | null } | null = null;
+    let org: { name?: string | null; state?: string | null } | null = null;
     if (data.organization_id != null) {
       try {
         const { data: found } = await admin
           .from('organizations')
-          .select('name, city, state')
+          .select('name, state')
           .eq('id', data.organization_id)
           .maybeSingle();
         org = found || null;

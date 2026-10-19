@@ -57,6 +57,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Site',
     'الموقع',
   ),
+  'Notes unavailable right now': row(
+    'یادداشت‌ها اکنون در دسترس نیستند',
+    'Notas no disponibles en este momento',
+    'Notes indisponibles pour le moment',
+    'ההערות אינן זמינות כרגע',
+    'Note non disponibili al momento',
+    'Notizen derzeit nicht verfügbar',
+    'Notas indisponíveis no momento',
+    'الملاحظات غير متاحة حاليًا',
+  ),
   'Notes': row(
     'یادداشت',
     'Notas',

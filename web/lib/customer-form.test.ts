@@ -8,6 +8,7 @@ import {
   charLimitFromError,
   customerOrgPayload,
   emptyCustomerForm,
+  updateCustomerOrg,
   finalizeOrganizationPayload,
   filterLinkedCustomers,
   loadLinkedCustomerOrgs,
@@ -381,4 +382,44 @@ test('send-invoice requires an owned invoice row before service-role writes', ()
   assert.match(src, /Invoice not found/);
   assert.doesNotMatch(src, /belongs to another organization/);
   assert.match(src, /if \(invoiceId && inv\)/);
+});
+
+function recordingSupabase() {
+  const updates: Array<Record<string, unknown>> = [];
+  const chain = (): unknown =>
+    new Proxy(function () {}, {
+      get(_t, prop) {
+        if (prop === 'then') {
+          return (resolve: (v: unknown) => void) => resolve({ data: [], error: null, count: 0 });
+        }
+        return (...args: unknown[]) => {
+          if (prop === 'update' && args[0] && typeof args[0] === 'object') {
+            updates.push(args[0] as Record<string, unknown>);
+          }
+          return chain();
+        };
+      },
+    });
+  return { client: chain() as never, updates };
+}
+
+test('QA #325 M-1: updateCustomerOrg never sends notes when org_private_fields failed', async () => {
+  const { client, updates } = recordingSupabase();
+  const form = { ...emptyCustomerForm(), name: 'Clinic', notes: '' };
+  const out = await updateCustomerOrg(client, 40, form, { privateBaseline: null });
+  assert.ok(!('notes' in out));
+  assert.ok(updates.length > 0 && updates.every((u) => !('notes' in u)));
+});
+
+test('QA #325 M-1: updateCustomerOrg skips unchanged notes, sends changed ones', async () => {
+  const a = recordingSupabase();
+  await updateCustomerOrg(a.client, 40, { ...emptyCustomerForm(), name: 'C', notes: 'same' }, {
+    privateBaseline: { notes: 'same', tax_id: null },
+  });
+  assert.ok(a.updates.every((u) => !('notes' in u)));
+  const b = recordingSupabase();
+  await updateCustomerOrg(b.client, 40, { ...emptyCustomerForm(), name: 'C', notes: 'new' }, {
+    privateBaseline: { notes: 'same', tax_id: null },
+  });
+  assert.ok(b.updates.some((u) => u.notes === 'new'));
 });

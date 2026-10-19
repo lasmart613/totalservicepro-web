@@ -27,9 +27,10 @@ const ORGS: (PublicDirectoryRow & { name: string; phone?: string })[] = [
   { id: 8, name: 'Inactive', type: 'service_company', state: 'WA', list_in_directory: true, is_active: false },
   { id: 10, name: 'Spaced Import', type: 'laser_clinic', state: 'CA', list_in_directory: true, notes: 'IMPORT : amer-clinics-1018' },
   { id: 11, name: 'Reimport', type: 'laser_clinic', state: 'CA', list_in_directory: true, notes: 'reimport: intl-clinics-1018' },
+  { id: 12, name: 'Text Prospect', type: 'service_company', state: 'CA', list_in_directory: true, prospect_pool: 'amer-clinics-1018' },
   { id: 9, name: 'Listed Supplier', type: 'parts_supplier', state: 'OR', list_in_directory: true, notes: 'important: ships fast' },
 ];
-const FORBIDDEN = [2, 3, 4, 5, 6, 7, 8, 10, 11];
+const FORBIDDEN = [2, 3, 4, 5, 6, 7, 8, 10, 11, 12];
 
 /** Mirrors the 000931 SQL filter. */
 function fakeRpc(source = ORGS, calls: unknown[] = []): DirectoryRpc {
@@ -39,7 +40,7 @@ function fakeRpc(source = ORGS, calls: unknown[] = []): DirectoryRpc {
       .filter((o) => o.list_in_directory === true && o.is_active !== false)
       .filter((o) => !args.p_types || args.p_types.includes(String(o.type)))
       .filter((o) => !/(^|[^a-z])(re)?import\s*:/i.test(o.notes || ''))
-      .filter((o) => o.prospect_pool !== true && !(o.lead_source || '').trim())
+      .filter((o) => !['', 'false', 'f'].includes(String(o.prospect_pool ?? '').trim().toLowerCase()) ? false : !(o.lead_source || '').trim())
       .sort((a, b) => Number(a.id) - Number(b.id));
     const rows = listed.slice(args.p_offset, args.p_offset + args.p_limit).map((o) => ({ id: o.id, type: o.type, region: o.state === 'CA' ? 'West' : o.state === 'OR' ? 'West' : null }));
     return { data: { rows, total: listed.length }, error: null };

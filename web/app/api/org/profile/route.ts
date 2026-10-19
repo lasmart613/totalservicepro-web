@@ -7,6 +7,7 @@ import { companyBrandingEnabled, normalizeHex, type CompanyThemeSource } from '@
 import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
 import { parseOrgTimeZone } from '@/lib/org-timezone';
 import { normalizeCountryName } from '@/lib/countries';
+import { guardPrivateFieldWipe, ORG_PROFILE_RESPONSE_COLUMNS } from '@/lib/org-columns';
 
 /**
  * POST /api/org/profile
@@ -197,6 +198,8 @@ export async function POST(req: NextRequest) {
       }
       payload.country = name;
     }
+    // QA #325 M-1: never wipe notes with an empty value unless the client asked (clear_notes).
+    guardPrivateFieldWipe(payload, body);
     if (Object.keys(payload).length === 0) {
       return NextResponse.json({ error: 'No profile fields to save' }, { status: 400 });
     }
@@ -211,10 +214,10 @@ export async function POST(req: NextRequest) {
         .from('organizations')
         .update(payload)
         .eq('id', linkedId)
-        .select('*')
+        .select(ORG_PROFILE_RESPONSE_COLUMNS)
         .maybeSingle();
       if (!error && data?.id != null) {
-        saved = data as Record<string, unknown>;
+        saved = data as unknown as Record<string, unknown>;
         lastError = null;
         break;
       }

@@ -42,6 +42,7 @@ import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
 import { useT } from '@/lib/fa/locale';
 import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
+import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, type OrgPrivateFields } from '@/lib/org-columns';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -165,6 +166,7 @@ export default function CustomerProfilePage() {
 
   // Editable form (same fields as Directory Add Customer)
   const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
+  const [privateBaseline, setPrivateBaseline] = useState<OrgPrivateFields | null>(null);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
   const [locationRefresh, setLocationRefresh] = useState(0);
@@ -288,7 +290,7 @@ export default function CustomerProfilePage() {
       {
         const { data, error } = await supabase
           .from('organizations')
-          .select('*')
+          .select(ORG_READABLE_COLUMNS)
           .eq('id', id)
           .maybeSingle();
         if (error) {
@@ -296,7 +298,7 @@ export default function CustomerProfilePage() {
           const slim = await supabase
             .from('organizations')
             .select(
-              'id, name, type, address, city, state, zip, phone, email, website, notes, biz_type, facility_type, specialties, laser_models, logo_url'
+              'id, name, type, address, city, state, zip, phone, email, website, biz_type, facility_type, specialties, laser_models, logo_url'
             )
             .eq('id', id)
             .maybeSingle();
@@ -305,6 +307,12 @@ export default function CustomerProfilePage() {
           org = (data as CustomerOrg) || null;
         }
       }
+
+      // 000932: notes come from org_private_fields (CRM creator / members only).
+      // null = not loaded: notes show as unavailable and saves never send them.
+      const priv = org ? await loadOrgPrivateFields(supabase, org.id as any) : null;
+      setPrivateBaseline(priv);
+      if (org && priv) org = { ...org, ...priv };
 
       if (!org) {
         setNotFound(true);
@@ -486,7 +494,10 @@ export default function CustomerProfilePage() {
     if (!canEdit || !customer?.id) return;
     setSaving(true);
     try {
-      const payload = await updateCustomerOrg(supabase, customer.id, form, { logoFile });
+      const payload = await updateCustomerOrg(supabase, customer.id, form, { logoFile, privateBaseline });
+      if (privateBaseline && 'notes' in payload) {
+        setPrivateBaseline({ ...privateBaseline, notes: (payload.notes as string | null) ?? null });
+      }
       setCustomer((prev) =>
         prev
           ? {
@@ -815,6 +826,7 @@ export default function CustomerProfilePage() {
               onChange={handleFormChange}
               disabled={!canEdit}
               orgType={customer.type}
+              notesAvailable={privateBaseline != null}
               onLogoFileChange={(file) => {
                 setLogoFile(file);
                 setDirty(true);

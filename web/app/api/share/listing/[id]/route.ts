@@ -2,8 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { getMarketplaceCaller } from '@/lib/marketplace/caller';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { SHARE_LISTING_SELECTS, sanitizeShareListingDetails } from '@/lib/share-listing-public';
 
 export const dynamic = 'force-dynamic';
+
+/** marketplace_listings.id is a uuid; anything else is a 404 without touching the DB. */
+const LISTING_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 
 /**
  * Public share endpoint for marketplace listings (equipment / parts / consumables).
@@ -14,26 +19,20 @@ export async function GET(
 ) {
   try {
     const raw = await Promise.resolve(ctx.params);
-    const id = raw?.id;
-    if (!id) {
-      return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    const id = String(raw?.id || '').trim();
+    if (!LISTING_ID_RE.test(id)) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
     if (!hasServiceRole()) {
       return NextResponse.json(
-        {
-          error: 'Share preview unavailable',
-          hint: 'Add SUPABASE_SERVICE_ROLE_KEY to Netlify, or run public SELECT policies on marketplace_listings.',
-        },
+        { error: 'Share preview unavailable' },
         { status: 503 }
       );
     }
 
     const admin = getSupabaseAdmin();
-    const selects = [
-      'id, title, description, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength, organization_id, stripe_product_id, stripe_price_id',
-      'id, title, description, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength',
-    ];
+    const selects = SHARE_LISTING_SELECTS;
     let data: Record<string, unknown> | null = null;
     let error: { message?: string } | null = null;
     for (const cols of selects) {
@@ -45,8 +44,8 @@ export async function GET(
     }
 
     if (error) {
-      console.error('[share/listing]', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+      console.error('[share/listing]', error.message);
+      return NextResponse.json({ error: 'Share preview unavailable' }, { status: 500 });
     }
     if (!data) {
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
@@ -66,16 +65,8 @@ export async function GET(
       );
     }
 
-    // Sanitize details — drop seller contact if present
-    let details = data.details;
-    if (details && typeof details === 'object') {
-      const d = { ...(details as Record<string, unknown>) };
-      delete d.seller_email;
-      delete d.seller_phone;
-      delete d.contact_email;
-      delete d.contact_phone;
-      details = d;
-    }
+    // Sanitize details: no seller contact, no Stripe keys.
+    const details = sanitizeShareListingDetails(data.details);
 
     return NextResponse.json({
       listing: {
@@ -83,12 +74,15 @@ export async function GET(
         details,
         seller_id: undefined,
         created_by: undefined,
+        serial_number: undefined,
+        stripe_product_id: undefined,
+        stripe_price_id: undefined,
         organization_id: organizationId,
         _public_share: true,
       },
     });
   } catch (e: unknown) {
-    console.error('[share/listing]', e);
-    return NextResponse.json({ error: e instanceof Error ? e.message : 'Server error' }, { status: 500 });
+    console.error('[share/listing]', e instanceof Error ? e.message : e);
+    return NextResponse.json({ error: 'Share preview unavailable' }, { status: 500 });
   }
 }

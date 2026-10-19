@@ -29,6 +29,7 @@ import { normalizeRegionInput } from './geo.ts';
 import { syncPrimaryLocationFromForm } from './customer-locations.ts';
 import { emptySocialFields, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
+import { privateFieldsPatch, type OrgPrivateFields } from './org-columns.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
   'Medical Spa',
@@ -471,7 +472,7 @@ export async function updateCustomerOrg(
   supabase: SupabaseClient,
   customerId: string | number,
   form: CustomerInfoFormValues,
-  opts?: { logoFile?: File | null }
+  opts?: { logoFile?: File | null; privateBaseline?: OrgPrivateFields | null }
 ): Promise<Record<string, unknown>> {
   const err = validateCustomerForm(form);
   if (err) throw new Error(err);
@@ -479,6 +480,10 @@ export async function updateCustomerOrg(
   const payload: Record<string, unknown> = customerOrgPayload(form, {
     updated_at: new Date().toISOString(),
   });
+  // QA #325 M-1: notes only when org_private_fields loaded them AND they changed.
+  delete payload.notes;
+  const priv = privateFieldsPatch(opts?.privateBaseline ?? null, { notes: form.notes });
+  if ('notes' in priv) payload.notes = priv.notes;
   const { error } = await updateOmittingCharOverflow(
     supabase,
     'organizations',
