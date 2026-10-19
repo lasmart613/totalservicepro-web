@@ -4,7 +4,9 @@ import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
+  clinicLeadClientIp,
   clinicLeadConfirmationKey,
+  isUnknownColumnError,
   isConfirmationKeyConflict,
   isLeadsTableMissing,
   shouldSendConfirmation,
@@ -46,15 +48,33 @@ test('send decision: one confirmation per claim', () => {
   assert.equal(shouldSendConfirmation({ email: 'a@b.test', stored: false, claimedKey: false, lostClaim: false }), true);
 });
 
-test('route claims the key, retries without it on conflict, and clears it on a failed send', () => {
+test('only 42703 / PGRST204 take the old-schema fallback', () => {
+  assert.equal(isUnknownColumnError({ code: '42703', message: 'column "claimed_at" does not exist' }), true);
+  assert.equal(isUnknownColumnError({ code: 'PGRST204', message: "Could not find the 'claimed_at' column" }), true);
+  assert.equal(isUnknownColumnError({ code: '23503', message: 'violates foreign key constraint "clinic_service_leads_organization_id_fkey"' }), false);
+  assert.equal(isUnknownColumnError({ code: '23502', message: 'null value in column "organization_id"' }), false);
+  assert.equal(isUnknownColumnError(null), false);
+});
+
+test('rate-limit key: Netlify client IP first, else the last XFF hop', () => {
+  const h = (m: Record<string, string>) => (n: string) => m[n] ?? null;
+  assert.equal(clinicLeadClientIp(h({ 'x-nf-client-connection-ip': '203.0.113.9', 'x-forwarded-for': '1.2.3.4, 203.0.113.9' })), '203.0.113.9');
+  assert.equal(clinicLeadClientIp(h({ 'x-forwarded-for': '6.6.6.6, 10.0.0.1, 203.0.113.9' })), '203.0.113.9');
+  assert.equal(clinicLeadClientIp(h({ 'x-real-ip': '198.51.100.2' })), '198.51.100.2');
+  assert.equal(clinicLeadClientIp(h({})), 'unknown');
+});
+
+test('route and migration wiring', () => {
   const route = readFileSync(join(here, '../app/api/clinic-service-leads/route.ts'), 'utf8');
-  assert.match(route, /clinicLeadConfirmationKey/);
-  assert.match(route, /isConfirmationKeyConflict/);
-  assert.match(route, /confirmation_key: null/);
-  assert.equal((route.match(/update\(\{ confirmation_key: null \}\)/g) || []).length, 2);
-  assert.doesNotMatch(route, /async function confirmationAlreadySent/);
+  const handler = readFileSync(join(here, './clinic-lead-handler.ts'), 'utf8');
+  assert.match(route, /clinicLeadClientIp/);
+  assert.doesNotMatch(route, /split\(','\)\[0\]/);
+  assert.match(handler, /finally \{/);
+  assert.match(handler, /releaseClaim/);
+  assert.doesNotMatch(handler, /error: message/);
   const mig = readFileSync(join(here, '../supabase/migrations/20261018_000930_clinic_service_leads.sql'), 'utf8');
   assert.match(mig, /CREATE UNIQUE INDEX IF NOT EXISTS clinic_service_leads_confirmation_key_key/);
+  assert.match(mig, /claimed_at timestamptz/);
   assert.match(mig, /REVOKE ALL ON TABLE public\.clinic_service_leads FROM PUBLIC, anon, authenticated/);
   assert.match(mig, /SET LOCAL lock_timeout = '5s'/);
 });

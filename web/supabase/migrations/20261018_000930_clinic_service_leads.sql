@@ -16,9 +16,11 @@
 -- bypasses RLS and keeps its grants.
 --
 -- confirmation_key: one confirmation email per (email, description, UTC day).
--- The route sets it on insert; a unique-violation means a confirmation was
--- already claimed, so the route stores the row without the key and skips the
--- confirmation. A failed send clears the key so a retry may confirm.
+-- The route sets it (and claimed_at) on insert; a unique-violation means a
+-- confirmation was already claimed, so the route stores the row without the
+-- key and skips the confirmation. The route releases the key in a finally
+-- block unless the email was sent; a claim older than ~10 minutes that never
+-- got confirmation_sent can be retaken (process killed mid-send).
 --
 -- No functions are created (no SECURITY DEFINER surface). Independent of
 -- 000927 / 000928 / 000929 (no shared objects); any order is fine.
@@ -78,7 +80,8 @@ CREATE TABLE IF NOT EXISTS public.clinic_service_leads (
   delivered_to_inbox boolean NOT NULL DEFAULT false,
   organization_id bigint REFERENCES public.organizations(id) ON DELETE SET NULL,
   service_request_id uuid REFERENCES public.service_requests(id) ON DELETE SET NULL,
-  confirmation_key text
+  confirmation_key text,
+  claimed_at timestamptz
 );
 -- Columns added by 000001..000003 if an older copy of the table exists.
 ALTER TABLE public.clinic_service_leads
@@ -87,7 +90,8 @@ ALTER TABLE public.clinic_service_leads
   ADD COLUMN IF NOT EXISTS model text,
   ADD COLUMN IF NOT EXISTS organization_id bigint REFERENCES public.organizations(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS service_request_id uuid REFERENCES public.service_requests(id) ON DELETE SET NULL,
-  ADD COLUMN IF NOT EXISTS confirmation_key text;
+  ADD COLUMN IF NOT EXISTS confirmation_key text,
+  ADD COLUMN IF NOT EXISTS claimed_at timestamptz;
 
 CREATE INDEX IF NOT EXISTS clinic_service_leads_created_at_idx ON public.clinic_service_leads (created_at DESC);
 CREATE INDEX IF NOT EXISTS clinic_service_leads_organization_id_idx ON public.clinic_service_leads (organization_id);
@@ -105,14 +109,25 @@ COMMENT ON COLUMN public.clinic_service_leads.service_request_id IS
   'service_requests row created for this guest landing submit. Insert-only; never an update of a live customer request.';
 COMMENT ON COLUMN public.clinic_service_leads.confirmation_key IS
   'md5(lower(email)|description)|UTC day. Unique when set: at most one confirmation email per request per day.';
+COMMENT ON COLUMN public.clinic_service_leads.claimed_at IS
+  'When confirmation_key was claimed. A claim older than ~10 minutes with confirmation_sent=false may be retaken by the route.';
 
 ALTER TABLE public.clinic_service_leads ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.clinic_service_leads FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.clinic_service_leads TO service_role;
 
--- Drift guard: no policy may exist on the table (service role only).
+-- Drift guard: no policy may exist on the table (service role only), and the
+-- claim index must really be UNIQUE (IF NOT EXISTS would keep a stray one).
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_index
+    WHERE indexrelid = to_regclass('public.clinic_service_leads_confirmation_key_key')
+      AND indrelid = 'public.clinic_service_leads'::regclass
+      AND indisunique
+  ) THEN
+    RAISE EXCEPTION '000930 drift: clinic_service_leads_confirmation_key_key is not a unique index on clinic_service_leads';
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_policies WHERE schemaname = 'public' AND tablename = 'clinic_service_leads') THEN
     RAISE EXCEPTION '000930 drift: unexpected policy on public.clinic_service_leads';
   END IF;
