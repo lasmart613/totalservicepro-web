@@ -61,21 +61,15 @@ test('guest cards keep type chrome and a generic region, never the clinic identi
   assert.doesNotMatch(blob, /75201/);
 });
 
-test('missing contact fields stay omitted so cards still look real', () => {
-  const card = redactDirectoryOrg({
-    id: 7,
-    name: 'Silent Repair Co',
-    type: 'service_company',
-    state: 'Oregon',
-  });
-  assert.equal(card.region, 'West');
-  assert.equal(card.typeLabel, 'Repair company');
-  assert.equal(card.hasPhone, false);
-  assert.equal(card.hasEmail, false);
-  assert.equal(card.hasWebsite, false);
-  assert.equal(card.phone, null);
-  assert.equal(card.email, null);
-  assert.doesNotMatch(JSON.stringify(card), /Silent Repair/);
+test('contact presence is uniform so guests cannot tell which orgs have contacts', () => {
+  const bare = redactDirectoryOrg({ id: 7, name: 'Silent Repair Co', type: 'service_company', state: 'Oregon' });
+  const full = redactDirectoryOrg({ ...SAMPLE, id: 7, type: 'service_company', state: 'Oregon' });
+  assert.equal(bare.region, 'West');
+  assert.equal(bare.typeLabel, 'Repair company');
+  assert.deepEqual(bare, full);
+  assert.equal(bare.hasPhone, true);
+  assert.equal(bare.phone, GUEST_PHONE_PLACEHOLDER);
+  assert.doesNotMatch(JSON.stringify(bare), /Silent Repair/);
 });
 
 test('unknown or identifying state values are dropped instead of echoed', () => {
@@ -124,9 +118,13 @@ test('logged-out directory redacts PII and sends card clicks to signup', () => {
   assert.match(page, /\/api\/directory/);
   assert.match(page, /GUEST_SIGNUP_HREF/);
   assert.match(page, /useSignedIn/);
-  assert.match(api, /redactDirectoryOrg/);
-  assert.match(api, /organizations/);
-  assert.doesNotMatch(api, /\.eq\(\s*['\"]list_in_directory['\"]/);
+  // Guest API: anon key + listed-only RPC (000931), never the service role.
+  assert.match(api, /loadGuestDirectoryPage/);
+  assert.match(api, /getSupabaseAnonKey/);
+  assert.doesNotMatch(api, /getSupabaseAdmin|hasServiceRole|SERVICE_ROLE/);
+  assert.doesNotMatch(api, /from\(\s*['"]organizations['"]/);
+  assert.doesNotMatch(api, /error\.message|message \}/);
+  assert.match(page, /\.eq\('list_in_directory', true\)\s*\.or\(DIRECTORY_NOT_IMPORTED_OR\)/);
   assert.match(ui, /blur-\[7px\]/);
   assert.match(ui, /placeholder/);
   assert.match(card, /directoryHref/);

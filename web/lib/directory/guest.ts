@@ -255,21 +255,15 @@ export function matchesGuestDirectoryFilter(
   return true;
 }
 
-function present(value?: string | null): boolean {
-  return Boolean(value && String(value).trim());
-}
-
 /**
- * Map a real Organizations row to a guest card.
- * Placeholders only — the real name / phone / address / city are dropped.
+ * Map a listed Organizations row to a guest card.
+ * Placeholders only: the real name / phone / address / city are dropped, and
+ * contact "presence" is uniform (every card shows the same blurred contact
+ * row), so a guest cannot tell which orgs have a phone, email or website.
  */
 export function redactDirectoryOrg(org: DirectoryOrgLike): GuestDirectoryCard {
   const id = org.id ?? 'org';
   const type = org.type ? String(org.type) : null;
-  const hasPhone = present(org.phone);
-  const hasEmail = present(org.email);
-  const hasWebsite = present(org.website);
-  const hasAddress = present(org.address) || present(org.city) || present(org.zip);
   return {
     id,
     type,
@@ -277,13 +271,13 @@ export function redactDirectoryOrg(org: DirectoryOrgLike): GuestDirectoryCard {
     region: regionFromState(org.state),
     name: GUEST_NAME_PLACEHOLDER,
     initials: GUEST_INITIALS_PLACEHOLDER,
-    hasPhone,
-    hasEmail,
-    hasWebsite,
-    hasAddress,
-    phone: hasPhone ? GUEST_PHONE_PLACEHOLDER : null,
-    email: hasEmail ? GUEST_EMAIL_PLACEHOLDER : null,
-    address: hasAddress ? GUEST_ADDRESS_PLACEHOLDER : null,
+    hasPhone: true,
+    hasEmail: true,
+    hasWebsite: true,
+    hasAddress: true,
+    phone: GUEST_PHONE_PLACEHOLDER,
+    email: GUEST_EMAIL_PLACEHOLDER,
+    address: GUEST_ADDRESS_PLACEHOLDER,
   };
 }
 
