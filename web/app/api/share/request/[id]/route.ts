@@ -23,10 +23,7 @@ export async function GET(
 
     if (!hasServiceRole()) {
       return NextResponse.json(
-        {
-          error: 'Share preview unavailable',
-          hint: 'Add SUPABASE_SERVICE_ROLE_KEY to Netlify, or run public SELECT policies on service_requests.',
-        },
+        { error: 'Share preview unavailable' },
         { status: 503 }
       );
     }
@@ -61,12 +58,12 @@ export async function GET(
       );
     }
 
-    let org: { name?: string | null; city?: string | null; state?: string | null } | null = null;
+    let org: { name?: string | null; state?: string | null } | null = null;
     if (data.organization_id != null) {
       try {
         const { data: found } = await admin
           .from('organizations')
-          .select('name, city, state')
+          .select('name, state')
           .eq('id', data.organization_id)
           .maybeSingle();
         org = found || null;

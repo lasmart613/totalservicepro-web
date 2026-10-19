@@ -28,7 +28,7 @@ type Row = Record<string, unknown>;
 /** Response body for /api/share/request/[id]. organization_id is not echoed; the org name is. */
 export function publicShareRequestRow(
   data: Row,
-  org: { name?: string | null; city?: string | null; state?: string | null } | null
+  org: { name?: string | null; state?: string | null } | null
 ) {
   return {
     id: data.id,
@@ -39,7 +39,8 @@ export function publicShareRequestRow(
     manufacturer: data.manufacturer ?? null,
     model: data.model ?? null,
     service_type: data.service_type ?? null,
-    city: (data.city as string | null) || org?.city || null,
+    // The request's own city only; the requesting org's city is never used (F-2).
+    city: (data.city as string | null) || null,
     state: (data.state as string | null) || org?.state || null,
     location: data.location ?? null,
     category: data.category ?? null,

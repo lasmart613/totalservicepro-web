@@ -43,6 +43,7 @@ import { orgTodayIso } from '@/lib/org-timezone';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
+import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
 import {
   catalogManufacturerValue,
   catalogModelValue,
@@ -1144,7 +1145,7 @@ export default function NewServiceReport() {
         const { error: extraErr } = await supabase.from('organizations').update(extras).eq('id', orgId);
         if (extraErr) toast.error('Customer added, but the email/contact was not saved: ' + extraErr.message);
       }
-      const { data: org, error: readErr } = await supabase.from('organizations').select('*').eq('id', orgId).maybeSingle();
+      const { data: org, error: readErr } = await supabase.from('organizations').select(ORG_READABLE_COLUMNS).eq('id', orgId).maybeSingle();
       if (readErr || !org) throw new Error(readErr?.message || 'Customer added, but it could not be loaded.');
 
       await loadCustomers(currentUserOrgId);
