@@ -42,8 +42,11 @@ test('000926 has an exact rollback', () => {
 });
 
 test('guest directory still hides inactive orgs and signed-in directory needs list_in_directory', () => {
-  const api = readFileSync(join(web, 'app/api/directory/route.ts'), 'utf8');
-  assert.match(api, /o\.is_active !== false/);
+  // 000931: the guest path reads public_directory_page (is_active IS DISTINCT FROM false), plus a JS re-check.
+  const api = readFileSync(join(web, 'lib/directory/guest-api.ts'), 'utf8');
+  assert.match(api, /row\.is_active === false\) return false/);
+  const rpc = readFileSync(join(web, 'supabase/migrations/20261018_000931_public_directory_page.sql'), 'utf8');
+  assert.match(rpc, /o\.is_active IS DISTINCT FROM false/);
   const page = readFileSync(join(web, 'app/directory/page.tsx'), 'utf8');
   assert.match(page, /\.eq\('list_in_directory', true\)/);
 });

@@ -16,6 +16,7 @@ import { Header } from '@/components/Header';
 import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
+import { DIRECTORY_NOT_IMPORTED_OR } from '@/lib/directory/guest-api';
 import { isServiceOrgType } from '@/lib/org-types';
 import { orgTypeLabel } from '@/lib/labels';
 import { useSignedIn } from '@/lib/use-signed-in';
@@ -121,6 +122,7 @@ export default function DirectoryPage() {
           .from('organizations')
           .select(listedSelect)
           .eq('list_in_directory', true)
+          .or(DIRECTORY_NOT_IMPORTED_OR)
           .order('name')
           .range(from, to)
       );
@@ -137,6 +139,7 @@ export default function DirectoryPage() {
               .from('organizations')
               .select(listedSelect)
               .eq('list_in_directory', true)
+              .or(DIRECTORY_NOT_IMPORTED_OR)
               .order('name')
               .range(from, to)
           );
