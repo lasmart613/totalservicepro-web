@@ -72,3 +72,20 @@ test('QA #325: /api/share/request/<non-uuid> is a 404 before any DB call', () =>
   assert.ok(guard < src.indexOf('getSupabaseAdmin('), 'uuid check precedes the DB client');
   assert.match(src.slice(guard, guard + 200), /status: 404/);
 });
+
+test('QA #325 r2: share listing details sanitize recursively, case-insensitive', () => {
+  const out = sanitizeShareListingDetails({
+    price_stripe_id: 'x',
+    Seller_Email: 'a@b.c',
+    CONTACT_PHONE: '1',
+    specs: { hours: 5, meta: { StripeRef: 'r', ok: true }, seller_phone: '2' },
+    options: [{ name: 'A', my_stripe_price: 'p', contact_email: 'e' }, 'plain', 3, null, [{ stripe: 1, k: 2 }]],
+  });
+  assert.deepEqual(out, {
+    specs: { hours: 5, meta: { ok: true } },
+    options: [{ name: 'A' }, 'plain', 3, null, [{ k: 2 }]],
+  });
+  assert.doesNotMatch(JSON.stringify(out), /stripe|seller_|contact_/i);
+  assert.deepEqual(sanitizeShareListingDetails([{ stripe_id: 1 }]), [{}]);
+  assert.equal(sanitizeShareListingDetails('s'), 's');
+});
