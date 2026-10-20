@@ -295,6 +295,8 @@ export async function extractManualBodyText(
   chunks?: IndexChunk[];
   skipped?: string;
   fatal?: string;
+  /** false when a chapter file had no bytes (its numPages is unknown) */
+  complete?: boolean;
 }> {
   const paths = await resolveManualPdfPaths(storage, manual);
   if (!paths.length) {
@@ -305,10 +307,14 @@ export async function extractManualBodyText(
   const fileCounts: IndexedPdfPart[] = [];
   let files = 0;
   let pageOffset = 0;
+  let complete = true;
   for (const path of paths) {
     const got = await downloadPdfBytes(storage, path);
     if (got.error) return { text: '', files, fileCounts, fatal: got.error };
-    if (!got.bytes) continue;
+    if (!got.bytes) {
+      complete = false;
+      continue;
+    }
     try {
       const sliced = await extractPdfPageSlice(got.bytes);
       fileCounts.push({ path, pageCount: sliced.total });
@@ -325,10 +331,47 @@ export async function extractManualBodyText(
       return { text: '', files, fileCounts, fatal: message };
     }
   }
-  if (!files) return { text: '', files: 0, fileCounts, skipped: 'no_extractable_text' };
+  if (!files) return { text: '', files: 0, fileCounts, skipped: 'no_extractable_text', complete };
   const storedChunks = chunkIndexText(chunks.join('\f'));
   const stored = summarizeIndexChunks(storedChunks);
-  return { text: stored.text, files, fileCounts, clip: stored, chunks: storedChunks };
+  return { text: stored.text, files, fileCounts, clip: stored, chunks: storedChunks, complete };
+}
+
+/**
+ * Real page count (pdf.js numPages, summed over chapter files) for manuals.page_count
+ * (000936). Null unless every file reported a positive count.
+ */
+export function pdfPageCountTotal(fileCounts: readonly IndexedPdfPart[]): number | null {
+  if (!fileCounts.length) return null;
+  let total = 0;
+  for (const part of fileCounts) {
+    const n = Math.floor(Number(part?.pageCount));
+    if (!Number.isFinite(n) || n < 1) return null;
+    total += n;
+  }
+  return total >= 1 && total <= 100000 ? total : null;
+}
+
+/**
+ * Write numPages as manuals.page_count with source 'pdf'. It takes precedence over the
+ * index-derived value (indexed_page_max is the last page with text, so scans undercount).
+ * Runs after the index write, so the index triggers cannot overwrite it. Before 000936
+ * the column is missing; that is ignored.
+ */
+async function persistManualPageCount(
+  client: TableClient,
+  id: number,
+  fileCounts: readonly IndexedPdfPart[],
+): Promise<void> {
+  const total = pdfPageCountTotal(fileCounts);
+  if (total == null) return;
+  const table = client.from('manuals');
+  if (!table || typeof table.update !== 'function') return;
+  const updated = await table.update({ page_count: total, page_count_source: 'pdf' }).eq('id', id);
+  const message = String(updated?.error?.message || '');
+  if (updated?.error && !/page_count/i.test(message)) {
+    console.warn('manual page count not stored', message || updated.error);
+  }
 }
 
 /** Store pdf.js page_count and page_start on the folder's chapter_metadata. */
@@ -336,13 +379,16 @@ async function persistChapterPageCounts(
   client: TableClient,
   manual: ManualIndexRow,
   fileCounts: readonly IndexedPdfPart[],
+  complete = true,
 ): Promise<void> {
   const next = chapterMetadataWithPageCounts(
     manual.chapter_metadata,
     fileCounts.map((part) => ({ storagePath: part.path, pageCount: part.pageCount })),
   );
   const id = asManualCatalogId(manual.id);
-  if (!next || id == null) return;
+  if (id == null) return;
+  if (complete) await persistManualPageCount(client, id, fileCounts);
+  if (!next) return;
   const table = client.from('manuals');
   if (!table || typeof table.update !== 'function') return;
   const updated = await table.update({ chapter_metadata: next }).eq('id', id);
@@ -989,7 +1035,7 @@ export async function indexManualSearchText(
   if (!saved.ok) {
     return { manualId, ok: false, chars: extracted.text.length, files: extracted.files, skipped: saved.error };
   }
-  await persistChapterPageCounts(client, manual, extracted.fileCounts);
+  await persistChapterPageCounts(client, manual, extracted.fileCounts, extracted.complete !== false);
   return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
 }
 
@@ -1173,7 +1219,7 @@ export async function indexMissingManualSearchText(
   if (!extracted.text) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || 'no_extractable_text' };
   }
-  await persistChapterPageCounts(client, manual, extracted.fileCounts);
+  await persistChapterPageCounts(client, manual, extracted.fileCounts, extracted.complete !== false);
   return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
 }
 

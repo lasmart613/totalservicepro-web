@@ -20,6 +20,7 @@ import {
 import { loadPublicStorefrontBySlug } from '@/lib/marketplace/storefront-server';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { viewerSeesPartSerial } from '@/lib/marketplace/part-public';
 
 export const dynamic = 'force-dynamic';
 
@@ -88,7 +89,10 @@ export async function GET(
         price_label: formatListingPrice(row),
         price: signedIn ? row.price : null,
         price_type: signedIn ? row.price_type : null,
-        serial_number: signedIn ? row.serial_number : null,
+        // Serials only for the seller org's own members, not every signed-in user.
+        serial_number: viewerSeesPartSerial({ ...row, organization_id: row.organization_id ?? org.id }, caller)
+          ? row.serial_number
+          : null,
         availability: listingAvailability(row),
         organization_id: listingOrgIdVisibleToViewer(row.organization_id ?? org.id, caller?.orgId),
       }));

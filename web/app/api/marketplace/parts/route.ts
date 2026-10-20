@@ -12,6 +12,8 @@ import {
 } from '@/lib/marketplace/parts';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { stripPrivatePartFields, viewerSeesPartSerial } from '@/lib/marketplace/part-public';
+import type { MarketplaceCaller } from '@/lib/marketplace/caller';
 
 export const dynamic = 'force-dynamic';
 
@@ -53,20 +55,16 @@ async function loadPartRows(): Promise<{ rows: MarketplaceListingLike[]; error: 
 function publicize(
   row: MarketplaceListingLike,
   canManage: boolean,
-  viewerOrgId?: string | number | null
+  caller: MarketplaceCaller | null
 ) {
-  const details =
-    row.details && typeof row.details === 'object' ? { ...row.details } : row.details;
-  if (details && typeof details === 'object') {
-    const clean = details as Record<string, unknown>;
-    delete clean.seller_email;
-    delete clean.seller_phone;
-    delete clean.contact_email;
-    delete clean.contact_phone;
-  }
+  const viewerOrgId = caller?.orgId;
+  // No Stripe ids; serial only for the seller org's members; details sanitized.
+  const safe = stripPrivatePartFields(
+    row as MarketplaceListingLike & Record<string, unknown>,
+    viewerSeesPartSerial(row, caller)
+  );
   return {
-    ...row,
-    details,
+    ...safe,
     images: listingImages(row),
     seller_id: canManage ? row.seller_id : undefined,
     created_by: canManage ? row.created_by : undefined,
@@ -111,7 +109,7 @@ export async function GET(req: NextRequest) {
         return isPublicListingStatus(row.status);
       })
       .map((row) =>
-        publicize(row, !!(mine && caller && canManageMarketplaceListing(row, caller)), caller?.orgId)
+        publicize(row, !!(mine && caller && canManageMarketplaceListing(row, caller)), caller)
       );
 
     return NextResponse.json({ listings, mine: !!mine });
