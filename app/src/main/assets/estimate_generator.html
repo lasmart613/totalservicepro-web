@@ -118,7 +118,7 @@
             <div class="grid-2" style="margin-top:16px;">
                 <div>
                     <label>Equipment type</label>
-                    <select id="equipmentType" onchange="refreshEstimateModels()">
+                    <select id="equipmentType" onchange="onEstimateTypeChange()">
                         <option value="laser">Laser</option>
                         <option value="lithotriptor">Lithotriptor</option>
                         <option value="c_arm">C-arm</option>
@@ -135,7 +135,7 @@
                 </div>
                 <div>
                     <label>Manufacturer</label>
-                    <select id="manufacturer" onchange="refreshEstimateModels()">
+                    <select id="manufacturer" onchange="onEstimateManufacturerChange()">
                         <option value="">Select...</option>
                     </select>
                 </div>
@@ -268,11 +268,35 @@
         return have === want;
     }
 
+    // Manufacturer list follows the type: a brand shows when it has a model of
+    // that type. For lasers a brand with no typed models keeps its place.
+    function manufacturerHasType(name, type) {
+        const own = catalogModels.filter((m) => modelBelongsToManufacturer(m, name));
+        if (own.some((m) => modelMatchesEquipmentType(m.equipment_type, type))) return true;
+        if (String(type || 'laser') !== 'laser') return false;
+        return own.length === 0;
+    }
+    function onEstimateTypeChange() {
+        const mfrSel = document.getElementById('manufacturer');
+        const modelSel = document.getElementById('model');
+        if (mfrSel) mfrSel.value = '';
+        if (modelSel) modelSel.value = '';
+        populateManufacturerSelect();
+        refreshEstimateModels();
+    }
+    function onEstimateManufacturerChange() {
+        const modelSel = document.getElementById('model');
+        if (modelSel) modelSel.value = '';
+        refreshEstimateModels();
+    }
     function populateManufacturerSelect() {
         const sel = document.getElementById('manufacturer');
         if (!sel) return;
         const current = sel.value;
-        const names = [...new Set(catalogMfrs.map((m) => m.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        const type = document.getElementById('equipmentType')?.value || 'laser';
+        const names = [...new Set(catalogMfrs.map((m) => m.name).filter(Boolean))]
+            .filter((n) => manufacturerHasType(n, type))
+            .sort((a, b) => a.localeCompare(b));
         sel.innerHTML = '<option value="">Select...</option>' + names.map((n) => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('');
         if (current && names.includes(current)) sel.value = current;
     }
