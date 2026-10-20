@@ -28,6 +28,11 @@ import { displayModelName, displayModelText } from '@/lib/model-display';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { StorageImage } from '@/components/StorageImage';
+import {
+  MARKETPLACE_CHECKOUT_PAUSED_CODE,
+  MARKETPLACE_CHECKOUT_PAUSED_LABEL,
+  parseCheckoutStatus,
+} from '@/lib/marketplace/checkout-pause';
 
 function PartDetail() {
   const params = useParams();
@@ -35,6 +40,22 @@ function PartDetail() {
   const searchParams = useSearchParams();
   const id = params.id as string;
   const { ready: authReady, signedIn } = useGuestSignupRedirect();
+  // Fail closed: Buy stays hidden until the server says checkout is open.
+  const [checkoutEnabled, setCheckoutEnabled] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/marketplace/checkout-status', { cache: 'no-store' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (!cancelled) setCheckoutEnabled(parseCheckoutStatus(j));
+      })
+      .catch(() => {
+        if (!cancelled) setCheckoutEnabled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [listing, setListing] = useState<null | (Record<string, unknown> & {
     id?: string;
     title?: string;
@@ -184,6 +205,10 @@ function PartDetail() {
 
   const startPurchase = async () => {
     if (!listing || buying) return;
+    if (!checkoutEnabled) {
+      toast.error(MARKETPLACE_CHECKOUT_PAUSED_LABEL);
+      return;
+    }
     const availability = listingAvailability(listing);
     if (!availability.purchasable) {
       toast.error(availability.reason || 'This part cannot be purchased');
@@ -201,6 +226,11 @@ function PartDetail() {
         body: JSON.stringify({ email: userEmail, quantity: buyQty }),
       });
       const json = await res.json().catch(() => ({}));
+      if (res.status === 503 && json?.code === MARKETPLACE_CHECKOUT_PAUSED_CODE) {
+        setCheckoutEnabled(false);
+        toast.error(json?.error || MARKETPLACE_CHECKOUT_PAUSED_LABEL);
+        return;
+      }
       if (!res.ok || !json?.url) {
         const blocked =
           json?.connectRequired || json?.code === 'stripe_connect_required'
@@ -477,7 +507,7 @@ function PartDetail() {
               )}
 
               <div className="mt-10 space-y-3">
-                {availability.purchasable && qty != null && qty > 1 && (
+                {checkoutEnabled && availability.purchasable && qty != null && qty > 1 && (
                   <label className="flex items-center gap-3 text-sm text-[var(--text2)]">
                     Quantity
                     <select
@@ -494,7 +524,16 @@ function PartDetail() {
                     </select>
                   </label>
                 )}
-                {availability.purchasable ? (
+                {availability.purchasable && !checkoutEnabled ? (
+                  <div
+                    role="status"
+                    aria-disabled="true"
+                    data-testid="checkout-paused"
+                    className="w-full py-4 text-center rounded-lg border border-[var(--border)] bg-[var(--surface3)] text-[var(--text2)]"
+                  >
+                    {MARKETPLACE_CHECKOUT_PAUSED_LABEL}
+                  </div>
+                ) : availability.purchasable ? (
                   <button
                     type="button"
                     onClick={startPurchase}
