@@ -4,6 +4,7 @@
  * Prices, record text, and manual PDF text are not in this table.
  */
 import { GAP_STRINGS } from './gap-copy.ts';
+import { MANUAL_LIBRARY_STRINGS } from './manual-library-copy.ts';
 import type { PublicLocale } from './locales.ts';
 
 type Loc = Exclude<PublicLocale, 'en'>;
@@ -1218,6 +1219,10 @@ const TABLE: Record<string, Record<Loc, string>> = {
   "Clinics: {count}": row("کلینیک‌ها: {count}", "Clínicas: {count}", "Cliniques : {count}", "מרפאות: {count}", "Cliniche: {count}", "Kliniken: {count}", "Clínicas: {count}", "العيادات: {count}"),
   "Country will be saved once the organization country column is added.": row("کشور پس از افزودن ستون کشور سازمان ذخیره می‌شود.", "El país se guardará cuando se agregue la columna de país de la organización.", "Le pays sera enregistré une fois la colonne pays de l’organisation ajoutée.", "המדינה תישמר לאחר הוספת עמודת המדינה של הארגון.", "Il paese verrà salvato quando sarà aggiunta la colonna paese dell’organizzazione.", "Das Land wird gespeichert, sobald die Länderspalte der Organisation hinzugefügt ist.", "O país será salvo quando a coluna de país da organização for adicionada.", "سيتم حفظ الدولة بعد إضافة عمود الدولة للمنظمة."),
 };
+
+for (const [key, value] of Object.entries(MANUAL_LIBRARY_STRINGS)) {
+  if (!TABLE[key]) TABLE[key] = value;
+}
 
 for (const [key, value] of Object.entries(GAP_STRINGS)) {
   if (!TABLE[key]) TABLE[key] = value;
