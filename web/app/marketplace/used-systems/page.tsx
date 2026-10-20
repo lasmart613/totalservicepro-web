@@ -6,6 +6,7 @@ import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { withListingColumns } from '@/lib/marketplace/listing-columns';
 import { listingHref } from '@/lib/marketplace/guest';
 import { formatListingPrice } from '@/lib/marketplace/parts';
 import { useSignedIn } from '@/lib/use-signed-in';
@@ -32,11 +33,14 @@ export default function UsedSystemsMarketplace() {
 
   const fetchListings = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('marketplace_listings')
-      .select('*')
-      .eq('listing_type', 'used')
-      .order('created_at', { ascending: false });
+    // 000935: named public columns only (serial_number / notes / details are private).
+    const { data, error } = await withListingColumns((cols) =>
+      supabase
+        .from('marketplace_listings')
+        .select(cols)
+        .eq('listing_type', 'used')
+        .order('created_at', { ascending: false }),
+    );
     if (!error && data) setListings(data);
     setLoading(false);
   };
