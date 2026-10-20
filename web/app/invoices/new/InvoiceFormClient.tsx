@@ -24,12 +24,13 @@ import {
   writeWithColumnRetry,
   type LineItem,
 } from '@/lib/billing/save-helpers';
-import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { displayModelName, displayModelText } from '@/lib/model-display';
 import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 import { canVoidInvoice, isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import { getOrgRole, voidInvoiceRole } from '@/lib/org-role';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
+import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
   collectableInvoiceDataFields,
@@ -89,18 +90,10 @@ export default function InvoiceFormClient() {
   const [custContact, setCustContact] = useState('');
 
   const catalog = useEquipmentCatalog(supabase);
-  const manufacturers = useMemo(
-    () => listManufacturers(catalog),
-    [catalog.manufacturers, catalog.models]
-  );
-  const [manufacturer, setManufacturer] = useState('');
-  const [model, setModel] = useState('');
+  const cascade = useEquipmentCascade(catalog);
+  const { manufacturer, model, equipment_type: equipmentType } = cascade.resolved;
   const [serial, setSerial] = useState('');
   const [pulseCount, setPulseCount] = useState('');
-  const models = useMemo(
-    () => (manufacturer ? listModelsForManufacturer(manufacturer, catalog) : []),
-    [manufacturer, catalog.manufacturers, catalog.models]
-  );
 
   const invoiceDateTouched = useRef(false);
   const orgTodayRef = useRef(orgTodayIso());
@@ -240,8 +233,11 @@ export default function InvoiceFormClient() {
       setDocNumber(
         data.invoice_number || idata.invoice_number || idata.invNumber || ''
       );
-      setManufacturer(idata.manufacturer || '');
-      setModel(idata.model || '');
+      cascade.hydrate({
+        equipmentType: idata.equipment_type || idata.equipmentType,
+        manufacturer: idata.manufacturer || '',
+        model: idata.model || '',
+      });
       setSerial(idata.serial || '');
       setPulseCount(idata.pulse_count != null ? String(idata.pulse_count) : '');
       const split = resolveInvoiceCollectable({
@@ -319,8 +315,11 @@ export default function InvoiceFormClient() {
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
       const ed = parseJsonField(data.estimate_data);
-      setManufacturer(ed.manufacturer || '');
-      setModel(ed.model || data.device_model || '');
+      cascade.hydrate({
+        equipmentType: ed.equipment_type || ed.equipmentType,
+        manufacturer: ed.manufacturer || '',
+        model: ed.model || data.device_model || '',
+      });
       setSerial(ed.serial || '');
       setPulseCount(ed.pulse_count != null ? String(ed.pulse_count) : '');
       setCustAddress(ed.custAddress || '');
@@ -574,6 +573,7 @@ export default function InvoiceFormClient() {
         balanceDue: nextStatus === 'paid' ? 0 : collectable.remainingOwed,
         manufacturer,
         model,
+        equipment_type: equipmentType,
         serial,
         pulse_count: pulseCount,
         invoice_number: invNum,
@@ -1055,40 +1055,7 @@ export default function InvoiceFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment (optional)')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-[var(--text3)]">{t('Manufacturer')}</label>
-              <select
-                className="input select mt-1"
-                value={manufacturer}
-                onChange={(e) => {
-                  setManufacturer(e.target.value);
-                  setModel('');
-                }}
-              >
-                <option value="">{t('— Select —')}</option>
-                {manufacturers.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text3)]">{t('Model')}</label>
-              <select
-                className="input select mt-1"
-                value={model}
-                disabled={!manufacturer}
-                onChange={(e) => setModel(e.target.value)}
-              >
-                <option value="">{t('— Select —')}</option>
-                {models.map((m) => (
-                  <option key={m} value={m}>
-                    {displayModelName(m)}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <EquipmentCascadeFields cascade={cascade} t={t} idPrefix="inv-eq" />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -8,9 +8,10 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { isClaimSignupWithoutToken } from '@/lib/claim-signup-metadata';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
-import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
+import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
 import { StorageImage } from '@/components/StorageImage';
 
 type LaserRow = {
@@ -34,16 +35,12 @@ export default function MyLasersPage() {
   const [rows, setRows] = useState<LaserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
-  const [mfr, setMfr] = useState('');
-  const [model, setModel] = useState('');
-  const [modelOther, setModelOther] = useState('');
   const [serial, setSerial] = useState('');
   const [room, setRoom] = useState('');
   const [saving, setSaving] = useState(false);
 
   const catalog = useEquipmentCatalog(supabase);
-  const mfrOptions = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
-  const modelOptions = useMemo(() => listModelsForManufacturer(mfr, catalog), [mfr, catalog.manufacturers, catalog.models]);
+  const cascade = useEquipmentCascade(catalog);
 
   useEffect(() => {
     (async () => {
@@ -105,17 +102,15 @@ export default function MyLasersPage() {
   }
 
   function openAdd() {
-    setMfr('');
-    setModel('');
-    setModelOther('');
+    cascade.reset();
     setSerial('');
     setRoom('');
     setModalOpen(true);
   }
 
   async function saveLaser() {
-    const modelVal = model === OTHER_MODEL ? modelOther.trim() : model.trim();
-    if (!mfr.trim() || !modelVal) {
+    const { manufacturer: mfrVal, model: modelVal, equipment_type: equipmentType } = cascade.resolved;
+    if (!mfrVal || !modelVal) {
       toast.error('Manufacturer and model are required');
       return;
     }
@@ -126,13 +121,19 @@ export default function MyLasersPage() {
     setSaving(true);
     const payload: any = {
       customer_organization_id: orgId,
-      manufacturer: mfr.trim(),
+      manufacturer: mfrVal,
       model: modelVal,
+      equipment_type: equipmentType,
       serial_number: serial.trim() || null,
       room: room.trim() || null,
     };
     try {
       let { error } = await supabase.from('equipment').insert(payload);
+      if (error) {
+        // Before 000937 there is no equipment_type column; keep room.
+        const { equipment_type: _type, ...noType } = payload;
+        ({ error } = await supabase.from('equipment').insert(noType));
+      }
       if (error) {
         // Retry without room if column missing on older deploys
         const slim = {
@@ -254,47 +255,7 @@ export default function MyLasersPage() {
           >
             <div className="font-extrabold text-lg text-[var(--gold)] mb-4">Add Laser</div>
             <div className="space-y-3">
-              <div>
-                <label className="label">Manufacturer *</label>
-                <select
-                  className="input"
-                  value={mfr}
-                  onChange={(e) => {
-                    setMfr(e.target.value);
-                    setModel('');
-                    setModelOther('');
-                  }}
-                >
-                  <option value="">Select brand…</option>
-                  {mfrOptions.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Model *</label>
-                <select
-                  className="input"
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  disabled={!mfr}
-                >
-                  <option value="">{mfr ? 'Select model…' : 'Select manufacturer first'}</option>
-                  {modelOptions.map((m) => (
-                    <option key={m} value={m}>{displayModelName(m)}</option>
-                  ))}
-                  <option value={OTHER_MODEL}>Other / not listed…</option>
-                </select>
-                {model === OTHER_MODEL && (
-                  <input
-                    className="input mt-2"
-                    value={modelOther}
-                    onChange={(e) => setModelOther(e.target.value)}
-                    placeholder="Model name"
-                  />
-                )}
-              </div>
+              <EquipmentCascadeFields cascade={cascade} labelClassName="label" idPrefix="my-eq" />
               <div>
                 <label className="label">Serial #</label>
                 <input className="input" value={serial} onChange={(e) => setSerial(e.target.value)} />

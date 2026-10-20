@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
+import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
 import { displayModelName, displayModelText } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser, loadServiceRequestsForLaser } from '@/lib/equipment-ensure';
@@ -50,9 +51,6 @@ export default function LaserProfilePage() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [mfr, setMfr] = useState('');
-  const [model, setModel] = useState('');
-  const [modelOther, setModelOther] = useState('');
   const [serial, setSerial] = useState('');
   const [room, setRoom] = useState('');
   const [mfgDate, setMfgDate] = useState('');
@@ -60,8 +58,7 @@ export default function LaserProfilePage() {
   const [photoFile, setPhotoFile] = useState<File | null>(null);
 
   const catalog = useEquipmentCatalog(supabase);
-  const mfrOptions = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
-  const modelOptions = useMemo(() => listModelsForManufacturer(mfr, catalog), [mfr, catalog.manufacturers, catalog.models]);
+  const cascade = useEquipmentCascade(catalog);
 
   useEffect(() => {
     if (id) loadAll();
@@ -139,18 +136,11 @@ export default function LaserProfilePage() {
 
   function openEdit() {
     if (!laser) return;
-    setMfr(laser.manufacturer || '');
-    const models = listModelsForManufacturer(laser.manufacturer || '', catalog);
-    if (laser.model && models.includes(laser.model)) {
-      setModel(laser.model);
-      setModelOther('');
-    } else if (laser.model) {
-      setModel(OTHER_MODEL);
-      setModelOther(laser.model);
-    } else {
-      setModel('');
-      setModelOther('');
-    }
+    cascade.hydrate({
+      equipmentType: (laser as any).equipment_type,
+      manufacturer: laser.manufacturer || '',
+      model: laser.model || '',
+    });
     setSerial(laser.serial_number || '');
     setRoom(laser.room || '');
     setMfgDate(laser.manufacture_date || '');
@@ -192,16 +182,17 @@ export default function LaserProfilePage() {
 
   async function saveEdit() {
     if (!laser) return;
-    const modelVal = model === OTHER_MODEL ? modelOther.trim() : model.trim();
-    if (!mfr.trim() || !modelVal) {
+    const { manufacturer: mfrVal, model: modelVal, equipment_type: equipmentType } = cascade.resolved;
+    if (!mfrVal || !modelVal) {
       toast.error('Manufacturer and model are required');
       return;
     }
     setSaving(true);
     try {
       const payload: any = {
-        manufacturer: mfr.trim(),
+        manufacturer: mfrVal,
         model: modelVal,
+        equipment_type: equipmentType,
         serial_number: serial.trim() || null,
         room: room.trim() || null,
         manufacture_date: mfgDate || null,
@@ -213,6 +204,11 @@ export default function LaserProfilePage() {
         payload.photo_url = await uploadPhoto(photoFile);
       }
       let { error } = await supabase.from('equipment').update(payload).eq('id', laser.id);
+      if (error) {
+        // Before 000937 there is no equipment_type column.
+        const { equipment_type: _type, ...noType } = payload;
+        ({ error } = await supabase.from('equipment').update(noType).eq('id', laser.id));
+      }
       if (error) {
         const slim: any = {
           manufacturer: payload.manufacturer,
@@ -377,38 +373,7 @@ export default function LaserProfilePage() {
           >
             <div className="font-extrabold text-lg text-[var(--gold)] mb-4">Edit Laser</div>
             <div className="space-y-3">
-              <div>
-                <label className="label">Manufacturer *</label>
-                <select
-                  className="input"
-                  value={mfr}
-                  onChange={(e) => {
-                    setMfr(e.target.value);
-                    setModel('');
-                    setModelOther('');
-                  }}
-                >
-                  <option value="">Select brand…</option>
-                  {mfrOptions.map((b) => (
-                    <option key={b} value={b}>{b}</option>
-                  ))}
-                  {!mfrOptions.includes(mfr) && mfr && <option value={mfr}>{mfr}</option>}
-                  <option value="Other">Other</option>
-                </select>
-              </div>
-              <div>
-                <label className="label">Model *</label>
-                <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
-                  <option value="">Select model…</option>
-                  {modelOptions.map((m) => (
-                    <option key={m} value={m}>{displayModelName(m)}</option>
-                  ))}
-                  <option value={OTHER_MODEL}>Other / not listed…</option>
-                </select>
-                {model === OTHER_MODEL && (
-                  <input className="input mt-2" value={modelOther} onChange={(e) => setModelOther(e.target.value)} placeholder="Model name" />
-                )}
-              </div>
+              <EquipmentCascadeFields cascade={cascade} labelClassName="label" idPrefix="my-eq-edit" />
               <div>
                 <label className="label">Serial #</label>
                 <input className="input" value={serial} onChange={(e) => setSerial(e.target.value)} />
