@@ -7,7 +7,8 @@
  * published manuals that have a PDF in Storage and no index row are indexed
  * with indexMissingManualSearchText (the God button extractor, expect-empty
  * write). Every write is replace_manual_search_index with p_expected_md5 NULL,
- * so this never overwrites a row another writer just made.
+ * so this never overwrites a row another writer just made. The same indexer
+ * stores pdf.js numPages in manuals.page_count (source 'pdf', 000936).
  *
  * Crash safety: before extracting a manual, the attempt is recorded with
  * record_manual_search_index_attempt, which bumps attempts and backs the
