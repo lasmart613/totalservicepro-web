@@ -1106,7 +1106,36 @@ function choicesForModels(models: CatalogModel[]): CatalogChoice[] {
   return dedupeModelChoices(choices);
 }
 
-export function listCatalogManufacturers(live?: LiveCatalog): string[] {
+export type TypedLiveCatalog = LiveCatalog & { equipmentType?: string | null | EquipmentType };
+
+/**
+ * True when this manufacturer belongs in the picker for `equipmentType`.
+ * A brand shows for a type when it has at least one visible model of that type.
+ * For lasers (the default) a brand with no typed models at all also stays, so
+ * legacy laser rows and static laser fallbacks are unchanged. A brand whose
+ * only models are another type (GE OEC → C-arm, Stryker → Beds) is hidden.
+ */
+function manufacturerMatchesEquipmentType(
+  bucket: CatalogModel[] | undefined,
+  equipmentType: string | null | undefined
+): boolean {
+  if (equipmentType == null || String(equipmentType).trim() === '') return true;
+  const want = normalizeEquipmentType(equipmentType);
+  if (!want) return true;
+  const visible = (bucket || []).filter((model) => {
+    const value = String(model.label || model.name || '').trim();
+    return value && !HIDDEN_PICKER_KEYS.has(modelDedupeKey(value));
+  });
+  if (visible.some((model) => modelMatchesEquipmentType(model.equipment_type, want))) return true;
+  if (want !== DEFAULT_EQUIPMENT_TYPE) return false;
+  // Laser: a brand with no models keeps its legacy place; one with only other types does not.
+  return visible.length === 0 && !(bucket || []).some((m) => {
+    const have = normalizeEquipmentType(m.equipment_type);
+    return have && have !== DEFAULT_EQUIPMENT_TYPE;
+  });
+}
+
+export function listCatalogManufacturers(live?: TypedLiveCatalog): string[] {
   const names: string[] = [];
   staticManufacturerRows().forEach((m) => {
     if (m.name) names.push(m.name);
@@ -1117,8 +1146,10 @@ export function listCatalogManufacturers(live?: LiveCatalog): string[] {
   const collapsed = collapseManufacturerNames(names);
   const { manufacturers, models } = liveCatalogRefs(live);
   const index = manufacturerModelIndex(manufacturers, models);
+  const equipmentType = live?.equipmentType;
   return collapsed.filter((name) => {
     const key = index.selectionKey(name);
+    if (!manufacturerMatchesEquipmentType(index.modelsByKey.get(key), equipmentType)) return false;
     if (bucketHasVisibleModel(index.modelsByKey.get(key))) return true;
     if (FORCE_MANUFACTURER_LABEL.has(name) || MANUFACTURER_DISPLAY[norm(name)]) return true;
     return index.staticKeys.has(key);
@@ -1142,7 +1173,7 @@ function collapseOec9900(choices: CatalogChoice[]): CatalogChoice[] {
   return merged.sort((a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
 }
 
-export function listCatalogManufacturerChoices(live?: LiveCatalog): CatalogChoice[] {
+export function listCatalogManufacturerChoices(live?: TypedLiveCatalog): CatalogChoice[] {
   const rows = live?.manufacturers || [];
   const { manufacturers, models } = liveCatalogRefs(live);
   const index = manufacturerModelIndex(manufacturers, models);
