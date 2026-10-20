@@ -72,6 +72,14 @@ INSERT INTO public.manuals SELECT g, 'Manual ' || g FROM generate_series(1, 40) 
 -- server page counts: 10 and 11 are 10-page manuals (two chapters 4 + 6); 8 has an entry without page_count
 UPDATE public.manuals SET chapter_metadata = '[{"order":0,"page_count":4},{"order":1,"page_count":6}]' WHERE id IN (10, 11);
 UPDATE public.manuals SET chapter_metadata = '[{"order":0,"page_count":4},{"order":1}]' WHERE id = 8;
+GRANT UPDATE ON public.manuals TO authenticated;  -- prod: authenticated=arwdm on manuals
+-- prod-shaped search index (service_role only); 15: 12 pages, 16: clipped
+CREATE TABLE public.manual_search_index (manual_id bigint, search_text text, indexed_at timestamptz DEFAULT now(),
+  index_clipped boolean, indexed_page_max integer, chunk_index integer);
+REVOKE ALL ON public.manual_search_index FROM PUBLIC, anon, authenticated;
+GRANT ALL ON public.manual_search_index TO service_role;
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES
+  (15, false, 7, 0), (15, false, 12, 1), (16, false, 9, 0), (16, true, 30, 1);
 INSERT INTO public.user_profiles VALUES
   ('a0000000-0000-0000-0000-00000000000a', 7001, 'owner'),   -- alice, org A
   ('b0000000-0000-0000-0000-00000000000b', 7002, 'owner'),   -- bob, org B
@@ -94,6 +102,11 @@ CREATE OR REPLACE FUNCTION pg_temp.snap() RETURNS text LANGUAGE sql AS $$
   SELECT string_agg(x, E'\n' ORDER BY x) FROM (
     SELECT 'col ' || attname || ' ' || format_type(atttypid, atttypmod) || ' ' || coalesce(array_to_string(attacl, ','), '')
       FROM pg_attribute WHERE attrelid = 'public.organization_manuals'::regclass AND attnum > 0 AND NOT attisdropped
+    UNION ALL SELECT 'xcol ' || attrelid::regclass::text || '.' || attname || ' ' || format_type(atttypid, atttypmod)
+      FROM pg_attribute WHERE attrelid IN ('public.manuals'::regclass, 'public.manual_search_index'::regclass) AND attnum > 0 AND NOT attisdropped
+    UNION ALL SELECT 'xcon ' || conrelid::regclass::text || ' ' || conname FROM pg_constraint WHERE conrelid IN ('public.manuals'::regclass, 'public.manual_search_index'::regclass)
+    UNION ALL SELECT 'xtrg ' || tgrelid::regclass::text || ' ' || tgname FROM pg_trigger WHERE tgrelid IN ('public.manuals'::regclass, 'public.manual_search_index'::regclass) AND NOT tgisinternal
+    UNION ALL SELECT 'xacl ' || c.relname || ' ' || (SELECT string_agg(a::text, ',' ORDER BY a::text) FROM unnest(c.relacl) a) FROM pg_class c WHERE c.oid IN ('public.manuals'::regclass, 'public.manual_search_index'::regclass)
     UNION ALL SELECT 'acl ' || (SELECT string_agg(a::text, ',' ORDER BY a::text) FROM unnest(relacl) a) FROM pg_class WHERE oid = 'public.organization_manuals'::regclass
     UNION ALL SELECT 'con ' || conname || ' ' || pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'public.organization_manuals'::regclass
     UNION ALL SELECT 'pol ' || polname || ' ' || polcmd::text || ' ' || coalesce(pg_get_expr(polqual, polrelid), '') || ' | ' || coalesce(pg_get_expr(polwithcheck, polrelid), '')
@@ -270,6 +283,8 @@ SELECT public.manual_record_access(8, 'page_view', (SELECT array_agg(g) FROM gen
 SELECT public.manual_record_access(8, 'page_view', ARRAY[1,2,3,20], 300);
 -- 9: 21 distinct pages
 SELECT public.manual_record_access(9, 'page_view', (SELECT array_agg(g) FROM generate_series(1, 21) g), 300);
+-- members cannot write the server page count (table UPDATE is granted on manuals)
+UPDATE public.manuals SET page_count = 100000 WHERE id = 15;
 -- 10: 6 of a 10-page manual (server count); the client claims 100000 pages: ignored
 SELECT public.manual_record_access(10, 'page_view', ARRAY[1,2,3,4,5,6], 100000);
 -- 11: 5 of a 10-page manual (half, not most); client claims 6 pages: ignored
@@ -279,11 +294,50 @@ CREATE TEMP TABLE r5 AS SELECT public.manual_library_status(8) s8, public.manual
 RESET ROLE;
 SELECT pg_temp.check('12 paging is fine: 20 distinct pages still refundable (dupes not counted)',
   (SELECT (s8->>'refund_eligible')::bool AND (s8->>'pages_viewed')::int = 20 FROM r5), (SELECT s8::text FROM r5));
-SELECT pg_temp.check('13 heavy reading: >20 pages, or most of a short manual (server page count, client value ignored), blocks; half does not',
+SELECT pg_temp.check('13 heavy reading: >20 pages, or most of a short manual (chapter_metadata wins over client 100000), blocks; half does not',
   (SELECT s9->>'reason' = 'heavy_reading' AND s10->>'reason' = 'heavy_reading' AND (s10->>'page_count')::int = 10
-          AND (s11->>'refund_eligible')::bool AND (s11->>'page_count')::int = 10 AND s8->>'page_count' IS NULL
-          AND NOT EXISTS (SELECT 1 FROM public.manual_library_events WHERE page_count IS NOT NULL) FROM r5),
+          AND s10->>'page_count_source' = 'chapter_metadata'
+          AND (s11->>'refund_eligible')::bool AND (s11->>'page_count')::int = 10
+          AND (s8->>'page_count')::int = 300 AND s8->>'page_count_source' = 'client_min' FROM r5),
   (SELECT s9::text || s10::text || s11::text FROM r5));
+
+-- ================= server page count =================
+SELECT pg_temp.check('13a backfill from search index (unclipped only); member UPDATE of page_count ignored',
+  (SELECT page_count FROM public.manuals WHERE id = 15) = 12
+  AND (SELECT page_count FROM public.manuals WHERE id = 16) IS NULL);
+SET ROLE service_role;
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES (17, false, 3, 0), (17, false, 8, 1);
+RESET ROLE;
+SELECT pg_temp.check('13b indexer insert fills manuals.page_count (statement trigger)', (SELECT page_count FROM public.manuals WHERE id = 17) = 8);
+DO $$ BEGIN
+  BEGIN
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.manuals (id, title, page_count) VALUES (900, 'x', 5);
+    RESET ROLE;
+    PERFORM pg_temp.check('13c member INSERT cannot set page_count', (SELECT page_count FROM public.manuals WHERE id = 900) IS NULL);
+  EXCEPTION WHEN insufficient_privilege THEN
+    PERFORM pg_temp.check('13c member INSERT cannot set page_count', true, 'insert refused');
+  END;
+  RESET ROLE;
+  DELETE FROM public.manuals WHERE id = 900;
+END $$;
+INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 15, 'web'), (7001, 18, 'web'), (7001, 19, 'web');
+SELECT pg_temp.as_user(:alice);
+SET ROLE authenticated;
+-- 15: 7 of 12 (server page_count) -> heavy
+SELECT public.manual_record_access(15, 'page_view', ARRAY[1,2,3,4,5,6,7], 1000);
+-- 18: unknown everywhere; client says 100000 then 10 -> min 10; 6 pages -> heavy
+SELECT public.manual_record_access(18, 'page_view', ARRAY[1,2,3], 100000);
+SELECT public.manual_record_access(18, 'page_view', ARRAY[4,5,6], 10);
+-- 19: unknown everywhere; client only ever says 100000 -> rule off (same as unknown)
+SELECT public.manual_record_access(19, 'page_view', ARRAY[1,2,3,4,5,6], 100000);
+CREATE TEMP TABLE r5b AS SELECT public.manual_library_status(15) a, public.manual_library_status(18) b, public.manual_library_status(19) c;
+RESET ROLE;
+SELECT pg_temp.check('13d manuals.page_count used; else MIN client count (only tightens)',
+  (SELECT a->>'reason' = 'heavy_reading' AND a->>'page_count_source' = 'manuals.page_count' AND (a->>'page_count')::int = 12
+          AND b->>'reason' = 'heavy_reading' AND b->>'page_count_source' = 'client_min' AND (b->>'page_count')::int = 10
+          AND (c->>'refund_eligible')::bool FROM r5b),
+  (SELECT a::text || b::text || c::text FROM r5b));
 
 -- ================= signed-URL proxy =================
 INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 12, 'web');
@@ -431,8 +485,23 @@ DELETE FROM public.organization_manuals WHERE manual_id <> 40;
 SELECT pg_temp.check('26 rollback x2 restores the exact pre-000936 schema/ACLs/policies/functions',
   pg_temp.snap() = (SELECT s FROM before_snap),
   (SELECT string_agg(l, E'\n') FROM (SELECT unnest(string_to_array(pg_temp.snap(), E'\n')) EXCEPT SELECT unnest(string_to_array(s, E'\n')) FROM before_snap) d(l)));
+-- Simulate Supabase's 2026-10-30 default-privilege change: no automatic grants.
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM anon, authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE EXECUTE ON FUNCTIONS FROM anon, authenticated, service_role;
 \i :mig
 SELECT pg_temp.check('27 re-apply after rollback', to_regclass('public.manual_library_events') IS NOT NULL);
+SELECT pg_temp.check('28 grants are explicit (no default privileges): same ACLs as before',
+  (SELECT string_agg(a::text, ',' ORDER BY a::text) FROM pg_class c, unnest(c.relacl) a WHERE c.oid = 'public.manual_library_events'::regclass)
+    = 'postgres=arwdDxtm/postgres,service_role=arwdDxtm/postgres'
+  AND has_sequence_privilege('service_role', 'public.manual_library_events_id_seq', 'USAGE')
+  AND has_function_privilege('authenticated', 'public.manual_library_remove(bigint,text)', 'EXECUTE')
+  AND has_function_privilege('authenticated', 'public.manual_library_status(bigint)', 'EXECUTE')
+  AND has_function_privilege('authenticated', 'public.manual_record_access(bigint,text,integer[],integer,text)', 'EXECUTE')
+  AND has_function_privilege('service_role', 'public.manual_record_url_issued(bigint,bigint,uuid,text)', 'EXECUTE')
+  AND has_function_privilege('service_role', 'public.manual_slots_held(bigint)', 'EXECUTE')
+  AND has_function_privilege('service_role', 'public.manual_slot_is_held(bigint,bigint)', 'EXECUTE')
+  AND NOT has_function_privilege('anon', 'public.manual_library_remove(bigint,text)', 'EXECUTE'));
 
 SELECT n, CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END AS result, name, CASE WHEN ok THEN '' ELSE detail END AS detail FROM pg_temp.results ORDER BY n;
 SELECT count(*) FILTER (WHERE ok) AS pass, count(*) FILTER (WHERE NOT ok) AS fail FROM pg_temp.results;

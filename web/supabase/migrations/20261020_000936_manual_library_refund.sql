@@ -33,7 +33,7 @@
 --     non-refunded removal by an AFTER DELETE trigger, so it cannot dodge the
 --     rules. Catalog deletions (manuals row gone, FK cascade) count as refunded.
 --   * public.manual_record_access(manual_id, kind, pages, page_count, source):
---     viewer reports page views, downloads and prints (page_count is ignored). It records only while
+--     viewer reports page views, downloads and prints (page_count: fallback only). It records only while
 --     the caller's org owns the manual and only inside the 24h window.
 --   * public.manual_record_url_issued(org, manual, user, source): service_role
 --     only; get-manual-url calls it each time it signs a URL for an owned
@@ -51,10 +51,23 @@
 --     A BEFORE INSERT trigger (SECURITY INVOKER) refuses any other role (42501)
 --     and clamps created_at to now() at most, so the 24h window cannot be
 --     forged even by a future definer function or a mistaken GRANT.
---   * The "most of a short manual" rule uses the server's page count (sum of
---     manuals.chapter_metadata[*].page_count when every entry has one). Client
---     page counts are ignored. Unknown page count: only the >20 pages and URL
---     rules apply.
+--   * The "most of a short manual" rule uses a page count, in this order:
+--       1. sum of manuals.chapter_metadata[*].page_count when every entry has one
+--          (40 of 2037 prod manuals on 2026-10-20);
+--       2. manuals.page_count (new, nullable, server-written only): backfilled here
+--          from manual_search_index (max indexed_page_max per manual, only when
+--          no chunk was clipped) and kept current by a statement trigger on
+--          manual_search_index inserts, i.e. whenever the indexer runs;
+--       3. otherwise the MINIMUM page count the viewer reported for this add.
+--          A client can only make the rule stricter with it: a lower count
+--          makes "more than half" easier to reach, and a huge value is no
+--          worse than unknown (the >20-page and URL rules still apply).
+--     indexed_page_max is the highest page with extracted text, so it can be
+--     a slight undercount (blank trailing pages): that also only tightens.
+--     get-manual-url does not fill it: it signs URLs and never opens the PDF.
+--     Clients cannot write manuals.page_count: authenticated has table UPDATE
+--     on manuals, so a SECURITY INVOKER trigger keeps the old value for any
+--     role other than service_role/postgres/supabase_admin.
 --   * Re-adding a manual whose slot is held (non-refunded removal this month)
 --     nets zero, so the add paths allow it even when full; removing it again
 --     inside 24h is reported as 'still_held' (no refund, no cap use) because
@@ -91,6 +104,14 @@ BEGIN
      NOT IN ('anon=rm/postgres,authenticated=arwdm/postgres', 'anon=r/postgres,authenticated=rd/postgres') THEN
     RAISE EXCEPTION '000936 drift: organization_manuals anon/authenticated ACL is not the expected prod shape';
   END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count' AND NOT attisdropped)
+     AND coalesce(col_description('public.manuals'::regclass,
+           (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count')), '')
+         NOT LIKE '000936%' THEN
+    RAISE EXCEPTION '000936 drift: manuals.page_count exists but was not created by 000936';
+  END IF;
   IF to_regprocedure('public.is_active_org_member(bigint)') IS NULL THEN
     RAISE EXCEPTION '000936 drift: public.is_active_org_member(bigint) missing';
   END IF;
@@ -112,7 +133,8 @@ BEGIN
       AND p.proname IN ('manual_library_remove','manual_library_status','manual_record_access',
                         'manual_record_url_issued','manual_slots_held','manual_refund_check',
                         'manual_library_log_add','manual_library_log_delete',
-                        'manual_library_guard_insert','manual_slot_is_held')
+                        'manual_library_guard_insert','manual_slot_is_held',
+                        'manual_page_count_guard','manual_page_count_from_index')
       AND coalesce(obj_description(p.oid, 'pg_proc'), '') NOT LIKE '000936%') THEN
     RAISE EXCEPTION '000936 drift: a manual library function not created by 000936 already exists';
   END IF;
@@ -135,6 +157,9 @@ CREATE TABLE IF NOT EXISTS public.manual_library_events (
   created_at      timestamptz NOT NULL DEFAULT now()
 );
 -- No FKs on purpose: the ledger outlives the library row, the org and the manual.
+-- Grants below are explicit (REVOKE from PUBLIC/anon/authenticated, GRANT to
+-- service_role). Nothing relies on default privileges, which Supabase changes
+-- on 2026-10-30. Functions likewise REVOKE ... FROM PUBLIC and GRANT explicitly.
 COMMENT ON TABLE public.manual_library_events IS
   '000936 append-only ledger of company manual library adds/removes and reads (refund rules).';
 CREATE INDEX IF NOT EXISTS manual_library_events_row_idx
@@ -245,6 +270,90 @@ CREATE TRIGGER organization_manuals_log_delete
   AFTER DELETE ON public.organization_manuals
   FOR EACH ROW EXECUTE FUNCTION public.manual_library_log_delete();
 
+-- ---------- server-known page count ----------
+ALTER TABLE public.manuals ADD COLUMN IF NOT EXISTS page_count integer;
+COMMENT ON COLUMN public.manuals.page_count IS
+  '000936 physical page count known to the server (indexer); NULL = unknown. Clients cannot write it.';
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'public.manuals'::regclass AND conname = 'manuals_page_count_check') THEN
+    ALTER TABLE public.manuals ADD CONSTRAINT manuals_page_count_check
+      CHECK (page_count IS NULL OR page_count BETWEEN 1 AND 100000);
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.manual_page_count_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+BEGIN
+  IF current_user NOT IN ('service_role', 'postgres', 'supabase_admin') THEN
+    IF TG_OP = 'INSERT' THEN
+      NEW.page_count := NULL;
+    ELSE
+      NEW.page_count := OLD.page_count;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+COMMENT ON FUNCTION public.manual_page_count_guard() IS '000936 trigger: only trusted roles write manuals.page_count';
+REVOKE ALL ON FUNCTION public.manual_page_count_guard() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS manuals_page_count_guard ON public.manuals;
+CREATE TRIGGER manuals_page_count_guard
+  BEFORE INSERT OR UPDATE OF page_count ON public.manuals
+  FOR EACH ROW EXECUTE FUNCTION public.manual_page_count_guard();
+
+-- Fill from the search index: max indexed_page_max per manual when no chunk was clipped.
+CREATE OR REPLACE FUNCTION public.manual_page_count_from_index()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  UPDATE public.manuals m
+     SET page_count = s.mx
+    FROM (SELECT i.manual_id, max(i.indexed_page_max) AS mx
+            FROM public.manual_search_index i
+           WHERE i.manual_id IN (SELECT DISTINCT n.manual_id FROM new_rows n)
+           GROUP BY i.manual_id
+          HAVING NOT bool_or(coalesce(i.index_clipped, false))
+             AND max(i.indexed_page_max) BETWEEN 1 AND 100000) s
+   WHERE m.id = s.manual_id
+     AND m.page_count IS DISTINCT FROM s.mx;
+  RETURN NULL;
+END;
+$$;
+COMMENT ON FUNCTION public.manual_page_count_from_index() IS '000936 trigger: manuals.page_count from manual_search_index';
+REVOKE ALL ON FUNCTION public.manual_page_count_from_index() FROM PUBLIC, anon, authenticated;
+
+DO $$
+BEGIN
+  IF to_regclass('public.manual_search_index') IS NOT NULL
+     AND (SELECT count(*) FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = 'manual_search_index'
+            AND column_name IN ('manual_id', 'indexed_page_max', 'index_clipped')) = 3 THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS manual_search_index_page_count ON public.manual_search_index';
+    EXECUTE 'CREATE TRIGGER manual_search_index_page_count
+               AFTER INSERT ON public.manual_search_index
+               REFERENCING NEW TABLE AS new_rows
+               FOR EACH STATEMENT EXECUTE FUNCTION public.manual_page_count_from_index()';
+    -- one-time backfill (only rows still unknown)
+    UPDATE public.manuals m
+       SET page_count = s.mx
+      FROM (SELECT i.manual_id, max(i.indexed_page_max) AS mx
+              FROM public.manual_search_index i
+             GROUP BY i.manual_id
+            HAVING NOT bool_or(coalesce(i.index_clipped, false))
+               AND max(i.indexed_page_max) BETWEEN 1 AND 100000) s
+     WHERE m.id = s.manual_id AND m.page_count IS NULL;
+  END IF;
+END $$;
+
 -- ---------- rule evaluation (internal) ----------
 CREATE OR REPLACE FUNCTION public.manual_refund_check(p_row_id bigint, p_org bigint, p_added_at timestamptz, p_manual_id bigint)
 RETURNS jsonb
@@ -266,6 +375,7 @@ DECLARE
   v_pr        boolean;
   v_used      int;
   v_held      boolean;
+  v_pc_src    text;
   v_reason    text := NULL;
   v_month     timestamptz := date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
 BEGIN
@@ -277,8 +387,7 @@ BEGIN
   FROM public.manual_library_events
   WHERE library_row_id = p_row_id;
 
-  -- Server page count: sum of chapter_metadata[*].page_count, only when every
-  -- entry has a positive one. Client-sent page counts are never used.
+  -- 1. sum of chapter_metadata[*].page_count, only when every entry has a positive one.
   SELECT CASE WHEN count(*) > 0 AND bool_and(e ? 'page_count' AND jsonb_typeof(e->'page_count') = 'number'
                                              AND (e->>'page_count')::numeric >= 1)
               THEN least(sum(floor((e->>'page_count')::numeric)), 100000)::int END
@@ -286,6 +395,18 @@ BEGIN
   FROM public.manuals m,
        jsonb_array_elements(CASE WHEN jsonb_typeof(m.chapter_metadata) = 'array' THEN m.chapter_metadata ELSE '[]'::jsonb END) e
   WHERE m.id = p_manual_id;
+  v_pc_src := CASE WHEN v_pc IS NOT NULL THEN 'chapter_metadata' END;
+  IF v_pc IS NULL THEN
+    SELECT m.page_count INTO v_pc FROM public.manuals m WHERE m.id = p_manual_id;
+    v_pc_src := CASE WHEN v_pc IS NOT NULL THEN 'manuals.page_count' END;
+  END IF;
+  IF v_pc IS NULL THEN
+    -- Last resort: the smallest count the viewer reported for this add (can only tighten).
+    SELECT min(e.page_count) INTO v_pc
+    FROM public.manual_library_events e
+    WHERE e.library_row_id = p_row_id AND e.kind = 'page_view' AND e.page_count IS NOT NULL;
+    v_pc_src := CASE WHEN v_pc IS NOT NULL THEN 'client_min' END;
+  END IF;
 
   SELECT EXISTS (
     SELECT 1 FROM public.manual_library_events h
@@ -320,6 +441,7 @@ BEGIN
     'refund_until', p_added_at + c_window,
     'pages_viewed', v_pages,
     'page_count', v_pc,
+    'page_count_source', v_pc_src,
     'url_fetches', v_urls,
     'refunds_used', v_used,
     'refunds_cap', c_cap);
@@ -476,8 +598,8 @@ DECLARE
   v_uid uuid := auth.uid();
   v_org bigint;
   v_src text := CASE WHEN p_source IN ('web','android','ios','api') THEN p_source ELSE 'unknown' END;
-  -- p_page_count is accepted for client compatibility and ignored (server page count only).
-  v_pc  int  := NULL;
+  -- Stored only as the last-resort fallback; refund check uses the MINIMUM seen.
+  v_pc  int  := CASE WHEN p_page_count BETWEEN 1 AND 100000 THEN p_page_count END;
   v_row public.organization_manuals%ROWTYPE;
   v_n   int := 0;
 BEGIN
