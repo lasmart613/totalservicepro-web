@@ -90,6 +90,8 @@ export default function EstimateFormClient() {
   const catalog = useEquipmentCatalog(supabase);
   const cascade = useEquipmentCascade(catalog);
   const equipmentType = cascade.state.equipmentType;
+  // Pulse counts only mean something for lasers; hidden and not saved otherwise.
+  const showPulseCount = equipmentType === 'laser';
   const [serial, setSerial] = useState('');
   const [pulseCount, setPulseCount] = useState('');
 
@@ -528,7 +530,7 @@ export default function EstimateFormClient() {
       const modelName = cascade.resolved.model;
       const mfr = cascade.resolved.manufacturer;
       const deviceModel = [mfr, modelName].filter(Boolean).join(' ') || null;
-      const serialPulses = [serial, pulseCount ? `${pulseCount} pulses` : '']
+      const serialPulses = [serial, showPulseCount && pulseCount ? `${pulseCount} pulses` : '']
         .filter(Boolean)
         .join(' · ') || null;
 
@@ -551,7 +553,7 @@ export default function EstimateFormClient() {
           model: modelName,
           equipment_type: equipmentType,
           serial,
-          pulse_count: pulseCount,
+          pulse_count: showPulseCount ? pulseCount : '',
           subtotal: totals.subtotal,
           tax: totals.tax,
           labor: totals.labor,
@@ -746,7 +748,7 @@ export default function EstimateFormClient() {
       manufacturer,
       model: modelName,
       serial,
-      pulseCount,
+      pulseCount: showPulseCount ? pulseCount : '',
       miles,
       urgency,
       services: svcLabels,
@@ -1010,6 +1012,7 @@ export default function EstimateFormClient() {
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
+            {showPulseCount && (
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
               <input
@@ -1020,6 +1023,7 @@ export default function EstimateFormClient() {
                 onChange={(e) => setPulseCount(e.target.value)}
               />
             </div>
+            )}
           </div>
         </section>
 

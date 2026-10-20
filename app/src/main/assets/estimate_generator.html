@@ -138,14 +138,16 @@
                     <select id="manufacturer" onchange="onEstimateManufacturerChange()">
                         <option value="">Select...</option>
                     </select>
+                    <input type="text" id="manufacturerOther" placeholder="Manufacturer name" style="display:none;margin-top:6px;">
                 </div>
             </div>
             <div class="grid-2" style="margin-top:8px;">
                 <div>
                     <label>Device Model</label>
-                    <select id="model">
+                    <select id="model" onchange="syncOtherInputs()">
                         <option value="">Select manufacturer first…</option>
                     </select>
+                    <input type="text" id="modelOther" placeholder="Model name" style="display:none;margin-top:6px;">
                 </div>
                 <div>
                     <label>Serial # / Current Pulse Count</label>
@@ -281,14 +283,61 @@
         const modelSel = document.getElementById('model');
         if (mfrSel) mfrSel.value = '';
         if (modelSel) modelSel.value = '';
+        ['manufacturerOther', 'modelOther'].forEach((id) => { const el = document.getElementById(id); if (el) el.value = ''; });
+        mergeStaticBiomed();
         populateManufacturerSelect();
         refreshEstimateModels();
     }
     function onEstimateManufacturerChange() {
         const modelSel = document.getElementById('model');
         if (modelSel) modelSel.value = '';
+        const md = document.getElementById('modelOther');
+        if (md) md.value = '';
         refreshEstimateModels();
     }
+    // Mirrors web/lib/equipment-catalog.ts BIOMED_CATALOG (000937 seed) so the
+    // type → manufacturer → model cascade works offline and before 000937 is applied.
+    // BEGIN BIOMED_STATIC
+    const BIOMED_STATIC = [["Midmark", "Ritter 111", "beds"], ["Midmark", "Ritter 112", "beds"], ["Midmark", "Ritter 119", "beds"], ["Midmark", "Ritter 204", "beds"], ["Midmark", "223", "beds"], ["Midmark", "224", "beds"], ["Midmark", "626", "beds"], ["Midmark", "641", "beds"], ["Hill-Rom", "Progressa", "beds"], ["Hill-Rom", "VersaCare", "beds"], ["Hill-Rom", "TotalCare", "beds"], ["Hill-Rom", "Centrella", "beds"], ["Hill-Rom", "Advanta 2", "beds"], ["Hill-Rom", "CareAssist ES", "beds"], ["Stryker", "S3 MedSurg Bed", "beds"], ["Stryker", "InTouch Critical Care Bed", "beds"], ["Stryker", "ProCuity", "beds"], ["Stryker", "Secure II", "beds"], ["Stryker", "Prime Series Stretcher", "beds"], ["Draeger", "Fabius GS", "anesthesia"], ["Draeger", "Fabius Plus", "anesthesia"], ["Draeger", "Apollo", "anesthesia"], ["Draeger", "Perseus A500", "anesthesia"], ["Draeger", "Narkomed 2B", "anesthesia"], ["Draeger", "Narkomed 6000", "anesthesia"], ["GE Healthcare", "Aisys CS2", "anesthesia"], ["GE Healthcare", "Aespire 7900", "anesthesia"], ["GE Healthcare", "Avance CS2", "anesthesia"], ["GE Healthcare", "Carestation 650", "anesthesia"], ["Mindray", "A7", "anesthesia"], ["Mindray", "WATO EX-65", "anesthesia"], ["GE OEC", "9800", "c_arm"], ["GE OEC", "OEC Elite", "c_arm"], ["Siemens Healthineers", "Cios Alpha", "c_arm"], ["Siemens Healthineers", "Arcadis Orbic", "c_arm"], ["Philips", "BV Pulsera", "c_arm"], ["Philips", "Zenition 70", "c_arm"], ["Ziehm Imaging", "Ziehm Vision RFD", "c_arm"], ["Ziehm Imaging", "Ziehm Solo", "c_arm"], ["ZOLL", "R Series", "defibrillator"], ["ZOLL", "X Series", "defibrillator"], ["ZOLL", "M Series", "defibrillator"], ["ZOLL", "AED Plus", "defibrillator"], ["Philips", "HeartStart MRx", "defibrillator"], ["Philips", "HeartStart XL", "defibrillator"], ["Philips", "HeartStart FRx", "defibrillator"], ["Physio-Control", "LIFEPAK 15", "defibrillator"], ["Physio-Control", "LIFEPAK 20e", "defibrillator"], ["Physio-Control", "LIFEPAK 1000", "defibrillator"], ["Physio-Control", "LIFEPAK CR2", "defibrillator"], ["Cardiac Science", "Powerheart G5", "defibrillator"], ["Olympus", "CV-190", "endoscope"], ["Olympus", "CV-180", "endoscope"], ["Olympus", "GIF-H190", "endoscope"], ["Olympus", "CF-HQ190", "endoscope"], ["Pentax Medical", "EPK-i7000", "endoscope"], ["Fujifilm", "EPX-4450HD", "endoscope"], ["Karl Storz", "IMAGE1 S", "endoscope"], ["BD", "Alaris 8015 PC Unit", "infusion_pump"], ["BD", "Alaris 8100 LVP Module", "infusion_pump"], ["Baxter", "Sigma Spectrum", "infusion_pump"], ["Baxter", "Colleague", "infusion_pump"], ["ICU Medical", "Plum 360", "infusion_pump"], ["ICU Medical", "Plum A+", "infusion_pump"], ["ICU Medical", "Medfusion 3500", "infusion_pump"], ["B. Braun", "Infusomat Space", "infusion_pump"], ["B. Braun", "Perfusor Space", "infusion_pump"], ["Philips", "IntelliVue MX450", "patient_monitor"], ["Philips", "IntelliVue MX800", "patient_monitor"], ["Philips", "IntelliVue MP50", "patient_monitor"], ["Philips", "SureSigns VS4", "patient_monitor"], ["GE Healthcare", "Dash 4000", "patient_monitor"], ["GE Healthcare", "CARESCAPE B450", "patient_monitor"], ["GE Healthcare", "CARESCAPE V100", "patient_monitor"], ["Mindray", "ePM 10M", "patient_monitor"], ["Mindray", "Passport 12", "patient_monitor"], ["Mindray", "BeneView T5", "patient_monitor"], ["Spacelabs", "Xprezzon", "patient_monitor"], ["Spacelabs", "Qube", "patient_monitor"], ["Welch Allyn", "Connex Spot Monitor", "patient_monitor"], ["Welch Allyn", "Spot Vital Signs LXi", "patient_monitor"], ["STERIS", "Amsco Century", "sterile_processing"], ["STERIS", "Amsco 400", "sterile_processing"], ["STERIS", "Reliance 444", "sterile_processing"], ["STERIS", "V-PRO maX", "sterile_processing"], ["Tuttnauer", "2540M", "sterile_processing"], ["Tuttnauer", "3870EA", "sterile_processing"], ["Tuttnauer", "EZ10", "sterile_processing"], ["Midmark", "M11 UltraClave", "sterile_processing"], ["Midmark", "M9 UltraClave", "sterile_processing"], ["GE Healthcare", "LOGIQ E10", "ultrasound"], ["GE Healthcare", "LOGIQ P9", "ultrasound"], ["GE Healthcare", "Vivid E95", "ultrasound"], ["GE Healthcare", "Voluson E10", "ultrasound"], ["GE Healthcare", "Venue", "ultrasound"], ["Philips", "EPIQ 7", "ultrasound"], ["Philips", "Affiniti 70", "ultrasound"], ["Philips", "CX50", "ultrasound"], ["Philips", "Lumify", "ultrasound"], ["Siemens Healthineers", "ACUSON Sequoia", "ultrasound"], ["Siemens Healthineers", "ACUSON Juniper", "ultrasound"], ["Samsung Medison", "HS60", "ultrasound"], ["Samsung Medison", "RS80A", "ultrasound"], ["Samsung Medison", "HM70A", "ultrasound"], ["FUJIFILM Sonosite", "Edge II", "ultrasound"], ["FUJIFILM Sonosite", "M-Turbo", "ultrasound"], ["FUJIFILM Sonosite", "X-Porte", "ultrasound"], ["Hamilton Medical", "HAMILTON-C1", "ventilator"], ["Hamilton Medical", "HAMILTON-C3", "ventilator"], ["Hamilton Medical", "HAMILTON-C6", "ventilator"], ["Hamilton Medical", "HAMILTON-T1", "ventilator"], ["Hamilton Medical", "HAMILTON-G5", "ventilator"], ["Medtronic", "Puritan Bennett 840", "ventilator"], ["Medtronic", "Puritan Bennett 980", "ventilator"], ["Draeger", "Evita V500", "ventilator"], ["Draeger", "Savina 300", "ventilator"], ["Philips", "Respironics V60", "ventilator"], ["Philips", "Trilogy 100", "ventilator"], ["GE Healthcare", "CARESCAPE R860", "ventilator"], ["Dornier", "Compact Delta II", "lithotriptor"], ["Dornier", "Compact Sigma", "lithotriptor"], ["Dornier", "Delta III", "lithotriptor"], ["Dornier", "Gemini", "lithotriptor"], ["Storz Medical", "Modulith SLX-F2", "lithotriptor"], ["Richard Wolf", "Piezolith 3000", "lithotriptor"]];
+    // END BIOMED_STATIC
+    const OTHER = '__other__';
+    function syncOtherInputs() {
+        const mfr = document.getElementById('manufacturer')?.value || '';
+        const model = document.getElementById('model')?.value || '';
+        const mo = document.getElementById('manufacturerOther');
+        const md = document.getElementById('modelOther');
+        if (mo) mo.style.display = mfr === OTHER ? '' : 'none';
+        if (md) md.style.display = (mfr === OTHER || model === OTHER) ? '' : 'none';
+    }
+    /** Saved manufacturer: typed text for Other, never the sentinel. */
+    function estimateManufacturer() {
+        const v = document.getElementById('manufacturer')?.value || '';
+        if (v === OTHER) return (document.getElementById('manufacturerOther')?.value || '').trim();
+        return v;
+    }
+    /** Saved model: typed text for Other, never the word "Other". */
+    function estimateModel() {
+        const mfr = document.getElementById('manufacturer')?.value || '';
+        const v = document.getElementById('model')?.value || '';
+        if (mfr === OTHER || v === OTHER) return (document.getElementById('modelOther')?.value || '').trim();
+        return v;
+    }
+    function mergeStaticBiomed() {
+        const have = new Set(catalogModels.map((m) => normName(m.manufacturer || '') + '|' + normName(m.name)));
+        const mfrNames = new Set(catalogMfrs.map((m) => normName(m.name)));
+        for (const [mfr, name, type] of BIOMED_STATIC) {
+            if (!mfrNames.has(normName(mfr))) {
+                catalogMfrs.push({ id: null, name: mfr });
+                mfrNames.add(normName(mfr));
+            }
+            const owner = catalogMfrs.find((m) => normName(m.name) === normName(mfr));
+            const dup = catalogModels.some((m) => normName(m.name) === normName(name) &&
+                (normName(m.manufacturer || '') === normName(mfr) || (owner && owner.id != null && String(m.manufacturer_id) === String(owner.id))));
+            if (dup || have.has(normName(mfr) + '|' + normName(name))) continue;
+            catalogModels.push({ name, label: name, manufacturer: mfr, equipment_type: type });
+        }
+    }
+
     function populateManufacturerSelect() {
         const sel = document.getElementById('manufacturer');
         if (!sel) return;
@@ -297,8 +346,10 @@
         const names = [...new Set(catalogMfrs.map((m) => m.name).filter(Boolean))]
             .filter((n) => manufacturerHasType(n, type))
             .sort((a, b) => a.localeCompare(b));
-        sel.innerHTML = '<option value="">Select...</option>' + names.map((n) => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('');
-        if (current && names.includes(current)) sel.value = current;
+        sel.innerHTML = '<option value="">Select...</option>' + names.map((n) => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('') +
+            '<option value="' + OTHER + '">Other</option>';
+        if (current && (names.includes(current) || current === OTHER)) sel.value = current;
+        syncOtherInputs();
     }
 
     function refreshEstimateModels() {
@@ -309,6 +360,13 @@
         const current = modelSel.value;
         if (!mfr) {
             modelSel.innerHTML = '<option value="">Select manufacturer first…</option>';
+            syncOtherInputs();
+            return;
+        }
+        if (mfr === OTHER) {
+            modelSel.innerHTML = '<option value="' + OTHER + '">Other</option>';
+            modelSel.value = OTHER;
+            syncOtherInputs();
             return;
         }
         const names = [...new Set(
@@ -319,8 +377,9 @@
         )].sort((a, b) => a.localeCompare(b));
         modelSel.innerHTML = '<option value="">Select...</option>' +
             names.map((n) => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('') +
-            '<option value="Other">Other</option>';
-        if (current && (names.includes(current) || current === 'Other')) modelSel.value = current;
+            '<option value="' + OTHER + '">Other</option>';
+        if (current && (names.includes(current) || current === OTHER)) modelSel.value = current;
+        syncOtherInputs();
     }
 
     async function loadEquipmentCatalog() {
@@ -380,8 +439,8 @@
 
         // Gather data
         const customer = document.getElementById('customer').value || '—';
-        const manufacturer = document.getElementById('manufacturer')?.value || '';
-        const modelOnly = document.getElementById('model').value || '—';
+        const manufacturer = estimateManufacturer();
+        const modelOnly = estimateModel() || '—';
         const model = [manufacturer, modelOnly].filter(Boolean).join(' ') || '—';
         const serial = document.getElementById('serial').value || '—';
         const issues = document.getElementById('issues').value || 'No issues noted';
@@ -542,12 +601,16 @@
         const data = {
             customer_name: customerName,
             organization_id: userOrgId,
-            device_model: [document.getElementById('manufacturer')?.value, document.getElementById('model').value].filter(Boolean).join(' ') || null,
+            device_model: [estimateManufacturer(), estimateModel()].filter(Boolean).join(' ') || null,
             serial_pulses: document.getElementById('serial').value || null,
             services: Array.from(document.querySelectorAll('.service-type:checked')).map(cb => cb.value),
             issues: document.getElementById('issues').value || null,
             total: parseFloat(document.querySelector('.totals span')?.innerText.replace('$','') || 0),
-            estimate_data: {} 
+            estimate_data: {
+                manufacturer: estimateManufacturer(),
+                model: estimateModel(),
+                equipment_type: document.getElementById('equipmentType')?.value || 'laser',
+            }
         };
 
         const { error } = await supabase.from('service_estimates').insert([data]);

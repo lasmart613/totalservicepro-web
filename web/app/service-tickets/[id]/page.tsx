@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -14,15 +14,12 @@ import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
   catalogChoiceLabel,
   manufacturerChoiceLabel,
-  mergedManufacturerOption,
-  mergedModelOption,
   normalizeManufacturerRow,
   normalizeModelRow,
-  withSavedManufacturerChoice,
-  withSavedModelChoice,
 } from '@/lib/equipment-dropdown';
-import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
-import { EQUIPMENT_TYPES, equipmentTypeLabel, normalizeEquipmentType } from '@/lib/equipment-types';
+import { equipmentTypeLabel, normalizeEquipmentType } from '@/lib/equipment-types';
+import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
+import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
 import {
   applyTicketAssignee,
   assigneeName,
@@ -68,6 +65,7 @@ export default function ServiceTicketDetail() {
   const [ticket, setTicket] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
+
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
   const [organizations, setOrganizations] = useState<LinkedCustomerOpt[]>([]);
@@ -199,7 +197,11 @@ export default function ServiceTicketDetail() {
         try {
           const { data: m } = await supabase.from('manufacturers').select('id, name').order('name');
           setDbMfrs(m || []);
-          const { data: lm } = await supabase.from('laser_models').select('id, name, manufacturer_id').order('name');
+          // equipment_type keeps GE OEC (c_arm) and other non-laser brands out of the Laser list.
+          const { data: lm } = await supabase
+            .from('laser_models')
+            .select('id, name, manufacturer_id, equipment_type')
+            .order('name');
           setDbLaserModels(lm || []);
         } catch (e) { /* fallback to free text ok */ }
       } catch (err) {
@@ -211,6 +213,24 @@ export default function ServiceTicketDetail() {
 
     fetchData();
   }, [ticketId, supabase]);
+
+  const liveCatalog = useMemo(
+    () => ({
+      manufacturers: dbMfrs.map(normalizeManufacturerRow),
+      models: dbLaserModels.map(normalizeModelRow),
+    }),
+    [dbMfrs, dbLaserModels]
+  );
+  const cascade = useEquipmentCascade(liveCatalog);
+  const startEditing = () => {
+    // Off-list saved make/model load as Other + their text.
+    cascade.hydrate({
+      equipmentType: ticket?.equipment_type,
+      manufacturer: ticket?.equipment_make || '',
+      model: ticket?.equipment_model || '',
+    });
+    setIsEditing(true);
+  };
 
   const handleInputChange = (field: string, value: any) => {
     setFormData((prev: any) => ({ ...prev, [field]: value }));
@@ -245,6 +265,10 @@ export default function ServiceTicketDetail() {
       for (const key of TICKET_SAVE_FIELDS) {
         if (key in formData) patch[key] = formData[key];
       }
+      // Type → make → model come from the shared cascade (Other = typed text).
+      patch.equipment_type = cascade.resolved.equipment_type;
+      patch.equipment_make = cascade.resolved.manufacturer || null;
+      patch.equipment_model = cascade.resolved.model || null;
       // Form assigned_to is the picker uuid. applyTicketAssignee writes that column only.
       const assignedTo = looksLikeUuid(formData.assigned_to) ? String(formData.assigned_to).trim() : '';
       applyTicketAssignee(patch, assignedTo || null);
@@ -322,36 +346,6 @@ export default function ServiceTicketDetail() {
     );
   }
 
-  const liveCatalog = {
-    manufacturers: dbMfrs.map(normalizeManufacturerRow),
-    models: dbLaserModels.map(normalizeModelRow),
-  };
-  const editType = normalizeEquipmentType(formData.equipment_type);
-  const makeOptions = listManufacturerChoices({ ...liveCatalog, equipmentType: editType });
-  const storedMake = String(formData.equipment_make || '');
-  const makeValue = mergedManufacturerOption(
-    storedMake,
-    makeOptions.map((option) => option.value)
-  );
-  const makeChoices = withSavedManufacturerChoice(
-    makeValue && !makeOptions.some((option) => option.value === makeValue)
-      ? [...makeOptions, { value: makeValue, label: manufacturerChoiceLabel(makeValue) }]
-      : makeOptions,
-    String(ticket.equipment_make || '')
-  );
-  const modelOptions = listModelChoices(makeValue || storedMake, {
-    ...liveCatalog,
-    equipmentType: editType,
-  });
-  const storedModel = String(formData.equipment_model || '');
-  const modelValue = mergedModelOption(storedModel, modelOptions);
-  const modelChoices = withSavedModelChoice(
-    modelOptions,
-    storedModel,
-    makeValue || storedMake,
-    String(ticket.equipment_make || '')
-  );
-
   const canCreateReport =
     viewerRole != null && canCreateServiceReports(viewerRole, viewerOrgType);
 
@@ -378,7 +372,7 @@ export default function ServiceTicketDetail() {
               existingReports={existingReports}
             />
             {!isEditing ? (
-              <button onClick={() => setIsEditing(true)} className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto">
+              <button onClick={startEditing} className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto">
                 <Edit2 size={18} /> Edit Ticket
               </button>
             ) : (
@@ -486,52 +480,15 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Equipment Information</h2>
             <div className="space-y-4">
-              <Field label="Equipment Type" value={isEditing ? (
-                <select
-                  className="input"
-                  data-testid="cascade-type"
-                  value={editType || formData.equipment_type || ''}
-                  onChange={(e) =>
-                    // Type change clears make and model.
-                    setFormData((prev: any) =>
-                      (prev.equipment_type || '') === e.target.value
-                        ? prev
-                        : { ...prev, equipment_type: e.target.value || null, equipment_make: '', equipment_model: '' }
-                    )
-                  }
-                >
-                  <option value="">-- Select --</option>
-                  {EQUIPMENT_TYPES.map((item) => (
-                    <option key={item.value} value={item.value}>{item.label}</option>
-                  ))}
-                  {formData.equipment_type && !editType ? (
-                    <option value={formData.equipment_type}>{formData.equipment_type}</option>
-                  ) : null}
-                </select>
-              ) : (ticket.equipment_type ? (normalizeEquipmentType(ticket.equipment_type) ? equipmentTypeLabel(ticket.equipment_type) : ticket.equipment_type) : '')} />
-              <Field label="Make" value={isEditing ? (
-                dbMfrs.length > 0 ? (
-                  <select className="input" value={makeValue} onChange={(e) => setFormData((prev: any) => ({ ...prev, equipment_make: e.target.value, equipment_model: '' }))}>
-                    <option value="">-- Select --</option>
-                    {makeChoices.map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
-                    ))}
-                  </select>
-                ) : <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} />
-              ) : manufacturerChoiceLabel(ticket.equipment_make)} />
-
-              <Field label="Model" value={isEditing ? (
-                dbLaserModels.length > 0 ? (
-                  <select className="input" value={modelValue} onChange={(e) => handleInputChange('equipment_model', e.target.value)}>
-                    <option value="">-- Select --</option>
-                    {modelChoices.map((choice) => (
-                      <option key={choice.value} value={choice.value}>
-                        {choice.label}
-                      </option>
-                    ))}
-                  </select>
-                ) : <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} />
-              ) : catalogChoiceLabel(ticket.equipment_model)} />
+              {isEditing ? (
+                <EquipmentCascadeFields cascade={cascade} labelClassName="label" idPrefix="ticket-eq" />
+              ) : (
+                <>
+                  <Field label="Equipment Type" value={ticket.equipment_type ? (normalizeEquipmentType(ticket.equipment_type) ? equipmentTypeLabel(ticket.equipment_type) : ticket.equipment_type) : ''} />
+                  <Field label="Make" value={manufacturerChoiceLabel(ticket.equipment_make)} />
+                  <Field label="Model" value={catalogChoiceLabel(ticket.equipment_model)} />
+                </>
+              )}
               <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
               <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : displayStoredDay(ticket.service_date, docZone)} />
             </div>
