@@ -214,7 +214,7 @@ test('migration 000936 standards', () => {
   assert.match(mig, /manual_library_guard_insert\(\)\s*RETURNS trigger\s*LANGUAGE plpgsql\s*SECURITY INVOKER/);
   assert.match(mig, /ADD COLUMN IF NOT EXISTS page_count integer/);
   assert.match(mig, /SELECT min\(e\.page_count\) INTO v_pc/);
-  assert.match(mig, /BEFORE INSERT OR UPDATE OF page_count ON public\.manuals/);
+  assert.match(mig, /BEFORE INSERT OR UPDATE OF page_count, page_count_source ON public\.manuals/);
   assert.match(mig, /GRANT ALL ON TABLE public\.manual_library_events TO service_role;/);
   assert.match(rb, /DROP COLUMN IF EXISTS page_count/);
   assert.match(rb, /GRANT INSERT, UPDATE, MAINTAIN ON TABLE public\.organization_manuals TO authenticated;/);
@@ -222,4 +222,22 @@ test('migration 000936 standards', () => {
     assert.ok(new RegExp(`FUNCTION public\\.${fn}\\([^)]*\\)\\s*RETURNS[\\s\\S]{0,120}SECURITY DEFINER\\s*SET search_path = ''`).test(mig), fn);
     assert.ok(rb.includes(`DROP FUNCTION IF EXISTS public.${fn}(`), `rollback drops ${fn}`);
   }
+});
+
+test('000936 page_count: pdf.js numPages wins; index triggers on INSERT and UPDATE; clipped -> NULL', async () => {
+  const { pdfPageCountTotal } = await import('./manual-search-index.ts');
+  assert.equal(pdfPageCountTotal([{ path: 'a.pdf', pageCount: 120 }]), 120);
+  assert.equal(pdfPageCountTotal([{ path: 'a.pdf', pageCount: 4 }, { path: 'b.pdf', pageCount: 6 }]), 10);
+  assert.equal(pdfPageCountTotal([{ path: 'a.pdf', pageCount: 4 }, { path: 'b.pdf', pageCount: 0 }]), null);
+  assert.equal(pdfPageCountTotal([]), null);
+  const idx = read('lib/manual-search-index.ts');
+  const mig = read('supabase/migrations/20261020_000936_manual_library_refund.sql');
+  const rb = read('supabase/migrations/20261020_000936_manual_library_refund_rollback.sql');
+  assert.match(idx, /update\(\{ page_count: total, page_count_source: 'pdf' \}\)/);
+  assert.match(idx, /if \(complete\) await persistManualPageCount/);
+  assert.match(mig, /AFTER UPDATE ON public\.manual_search_index\s+REFERENCING NEW TABLE AS new_rows/);
+  assert.match(mig, /WHEN bool_or\(coalesce\(i\.index_clipped, false\)\) THEN NULL/);
+  assert.match(mig, /m\.page_count_source IS DISTINCT FROM 'pdf'/);
+  assert.match(rb, /DROP TRIGGER IF EXISTS manual_search_index_page_count_upd/);
+  assert.match(rb, /DROP COLUMN IF EXISTS page_count_source/);
 });
