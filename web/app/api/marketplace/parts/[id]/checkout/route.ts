@@ -74,7 +74,8 @@ export async function POST(
 
     const headerEmail = await callerEmail(req);
     const email = String(body?.email || headerEmail || '').trim() || null;
-    const quantity = body?.quantity != null ? Number(body.quantity) : 1;
+    // Validated (whole number, 1..stock) and fixed server-side in createPartCheckoutSession.
+    const quantity: unknown = body?.quantity;
     const session = await createPartCheckoutSession({ listing, customerEmail: email, quantity });
     return NextResponse.json({
       url: session.url,
