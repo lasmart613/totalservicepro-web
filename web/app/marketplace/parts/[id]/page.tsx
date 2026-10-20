@@ -67,6 +67,8 @@ function PartDetail() {
     featured?: boolean;
   } | null>(null);
   const [removing, setRemoving] = useState(false);
+  // Quantity is chosen here and fixed server-side (Stripe Checkout no longer lets the buyer change it).
+  const [buyQty, setBuyQty] = useState(1);
   const [buying, setBuying] = useState(false);
   const [showBidForm, setShowBidForm] = useState(false);
   const [bidPrice, setBidPrice] = useState('');
@@ -196,7 +198,7 @@ function PartDetail() {
       const res = await fetch(`/api/marketplace/parts/${encodeURIComponent(id)}/checkout`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ email: userEmail, quantity: 1 }),
+        body: JSON.stringify({ email: userEmail, quantity: buyQty }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) {
@@ -475,6 +477,23 @@ function PartDetail() {
               )}
 
               <div className="mt-10 space-y-3">
+                {availability.purchasable && qty != null && qty > 1 && (
+                  <label className="flex items-center gap-3 text-sm text-[var(--text2)]">
+                    Quantity
+                    <select
+                      value={buyQty}
+                      onChange={(e) => setBuyQty(Number(e.target.value) || 1)}
+                      className="input w-24"
+                      aria-label="Quantity"
+                    >
+                      {Array.from({ length: Math.min(qty, 99) }, (_, i) => i + 1).map((n) => (
+                        <option key={n} value={n}>
+                          {n}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 {availability.purchasable ? (
                   <button
                     type="button"
