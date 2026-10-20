@@ -27,6 +27,7 @@ import {
   emptyStateKey,
   parseProspectResponse,
   upgradeCta,
+  loadErrorKey,
   PROSPECT_PAGE_SIZE,
   type ProspectLoad,
 } from '@/lib/prospects/find-clinics';
@@ -171,6 +172,10 @@ export default function FindClinicsPage() {
       const res = await fetchPage({ country, city, offset: load.data.clinics.length });
       if (res.ok) {
         setLoad({ ok: true, data: { ...res.data, clinics: [...load.data.clinics, ...res.data.clinics] } });
+      } else {
+        // Keep the rows already shown; explain a rate limit / offset cap.
+        const key = loadErrorKey(res.reason);
+        toast.error(key ? t(key) : t('Could not load clinics. Please try again.'));
       }
     } finally {
       setLoadingMore(false);
@@ -241,6 +246,12 @@ export default function FindClinicsPage() {
           <div className="card p-8 text-center text-[var(--text3)]">
             {load.reason === 'not_service_org'
               ? t('Find clinics is only available to service companies.')
+              : load.reason === 'not_admin'
+                ? t('Find clinics shows clinic contact details, so only your company owner and admins can use it. Ask your admin for access.')
+              : load.reason === 'rate_limited'
+                ? t('Too many searches in a short time. Wait a minute and try again.')
+              : load.reason === 'offset_too_large'
+                ? t('You reached the end of what can be browsed in one list. Filter by country or city to see more.')
               : load.reason === 'unavailable'
                 ? t('Find clinics is not available yet.')
                 : t('Could not load clinics. Please try again.')}
