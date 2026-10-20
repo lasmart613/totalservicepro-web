@@ -21,7 +21,8 @@ BEGIN
     WHERE n.nspname = 'public'
       AND p.proname IN ('manual_library_remove','manual_library_status','manual_record_access',
                         'manual_record_url_issued','manual_slots_held','manual_refund_check',
-                        'manual_library_log_add','manual_library_log_delete')
+                        'manual_library_log_add','manual_library_log_delete',
+                        'manual_library_guard_insert','manual_slot_is_held')
       AND coalesce(obj_description(p.oid, 'pg_proc'), '') NOT LIKE '000936%') THEN
     RAISE EXCEPTION '000936 rollback: a manual library function was not created by 000936';
   END IF;
@@ -37,13 +38,16 @@ END $$;
 
 DROP TRIGGER IF EXISTS organization_manuals_log_add ON public.organization_manuals;
 DROP TRIGGER IF EXISTS organization_manuals_log_delete ON public.organization_manuals;
+DROP TRIGGER IF EXISTS organization_manuals_guard_insert ON public.organization_manuals;
 
 DROP FUNCTION IF EXISTS public.manual_library_remove(bigint, text);
 DROP FUNCTION IF EXISTS public.manual_library_status(bigint);
 DROP FUNCTION IF EXISTS public.manual_record_access(bigint, text, integer[], integer, text);
 DROP FUNCTION IF EXISTS public.manual_record_url_issued(bigint, bigint, uuid, text);
 DROP FUNCTION IF EXISTS public.manual_slots_held(bigint);
-DROP FUNCTION IF EXISTS public.manual_refund_check(bigint, bigint, timestamptz);
+DROP FUNCTION IF EXISTS public.manual_refund_check(bigint, bigint, timestamptz, bigint);
+DROP FUNCTION IF EXISTS public.manual_slot_is_held(bigint, bigint);
+DROP FUNCTION IF EXISTS public.manual_library_guard_insert();
 DROP FUNCTION IF EXISTS public.manual_library_log_add();
 DROP FUNCTION IF EXISTS public.manual_library_log_delete();
 
@@ -51,5 +55,10 @@ ALTER TABLE public.organization_manuals DROP CONSTRAINT IF EXISTS organization_m
 ALTER TABLE public.organization_manuals DROP COLUMN IF EXISTS source;
 
 DROP TABLE IF EXISTS public.manual_library_events;
+
+-- Restore the prod ACL 000936 checked before revoking (anon=rm, authenticated=arwdm).
+-- WARNING: this re-opens direct client INSERT (the QA #332 MEDIUM).
+GRANT MAINTAIN ON TABLE public.organization_manuals TO anon;
+GRANT INSERT, UPDATE, MAINTAIN ON TABLE public.organization_manuals TO authenticated;
 
 COMMIT;

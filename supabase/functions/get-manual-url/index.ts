@@ -1016,7 +1016,20 @@ Deno.serve(async (req) => {
       }
       if (!owned.has(manualId)) {
         // Enforce slot limit
-        if (owned.size + slotsHeld >= slotLimit) {
+        // Re-adding a manual whose slot is held nets zero (000936).
+        let reAddHeld = false;
+        if (slotsHeld > 0) {
+          try {
+            const { data: isHeld, error: isHeldErr } = await admin.rpc("manual_slot_is_held", {
+              p_org: Number(orgId),
+              p_manual_id: Number(manualId),
+            });
+            reAddHeld = !isHeldErr && isHeld === true;
+          } catch {
+            reAddHeld = false;
+          }
+        }
+        if (owned.size + slotsHeld >= slotLimit && !reAddHeld) {
           return json(403, {
             error: `Library full (${owned.size + slotsHeld}/${slotLimit}). Upgrade for more slots or remove a manual.`,
             requires_add: true,

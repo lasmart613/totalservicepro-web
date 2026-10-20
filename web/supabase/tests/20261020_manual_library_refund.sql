@@ -40,7 +40,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO an
 CREATE TABLE public.organizations (id bigint PRIMARY KEY, name text);
 CREATE TABLE public.organization_memberships (id bigserial PRIMARY KEY, user_id uuid NOT NULL, organization_id bigint NOT NULL, role text);
 CREATE TABLE public.user_profiles (id uuid PRIMARY KEY, organization_id bigint, role text);
-CREATE TABLE public.manuals (id bigint PRIMARY KEY, title text);
+CREATE TABLE public.manuals (id bigint PRIMARY KEY, title text, chapter_metadata jsonb DEFAULT '[]'::jsonb);
 CREATE OR REPLACE FUNCTION public.is_active_org_member(p_org bigint) RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
 SET search_path = public, pg_temp AS $$
   SELECT EXISTS (SELECT 1 FROM public.organization_memberships m WHERE m.user_id = auth.uid() AND m.organization_id = p_org); $$;
@@ -69,6 +69,9 @@ GRANT SELECT ON public.user_profiles, public.manuals, public.organization_member
 -- fixtures
 INSERT INTO public.organizations VALUES (7001, 'Proof Service A'), (7002, 'Proof Service B');
 INSERT INTO public.manuals SELECT g, 'Manual ' || g FROM generate_series(1, 40) g;
+-- server page counts: 10 and 11 are 10-page manuals (two chapters 4 + 6); 8 has an entry without page_count
+UPDATE public.manuals SET chapter_metadata = '[{"order":0,"page_count":4},{"order":1,"page_count":6}]' WHERE id IN (10, 11);
+UPDATE public.manuals SET chapter_metadata = '[{"order":0,"page_count":4},{"order":1}]' WHERE id = 8;
 INSERT INTO public.user_profiles VALUES
   ('a0000000-0000-0000-0000-00000000000a', 7001, 'owner'),   -- alice, org A
   ('b0000000-0000-0000-0000-00000000000b', 7002, 'owner'),   -- bob, org B
@@ -113,7 +116,7 @@ CREATE OR REPLACE FUNCTION pg_temp.as_user(p_uid text) RETURNS void LANGUAGE sql
 -- ================= apply =================
 \i :mig
 \i :mig
-SELECT pg_temp.check('01 apply + re-apply (idempotent)', (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.organization_manuals'::regclass AND NOT tgisinternal) = 2);
+SELECT pg_temp.check('01 apply + re-apply (idempotent)', (SELECT count(*) FROM pg_trigger WHERE tgrelid = 'public.organization_manuals'::regclass AND NOT tgisinternal) = 3);
 
 -- ================= grants =================
 SELECT pg_temp.check('02 ledger closed to anon/authenticated',
@@ -130,16 +133,64 @@ SELECT pg_temp.check('03 function grants',
   AND has_function_privilege('authenticated', 'public.manual_record_access(bigint,text,integer[],integer,text)', 'EXECUTE')
   AND NOT has_function_privilege('authenticated', 'public.manual_record_url_issued(bigint,bigint,uuid,text)', 'EXECUTE')
   AND has_function_privilege('service_role', 'public.manual_record_url_issued(bigint,bigint,uuid,text)', 'EXECUTE')
-  AND NOT has_function_privilege('authenticated', 'public.manual_refund_check(bigint,bigint,timestamptz)', 'EXECUTE')
+  AND NOT has_function_privilege('authenticated', 'public.manual_refund_check(bigint,bigint,timestamptz,bigint)', 'EXECUTE')
   AND NOT has_function_privilege('authenticated', 'public.manual_library_log_add()', 'EXECUTE')
-  AND NOT has_function_privilege('anon', 'public.manual_slots_held(bigint)', 'EXECUTE'));
+  AND NOT has_function_privilege('anon', 'public.manual_slots_held(bigint)', 'EXECUTE')
+  AND NOT has_function_privilege('anon', 'public.manual_slot_is_held(bigint,bigint)', 'EXECUTE')
+  AND NOT has_function_privilege('authenticated', 'public.manual_library_guard_insert()', 'EXECUTE'));
 
 -- ================= add logging =================
+SELECT set_config('request.jwt.claim.role', 'service_role', false);
+SET ROLE service_role;
+INSERT INTO public.organization_manuals (organization_id, manual_id, added_by, source) VALUES (7001, 1, 'a0000000-0000-0000-0000-00000000000a', 'web');
+INSERT INTO public.organization_manuals (organization_id, manual_id, added_by) VALUES (7001, 2, 'a0000000-0000-0000-0000-00000000000a');
+-- forged future created_at is clamped to now()
+INSERT INTO public.organization_manuals (organization_id, manual_id, added_by, source, created_at) VALUES (7001, 3, 'a0000000-0000-0000-0000-00000000000a', 'api', now() + interval '10 years');
+RESET ROLE;
+SELECT pg_temp.check('04b created_at can never be in the future (clamped, even for service_role)',
+  (SELECT created_at <= now() FROM public.organization_manuals WHERE organization_id = 7001 AND manual_id = 3));
+DELETE FROM public.organization_manuals WHERE organization_id = 7001 AND manual_id = 3;
+DELETE FROM public.manual_library_events WHERE manual_id = 3;
+
+-- direct client INSERT is closed (QA #332 MEDIUM)
 SELECT pg_temp.as_user(:alice);
 SET ROLE authenticated;
-INSERT INTO public.organization_manuals (organization_id, manual_id, added_by, source) VALUES (7001, 1, auth.uid(), 'web');
-INSERT INTO public.organization_manuals (organization_id, manual_id, added_by) VALUES (7001, 2, auth.uid());
+DO $$ BEGIN
+  BEGIN
+    INSERT INTO public.organization_manuals (organization_id, manual_id, added_by, source, created_at)
+    VALUES (7001, 3, auth.uid(), 'web', now() + interval '10 years');
+    PERFORM pg_temp.check('04c member direct INSERT refused (privilege revoked)', false);
+  EXCEPTION WHEN insufficient_privilege THEN PERFORM pg_temp.check('04c member direct INSERT refused (privilege revoked)', true);
+  END;
+  BEGIN
+    UPDATE public.organization_manuals SET created_at = now() WHERE organization_id = 7001;
+    PERFORM pg_temp.check('04d member UPDATE refused (privilege revoked)', false);
+  EXCEPTION WHEN insufficient_privilege THEN PERFORM pg_temp.check('04d member UPDATE refused (privilege revoked)', true);
+  END;
+END $$;
 RESET ROLE;
+-- defense in depth: even with INSERT granted by mistake, the BEFORE INSERT trigger refuses
+DO $$ BEGIN
+  GRANT INSERT ON public.organization_manuals TO authenticated;
+  PERFORM set_config('request.jwt.claim.sub', 'a0000000-0000-0000-0000-00000000000a', true);
+  BEGIN
+    SET LOCAL ROLE authenticated;
+    INSERT INTO public.organization_manuals (organization_id, manual_id, added_by) VALUES (7001, 3, auth.uid());
+    RESET ROLE;
+    PERFORM pg_temp.check('04e guard trigger refuses non-service INSERT', false);
+  EXCEPTION WHEN insufficient_privilege THEN
+    PERFORM pg_temp.check('04e guard trigger refuses non-service INSERT', SQLERRM LIKE 'add manuals through%', SQLERRM);
+  END;
+  RESET ROLE;
+  REVOKE INSERT ON public.organization_manuals FROM authenticated;
+END $$;
+SELECT pg_temp.check('04f MAINTAIN closed on organization_manuals and the ledger',
+  NOT has_table_privilege('anon', 'public.organization_manuals', 'MAINTAIN')
+  AND NOT has_table_privilege('authenticated', 'public.organization_manuals', 'MAINTAIN')
+  AND NOT has_table_privilege('authenticated', 'public.organization_manuals', 'INSERT')
+  AND has_table_privilege('authenticated', 'public.organization_manuals', 'SELECT')
+  AND has_table_privilege('authenticated', 'public.organization_manuals', 'DELETE')
+  AND has_table_privilege('service_role', 'public.organization_manuals', 'INSERT'));
 SELECT pg_temp.check('04 every add logged with source (web / unknown)',
   (SELECT array_agg(source ORDER BY manual_id) FROM public.manual_library_events WHERE kind = 'add' AND organization_id = 7001) = ARRAY['web','unknown']);
 DO $$ BEGIN
@@ -178,13 +229,25 @@ RESET ROLE;
 SELECT pg_temp.check('08 after 24h: removed, not refunded, slot held',
   (SELECT (j->>'removed')::bool AND NOT (j->>'refunded')::bool AND j->>'reason' = 'window_expired' AND (j->>'slots_held')::int = 1 FROM r3),
   (SELECT j::text FROM r3));
-INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 5, 'web');
 SELECT set_config('request.jwt.claim.role', 'service_role', false);
-SELECT pg_temp.check('09 re-adding the held manual releases the held slot', public.manual_slots_held(7001) = 0);
-DELETE FROM public.organization_manuals WHERE organization_id = 7001 AND manual_id = 5;  -- direct delete
+SELECT pg_temp.check('09a manual_slot_is_held: held after the non-refunded removal', public.manual_slot_is_held(7001, 5) AND NOT public.manual_slot_is_held(7001, 6));
+INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 5, 'web');
+SELECT pg_temp.check('09 re-adding the held manual releases the held slot', public.manual_slots_held(7001) = 0 AND NOT public.manual_slot_is_held(7001, 5));
+SELECT pg_temp.as_user(:alice);
+SET ROLE authenticated;
+CREATE TEMP TABLE r3b AS SELECT public.manual_library_status(5) s, public.manual_library_remove(5) j;
+RESET ROLE;
+SELECT pg_temp.check('09b re-add then remove within 24h: still_held, no refund, no cap use, hold back',
+  (SELECT s->>'reason' = 'still_held' AND NOT (s->>'refund_eligible')::bool
+          AND j->>'reason' = 'still_held' AND NOT (j->>'refunded')::bool
+          AND (j->>'refunds_used')::int = 1 AND (j->>'slots_held')::int = 1 FROM r3b),
+  (SELECT j::text FROM r3b));
+INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 14, 'web');
+DELETE FROM public.organization_manuals WHERE organization_id = 7001 AND manual_id = 14;  -- direct delete
+SELECT set_config('request.jwt.claim.role', 'service_role', false);
 SELECT pg_temp.check('10 direct DELETE logged as non-refunded removal (holds slot)',
-  (SELECT reason = 'direct_delete' AND refunded IS FALSE AND source = 'db' FROM public.manual_library_events WHERE kind = 'remove' AND manual_id = 5 ORDER BY id DESC LIMIT 1)
-  AND public.manual_slots_held(7001) = 1);
+  (SELECT reason = 'direct_delete' AND refunded IS FALSE AND source = 'db' FROM public.manual_library_events WHERE kind = 'remove' AND manual_id = 14 ORDER BY id DESC LIMIT 1)
+  AND public.manual_slots_held(7001) = 2);
 
 -- ================= download / print =================
 INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 6, 'web'), (7001, 7, 'web');
@@ -207,17 +270,19 @@ SELECT public.manual_record_access(8, 'page_view', (SELECT array_agg(g) FROM gen
 SELECT public.manual_record_access(8, 'page_view', ARRAY[1,2,3,20], 300);
 -- 9: 21 distinct pages
 SELECT public.manual_record_access(9, 'page_view', (SELECT array_agg(g) FROM generate_series(1, 21) g), 300);
--- 10: 6 of a 10-page manual (most of a short manual)
-SELECT public.manual_record_access(10, 'page_view', ARRAY[1,2,3,4,5,6], 10);
--- 11: 5 of a 10-page manual (half, not most)
-SELECT public.manual_record_access(11, 'page_view', ARRAY[1,2,3,4,5], 10);
+-- 10: 6 of a 10-page manual (server count); the client claims 100000 pages: ignored
+SELECT public.manual_record_access(10, 'page_view', ARRAY[1,2,3,4,5,6], 100000);
+-- 11: 5 of a 10-page manual (half, not most); client claims 6 pages: ignored
+SELECT public.manual_record_access(11, 'page_view', ARRAY[1,2,3,4,5], 6);
 CREATE TEMP TABLE r5 AS SELECT public.manual_library_status(8) s8, public.manual_library_status(9) s9,
                                 public.manual_library_status(10) s10, public.manual_library_status(11) s11;
 RESET ROLE;
 SELECT pg_temp.check('12 paging is fine: 20 distinct pages still refundable (dupes not counted)',
   (SELECT (s8->>'refund_eligible')::bool AND (s8->>'pages_viewed')::int = 20 FROM r5), (SELECT s8::text FROM r5));
-SELECT pg_temp.check('13 heavy reading: >20 pages, or most of a short manual, blocks; half does not',
-  (SELECT s9->>'reason' = 'heavy_reading' AND s10->>'reason' = 'heavy_reading' AND (s11->>'refund_eligible')::bool FROM r5),
+SELECT pg_temp.check('13 heavy reading: >20 pages, or most of a short manual (server page count, client value ignored), blocks; half does not',
+  (SELECT s9->>'reason' = 'heavy_reading' AND s10->>'reason' = 'heavy_reading' AND (s10->>'page_count')::int = 10
+          AND (s11->>'refund_eligible')::bool AND (s11->>'page_count')::int = 10 AND s8->>'page_count' IS NULL
+          AND NOT EXISTS (SELECT 1 FROM public.manual_library_events WHERE page_count IS NOT NULL) FROM r5),
   (SELECT s9::text || s10::text || s11::text FROM r5));
 
 -- ================= signed-URL proxy =================
@@ -347,6 +412,17 @@ SELECT pg_temp.check('25 apply refuses a foreign function',
   obj_description('public.manual_slots_held(bigint)'::regprocedure, 'pg_proc') = 'someone else');
 \set ON_ERROR_STOP on
 COMMENT ON FUNCTION public.manual_slots_held(bigint) IS '000936 slots held by non-refunded removals this month';
+
+-- ACL drift guard: an unexpected grant makes apply refuse
+GRANT TRIGGER ON public.organization_manuals TO authenticated;
+\set ON_ERROR_STOP off
+\echo 'expected ERROR (ACL drift guard):'
+\i :mig
+ROLLBACK;
+\set ON_ERROR_STOP on
+SELECT pg_temp.check('25b apply refuses an unexpected organization_manuals ACL',
+  has_table_privilege('authenticated', 'public.organization_manuals', 'TRIGGER'));
+REVOKE TRIGGER ON public.organization_manuals FROM authenticated;
 
 -- ================= rollback (twice), exact =================
 DELETE FROM public.organization_manuals WHERE manual_id <> 40;

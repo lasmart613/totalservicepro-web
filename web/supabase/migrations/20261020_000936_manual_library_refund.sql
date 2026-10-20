@@ -33,7 +33,7 @@
 --     non-refunded removal by an AFTER DELETE trigger, so it cannot dodge the
 --     rules. Catalog deletions (manuals row gone, FK cascade) count as refunded.
 --   * public.manual_record_access(manual_id, kind, pages, page_count, source):
---     viewer reports page views, downloads and prints. It records only while
+--     viewer reports page views, downloads and prints (page_count is ignored). It records only while
 --     the caller's org owns the manual and only inside the 24h window.
 --   * public.manual_record_url_issued(org, manual, user, source): service_role
 --     only; get-manual-url calls it each time it signs a URL for an owned
@@ -43,6 +43,22 @@
 --   * public.manual_library_status(manual_id): eligibility preview for the UI.
 --   * public.manual_slots_held(org): non-refunded removals still holding a slot
 --     this month; the add paths add it to the used count.
+--
+--   * Direct client writes are closed (QA #332 MEDIUM): INSERT, UPDATE and
+--     MAINTAIN on organization_manuals are revoked from anon and authenticated.
+--     Adds go only through POST /api/manuals/library or get-manual-url
+--     action=add (service_role), which enforce plan limit + held slots in code.
+--     A BEFORE INSERT trigger (SECURITY INVOKER) refuses any other role (42501)
+--     and clamps created_at to now() at most, so the 24h window cannot be
+--     forged even by a future definer function or a mistaken GRANT.
+--   * The "most of a short manual" rule uses the server's page count (sum of
+--     manuals.chapter_metadata[*].page_count when every entry has one). Client
+--     page counts are ignored. Unknown page count: only the >20 pages and URL
+--     rules apply.
+--   * Re-adding a manual whose slot is held (non-refunded removal this month)
+--     nets zero, so the add paths allow it even when full; removing it again
+--     inside 24h is reported as 'still_held' (no refund, no cap use) because
+--     the earlier hold comes back.
 --
 -- Wrapped in BEGIN/COMMIT. Idempotent. Objects carry COMMENT '000936 ...' so the
 -- drift guards and the rollback refuse anything 000936 did not create.
@@ -67,6 +83,14 @@ BEGIN
   IF v_missing IS NOT NULL THEN
     RAISE EXCEPTION '000936 drift: organization_manuals is missing column(s): %', v_missing;
   END IF;
+  -- organization_manuals ACL must be the prod shape (or already 000936's), so the
+  -- rollback can restore it exactly.
+  IF (SELECT string_agg(a::text, ',' ORDER BY a::text) FROM pg_class c, unnest(c.relacl) a
+      WHERE c.oid = 'public.organization_manuals'::regclass
+        AND (a::text LIKE 'anon=%' OR a::text LIKE 'authenticated=%'))
+     NOT IN ('anon=rm/postgres,authenticated=arwdm/postgres', 'anon=r/postgres,authenticated=rd/postgres') THEN
+    RAISE EXCEPTION '000936 drift: organization_manuals anon/authenticated ACL is not the expected prod shape';
+  END IF;
   IF to_regprocedure('public.is_active_org_member(bigint)') IS NULL THEN
     RAISE EXCEPTION '000936 drift: public.is_active_org_member(bigint) missing';
   END IF;
@@ -87,7 +111,8 @@ BEGIN
     WHERE n.nspname = 'public'
       AND p.proname IN ('manual_library_remove','manual_library_status','manual_record_access',
                         'manual_record_url_issued','manual_slots_held','manual_refund_check',
-                        'manual_library_log_add','manual_library_log_delete')
+                        'manual_library_log_add','manual_library_log_delete',
+                        'manual_library_guard_insert','manual_slot_is_held')
       AND coalesce(obj_description(p.oid, 'pg_proc'), '') NOT LIKE '000936%') THEN
     RAISE EXCEPTION '000936 drift: a manual library function not created by 000936 already exists';
   END IF;
@@ -138,6 +163,33 @@ BEGIN
       CHECK (source IS NULL OR source IN ('web','android','ios','api','edge','db','unknown'));
   END IF;
 END $$;
+
+-- ---------- close direct client writes ----------
+REVOKE INSERT, UPDATE, MAINTAIN ON TABLE public.organization_manuals FROM anon, authenticated;
+REVOKE MAINTAIN ON TABLE public.organization_manuals FROM PUBLIC;
+
+CREATE OR REPLACE FUNCTION public.manual_library_guard_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = ''
+AS $$
+BEGIN
+  -- INVOKER on purpose: current_user is the real caller.
+  IF current_user NOT IN ('service_role', 'postgres', 'supabase_admin') THEN
+    RAISE EXCEPTION 'add manuals through /api/manuals/library' USING ERRCODE = '42501';
+  END IF;
+  -- Nobody, not even the service role, can date an add in the future.
+  NEW.created_at := least(coalesce(NEW.created_at, now()), now());
+  RETURN NEW;
+END;
+$$;
+COMMENT ON FUNCTION public.manual_library_guard_insert() IS '000936 trigger: only trusted roles add; created_at <= now()';
+REVOKE ALL ON FUNCTION public.manual_library_guard_insert() FROM PUBLIC, anon, authenticated;
+DROP TRIGGER IF EXISTS organization_manuals_guard_insert ON public.organization_manuals;
+CREATE TRIGGER organization_manuals_guard_insert
+  BEFORE INSERT ON public.organization_manuals
+  FOR EACH ROW EXECUTE FUNCTION public.manual_library_guard_insert();
 
 -- ---------- triggers: log every add and every delete ----------
 CREATE OR REPLACE FUNCTION public.manual_library_log_add()
@@ -194,7 +246,7 @@ CREATE TRIGGER organization_manuals_log_delete
   FOR EACH ROW EXECUTE FUNCTION public.manual_library_log_delete();
 
 -- ---------- rule evaluation (internal) ----------
-CREATE OR REPLACE FUNCTION public.manual_refund_check(p_row_id bigint, p_org bigint, p_added_at timestamptz)
+CREATE OR REPLACE FUNCTION public.manual_refund_check(p_row_id bigint, p_org bigint, p_added_at timestamptz, p_manual_id bigint)
 RETURNS jsonb
 LANGUAGE plpgsql
 STABLE
@@ -213,17 +265,33 @@ DECLARE
   v_dl        boolean;
   v_pr        boolean;
   v_used      int;
+  v_held      boolean;
   v_reason    text := NULL;
   v_month     timestamptz := date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC';
 BEGIN
   SELECT count(*) FILTER (WHERE kind = 'page_view'),
-         max(page_count) FILTER (WHERE kind = 'page_view'),
          count(*) FILTER (WHERE kind = 'url_issued'),
          bool_or(kind = 'download'),
          bool_or(kind = 'print')
-    INTO v_pages, v_pc, v_urls, v_dl, v_pr
+    INTO v_pages, v_urls, v_dl, v_pr
   FROM public.manual_library_events
   WHERE library_row_id = p_row_id;
+
+  -- Server page count: sum of chapter_metadata[*].page_count, only when every
+  -- entry has a positive one. Client-sent page counts are never used.
+  SELECT CASE WHEN count(*) > 0 AND bool_and(e ? 'page_count' AND jsonb_typeof(e->'page_count') = 'number'
+                                             AND (e->>'page_count')::numeric >= 1)
+              THEN least(sum(floor((e->>'page_count')::numeric)), 100000)::int END
+    INTO v_pc
+  FROM public.manuals m,
+       jsonb_array_elements(CASE WHEN jsonb_typeof(m.chapter_metadata) = 'array' THEN m.chapter_metadata ELSE '[]'::jsonb END) e
+  WHERE m.id = p_manual_id;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.manual_library_events h
+    WHERE h.organization_id = p_org AND h.manual_id = p_manual_id AND h.kind = 'remove'
+      AND h.refunded IS FALSE AND h.created_at < p_added_at AND h.created_at >= v_month)
+    INTO v_held;
 
   SELECT count(*) INTO v_used
   FROM public.manual_library_events
@@ -232,6 +300,8 @@ BEGIN
 
   IF now() - p_added_at >= c_window THEN
     v_reason := 'window_expired';
+  ELSIF v_held THEN
+    v_reason := 'still_held';   -- the earlier hold comes back; nothing to refund
   ELSIF coalesce(v_dl, false) THEN
     v_reason := 'downloaded';
   ELSIF coalesce(v_pr, false) THEN
@@ -249,13 +319,14 @@ BEGIN
     'reason', coalesce(v_reason, 'refund'),
     'refund_until', p_added_at + c_window,
     'pages_viewed', v_pages,
+    'page_count', v_pc,
     'url_fetches', v_urls,
     'refunds_used', v_used,
     'refunds_cap', c_cap);
 END;
 $$;
-COMMENT ON FUNCTION public.manual_refund_check(bigint, bigint, timestamptz) IS '000936 internal refund rules';
-REVOKE ALL ON FUNCTION public.manual_refund_check(bigint, bigint, timestamptz) FROM PUBLIC, anon, authenticated;
+COMMENT ON FUNCTION public.manual_refund_check(bigint, bigint, timestamptz, bigint) IS '000936 internal refund rules';
+REVOKE ALL ON FUNCTION public.manual_refund_check(bigint, bigint, timestamptz, bigint) FROM PUBLIC, anon, authenticated;
 
 -- ---------- held slots ----------
 CREATE OR REPLACE FUNCTION public.manual_slots_held(p_org bigint)
@@ -278,6 +349,27 @@ $$;
 COMMENT ON FUNCTION public.manual_slots_held(bigint) IS '000936 slots held by non-refunded removals this month';
 REVOKE ALL ON FUNCTION public.manual_slots_held(bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.manual_slots_held(bigint) TO authenticated, service_role;
+
+-- Is this manual's slot held for the org right now? Re-adding it nets zero.
+CREATE OR REPLACE FUNCTION public.manual_slot_is_held(p_org bigint, p_manual_id bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.manual_library_events e
+    WHERE e.organization_id = p_org AND e.manual_id = p_manual_id
+      AND e.kind = 'remove' AND e.refunded IS FALSE
+      AND e.created_at >= (date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')
+      AND NOT EXISTS (SELECT 1 FROM public.organization_manuals om
+                      WHERE om.organization_id = p_org AND om.manual_id = p_manual_id))
+    AND (auth.role() = 'service_role' OR public.is_active_org_member(p_org));
+$$;
+COMMENT ON FUNCTION public.manual_slot_is_held(bigint, bigint) IS '000936 is this manual''s slot held (re-add nets zero)';
+REVOKE ALL ON FUNCTION public.manual_slot_is_held(bigint, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.manual_slot_is_held(bigint, bigint) TO authenticated, service_role;
 
 -- caller's org (profile org, must be an active member)
 -- (inline in each function; no extra helper so the surface stays small)
@@ -305,7 +397,7 @@ BEGIN
   IF NOT FOUND THEN
     RETURN jsonb_build_object('owned', false, 'slots_held', public.manual_slots_held(v_org));
   END IF;
-  RETURN public.manual_refund_check(v_row.id, v_org, v_row.created_at)
+  RETURN public.manual_refund_check(v_row.id, v_org, v_row.created_at, v_row.manual_id)
          || jsonb_build_object('owned', true, 'added_at', v_row.created_at,
                                'slots_held', public.manual_slots_held(v_org));
 END;
@@ -346,7 +438,7 @@ BEGIN
     RETURN jsonb_build_object('removed', false, 'refunded', false, 'reason', 'not_in_library');
   END IF;
 
-  v_check  := public.manual_refund_check(v_row.id, v_org, v_row.created_at);
+  v_check  := public.manual_refund_check(v_row.id, v_org, v_row.created_at, v_row.manual_id);
   v_refund := (v_check->>'refund_eligible')::boolean;
 
   PERFORM set_config('tsp.manual_remove_row', v_row.id::text, true);
@@ -384,7 +476,8 @@ DECLARE
   v_uid uuid := auth.uid();
   v_org bigint;
   v_src text := CASE WHEN p_source IN ('web','android','ios','api') THEN p_source ELSE 'unknown' END;
-  v_pc  int  := CASE WHEN p_page_count BETWEEN 1 AND 100000 THEN p_page_count END;
+  -- p_page_count is accepted for client compatibility and ignored (server page count only).
+  v_pc  int  := NULL;
   v_row public.organization_manuals%ROWTYPE;
   v_n   int := 0;
 BEGIN
