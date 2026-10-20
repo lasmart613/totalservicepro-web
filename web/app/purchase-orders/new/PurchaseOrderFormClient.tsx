@@ -168,9 +168,16 @@ export default function PurchaseOrderFormClient() {
       let mkt = await supabase
         .from('marketplace_listings')
         .select(
-          'id, title, description, part_number, manufacturer, price, listing_type, category, status, details'
+          // 000935: details is private; details_public is the sanitized copy.
+          'id, title, description, part_number, manufacturer, price, listing_type, category, status, details:details_public'
         )
         .limit(500);
+      if (mkt.error) {
+        mkt = await supabase
+          .from('marketplace_listings')
+          .select('id, title, description, part_number, manufacturer, price, listing_type, category, status, details')
+          .limit(500);
+      }
       if (mkt.error) {
         mkt = await supabase
           .from('marketplace_listings')

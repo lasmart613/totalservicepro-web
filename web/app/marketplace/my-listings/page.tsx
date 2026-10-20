@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { withListingColumns } from '@/lib/marketplace/listing-columns';
 import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import {
   formatListingPrice,
@@ -61,16 +62,18 @@ export default function MyListings() {
         .maybeSingle();
       const orgId = profile?.organization_id;
 
-      let query = supabase
-        .from('marketplace_listings')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (orgId != null) {
-        query = query.or(`seller_id.eq.${user.id},created_by.eq.${user.id},organization_id.eq.${orgId}`);
-      } else {
-        query = query.or(`seller_id.eq.${user.id},created_by.eq.${user.id}`);
-      }
-      const { data, error } = await query;
+      // 000935: named public columns only (serial_number / notes / details are private).
+      const owned =
+        orgId != null
+          ? `seller_id.eq.${user.id},created_by.eq.${user.id},organization_id.eq.${orgId}`
+          : `seller_id.eq.${user.id},created_by.eq.${user.id}`;
+      const { data, error } = await withListingColumns((cols) =>
+        supabase
+          .from('marketplace_listings')
+          .select(cols)
+          .order('created_at', { ascending: false })
+          .or(owned),
+      );
       let rows: SellerListing[] = !error && data ? (data as SellerListing[]) : [];
 
       if (!rows.length) {
