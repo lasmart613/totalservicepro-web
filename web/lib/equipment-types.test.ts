@@ -118,8 +118,10 @@ test('seed catalog covers Larry’s first five manuals without PDF binaries', ()
   assert.ok(EQUIPMENT_CATALOG.some((m) => m.name === 'GE OEC'));
   const dornier = EQUIPMENT_CATALOG.find((m) => m.name === 'Dornier');
   assert.ok(dornier);
-  assert.ok((dornier?.models || []).every((m) => m.equipmentType === 'laser'));
-  assert.deepEqual((dornier?.models || []).map((m) => m.name), ['H20', 'H30']);
+  // Dornier H20 / H30 stay holmium lasers; 000937 adds Dornier ESWL as lithotriptor.
+  const dornierLasers = (dornier?.models || []).filter((m) => m.equipmentType === 'laser');
+  assert.deepEqual(dornierLasers.map((m) => m.name), ['H20', 'H30']);
+  assert.ok((dornier?.models || []).every((m) => m.equipmentType === 'laser' || m.equipmentType === 'lithotriptor'));
   const quanta = EQUIPMENT_CATALOG.find((m) => m.name === 'Quanta System');
   assert.deepEqual(
     (quanta?.models || []).map((m) => m.name),

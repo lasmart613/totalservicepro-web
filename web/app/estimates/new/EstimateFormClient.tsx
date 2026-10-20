@@ -38,14 +38,9 @@ import {
   type CustomerActionKind,
   type LineItem,
 } from '@/lib/billing/save-helpers';
-import { listManufacturerChoices, listModelChoices, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
-import {
-  DEFAULT_EQUIPMENT_TYPE,
-  EQUIPMENT_TYPES,
-  equipmentTypeOrDefault,
-  type EquipmentType,
-} from '@/lib/equipment-types';
+import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
+import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import { documentDirection } from '@/lib/i18n/translate-app';
 import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
@@ -93,23 +88,12 @@ export default function EstimateFormClient() {
 
   // Equipment — live manufacturers + laser_models, static MODELS as fallback
   const catalog = useEquipmentCatalog(supabase);
-  const [equipmentType, setEquipmentType] = useState<EquipmentType>(DEFAULT_EQUIPMENT_TYPE);
-  const manufacturers = useMemo(
-    () => listManufacturerChoices(catalog),
-    [catalog.manufacturers, catalog.models]
-  );
-  const [manufacturer, setManufacturer] = useState('');
-  const [model, setModel] = useState('');
-  const [customModel, setCustomModel] = useState('');
+  const cascade = useEquipmentCascade(catalog);
+  const equipmentType = cascade.state.equipmentType;
+  // Pulse counts only mean something for lasers; hidden and not saved otherwise.
+  const showPulseCount = equipmentType === 'laser';
   const [serial, setSerial] = useState('');
   const [pulseCount, setPulseCount] = useState('');
-  const models = useMemo(
-    () =>
-      manufacturer
-        ? listModelChoices(manufacturer, { ...catalog, equipmentType })
-        : [],
-    [manufacturer, catalog.manufacturers, catalog.models, equipmentType]
-  );
 
   // Services / notes
   const [services, setServices] = useState<string[]>([]);
@@ -279,9 +263,11 @@ export default function EstimateFormClient() {
       const loadedEst = data.estimate_number || ed.estimate_number || ed.estNumber || '';
       setDocNumber(loadedEst);
       allocatedNumberRef.current = loadedEst;
-      setManufacturer(ed.manufacturer || '');
-      setModel(ed.model || '');
-      setEquipmentType(equipmentTypeOrDefault(ed.equipment_type || ed.equipmentType));
+      cascade.hydrate({
+        equipmentType: ed.equipment_type || ed.equipmentType,
+        manufacturer: ed.manufacturer || '',
+        model: ed.model || '',
+      });
       setSerial(ed.serial || '');
       setPulseCount(ed.pulse_count != null ? String(ed.pulse_count) : '');
       setCustAddress(ed.custAddress || ed.address || '');
@@ -541,10 +527,10 @@ export default function EstimateFormClient() {
       }
       const existingId = savedIdRef.current;
 
-      const modelName = model === '__other__' ? customModel.trim() : model;
-      const mfr = manufacturer === '__other__' ? '' : manufacturer;
+      const modelName = cascade.resolved.model;
+      const mfr = cascade.resolved.manufacturer;
       const deviceModel = [mfr, modelName].filter(Boolean).join(' ') || null;
-      const serialPulses = [serial, pulseCount ? `${pulseCount} pulses` : '']
+      const serialPulses = [serial, showPulseCount && pulseCount ? `${pulseCount} pulses` : '']
         .filter(Boolean)
         .join(' · ') || null;
 
@@ -567,7 +553,7 @@ export default function EstimateFormClient() {
           model: modelName,
           equipment_type: equipmentType,
           serial,
-          pulse_count: pulseCount,
+          pulse_count: showPulseCount ? pulseCount : '',
           subtotal: totals.subtotal,
           tax: totals.tax,
           labor: totals.labor,
@@ -716,7 +702,8 @@ export default function EstimateFormClient() {
   }
 
   function buildEstimateEmailHtml(themeScope: DocThemeScope = 'email') {
-    const modelName = model === '__other__' ? customModel.trim() : model;
+    const modelName = cascade.resolved.model;
+    const manufacturer = cascade.resolved.manufacturer;
     const svcLabels = services.map((s) => SERVICE_TYPE_LABELS[s] || s);
     if (otherService.trim()) svcLabels.push(otherService.trim());
     const visibleParts = partLines.filter((p) => p.part_number || p.description || p.ext);
@@ -761,7 +748,7 @@ export default function EstimateFormClient() {
       manufacturer,
       model: modelName,
       serial,
-      pulseCount,
+      pulseCount: showPulseCount ? pulseCount : '',
       miles,
       urgency,
       services: svcLabels,
@@ -1020,80 +1007,12 @@ export default function EstimateFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="text-xs text-[var(--text3)]">{t('Equipment type')}</label>
-              <select
-                className="input select mt-1"
-                value={equipmentType}
-                onChange={(e) => {
-                  const next = equipmentTypeOrDefault(e.target.value);
-                  setEquipmentType(next);
-                  if (model && model !== '__other__') {
-                    const nextModels = manufacturer
-                      ? listModelsForManufacturer(manufacturer, { ...catalog, equipmentType: next })
-                      : [];
-                    if (!nextModels.includes(model)) {
-                      setModel('');
-                      setCustomModel('');
-                    }
-                  }
-                }}
-              >
-                {EQUIPMENT_TYPES.map((item) => (
-                  <option key={item.value} value={item.value}>
-                    {t(item.label)}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text3)]">{t('Manufacturer')}</label>
-              <select
-                className="input select mt-1"
-                value={manufacturer}
-                onChange={(e) => {
-                  setManufacturer(e.target.value);
-                  setModel('');
-                  setCustomModel('');
-                }}
-              >
-                <option value="">{t('— Select —')}</option>
-                {manufacturers.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text3)]">{t('Model')}</label>
-              <select
-                className="input select mt-1"
-                value={model}
-                disabled={!manufacturer}
-                onChange={(e) => setModel(e.target.value)}
-              >
-                <option value="">{t('— Select —')}</option>
-                {models.map((m) => (
-                  <option key={m.value} value={m.value}>
-                    {m.label}
-                  </option>
-                ))}
-                <option value="__other__">{t('Other / custom…')}</option>
-              </select>
-              {model === '__other__' && (
-                <input
-                  className="input mt-2"
-                  placeholder={t('Custom model name')}
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                />
-              )}
-            </div>
+            <EquipmentCascadeFields cascade={cascade} t={t} idPrefix="est-eq" />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
+            {showPulseCount && (
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
               <input
@@ -1104,6 +1023,7 @@ export default function EstimateFormClient() {
                 onChange={(e) => setPulseCount(e.target.value)}
               />
             </div>
+            )}
           </div>
         </section>
 

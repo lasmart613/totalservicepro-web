@@ -363,8 +363,8 @@ export default function NewServiceReport() {
     [dbManufacturers, dbLaserModels]
   );
   const baseManufacturerChoices = useMemo(
-    () => listManufacturerChoices(reportCatalog),
-    [reportCatalog]
+    () => listManufacturerChoices({ ...reportCatalog, equipmentType }),
+    [reportCatalog, equipmentType]
   );
   const manufacturerChoices = useMemo(
     () =>
@@ -1226,7 +1226,9 @@ export default function NewServiceReport() {
           brand,
         })
     );
-    if (inferred !== equipmentType) {
+    // A model picked from the type-filtered list already matches the type.
+    const inCurrentType = modelChoices.some((c) => c.value === modelVal);
+    if (!inCurrentType && inferred !== equipmentType) {
       void onEquipmentTypeChange(inferred);
     }
     // Derive equipment_name from manufacturer + model dropdowns (no free-text field)
@@ -1927,7 +1929,14 @@ export default function NewServiceReport() {
             <select
               className="input mb-1 w-full"
               value={equipmentType}
-              onChange={(e) => void onEquipmentTypeChange(equipmentTypeOrDefault(e.target.value))}
+              data-testid="cascade-type"
+              onChange={(e) => {
+                const next = equipmentTypeOrDefault(e.target.value);
+                if (next === equipmentType) return;
+                // Type change clears manufacturer and model.
+                selectDbManufacturer('');
+                void onEquipmentTypeChange(next);
+              }}
             >
               {EQUIPMENT_TYPES.map((t) => (
                 <option key={t.value} value={t.value}>

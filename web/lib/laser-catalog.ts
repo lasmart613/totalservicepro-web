@@ -14,11 +14,11 @@ import {
 } from './equipment-dropdown.ts';
 import type { EquipmentType } from './equipment-types.ts';
 
-export function listManufacturers(live?: LiveCatalog): string[] {
+export function listManufacturers(live?: LiveCatalog & { equipmentType?: string | null | EquipmentType }): string[] {
   return listCatalogManufacturers(live);
 }
 
-export function listManufacturerChoices(live?: LiveCatalog): CatalogChoice[] {
+export function listManufacturerChoices(live?: LiveCatalog & { equipmentType?: string | null | EquipmentType }): CatalogChoice[] {
   return listCatalogManufacturerChoices(live);
 }
 
