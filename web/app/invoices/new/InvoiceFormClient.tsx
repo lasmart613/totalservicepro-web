@@ -93,6 +93,8 @@ export default function InvoiceFormClient() {
   const cascade = useEquipmentCascade(catalog);
   const { manufacturer, model, equipment_type: equipmentType } = cascade.resolved;
   const [serial, setSerial] = useState('');
+  // Pulse counts only mean something for lasers; hidden and not saved otherwise.
+  const showPulseCount = equipmentType === 'laser';
   const [pulseCount, setPulseCount] = useState('');
 
   const invoiceDateTouched = useRef(false);
@@ -575,7 +577,7 @@ export default function InvoiceFormClient() {
         model,
         equipment_type: equipmentType,
         serial,
-        pulse_count: pulseCount,
+        pulse_count: showPulseCount ? pulseCount : '',
         invoice_number: invNum,
         invNumber: invNum,
         custAddress,
@@ -1060,16 +1062,18 @@ export default function InvoiceFormClient() {
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
-            <div>
-              <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
-              <input
-                className="input mt-1"
-                type="number"
-                min={0}
-                value={pulseCount}
-                onChange={(e) => setPulseCount(e.target.value)}
-              />
-            </div>
+            {showPulseCount && (
+              <div>
+                <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  min={0}
+                  value={pulseCount}
+                  onChange={(e) => setPulseCount(e.target.value)}
+                />
+              </div>
+            )}
           </div>
         </section>
 
