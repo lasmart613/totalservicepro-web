@@ -61,7 +61,7 @@ export type ProspectViewer = {
 
 export type ProspectLoad =
   | { ok: true; data: ProspectPayload }
-  | { ok: false; reason: 'unavailable' | 'not_service_org' | 'error'; message?: string };
+  | { ok: false; reason: 'unavailable' | 'not_service_org' | 'not_admin' | 'rate_limited' | 'offset_too_large' | 'error'; message?: string };
 
 /** Our RPCs; only these being missing means "migration not applied yet". */
 const PROSPECT_RPCS = ['find_clinic_prospects', 'add_prospect_customer'];
@@ -88,6 +88,10 @@ export function parseProspectResponse(data: unknown, error: { message?: string; 
   }
   const j = (data || {}) as Record<string, unknown>;
   if (j.error === 'not_service_org' || j.error === 'no_org') return { ok: false, reason: 'not_service_org' };
+  // 000934: owners/admins only, 30 calls per minute, Premium offset <= 5000.
+  if (j.error === 'not_admin') return { ok: false, reason: 'not_admin' };
+  if (j.error === 'rate_limited') return { ok: false, reason: 'rate_limited' };
+  if (j.error === 'offset_too_large') return { ok: false, reason: 'offset_too_large' };
   if (j.error) return { ok: false, reason: 'error', message: String(j.error) };
   return {
     ok: true,
@@ -144,6 +148,25 @@ export function emptyStateKey(data: ProspectPayload | null): string {
   if (v.country_pool === 0) return EMPTY_COUNTRY_NOT_IN_POOL;
   if (v.country_pool === null) return EMPTY_NO_COUNTRY;
   return EMPTY_NO_LOCATION;
+}
+
+export const FIND_CLINICS_ASK_ADMIN =
+  'Find clinics shows clinic contact details, so only your company owner and admins can use it. Ask your admin for access.';
+export const FIND_CLINICS_RATE_LIMITED = 'Too many searches in a short time. Wait a minute and try again.';
+export const FIND_CLINICS_OFFSET_LIMIT = 'You reached the end of what can be browsed in one list. Filter by country or city to see more.';
+
+/** Message key for a find_clinic_prospects() refusal, or null when not one of these. */
+export function loadErrorKey(reason: string): string | null {
+  switch (reason) {
+    case 'not_admin':
+      return FIND_CLINICS_ASK_ADMIN;
+    case 'rate_limited':
+      return FIND_CLINICS_RATE_LIMITED;
+    case 'offset_too_large':
+      return FIND_CLINICS_OFFSET_LIMIT;
+    default:
+      return null;
+  }
 }
 
 /** Message key for an add_prospect_customer() refusal. */
