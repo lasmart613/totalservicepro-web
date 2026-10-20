@@ -3,9 +3,9 @@
 --   SELECT grants), the original "Sellers select own listings" policy, and drops
 --   details_public, marketplace_listing_private and marketplace_public_details.
 -- No data changes (details_public is generated from details).
--- App code from the 000935 PR does NOT fully keep working after rollback:
--- reads of details_public fail once the column is gone. Revert the PR's client
--- changes together with this rollback.
+-- App code from the 000935 PR keeps working after rollback: withListingColumns()
+-- sees "details_public does not exist" and retries with the legacy column list,
+-- and marketplace_listing_private callers fall back to no private fields.
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
