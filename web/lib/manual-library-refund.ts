@@ -66,6 +66,7 @@ export type RefundReason =
   | 'heavy_reading'
   | 'many_fetches'
   | 'monthly_cap'
+  | 'still_held'
   | 'not_in_library';
 
 export type RemoveResult = {
@@ -122,6 +123,8 @@ export function refundReasonMessage(reason: string | undefined | null): string {
       return 'Removed. No slot refund: much of the manual was read.';
     case 'monthly_cap':
       return 'Removed. No slot refund: your company used its 3 refunds this month.';
+    case 'still_held':
+      return 'Removed. No slot refund: this manual already held a slot from an earlier removal this month.';
     case 'not_in_library':
       return 'This manual is no longer in your company library.';
     default:

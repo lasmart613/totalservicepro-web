@@ -132,7 +132,7 @@ test('page batcher sends each page once', () => {
 
 test('every reason has copy, translated in all 8 locales', () => {
   const keys = new Set<string>();
-  for (const r of ['refund', 'window_expired', 'downloaded', 'printed', 'heavy_reading', 'many_fetches', 'monthly_cap', 'not_in_library', 'other']) {
+  for (const r of ['refund', 'window_expired', 'downloaded', 'printed', 'heavy_reading', 'many_fetches', 'monthly_cap', 'still_held', 'not_in_library', 'other']) {
     keys.add(refundReasonMessage(r));
   }
   keys.add(removeActionLabel({ owned: true, refund_eligible: true }));
@@ -163,6 +163,9 @@ test('/manuals uses the in-app dialog with the guard, Undo and Remove', () => {
   assert.ok(/label: t\('Undo'\)/.test(page), 'Undo on the added toast');
   assert.ok(page.includes('removeFromLibrary(') && page.includes('data-testid="manual-remove"'));
   assert.ok(!/from\('organization_manuals'\)\s*\.delete\(/.test(page), 'page never deletes directly');
+  // QA #332 MEDIUM: no direct client insert into the library tables
+  assert.ok(!/from\('organization_manuals'\)\s*\.insert\(/.test(page), 'no client insert into organization_manuals');
+  assert.ok(!/from\('user_manuals'\)\s*\.insert\(/.test(page), 'no client insert into user_manuals');
 });
 
 test('dialog: Cancel focused, Enter never accepts, Esc/backdrop cancel, armed accept, a11y', () => {
@@ -171,20 +174,23 @@ test('dialog: Cancel focused, Enter never accepts, Esc/backdrop cancel, armed ac
   assert.ok(/e\.key === 'Enter'[\s\S]{0,300}preventDefault\(\)[\s\S]{0,200}cancel\(\)/.test(src));
   assert.ok(!/e\.key === 'Enter'[\s\S]{0,300}accept\(\)/.test(src), 'Enter path never calls accept');
   assert.ok(/e\.key === 'Escape'[\s\S]{0,120}cancel\(\)/.test(src));
-  assert.ok(/e\.target === e\.currentTarget\) cancel\(\)/.test(src));
+  assert.ok(/if \(e\.target !== e\.currentTarget\) return;\s*if \(!addConfirmArmed\(openedAt\.current, Date\.now\(\), ADD_CONFIRM_ARM_MS\)\) return;\s*cancel\(\);/.test(src), 'backdrop ignored for 300ms');
   assert.ok(/addConfirmArmed\(openedAt\.current/.test(src));
   assert.ok(src.includes('role="dialog"') && src.includes('aria-modal="true"') && src.includes('aria-labelledby') && src.includes('aria-describedby'));
 });
 
 test('add paths count held slots and record the source', () => {
   const route = read('app/api/manuals/library/route.ts');
-  assert.ok(route.includes("rpc('manual_slots_held'") && /usedNow >= limit/.test(route));
+  assert.ok(route.includes("rpc('manual_slots_held'") && /usedNow >= limit && !reAddHeld/.test(route));
+  assert.ok(route.includes("rpc('manual_slot_is_held'") && /if \(!hasServiceRole\(\)\)/.test(route));
   assert.ok(/source,\n\s*\}\);/.test(route));
   const edge = readFileSync(join(webDir, '..', 'supabase/functions/get-manual-url/index.ts'), 'utf8');
   assert.ok(edge.includes('"manual_slots_held"') && edge.includes('owned.size + slotsHeld >= slotLimit'));
   assert.ok(edge.includes('"manual_record_url_issued"'));
+  assert.ok(edge.includes('"manual_slot_is_held"') && edge.includes('owned.size + slotsHeld >= slotLimit && !reAddHeld'));
   const viewer = read('components/ManualPdfViewer.tsx');
   assert.ok(viewer.includes("'beforeprint'") && viewer.includes("'page_view'") && viewer.includes('onClick={reportDownload}'));
+  assert.ok(!/pageCount:\s/.test(viewer.slice(viewer.indexOf('createPageViewBatcher(('))), 'viewer no longer sends a page count');
 });
 
 test('migration 000936 standards', () => {
@@ -200,6 +206,11 @@ test('migration 000936 standards', () => {
   assert.match(mig, /c_cap\s+constant int := 3/);
   assert.match(mig, /c_pages\s+constant int := 20/);
   assert.match(mig, /REVOKE ALL ON TABLE public\.manual_library_events FROM PUBLIC, anon, authenticated;/);
+  assert.match(mig, /REVOKE INSERT, UPDATE, MAINTAIN ON TABLE public\.organization_manuals FROM anon, authenticated;/);
+  assert.match(mig, /BEFORE INSERT ON public\.organization_manuals/);
+  assert.match(mig, /manual_library_guard_insert\(\)\s*RETURNS trigger\s*LANGUAGE plpgsql\s*SECURITY INVOKER/);
+  assert.match(mig, /v_pc\s+int\s+:= NULL;/);
+  assert.match(rb, /GRANT INSERT, UPDATE, MAINTAIN ON TABLE public\.organization_manuals TO authenticated;/);
   for (const fn of ['manual_library_remove', 'manual_library_status', 'manual_record_access', 'manual_record_url_issued', 'manual_slots_held', 'manual_refund_check']) {
     assert.ok(new RegExp(`FUNCTION public\\.${fn}\\([^)]*\\)\\s*RETURNS[\\s\\S]{0,120}SECURITY DEFINER\\s*SET search_path = ''`).test(mig), fn);
     assert.ok(rb.includes(`DROP FUNCTION IF EXISTS public.${fn}(`), `rollback drops ${fn}`);
