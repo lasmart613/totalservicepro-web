@@ -1,5 +1,10 @@
 -- 000935: marketplace_listings column lockdown (QA sec-1019, MEDIUM follow-up to #329).
 --
+-- CLIENT WRITES: after 000935 any client (anon/authenticated) INSERT or UPDATE
+-- chained with .select() and NO column list (= RETURNING *) is refused with
+-- 42501, because it returns the private columns. Always name the columns,
+-- e.g. .select('id') or .select(LISTING_PUBLIC_SELECT).
+--
 -- Before (prod, read-only check 2026-10-19):
 --   * anon had table-level SELECT (+ MAINTAIN) and authenticated had
 --     SELECT/INSERT/UPDATE/DELETE (+ MAINTAIN) on public.marketplace_listings.

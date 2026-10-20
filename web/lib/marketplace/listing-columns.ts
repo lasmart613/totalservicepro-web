@@ -76,6 +76,25 @@ export async function withListingColumns<T extends { error: PgError }>(
   return run(LISTING_PUBLIC_SELECT_LEGACY);
 }
 
+const PO_CATALOG_BASE = 'id, title, description, part_number, manufacturer, price, listing_type, category, status';
+export const PO_CATALOG_SELECT = `${PO_CATALOG_BASE}, details:details_public`;
+export const PO_CATALOG_SELECT_LEGACY = `${PO_CATALOG_BASE}, details`;
+
+/**
+ * PO catalog lookup (signed-in client). Uses details_public. It falls back to
+ * the legacy raw-details list ONLY when details_public does not exist yet (000935
+ * not applied). Any other error (42501, RLS, network) fails closed: no rows,
+ * and the error is returned. It never retries with other columns.
+ */
+export async function loadPoCatalogListings<R>(
+  run: (columns: string) => PromiseLike<{ data: R[] | null; error: PgError }>,
+): Promise<{ data: R[]; error: PgError }> {
+  let res = await run(PO_CATALOG_SELECT);
+  if (res.error && isMissingDetailsPublic(res.error)) res = await run(PO_CATALOG_SELECT_LEGACY);
+  if (res.error) return { data: [], error: res.error };
+  return { data: res.data || [], error: null };
+}
+
 export type ListingPrivateFields = {
   serial_number: string | null;
   notes: string | null;

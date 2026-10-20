@@ -9,6 +9,9 @@ import {
   LISTING_PUBLIC_SELECT_LEGACY,
   isMissingDetailsPublic,
   loadListingPrivateFields,
+  loadPoCatalogListings,
+  PO_CATALOG_SELECT,
+  PO_CATALOG_SELECT_LEGACY,
   withListingColumns,
 } from './listing-columns.ts';
 import { sanitizeShareListingDetails } from '../share-listing-public.ts';
@@ -121,4 +124,40 @@ test('SQL sanitizer rule matches sanitizeShareListingDetails on the proof fixtur
   assert.deepEqual(sanitizeShareListingDetails(fixture), {
     sku: 'SKU-1', shipping: { days: 3 }, compatible_models: [{ m: 'GentleLase' }], warranty: '90 days',
   });
+});
+
+test('PO catalog: legacy fallback only when details_public is missing', async () => {
+  const calls: string[] = [];
+  const res = await loadPoCatalogListings<{ id: string }>(async (c) => {
+    calls.push(c);
+    return c === PO_CATALOG_SELECT
+      ? { data: null, error: { message: 'column marketplace_listings.details_public does not exist', code: '42703' } }
+      : { data: [{ id: 'a' }], error: null };
+  });
+  assert.deepEqual(calls, [PO_CATALOG_SELECT, PO_CATALOG_SELECT_LEGACY]);
+  assert.deepEqual(res.data, [{ id: 'a' }]);
+});
+
+test('PO catalog: any other error fails closed with no retry', async () => {
+  for (const error of [
+    { message: 'permission denied for table marketplace_listings', code: '42501' },
+    { message: 'Failed to fetch' },
+    { message: 'permission denied for column details', code: '42501' },
+  ]) {
+    const calls: string[] = [];
+    const res = await loadPoCatalogListings<{ id: string }>(async (c) => {
+      calls.push(c);
+      return c === PO_CATALOG_SELECT ? { data: null, error } : { data: [{ id: 'leak' }], error: null };
+    });
+    assert.deepEqual(calls, [PO_CATALOG_SELECT]);
+    assert.deepEqual(res.data, []);
+    assert.equal(res.error, error);
+  }
+});
+
+test('PO catalog: success path uses details_public and never raw details', async () => {
+  assert.match(PO_CATALOG_SELECT, /details:details_public$/);
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../app/purchase-orders/new/PurchaseOrderFormClient.tsx'), 'utf8');
+  assert.ok(src.includes('loadPoCatalogListings'));
+  assert.ok(!/status, details'/.test(src), 'no inline raw-details fallback in PO form');
 });

@@ -24,6 +24,7 @@ import {
 } from '@/lib/billing/save-helpers';
 import { isSentPurchaseOrder, purchaseOrderSavePayload } from '@/lib/billing/purchase-order-save';
 import { isPartListing } from '@/lib/marketplace/parts';
+import { loadPoCatalogListings } from '@/lib/marketplace/listing-columns';
 import {
   exactPartSuggest,
   filterPartSuggests,
@@ -165,25 +166,12 @@ export default function PurchaseOrderFormClient() {
       console.warn('PO catalog suggest', e);
     }
     try {
-      let mkt = await supabase
-        .from('marketplace_listings')
-        .select(
-          // 000935: details is private; details_public is the sanitized copy.
-          'id, title, description, part_number, manufacturer, price, listing_type, category, status, details:details_public'
-        )
-        .limit(500);
-      if (mkt.error) {
-        mkt = await supabase
-          .from('marketplace_listings')
-          .select('id, title, description, part_number, manufacturer, price, listing_type, category, status, details')
-          .limit(500);
-      }
-      if (mkt.error) {
-        mkt = await supabase
-          .from('marketplace_listings')
-          .select('id, title, description, part_number, manufacturer, price, listing_type, category, status')
-          .limit(500);
-      }
+      // 000935: details is private; details_public is the sanitized copy.
+      // Legacy raw-details fallback only when details_public is missing; other errors fail closed.
+      const mkt = await loadPoCatalogListings<Record<string, unknown>>((columns) =>
+        supabase.from('marketplace_listings').select(columns).limit(500),
+      );
+      if (mkt.error) console.warn('PO catalog marketplace', mkt.error);
       for (const raw of mkt.data || []) {
         let details = (raw as { details?: unknown }).details;
         if (typeof details === 'string') {
