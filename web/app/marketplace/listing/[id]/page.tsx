@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { loadListingPrivateFields, withListingColumns } from '@/lib/marketplace/listing-columns';
 import { toast } from 'sonner';
 import { ShareButton } from '@/components/ShareButton';
 import { listingShareText } from '@/lib/share';
@@ -41,14 +42,17 @@ export default function ListingDetail() {
     setUserId(user?.id || null);
 
     let data: any = null;
-    const { data: direct, error } = await supabase
-      .from('marketplace_listings')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle();
+    // 000935: named public columns only; the seller's own serial comes from the RPC below.
+    const { data: direct, error } = await withListingColumns((cols) =>
+      supabase.from('marketplace_listings').select(cols).eq('id', id).maybeSingle(),
+    );
 
     if (!error && direct) {
       data = direct;
+      if (user) {
+        const priv = await loadListingPrivateFields(supabase, String(id));
+        if (priv?.serial_number) data = { ...data, serial_number: priv.serial_number };
+      }
     } else {
       try {
         const headers = await marketplaceAuthHeaders();

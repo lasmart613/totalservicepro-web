@@ -6,6 +6,7 @@ import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { ShareButton } from '@/components/ShareButton';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { withListingColumns } from '@/lib/marketplace/listing-columns';
 import { listingShareText } from '@/lib/share';
 import { loginHref } from '@/lib/login-next';
 import { ListingDescription } from '@/components/ListingDescription';
@@ -109,11 +110,10 @@ function PartDetail() {
     }
 
     if (!data) {
-      const { data: direct, error } = await supabase
-        .from('marketplace_listings')
-        .select('*')
-        .eq('id', id)
-        .maybeSingle();
+      // 000935: named public columns only (serial_number / notes / details are private).
+      const { data: direct, error } = await withListingColumns((cols) =>
+        supabase.from('marketplace_listings').select(cols).eq('id', id).maybeSingle(),
+      );
       if (!error && direct && isPartListing(direct)) data = direct;
     }
 
