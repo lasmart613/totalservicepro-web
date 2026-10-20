@@ -523,11 +523,6 @@ function mainPartFields(input: {
     'shipping_address_collection[allowed_countries][0]': 'US',
     billing_address_collection: 'auto',
   };
-  if (input.maxQuantity != null && input.maxQuantity > 1) {
-    fields['line_items[0][adjustable_quantity][enabled]'] = 'true';
-    fields['line_items[0][adjustable_quantity][minimum]'] = 1;
-    fields['line_items[0][adjustable_quantity][maximum]'] = input.maxQuantity;
-  }
   const email = input.customerEmail ? String(input.customerEmail).trim() : '';
   if (email.includes('@')) fields.customer_email = email;
   return fields;

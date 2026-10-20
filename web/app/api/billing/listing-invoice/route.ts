@@ -11,10 +11,15 @@ import { coerceOrgId, writeWithColumnRetry } from '@/lib/billing/save-helpers';
 import { loadLinkedCustomerOrgs } from '@/lib/customer-form';
 import { sameOrg } from '@/lib/org-membership';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
+import { loadListingPrivateFields } from '@/lib/marketplace/listing-columns';
 
 export const dynamic = 'force-dynamic';
 
+// 000935: serial_number / details are private columns. details_public is the
+// sanitized copy (sku etc. survive); the serial comes from marketplace_listing_private.
+// The pre-000935 lists stay as fallbacks until the migration is applied.
 const LISTING_SELECTS = [
+  'id, title, part_number, price, price_type, manufacturer, model, details:details_public, organization_id',
   'id, title, part_number, price, price_type, manufacturer, model, serial_number, details, organization_id',
   'id, title, part_number, price, manufacturer, model, serial_number, details, organization_id',
   'id, title, price, details, organization_id',
@@ -117,13 +122,18 @@ export async function POST(req: NextRequest) {
 }
 
 async function loadListing(
-  supabase: { from: (table: string) => any },
+  supabase: { from: (table: string) => any; rpc: (fn: string, args: Record<string, unknown>) => any },
   id: string
 ): Promise<ListingInvoiceSource | null> {
   for (const cols of LISTING_SELECTS) {
     const { data, error } = await supabase.from('marketplace_listings').select(cols).eq('id', id).maybeSingle();
     if (!error && data) {
       const row = data as ListingInvoiceSource;
+      if (!cols.includes('serial_number')) {
+        // Seller org members only (the invoice flow rejects other orgs anyway).
+        const priv = await loadListingPrivateFields(supabase, String(row.id ?? id));
+        row.serial_number = priv?.serial_number ?? null;
+      }
       return {
         id: row.id,
         title: row.title,

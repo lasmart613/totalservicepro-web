@@ -16,7 +16,10 @@
  * same extractor the God button uses (pdf.js, [[pdfpage:N]] stamps), but an
  * expect-empty, chunked write (migration 000918): begin claims the manual,
  * then one append_manual_search_index_chunks call per ~200,000-character
- * chunk, then finish. Each call stays under the REST role's 8 s
+ * chunk, then finish. After the write it also stores the PDF's real page
+ * count (pdf.js numPages, summed over chapter files) in manuals.page_count with
+ * page_count_source 'pdf' (000936); that beats the indexed_page_max fallback.
+ * Each call stays under the REST role's 8 s
  * statement_timeout (the one-call write timed out on dense manuals 1195 and
  * 1210). Until finish, the manual is not indexed for any reader; a failure
  * deletes the partial rows. A manual that gained a complete index after this

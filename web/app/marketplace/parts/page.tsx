@@ -6,6 +6,7 @@ import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { ListingDescriptionSnippet } from '@/components/ListingDescription';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { withListingColumns } from '@/lib/marketplace/listing-columns';
 import { isPublicListingStatus } from '@/lib/marketplace/ownership';
 import {
   EMPTY_PARTS_FILTERS,
@@ -52,17 +53,22 @@ export default function PartsMarketplace() {
   useEffect(() => {
     const fetchListings = async () => {
       setLoading(true);
-      let { data, error } = await supabase
-        .from('marketplace_listings')
-        .select('*')
-        .or('listing_type.eq.part,listing_type.eq.parts')
-        .order('created_at', { ascending: false });
-      if (error) {
-        const retry = await supabase
+      // 000935: named public columns only (serial_number / notes / details are private).
+      let { data, error } = await withListingColumns((cols) =>
+        supabase
           .from('marketplace_listings')
-          .select('*')
-          .eq('listing_type', 'part')
-          .order('created_at', { ascending: false });
+          .select(cols)
+          .or('listing_type.eq.part,listing_type.eq.parts')
+          .order('created_at', { ascending: false }),
+      );
+      if (error) {
+        const retry = await withListingColumns((cols) =>
+          supabase
+            .from('marketplace_listings')
+            .select(cols)
+            .eq('listing_type', 'part')
+            .order('created_at', { ascending: false }),
+        );
         data = retry.data;
         error = retry.error;
       }
