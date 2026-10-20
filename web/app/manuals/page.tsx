@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Header } from '@/components/Header';
 import { ShelfScroller } from '@/components/ShelfScroller';
 import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
@@ -20,6 +20,17 @@ import {
   type ManualLibraryShelf,
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
+import { ManualConfirmDialog } from '@/components/ManualConfirmDialog';
+import {
+  createInFlightGuard,
+  librarySource,
+  loadLibraryStatus,
+  loadSlotsHeld,
+  refundReasonMessage,
+  removeActionLabel,
+  removeConfirmBody,
+  removeFromLibrary,
+} from '@/lib/manual-library-refund';
 import { canAccessServiceManuals } from '@/lib/roles';
 import {
   companyLibraryOpenNeedsAdd,
@@ -99,6 +110,35 @@ export default function ManualsLibrary() {
   const [canService, setCanService] = useState<boolean | null>(null);
   const [callerRole, setCallerRole] = useState<string | null>(null);
   const [callerOrgType, setCallerOrgType] = useState<string | null>(null);
+  /** 000936: non-refunded removals still holding a slot this month. */
+  const [slotsHeld, setSlotsHeld] = useState(0);
+  const [dialog, setDialog] = useState<null | {
+    title: string;
+    body: string;
+    detail?: string | null;
+    acceptLabel: string;
+    destructive?: boolean;
+    resolve: (ok: boolean) => void;
+  }>(null);
+  /** Drops repeat clicks while an open/add/remove for the same manual is running. */
+  const inFlight = useRef(createInFlightGuard());
+  const slotsUsed = ownedIds.size + slotsHeld;
+
+  function askConfirm(opts: {
+    title: string;
+    body: string;
+    detail?: string | null;
+    acceptLabel: string;
+    destructive?: boolean;
+  }): Promise<boolean> {
+    return new Promise((resolve) => setDialog({ ...opts, resolve }));
+  }
+  function closeDialog(ok: boolean) {
+    setDialog((d) => {
+      d?.resolve(ok);
+      return null;
+    });
+  }
 
   useEffect(() => {
     const parsed = parseManualLibrarySearchParams(window.location.search);
@@ -220,6 +260,7 @@ export default function ManualsLibrary() {
       setManuals(visibleCatalog);
       const oId = prof?.organization_id ?? null;
       setOrgId(oId);
+      setSlotsHeld(await loadSlotsHeld(supabase, oId));
       if (oId != null) {
         let org: Record<string, unknown> | null = null;
         let orgRes = await supabase
@@ -334,8 +375,8 @@ export default function ManualsLibrary() {
       toast.error('No service company on your profile — complete onboarding first. Manuals are shared by your organization.');
       return false;
     }
-    if (!isUnlimitedManualSlots(slotLimit) && ownedIds.size >= slotLimit) {
-      toast.error(`Library full (${ownedIds.size}/${slotLimit}). Upgrade or remove a manual.`);
+    if (!isUnlimitedManualSlots(slotLimit) && slotsUsed >= slotLimit) {
+      toast.error(`Library full (${slotsUsed}/${slotLimit}). Upgrade or remove a manual.`);
       return false;
     }
 
@@ -349,7 +390,7 @@ export default function ManualsLibrary() {
             Authorization: `Bearer ${token}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ manual_id: m.id }),
+          body: JSON.stringify({ manual_id: m.id, source: librarySource(navigator.userAgent) }),
         });
         const json = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
@@ -365,7 +406,7 @@ export default function ManualsLibrary() {
           return true;
         }
         if (res.status === 409) {
-          toast.error(json?.error || `Library full (${ownedIds.size}/${slotLimit}). Upgrade or remove a manual.`);
+          toast.error(json?.error || `Library full (${slotsUsed}/${slotLimit}). Upgrade or remove a manual.`);
           return false;
         }
         if (json?.error && res.status < 500) {
@@ -382,7 +423,16 @@ export default function ManualsLibrary() {
       organization_id: orgId,
       manual_id: m.id,
       added_by: user.id,
+      source: librarySource(navigator.userAgent),
     });
+    if (error && /source/i.test(error.message || '') && /column|schema cache/i.test(error.message || '')) {
+      // 000936 not applied yet: the source column does not exist.
+      ({ error } = await supabase.from('organization_manuals').insert({
+        organization_id: orgId,
+        manual_id: m.id,
+        added_by: user.id,
+      }));
+    }
     if (error && /duplicate|unique|23505/i.test(error.message || '')) {
       return true;
     }
@@ -446,34 +496,95 @@ export default function ManualsLibrary() {
   }
 
   async function confirmAddManual(m: any, shownTitle: string): Promise<boolean> {
-    const used = ownedIds.size;
-    const limit = slotLimit;
-    const remaining = isUnlimitedManualSlots(limit) ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
-    if (!isUnlimitedManualSlots(limit) && remaining <= 0) {
-      toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
-      return false;
-    }
-    const confirmAdd = window.confirm(
-      `Add "${shownTitle}" to your company library?\n\n` +
-        `Slots used: ${used} of ${isUnlimitedManualSlots(limit) ? 'unlimited' : limit}` +
-        `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\n` +
-        `Everyone in your service company can open it after you add it.`
-    );
-    if (!confirmAdd) return false;
-    return addToCompanyLibrary(m);
+    const result = await inFlight.current.run(`add:${m?.id}`, async () => {
+      const used = slotsUsed;
+      const limit = slotLimit;
+      const unlimited = isUnlimitedManualSlots(limit);
+      const remaining = unlimited ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
+      if (!unlimited && remaining <= 0) {
+        toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
+        return false;
+      }
+      const detail = unlimited
+        ? t('Slots used: {used} (unlimited).').replace('{used}', String(used))
+        : t('Slots used: {used} of {limit} ({left} left).')
+            .replace('{used}', String(used))
+            .replace('{limit}', String(limit))
+            .replace('{left}', String(remaining));
+      const ok = await askConfirm({
+        title: t('Add to company library?'),
+        body: t('Add “{title}” to your company library? Everyone in your service company can open it.').replace(
+          '{title}',
+          shownTitle,
+        ),
+        detail,
+        acceptLabel: 'Add & open',
+      });
+      if (!ok) return false;
+      return addToCompanyLibrary(m);
+    });
+    return result === true;
+  }
+
+  /**
+   * Remove from the company library through the 000936 RPC. The server
+   * decides whether the slot is refunded. viaUndo skips the extra confirm
+   * (the toast Undo button is the explicit request).
+   */
+  async function removeManual(m: any, opts: { viaUndo?: boolean } = {}) {
+    await inFlight.current.run(`remove:${m?.id}`, async () => {
+      const supabase = getSupabaseClient();
+      const shownTitle = catalogManualTitle(m);
+      if (!opts.viaUndo) {
+        const status = await loadLibraryStatus(supabase, m.id);
+        const ok = await askConfirm({
+          title: t('Remove from company library?'),
+          body: `${shownTitle}. ${t(removeConfirmBody(status))}`,
+          detail:
+            status?.refund_eligible && status.refund_until
+              ? t('Refund available until {time}.').replace('{time}', new Date(status.refund_until).toLocaleString())
+              : null,
+          acceptLabel: removeActionLabel(status),
+          destructive: true,
+        });
+        if (!ok) return;
+      }
+      const { result, error } = await removeFromLibrary(supabase, m.id, orgId, librarySource(navigator.userAgent));
+      if (error || !result) {
+        toast.error(t('Could not remove manual') + (error?.message ? `: ${error.message}` : ''));
+        return;
+      }
+      if (result.refunded) toast.success(t(refundReasonMessage(result.reason)));
+      else toast.message(t(refundReasonMessage(result.reason)));
+      await loadData();
+    });
   }
 
   async function openAddedManual(m: any, shownTitle: string, payload: Record<string, unknown>) {
     await loadData();
     const openRes = await callGetManualUrl(payload);
+    const undo = {
+      label: t('Undo'),
+      onClick: () => {
+        void removeManual(m, { viaUndo: true }).then(() => router.push('/manuals'));
+      },
+    };
     if (openPayloadUrl(openRes.json, m, shownTitle) === true) {
-      toast.success('Added to company library');
+      toast.success(t('Added to company library'), { action: undo, duration: 15000 });
       return;
     }
+    toast.message(t('Added to company library'), { action: undo, duration: 15000 });
     toast.error(openRes.json.error || 'Added, but could not open PDF yet. Try again from My Library.');
   }
 
   async function openManual(m: any) {
+    // In-flight guard: a double click (or a click while the add dialog is up)
+    // must not start a second open/add for the same manual.
+    if (dialog) return;
+    await inFlight.current.run(`open:${m?.id}`, () => openManualOnce(m));
+  }
+
+  async function openManualOnce(m: any) {
     try {
       if (!mayOpenManual(callerRole, callerOrgType, m)) {
         toast.error(SERVICE_MANUALS_FORBIDDEN);
@@ -842,6 +953,16 @@ export default function ManualsLibrary() {
   return (
     <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
       <Header />
+      <ManualConfirmDialog
+        open={dialog != null}
+        title={dialog?.title || ''}
+        body={dialog?.body || ''}
+        detail={dialog?.detail}
+        acceptLabel={dialog?.acceptLabel || 'Add & open'}
+        destructive={dialog?.destructive}
+        onAccept={() => closeDialog(true)}
+        onCancel={() => closeDialog(false)}
+      />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <div className="manual-libraries mb-5" role="tablist" aria-label="Manual libraries">
@@ -1066,14 +1187,14 @@ export default function ManualsLibrary() {
             onClick={() => setTab('library')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'library' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
           >
-            {t('My Library')} ({ownedIds.size}/{isUnlimitedManualSlots(slotLimit) ? '∞' : slotLimit})
+            {t('My Library')} ({slotsUsed}/{isUnlimitedManualSlots(slotLimit) ? '∞' : slotLimit})
           </button>
         </div>
 
         {tab === 'browse' && (
           <p className="text-sm text-[var(--text3)] mb-4">
             Tap a manual to <strong className="text-[var(--text)]">add it to your company library</strong>
-            {!isUnlimitedManualSlots(slotLimit) ? ` (${Math.max(0, slotLimit - ownedIds.size)} slots left)` : ''}, then open the PDF.
+            {!isUnlimitedManualSlots(slotLimit) ? ` (${Math.max(0, slotLimit - slotsUsed)} slots left)` : ''}, then open the PDF.
             Manuals are shared with everyone in your service company.
           </p>
         )}
@@ -1228,6 +1349,21 @@ export default function ManualsLibrary() {
                           <div className="absolute -top-1 -right-1 z-10 rounded-full bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 shadow">
                             ✓
                           </div>
+                        )}
+                        {isOwned(m) && tab === 'library' && orgId != null && (
+                          <button
+                            type="button"
+                            data-testid="manual-remove"
+                            aria-label={t('Remove “{title}” from library').replace('{title}', shownTitle)}
+                            title={t('Remove “{title}” from library').replace('{title}', shownTitle)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void removeManual(m);
+                            }}
+                            className="absolute -bottom-1 -right-1 z-10 rounded-full bg-red-700 text-white text-[10px] font-bold w-5 h-5 leading-none shadow focus:outline focus:outline-2 focus:outline-white"
+                          >
+                            ×
+                          </button>
                         )}
                       </div>
                       );
