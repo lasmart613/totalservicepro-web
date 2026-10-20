@@ -414,12 +414,13 @@ test('fetchEquipmentCatalog pages manufacturers and laser_models', async () => {
 test('estimate form and invoice form load the live catalog join', () => {
   const estimate = readFileSync(join(here, '../app/estimates/new/EstimateFormClient.tsx'), 'utf8');
   assert.match(estimate, /useEquipmentCatalog/);
-  assert.match(estimate, /listModelChoices/);
+  assert.match(estimate, /useEquipmentCascade\(catalog\)/);
   assert.match(estimate, /equipmentType|equipment_type/);
   assert.doesNotMatch(estimate, /listManufacturers\(\)/);
 
   const invoice = readFileSync(join(here, '../app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
   assert.match(invoice, /useEquipmentCatalog/);
+  assert.match(invoice, /useEquipmentCascade\(catalog\)/);
   assert.doesNotMatch(invoice, /listManufacturers\(\)/);
 });
 
@@ -562,7 +563,7 @@ test('HOYA Con-Bio aliases collapse and compact model codes humanize without cha
   assert.ok(mfrs.includes('HOYA ConBio'));
   assert.equal(mfrs.filter((name) => /quanta/i.test(name)).length, 1);
   assert.ok(mfrs.includes('Quanta System'));
-  assert.equal(mfrs.filter((name) => /ams|laserscope|american medical systems/i.test(name)).length, 1);
+  assert.equal(mfrs.filter((name) => /\bams\b|laserscope|american medical systems/i.test(name)).length, 1);
   assert.ok(mfrs.includes('AMS / Laserscope'));
 
   const candela = listCatalogModelChoices('Candela', live);
