@@ -303,7 +303,8 @@
     async function loadListings() {
         let query = supabaseClient
             .from('marketplace_listings')
-            .select('*')
+            // 000935: serial_number / notes / details are private columns; select('*') is refused.
+            .select('id, seller_id, title, description, category, condition, manufacturer, model, part_number, wavelength, price, price_type, currency, photos, images, city, state, status, views, created_at, listing_type')
             .order('created_at', { ascending: false });
 
         if (showingMine && currentUser) {
