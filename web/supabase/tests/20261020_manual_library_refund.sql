@@ -75,7 +75,7 @@ UPDATE public.manuals SET chapter_metadata = '[{"order":0,"page_count":4},{"orde
 GRANT UPDATE ON public.manuals TO authenticated;  -- prod: authenticated=arwdm on manuals
 -- prod-shaped search index (service_role only); 15: 12 pages, 16: clipped
 CREATE TABLE public.manual_search_index (manual_id bigint, search_text text, indexed_at timestamptz DEFAULT now(),
-  index_clipped boolean, indexed_page_max integer, chunk_index integer);
+  index_clipped boolean, indexed_page_max integer, chunk_index integer, PRIMARY KEY (manual_id, chunk_index));
 REVOKE ALL ON public.manual_search_index FROM PUBLIC, anon, authenticated;
 GRANT ALL ON public.manual_search_index TO service_role;
 INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES
@@ -338,6 +338,46 @@ SELECT pg_temp.check('13d manuals.page_count used; else MIN client count (only t
           AND b->>'reason' = 'heavy_reading' AND b->>'page_count_source' = 'client_min' AND (b->>'page_count')::int = 10
           AND (c->>'refund_eligible')::bool FROM r5b),
   (SELECT a::text || b::text || c::text FROM r5b));
+
+-- ================= re-index (ON CONFLICT DO UPDATE) and pdf numPages =================
+SET ROLE service_role;
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES (17, false, 30, 1)
+  ON CONFLICT (manual_id, chunk_index) DO UPDATE SET indexed_page_max = EXCLUDED.indexed_page_max, index_clipped = EXCLUDED.index_clipped;
+RESET ROLE;
+SELECT pg_temp.check('13e re-index upsert (DO UPDATE) refreshes page_count (AFTER UPDATE trigger)',
+  (SELECT page_count = 30 AND page_count_source = 'index' FROM public.manuals WHERE id = 17));
+SET ROLE service_role;
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES (17, true, 30, 0)
+  ON CONFLICT (manual_id, chunk_index) DO UPDATE SET indexed_page_max = EXCLUDED.indexed_page_max, index_clipped = EXCLUDED.index_clipped;
+RESET ROLE;
+SELECT pg_temp.check('13f a clipped chunk on re-index sets page_count NULL',
+  (SELECT page_count IS NULL AND page_count_source IS NULL FROM public.manuals WHERE id = 17));
+-- 41: scanned PDF: text only on 4 pages, pdf.js numPages 120
+INSERT INTO public.manuals (id, title) VALUES (41, 'scanned');
+SET ROLE service_role;
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES (41, false, 4, 0);
+RESET ROLE;
+CREATE TEMP TABLE r5c AS SELECT (SELECT page_count FROM public.manuals WHERE id = 41) AS before_pdf;
+SET ROLE service_role;
+UPDATE public.manuals SET page_count = 120, page_count_source = 'pdf' WHERE id = 41;   -- indexer: numPages
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES (41, false, 5, 0)
+  ON CONFLICT (manual_id, chunk_index) DO UPDATE SET indexed_page_max = EXCLUDED.indexed_page_max;
+INSERT INTO public.manual_search_index (manual_id, index_clipped, indexed_page_max, chunk_index) VALUES (41, true, 9, 1);
+RESET ROLE;
+SET ROLE authenticated;
+UPDATE public.manuals SET page_count = 1, page_count_source = 'index' WHERE id = 41;
+RESET ROLE;
+INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 41, 'web');
+SELECT pg_temp.as_user(:alice);
+SET ROLE authenticated;
+SELECT public.manual_record_access(41, 'page_view', ARRAY[1,2,3], 3);
+CREATE TEMP TABLE r5d AS SELECT public.manual_library_status(41) d;
+RESET ROLE;
+SELECT pg_temp.check('13g pdf numPages wins over indexed_page_max; index re-runs/clips and members cannot replace it',
+  (SELECT before_pdf FROM r5c) = 4
+  AND (SELECT page_count = 120 AND page_count_source = 'pdf' FROM public.manuals WHERE id = 41)
+  AND (SELECT (d->>'refund_eligible')::bool AND (d->>'page_count')::int = 120 AND d->>'page_count_source' = 'manuals.page_count' FROM r5d),
+  (SELECT d::text FROM r5d));
 
 -- ================= signed-URL proxy =================
 INSERT INTO public.organization_manuals (organization_id, manual_id, source) VALUES (7001, 12, 'web');

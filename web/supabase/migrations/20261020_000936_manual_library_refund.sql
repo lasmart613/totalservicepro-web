@@ -54,16 +54,21 @@
 --   * The "most of a short manual" rule uses a page count, in this order:
 --       1. sum of manuals.chapter_metadata[*].page_count when every entry has one
 --          (40 of 2037 prod manuals on 2026-10-20);
---       2. manuals.page_count (new, nullable, server-written only): backfilled here
---          from manual_search_index (max indexed_page_max per manual, only when
---          no chunk was clipped) and kept current by a statement trigger on
---          manual_search_index inserts, i.e. whenever the indexer runs;
+--       2. manuals.page_count (new, nullable, server-written only), with
+--          page_count_source:
+--          'pdf'   the indexer writes pdf.js numPages (sum over chapter files)
+--                  after every successful index; exact, and always wins;
+--          'index' fallback when no pdf value exists: max indexed_page_max per
+--                  manual, backfilled here and kept current by AFTER INSERT and
+--                  AFTER UPDATE statement triggers (re-index upserts ON CONFLICT
+--                  DO UPDATE); NULL when any chunk is clipped.
 --       3. otherwise the MINIMUM page count the viewer reported for this add.
 --          A client can only make the rule stricter with it: a lower count
 --          makes "more than half" easier to reach, and a huge value is no
 --          worse than unknown (the >20-page and URL rules still apply).
---     indexed_page_max is the highest page with extracted text, so it can be
---     a slight undercount (blank trailing pages): that also only tightens.
+--     indexed_page_max is the highest page with extracted text, so scanned
+--     PDFs undercount badly (QA: 4-page "service manuals"); that is why numPages
+--     takes precedence whenever the indexer has opened the file.
 --     get-manual-url does not fill it: it signs URLs and never opens the PDF.
 --     Clients cannot write manuals.page_count: authenticated has table UPDATE
 --     on manuals, so a SECURITY INVOKER trigger keeps the old value for any
@@ -111,6 +116,14 @@ BEGIN
            (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count')), '')
          NOT LIKE '000936%' THEN
     RAISE EXCEPTION '000936 drift: manuals.page_count exists but was not created by 000936';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count_source' AND NOT attisdropped)
+     AND coalesce(col_description('public.manuals'::regclass,
+           (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count_source')), '')
+         NOT LIKE '000936%' THEN
+    RAISE EXCEPTION '000936 drift: manuals.page_count_source exists but was not created by 000936';
   END IF;
   IF to_regprocedure('public.is_active_org_member(bigint)') IS NULL THEN
     RAISE EXCEPTION '000936 drift: public.is_active_org_member(bigint) missing';
@@ -272,6 +285,10 @@ CREATE TRIGGER organization_manuals_log_delete
 
 -- ---------- server-known page count ----------
 ALTER TABLE public.manuals ADD COLUMN IF NOT EXISTS page_count integer;
+-- 'pdf'   = pdf.js numPages written by the indexer (exact; wins)
+-- 'index' = max(manual_search_index.indexed_page_max) (last page with text; can undercount scans)
+ALTER TABLE public.manuals ADD COLUMN IF NOT EXISTS page_count_source text;
+COMMENT ON COLUMN public.manuals.page_count_source IS '000936 pdf | index; NULL when page_count is NULL';
 COMMENT ON COLUMN public.manuals.page_count IS
   '000936 physical page count known to the server (indexer); NULL = unknown. Clients cannot write it.';
 DO $$
@@ -280,6 +297,11 @@ BEGIN
                  WHERE conrelid = 'public.manuals'::regclass AND conname = 'manuals_page_count_check') THEN
     ALTER TABLE public.manuals ADD CONSTRAINT manuals_page_count_check
       CHECK (page_count IS NULL OR page_count BETWEEN 1 AND 100000);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                 WHERE conrelid = 'public.manuals'::regclass AND conname = 'manuals_page_count_source_check') THEN
+    ALTER TABLE public.manuals ADD CONSTRAINT manuals_page_count_source_check
+      CHECK (page_count_source IS NULL OR page_count_source IN ('pdf', 'index'));
   END IF;
 END $$;
 
@@ -293,8 +315,10 @@ BEGIN
   IF current_user NOT IN ('service_role', 'postgres', 'supabase_admin') THEN
     IF TG_OP = 'INSERT' THEN
       NEW.page_count := NULL;
+      NEW.page_count_source := NULL;
     ELSE
       NEW.page_count := OLD.page_count;
+      NEW.page_count_source := OLD.page_count_source;
     END IF;
   END IF;
   RETURN NEW;
@@ -304,10 +328,12 @@ COMMENT ON FUNCTION public.manual_page_count_guard() IS '000936 trigger: only tr
 REVOKE ALL ON FUNCTION public.manual_page_count_guard() FROM PUBLIC, anon, authenticated;
 DROP TRIGGER IF EXISTS manuals_page_count_guard ON public.manuals;
 CREATE TRIGGER manuals_page_count_guard
-  BEFORE INSERT OR UPDATE OF page_count ON public.manuals
+  BEFORE INSERT OR UPDATE OF page_count, page_count_source ON public.manuals
   FOR EACH ROW EXECUTE FUNCTION public.manual_page_count_guard();
 
--- Fill from the search index: max indexed_page_max per manual when no chunk was clipped.
+-- Fill from the search index on INSERT and on UPDATE (re-index upserts ON CONFLICT DO UPDATE).
+-- A pdf.js numPages value ('pdf') is never replaced from the index. Otherwise: any clipped chunk
+-- -> NULL (unknown); else max(indexed_page_max) in range -> 'index'; else NULL.
 CREATE OR REPLACE FUNCTION public.manual_page_count_from_index()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -316,15 +342,19 @@ SET search_path = ''
 AS $$
 BEGIN
   UPDATE public.manuals m
-     SET page_count = s.mx
-    FROM (SELECT i.manual_id, max(i.indexed_page_max) AS mx
+     SET page_count = s.pc,
+         page_count_source = CASE WHEN s.pc IS NULL THEN NULL ELSE 'index' END
+    FROM (SELECT i.manual_id,
+                 CASE WHEN bool_or(coalesce(i.index_clipped, false)) THEN NULL
+                      WHEN max(i.indexed_page_max) BETWEEN 1 AND 100000 THEN max(i.indexed_page_max)
+                 END AS pc
             FROM public.manual_search_index i
            WHERE i.manual_id IN (SELECT DISTINCT n.manual_id FROM new_rows n)
-           GROUP BY i.manual_id
-          HAVING NOT bool_or(coalesce(i.index_clipped, false))
-             AND max(i.indexed_page_max) BETWEEN 1 AND 100000) s
+           GROUP BY i.manual_id) s
    WHERE m.id = s.manual_id
-     AND m.page_count IS DISTINCT FROM s.mx;
+     AND m.page_count_source IS DISTINCT FROM 'pdf'
+     AND (m.page_count IS DISTINCT FROM s.pc
+          OR m.page_count_source IS DISTINCT FROM CASE WHEN s.pc IS NULL THEN NULL ELSE 'index' END);
   RETURN NULL;
 END;
 $$;
@@ -342,9 +372,14 @@ BEGIN
                AFTER INSERT ON public.manual_search_index
                REFERENCING NEW TABLE AS new_rows
                FOR EACH STATEMENT EXECUTE FUNCTION public.manual_page_count_from_index()';
+    EXECUTE 'DROP TRIGGER IF EXISTS manual_search_index_page_count_upd ON public.manual_search_index';
+    EXECUTE 'CREATE TRIGGER manual_search_index_page_count_upd
+               AFTER UPDATE ON public.manual_search_index
+               REFERENCING NEW TABLE AS new_rows
+               FOR EACH STATEMENT EXECUTE FUNCTION public.manual_page_count_from_index()';
     -- one-time backfill (only rows still unknown)
     UPDATE public.manuals m
-       SET page_count = s.mx
+       SET page_count = s.mx, page_count_source = 'index'
       FROM (SELECT i.manual_id, max(i.indexed_page_max) AS mx
               FROM public.manual_search_index i
              GROUP BY i.manual_id

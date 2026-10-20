@@ -43,12 +43,21 @@ BEGIN
          NOT LIKE '000936%' THEN
     RAISE EXCEPTION '000936 rollback: manuals.page_count was not created by 000936';
   END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_attribute
+    WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count_source' AND NOT attisdropped)
+     AND coalesce(col_description('public.manuals'::regclass,
+           (SELECT attnum FROM pg_attribute WHERE attrelid = 'public.manuals'::regclass AND attname = 'page_count_source')), '')
+         NOT LIKE '000936%' THEN
+    RAISE EXCEPTION '000936 rollback: manuals.page_count_source was not created by 000936';
+  END IF;
 END $$;
 
 DROP TRIGGER IF EXISTS manuals_page_count_guard ON public.manuals;
 DO $$ BEGIN
   IF to_regclass('public.manual_search_index') IS NOT NULL THEN
     EXECUTE 'DROP TRIGGER IF EXISTS manual_search_index_page_count ON public.manual_search_index';
+    EXECUTE 'DROP TRIGGER IF EXISTS manual_search_index_page_count_upd ON public.manual_search_index';
   END IF;
 END $$;
 DROP TRIGGER IF EXISTS organization_manuals_log_add ON public.organization_manuals;
@@ -69,6 +78,8 @@ DROP FUNCTION IF EXISTS public.manual_library_log_add();
 DROP FUNCTION IF EXISTS public.manual_library_log_delete();
 
 ALTER TABLE public.manuals DROP CONSTRAINT IF EXISTS manuals_page_count_check;
+ALTER TABLE public.manuals DROP CONSTRAINT IF EXISTS manuals_page_count_source_check;
+ALTER TABLE public.manuals DROP COLUMN IF EXISTS page_count_source;
 ALTER TABLE public.manuals DROP COLUMN IF EXISTS page_count;  -- backfilled values are derived; nothing lost
 ALTER TABLE public.organization_manuals DROP CONSTRAINT IF EXISTS organization_manuals_source_check;
 ALTER TABLE public.organization_manuals DROP COLUMN IF EXISTS source;
