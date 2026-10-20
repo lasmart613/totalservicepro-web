@@ -22,6 +22,7 @@ import {
   withSavedModelChoice,
 } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
+import { EQUIPMENT_TYPES, equipmentTypeLabel, normalizeEquipmentType } from '@/lib/equipment-types';
 import {
   applyTicketAssignee,
   assigneeName,
@@ -325,7 +326,8 @@ export default function ServiceTicketDetail() {
     manufacturers: dbMfrs.map(normalizeManufacturerRow),
     models: dbLaserModels.map(normalizeModelRow),
   };
-  const makeOptions = listManufacturerChoices(liveCatalog);
+  const editType = normalizeEquipmentType(formData.equipment_type);
+  const makeOptions = listManufacturerChoices({ ...liveCatalog, equipmentType: editType });
   const storedMake = String(formData.equipment_make || '');
   const makeValue = mergedManufacturerOption(
     storedMake,
@@ -339,7 +341,7 @@ export default function ServiceTicketDetail() {
   );
   const modelOptions = listModelChoices(makeValue || storedMake, {
     ...liveCatalog,
-    equipmentType: formData.equipment_type,
+    equipmentType: editType,
   });
   const storedModel = String(formData.equipment_model || '');
   const modelValue = mergedModelOption(storedModel, modelOptions);
@@ -484,9 +486,32 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Equipment Information</h2>
             <div className="space-y-4">
+              <Field label="Equipment Type" value={isEditing ? (
+                <select
+                  className="input"
+                  data-testid="cascade-type"
+                  value={editType || formData.equipment_type || ''}
+                  onChange={(e) =>
+                    // Type change clears make and model.
+                    setFormData((prev: any) =>
+                      (prev.equipment_type || '') === e.target.value
+                        ? prev
+                        : { ...prev, equipment_type: e.target.value || null, equipment_make: '', equipment_model: '' }
+                    )
+                  }
+                >
+                  <option value="">-- Select --</option>
+                  {EQUIPMENT_TYPES.map((item) => (
+                    <option key={item.value} value={item.value}>{item.label}</option>
+                  ))}
+                  {formData.equipment_type && !editType ? (
+                    <option value={formData.equipment_type}>{formData.equipment_type}</option>
+                  ) : null}
+                </select>
+              ) : (ticket.equipment_type ? (normalizeEquipmentType(ticket.equipment_type) ? equipmentTypeLabel(ticket.equipment_type) : ticket.equipment_type) : '')} />
               <Field label="Make" value={isEditing ? (
                 dbMfrs.length > 0 ? (
-                  <select className="input" value={makeValue} onChange={(e) => handleInputChange('equipment_make', e.target.value)}>
+                  <select className="input" value={makeValue} onChange={(e) => setFormData((prev: any) => ({ ...prev, equipment_make: e.target.value, equipment_model: '' }))}>
                     <option value="">-- Select --</option>
                     {makeChoices.map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
@@ -507,7 +532,6 @@ export default function ServiceTicketDetail() {
                   </select>
                 ) : <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} />
               ) : catalogChoiceLabel(ticket.equipment_model)} />
-              <Field label="Equipment Type" value={isEditing ? <input className="input" value={formData.equipment_type || ''} onChange={(e) => handleInputChange('equipment_type', e.target.value)} /> : ticket.equipment_type} />
               <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
               <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : displayStoredDay(ticket.service_date, docZone)} />
             </div>

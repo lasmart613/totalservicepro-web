@@ -57,6 +57,7 @@ import {
 import { catalogChoiceLabel, mergedManufacturerOption, mergedModelOption } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices, listModelChoices, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import { DEFAULT_EQUIPMENT_TYPE, EQUIPMENT_TYPES, equipmentTypeOrDefault, type EquipmentType } from '@/lib/equipment-types';
 import {
   OTHER_MANUFACTURER,
   isEquipmentSentinel,
@@ -96,6 +97,7 @@ type TicketForm = {
   service_type: string;
   priority: string;
   status: string;
+  equipment_type: EquipmentType;
   equipment_make: string;
   equipment_make_other: string;
   equipment_model: string;
@@ -119,6 +121,7 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   service_type: 'Repair',
   priority: 'Medium',
   status: 'Scheduled',
+  equipment_type: DEFAULT_EQUIPMENT_TYPE,
   equipment_make: '',
   equipment_make_other: '',
   equipment_model: '',
@@ -172,8 +175,8 @@ export default function ServiceSchedule() {
   const router = useRouter();
   const catalog = useEquipmentCatalog(supabase);
   const manufacturers = useMemo(
-    () => listManufacturerChoices(catalog),
-    [catalog.manufacturers, catalog.models]
+    () => listManufacturerChoices({ ...catalog, equipmentType: form.equipment_type }),
+    [catalog.manufacturers, catalog.models, form.equipment_type]
   );
   // "Other / custom…" is a sentinel: keep it selected as-is (a catalog maker named
   // "Other" must not absorb it) and never list it as a model option.
@@ -189,8 +192,10 @@ export default function ServiceSchedule() {
     () =>
       makeIsOther
         ? []
-        : (makeValue || form.equipment_make) ? listModelChoices(makeValue || form.equipment_make, catalog) : [],
-    [form.equipment_make, makeValue, makeIsOther, catalog.manufacturers, catalog.models]
+        : (makeValue || form.equipment_make)
+          ? listModelChoices(makeValue || form.equipment_make, { ...catalog, equipmentType: form.equipment_type })
+          : [],
+    [form.equipment_make, makeValue, makeIsOther, catalog.manufacturers, catalog.models, form.equipment_type]
   );
   const modelValue = isEquipmentSentinel(form.equipment_model)
     ? OTHER_MODEL
@@ -691,6 +696,7 @@ export default function ServiceSchedule() {
         ...(persistedLocationId(selectedLocationId) != null
           ? { customer_location_id: persistedLocationId(selectedLocationId) }
           : {}),
+        equipment_type: form.equipment_type,
         equipment_make: equipment.equipment_make,
         equipment_model: equipment.equipment_model,
         serial_number: form.serial_number.trim() || null,
@@ -1492,6 +1498,30 @@ export default function ServiceSchedule() {
                     <option>{t('Completed')}</option>
                   </select>
                 </div>
+              </div>
+              <div>
+                <label className="label">{t('Equipment type')}</label>
+                <select
+                  className="select"
+                  data-testid="cascade-type"
+                  value={form.equipment_type}
+                  onChange={(e) => {
+                    const next = equipmentTypeOrDefault(e.target.value);
+                    if (next === form.equipment_type) return;
+                    // Type change clears manufacturer and model.
+                    setForm({
+                      ...form,
+                      equipment_type: next,
+                      ...selectionAfterManufacturerChange('', ''),
+                    });
+                  }}
+                >
+                  {EQUIPMENT_TYPES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {t(item.label)}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>

@@ -101,9 +101,9 @@ export default function Onboarding() {
   const [laserSerial, setLaserSerial] = useState('');
   const [laserNotes, setLaserNotes] = useState('');
   const catalog = useEquipmentCatalog(supabase);
-  const BRANDS = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
+  const BRANDS = useMemo(() => listManufacturers({ ...catalog, equipmentType: 'laser' }), [catalog.manufacturers, catalog.models]);
   const laserModelsForMfr = useMemo(
-    () => listModelsForManufacturer(laserMfr, catalog),
+    () => listModelsForManufacturer(laserMfr, { ...catalog, equipmentType: 'laser' }),
     [laserMfr, catalog.manufacturers, catalog.models]
   );
 
