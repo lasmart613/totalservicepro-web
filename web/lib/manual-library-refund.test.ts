@@ -182,7 +182,10 @@ test('dialog: Cancel focused, Enter never accepts, Esc/backdrop cancel, armed ac
 test('add paths count held slots and record the source', () => {
   const route = read('app/api/manuals/library/route.ts');
   assert.ok(route.includes("rpc('manual_slots_held'") && /usedNow >= limit && !reAddHeld/.test(route));
-  assert.ok(route.includes("rpc('manual_slot_is_held'") && /if \(!hasServiceRole\(\)\)/.test(route));
+  assert.ok(route.includes("rpc('manual_slot_is_held'"));
+  // fail closed: 503 before any user-client fallback; writer is always the admin client
+  assert.ok(/if \(!hasServiceRole\(\)\) \{\s*return NextResponse\.json\(\{ error: 'Server misconfigured' \}, \{ status: 503 \}\);\s*\}\s*const writer = getSupabaseAdmin\(\);/.test(route));
+  assert.ok(!/hasServiceRole\(\) \? getSupabaseAdmin\(\) : supabase/.test(route), 'no user-client writer fallback');
   assert.ok(/source,\n\s*\}\);/.test(route));
   const edge = readFileSync(join(webDir, '..', 'supabase/functions/get-manual-url/index.ts'), 'utf8');
   assert.ok(edge.includes('"manual_slots_held"') && edge.includes('owned.size + slotsHeld >= slotLimit'));
@@ -190,7 +193,7 @@ test('add paths count held slots and record the source', () => {
   assert.ok(edge.includes('"manual_slot_is_held"') && edge.includes('owned.size + slotsHeld >= slotLimit && !reAddHeld'));
   const viewer = read('components/ManualPdfViewer.tsx');
   assert.ok(viewer.includes("'beforeprint'") && viewer.includes("'page_view'") && viewer.includes('onClick={reportDownload}'));
-  assert.ok(!/pageCount:\s/.test(viewer.slice(viewer.indexOf('createPageViewBatcher(('))), 'viewer no longer sends a page count');
+  assert.ok(/pageCount: isFolder \? undefined : pageCountRef\.current/.test(viewer), 'single-file page count sent as fallback only');
 });
 
 test('migration 000936 standards', () => {
@@ -209,7 +212,11 @@ test('migration 000936 standards', () => {
   assert.match(mig, /REVOKE INSERT, UPDATE, MAINTAIN ON TABLE public\.organization_manuals FROM anon, authenticated;/);
   assert.match(mig, /BEFORE INSERT ON public\.organization_manuals/);
   assert.match(mig, /manual_library_guard_insert\(\)\s*RETURNS trigger\s*LANGUAGE plpgsql\s*SECURITY INVOKER/);
-  assert.match(mig, /v_pc\s+int\s+:= NULL;/);
+  assert.match(mig, /ADD COLUMN IF NOT EXISTS page_count integer/);
+  assert.match(mig, /SELECT min\(e\.page_count\) INTO v_pc/);
+  assert.match(mig, /BEFORE INSERT OR UPDATE OF page_count ON public\.manuals/);
+  assert.match(mig, /GRANT ALL ON TABLE public\.manual_library_events TO service_role;/);
+  assert.match(rb, /DROP COLUMN IF EXISTS page_count/);
   assert.match(rb, /GRANT INSERT, UPDATE, MAINTAIN ON TABLE public\.organization_manuals TO authenticated;/);
   for (const fn of ['manual_library_remove', 'manual_library_status', 'manual_record_access', 'manual_record_url_issued', 'manual_slots_held', 'manual_refund_check']) {
     assert.ok(new RegExp(`FUNCTION public\\.${fn}\\([^)]*\\)\\s*RETURNS[\\s\\S]{0,120}SECURITY DEFINER\\s*SET search_path = ''`).test(mig), fn);

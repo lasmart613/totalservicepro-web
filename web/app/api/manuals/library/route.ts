@@ -164,8 +164,12 @@ export async function POST(req: NextRequest) {
       );
     }
     let orgId = normalizeOrgId(profile?.organization_id);
-    const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
-    if (!orgId && hasServiceRole()) {
+    // 000936 revoked INSERT for signed-in users: fail closed without the service role.
+    if (!hasServiceRole()) {
+      return NextResponse.json({ error: 'Server misconfigured' }, { status: 503 });
+    }
+    const writer = getSupabaseAdmin();
+    if (!orgId) {
       const { data: adminProfile } = await writer
         .from('user_profiles')
         .select('organization_id')
@@ -206,10 +210,6 @@ export async function POST(req: NextRequest) {
     const usedNow = owned.size + held;
     // Re-adding a manual whose slot is held nets zero, so it is allowed when full.
     const reAddHeld = held > 0 && (await slotIsHeld(writer, orgId, manualId));
-    if (!hasServiceRole()) {
-      // 000936 revoked INSERT for signed-in users; only the service role can add.
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 503 });
-    }
     if (!isUnlimitedManualSlots(limit) && usedNow >= limit && !reAddHeld) {
       return NextResponse.json(
         {

@@ -759,6 +759,8 @@ export function ManualPdfViewer({
   // prints, heavy reading). Pages are batched; reporting never blocks reading.
   const trackManualId = sourceUrl ? null : manualId;
   const pageBatcher = useRef<ReturnType<typeof createPageViewBatcher> | null>(null);
+  const pageCountRef = useRef(0);
+  pageCountRef.current = pageCount;
   const chapterIndex = Math.max(
     0,
     chapters.findIndex((c) => c?.storage_path && c.storage_path === openStoragePath),
@@ -771,7 +773,10 @@ export function ManualPdfViewer({
     const batcher = createPageViewBatcher((pages) => {
       void recordManualAccess(supabase, trackManualId, 'page_view', {
         pages,
-        // Page count comes from the server (manuals.chapter_metadata); not sent.
+        // Last-resort fallback only (server uses chapter_metadata, then
+        // manuals.page_count, then the MIN reported). Folder chapters would
+        // undercount the whole manual, so only single files send it.
+        pageCount: isFolder ? undefined : pageCountRef.current || undefined,
         source,
       });
     });
@@ -792,7 +797,7 @@ export function ManualPdfViewer({
       window.removeEventListener('beforeprint', onPrint);
       pageBatcher.current = null;
     };
-  }, [trackManualId]);
+  }, [trackManualId, isFolder]);
   useEffect(() => {
     if (!trackManualId || !pageCount || loading || page < 1) return;
     // Folder manuals: keep chapter pages distinct (chapter index * 1000 + page).
