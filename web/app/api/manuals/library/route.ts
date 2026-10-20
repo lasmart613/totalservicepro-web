@@ -7,6 +7,7 @@ import { canAccessServiceManuals } from '@/lib/roles';
 import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
 import { isPublishedColumnMissing, wherePublished } from '@/lib/manual-published';
+import { normalizeLibrarySource } from '@/lib/manual-library-refund';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,6 +92,23 @@ async function ownedManualIds(
   return ids;
 }
 
+function isMissingSourceColumn(error: { message?: string } | null | undefined): boolean {
+  const msg = String(error?.message || '');
+  return /source/i.test(msg) && /column|schema cache/i.test(msg);
+}
+
+/** Slots held by non-refunded removals this month (000936). 0 before 000936. */
+async function slotsHeld(client: { rpc: (fn: string, args: Record<string, unknown>) => any }, orgId: string | number) {
+  try {
+    const { data, error } = await client.rpc('manual_slots_held', { p_org: Number(orgId) });
+    if (error) return 0;
+    const n = Number(data);
+    return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /**
  * Add a manual to the signed-in org library. Premium is capped at 15.
  * Team / Enterprise are unlimited. Download still requires ownership.
@@ -101,7 +119,8 @@ export async function POST(req: NextRequest) {
     if (!('user' in caller) || !caller.user) return caller.error;
     const { user, supabase } = caller;
 
-    const body = (await req.json().catch(() => ({}))) as { manual_id?: string | number };
+    const body = (await req.json().catch(() => ({}))) as { manual_id?: string | number; source?: unknown };
+    const source = normalizeLibrarySource(body.source);
     const manualId = body.manual_id;
     if (manualId == null || String(manualId).trim() === '') {
       return NextResponse.json({ error: 'Missing manual_id' }, { status: 400 });
@@ -169,12 +188,16 @@ export async function POST(req: NextRequest) {
     if (owned.has(String(manualId))) {
       return NextResponse.json({ ok: true, already: true, slot_limit: limit, used: owned.size });
     }
-    if (!isUnlimitedManualSlots(limit) && owned.size >= limit) {
+    // 000936: removals that were not refunded keep holding their slot this month.
+    const held = await slotsHeld(writer, orgId);
+    const usedNow = owned.size + held;
+    if (!isUnlimitedManualSlots(limit) && usedNow >= limit) {
       return NextResponse.json(
         {
-          error: `Company library is full (${owned.size}/${limit}). Upgrade for more slots.`,
+          error: `Company library is full (${usedNow}/${limit}). Upgrade for more slots.`,
           slot_limit: limit,
-          used: owned.size,
+          used: usedNow,
+          held,
         },
         { status: 409 }
       );
@@ -184,7 +207,16 @@ export async function POST(req: NextRequest) {
       organization_id: orgId,
       manual_id: manualId,
       added_by: user.id,
+      source,
     });
+    if (error && isMissingSourceColumn(error)) {
+      // 000936 not applied yet.
+      ({ error } = await writer.from('organization_manuals').insert({
+        organization_id: orgId,
+        manual_id: manualId,
+        added_by: user.id,
+      }));
+    }
     if (error && /duplicate|unique|23505/i.test(error.message || '')) {
       return NextResponse.json({ ok: true, already: true, slot_limit: limit, used: owned.size });
     }
@@ -207,7 +239,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message || 'Could not add to company library' }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true, slot_limit: limit, used: owned.size + 1 });
+    return NextResponse.json({ ok: true, slot_limit: limit, used: usedNow + 1 });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Could not add manual';
     console.error('[manuals/library]', e);

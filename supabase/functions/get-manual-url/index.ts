@@ -917,6 +917,19 @@ Deno.serve(async (req) => {
     }
 
     let owned = await loadOwned(admin, user.id, orgId);
+    // 000936: removals that were not refunded hold their slot until month end.
+    let slotsHeld = 0;
+    if (orgId != null) {
+      try {
+        const { data: heldRows, error: heldErr } = await admin.rpc("manual_slots_held", { p_org: Number(orgId) });
+        if (!heldErr && Number(heldRows) > 0) slotsHeld = Math.floor(Number(heldRows));
+      } catch {
+        /* 000936 not applied: nothing held */
+      }
+    }
+    const librarySource = ["web", "android", "ios", "api"].includes(String(body.source))
+      ? String(body.source)
+      : "edge";
 
     let man: any = null;
     // Resolve manual row by id or storage_path
@@ -1003,20 +1016,29 @@ Deno.serve(async (req) => {
       }
       if (!owned.has(manualId)) {
         // Enforce slot limit
-        if (owned.size >= slotLimit) {
+        if (owned.size + slotsHeld >= slotLimit) {
           return json(403, {
-            error: `Library full (${owned.size}/${slotLimit}). Upgrade for more slots or remove a manual.`,
+            error: `Library full (${owned.size + slotsHeld}/${slotLimit}). Upgrade for more slots or remove a manual.`,
             requires_add: true,
             library_full: true,
             owned_count: owned.size,
+            slots_held: slotsHeld,
             slot_limit: slotLimit,
           });
         }
-        const { error: insErr } = await admin.from("organization_manuals").insert({
+        let { error: insErr } = await admin.from("organization_manuals").insert({
           organization_id: orgId,
           manual_id: manualId,
           added_by: user.id,
+          source: librarySource,
         });
+        if (insErr && /source/i.test(insErr.message || "") && /column|schema cache/i.test(insErr.message || "")) {
+          ({ error: insErr } = await admin.from("organization_manuals").insert({
+            organization_id: orgId,
+            manual_id: manualId,
+            added_by: user.id,
+          }));
+        }
         if (insErr && !/duplicate|unique|23505/i.test(insErr.message || "")) {
           // Fallback: personal user_manuals if org table missing
           if (/schema cache|does not exist|relation/i.test(insErr.message || "")) {
@@ -1113,6 +1135,22 @@ Deno.serve(async (req) => {
         requested_path: storagePath,
         title: man?.title || null,
       });
+    }
+
+    // 000936: count file serves (signed URL / bytes) for an owned manual inside
+    // the 24h refund window. Server-side "heavy reading" proxy; chapter lists
+    // are not counted. Never blocks the read.
+    if (inLibrary && !wantList && manualId && orgId != null) {
+      try {
+        await admin.rpc("manual_record_url_issued", {
+          p_org: Number(orgId),
+          p_manual_id: Number(manualId),
+          p_user: user.id,
+          p_source: librarySource === "edge" ? "edge" : librarySource,
+        });
+      } catch {
+        /* 000936 not applied */
+      }
     }
 
     const ownedRow = manualId ? owned.get(manualId) || null : null;

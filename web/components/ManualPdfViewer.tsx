@@ -36,6 +36,7 @@ import {
   manualOpenErrorMessage,
 } from '@/lib/manual-file';
 import { useT } from '@/lib/fa/locale';
+import { createPageViewBatcher, librarySource, recordManualAccess } from '@/lib/manual-library-refund';
 
 function sameStoragePath(a?: string | null, b?: string | null): boolean {
   const norm = (value?: string | null) =>
@@ -754,6 +755,56 @@ export function ManualPdfViewer({
     return () => io.disconnect();
   }, [pageCount, loading, docEpoch]);
 
+  // 000936: report reads so the server can decide Remove & refund (downloads,
+  // prints, heavy reading). Pages are batched; reporting never blocks reading.
+  const trackManualId = sourceUrl ? null : manualId;
+  const pageBatcher = useRef<ReturnType<typeof createPageViewBatcher> | null>(null);
+  const chapterIndex = Math.max(
+    0,
+    chapters.findIndex((c) => c?.storage_path && c.storage_path === openStoragePath),
+  );
+  const isFolder = chapters.length > 1;
+  useEffect(() => {
+    if (!trackManualId) return;
+    const supabase = getSupabaseClient();
+    const source = librarySource(typeof navigator !== 'undefined' ? navigator.userAgent : '');
+    const batcher = createPageViewBatcher((pages) => {
+      void recordManualAccess(supabase, trackManualId, 'page_view', {
+        pages,
+        pageCount: isFolder ? undefined : pageCount || undefined,
+        source,
+      });
+    });
+    pageBatcher.current = batcher;
+    const timer = window.setInterval(() => batcher.flush(), 5000);
+    const onHide = () => {
+      if (document.visibilityState === 'hidden') batcher.flush();
+    };
+    const onPrint = () => {
+      void recordManualAccess(supabase, trackManualId, 'print', { source });
+    };
+    document.addEventListener('visibilitychange', onHide);
+    window.addEventListener('beforeprint', onPrint);
+    return () => {
+      batcher.flush();
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onHide);
+      window.removeEventListener('beforeprint', onPrint);
+      pageBatcher.current = null;
+    };
+  }, [trackManualId, isFolder, pageCount]);
+  useEffect(() => {
+    if (!trackManualId || !pageCount || loading || page < 1) return;
+    // Folder manuals: keep chapter pages distinct (chapter index * 1000 + page).
+    pageBatcher.current?.add(Math.min(100000, (isFolder ? chapterIndex * 1000 : 0) + page));
+  }, [trackManualId, page, pageCount, loading, isFolder, chapterIndex]);
+  const reportDownload = () => {
+    if (!trackManualId) return;
+    void recordManualAccess(getSupabaseClient(), trackManualId, 'download', {
+      source: librarySource(typeof navigator !== 'undefined' ? navigator.userAgent : ''),
+    });
+  };
+
   async function runSearch(direction: 1 | 0 | -1 = 0, override?: string) {
     const q = (override ?? query).trim();
     if (!q || !pdfRef.current) return;
@@ -1155,6 +1206,7 @@ export function ManualPdfViewer({
               <a
                 href={fileOffer.url}
                 download={fileOffer.fileName}
+                onClick={reportDownload}
                 rel="noopener noreferrer"
                 className="btn btn-primary text-sm px-4 py-2"
               >
