@@ -12,7 +12,8 @@ import { ADD_CONFIRM_ARM_MS, addConfirmArmed } from '@/lib/manual-library-refund
  *   - Cancel has focus when the dialog opens.
  *   - Enter never accepts: on the accept button it is swallowed; on Cancel it cancels.
  *   - The accept button ignores clicks for ADD_CONFIRM_ARM_MS after opening.
- *   - Esc and a click on the backdrop cancel.
+ *   - Esc and a click on the backdrop cancel (backdrop clicks are ignored for
+ *     the first ADD_CONFIRM_ARM_MS too, so a double click cannot flicker it).
  * Accessible: role="dialog", aria-modal, labelled and described, focus trapped
  * between the two buttons, focus restored to the opener on close.
  */
@@ -97,7 +98,10 @@ export function ManualConfirmDialog({
       className="fixed inset-0 z-[1000] flex items-center justify-center bg-black/60 px-4"
       data-testid="manual-confirm-backdrop"
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) cancel();
+        // The second click of a double click lands here: ignore it while unarmed.
+        if (e.target !== e.currentTarget) return;
+        if (!addConfirmArmed(openedAt.current, Date.now(), ADD_CONFIRM_ARM_MS)) return;
+        cancel();
       }}
     >
       <div

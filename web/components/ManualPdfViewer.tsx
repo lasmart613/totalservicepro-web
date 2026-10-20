@@ -771,7 +771,7 @@ export function ManualPdfViewer({
     const batcher = createPageViewBatcher((pages) => {
       void recordManualAccess(supabase, trackManualId, 'page_view', {
         pages,
-        pageCount: isFolder ? undefined : pageCount || undefined,
+        // Page count comes from the server (manuals.chapter_metadata); not sent.
         source,
       });
     });
@@ -792,7 +792,7 @@ export function ManualPdfViewer({
       window.removeEventListener('beforeprint', onPrint);
       pageBatcher.current = null;
     };
-  }, [trackManualId, isFolder, pageCount]);
+  }, [trackManualId]);
   useEffect(() => {
     if (!trackManualId || !pageCount || loading || page < 1) return;
     // Folder manuals: keep chapter pages distinct (chapter index * 1000 + page).

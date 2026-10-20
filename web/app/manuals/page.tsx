@@ -414,45 +414,15 @@ export default function ManualsLibrary() {
           return false;
         }
       } catch {
-        /* API unreachable — fall through to local insert, still capped above */
+        /* API unreachable: handled below */
       }
     }
 
-    // Fallback only if the API is unavailable; still honor the local Premium=15 cap.
-    let { error } = await supabase.from('organization_manuals').insert({
-      organization_id: orgId,
-      manual_id: m.id,
-      added_by: user.id,
-      source: librarySource(navigator.userAgent),
-    });
-    if (error && /source/i.test(error.message || '') && /column|schema cache/i.test(error.message || '')) {
-      // 000936 not applied yet: the source column does not exist.
-      ({ error } = await supabase.from('organization_manuals').insert({
-        organization_id: orgId,
-        manual_id: m.id,
-        added_by: user.id,
-      }));
-    }
-    if (error && /duplicate|unique|23505/i.test(error.message || '')) {
-      return true;
-    }
-    if (error && /schema cache|does not exist|relation/i.test(error.message || '')) {
-      const um = await supabase.from('user_manuals').insert({
-        user_id: user.id,
-        manual_id: m.id,
-      });
-      if (um.error && !/duplicate|unique|23505/i.test(um.error.message || '')) {
-        toast.error(um.error.message || 'Could not add manual');
-        return false;
-      }
-      toast.message('Added to personal library (company library table not set up yet)');
-      return true;
-    }
-    if (error) {
-      toast.error(error.message || 'Could not add to company library');
-      return false;
-    }
-    return true;
+    // 000936: members can no longer insert into organization_manuals directly
+    // (INSERT revoked + guard trigger). The route (service role) is the only
+    // web add path, so there is no client-side fallback insert any more.
+    toast.error(token ? 'Could not add to company library. Please try again.' : 'Please log in first');
+    return false;
   }
 
   function libraryTitle(manual: any, titleHint?: string) {

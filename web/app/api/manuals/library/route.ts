@@ -109,6 +109,19 @@ async function slotsHeld(client: { rpc: (fn: string, args: Record<string, unknow
   }
 }
 
+async function slotIsHeld(
+  client: { rpc: (fn: string, args: Record<string, unknown>) => any },
+  orgId: string | number,
+  manualId: string | number,
+) {
+  try {
+    const { data, error } = await client.rpc('manual_slot_is_held', { p_org: Number(orgId), p_manual_id: Number(manualId) });
+    return !error && data === true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Add a manual to the signed-in org library. Premium is capped at 15.
  * Team / Enterprise are unlimited. Download still requires ownership.
@@ -191,7 +204,13 @@ export async function POST(req: NextRequest) {
     // 000936: removals that were not refunded keep holding their slot this month.
     const held = await slotsHeld(writer, orgId);
     const usedNow = owned.size + held;
-    if (!isUnlimitedManualSlots(limit) && usedNow >= limit) {
+    // Re-adding a manual whose slot is held nets zero, so it is allowed when full.
+    const reAddHeld = held > 0 && (await slotIsHeld(writer, orgId, manualId));
+    if (!hasServiceRole()) {
+      // 000936 revoked INSERT for signed-in users; only the service role can add.
+      return NextResponse.json({ error: 'Server misconfigured' }, { status: 503 });
+    }
+    if (!isUnlimitedManualSlots(limit) && usedNow >= limit && !reAddHeld) {
       return NextResponse.json(
         {
           error: `Company library is full (${usedNow}/${limit}). Upgrade for more slots.`,
@@ -239,7 +258,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message || 'Could not add to company library' }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true, slot_limit: limit, used: usedNow + 1 });
+    return NextResponse.json({ ok: true, slot_limit: limit, used: reAddHeld ? usedNow : usedNow + 1 });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Could not add manual';
     console.error('[manuals/library]', e);
