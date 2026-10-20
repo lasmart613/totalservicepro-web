@@ -12,10 +12,11 @@
 --      already exist (case-insensitive name match). New rows carry
 --      category = '000937 biomed seed' so the rollback removes only them.
 --      Existing rows (Dornier, GE OEC, or anything a user added) are reused.
---   2. public.laser_models: inserts 128 real, well-known models with
+--   2. public.laser_models: inserts 125 real, well-known models with
 --      equipment_type set, description = '000937 biomed seed'.
 --      ON CONFLICT (manufacturer_id, name) DO NOTHING (idempotent).
---   beds                4 manufacturers, 22 models
+--      Infant warmers (GE Giraffe / Panda) are not seeded: no fitting type yet.
+--   beds                3 manufacturers, 19 models
 --   anesthesia          3 manufacturers, 12 models
 --   c_arm               4 manufacturers, 8 models
 --   defibrillator       4 manufacturers, 12 models
@@ -140,9 +141,6 @@ INSERT INTO _l937 (manufacturer, name, equipment_type) VALUES
     ('Stryker', 'ProCuity', 'beds'),
     ('Stryker', 'Secure II', 'beds'),
     ('Stryker', 'Prime Series Stretcher', 'beds'),
-    ('GE Healthcare', 'Giraffe OmniBed', 'beds'),
-    ('GE Healthcare', 'Giraffe Warmer', 'beds'),
-    ('GE Healthcare', 'Panda iRes Warmer', 'beds'),
     ('Draeger', 'Fabius GS', 'anesthesia'),
     ('Draeger', 'Fabius Plus', 'anesthesia'),
     ('Draeger', 'Apollo', 'anesthesia'),
@@ -198,7 +196,7 @@ INSERT INTO _l937 (manufacturer, name, equipment_type) VALUES
     ('GE Healthcare', 'Dash 4000', 'patient_monitor'),
     ('GE Healthcare', 'CARESCAPE B450', 'patient_monitor'),
     ('GE Healthcare', 'CARESCAPE V100', 'patient_monitor'),
-    ('Mindray', 'ePM 10', 'patient_monitor'),
+    ('Mindray', 'ePM 10M', 'patient_monitor'),
     ('Mindray', 'Passport 12', 'patient_monitor'),
     ('Mindray', 'BeneView T5', 'patient_monitor'),
     ('Spacelabs', 'Xprezzon', 'patient_monitor'),

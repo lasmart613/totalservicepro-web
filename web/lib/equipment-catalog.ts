@@ -190,9 +190,6 @@ export const BIOMED_CATALOG: EquipmentCatalogManufacturer[] = [
   {
     name: "GE Healthcare",
     models: [
-      { name: "Giraffe OmniBed", label: "Giraffe OmniBed", equipmentType: 'beds' },
-      { name: "Giraffe Warmer", label: "Giraffe Warmer", equipmentType: 'beds' },
-      { name: "Panda iRes Warmer", label: "Panda iRes Warmer", equipmentType: 'beds' },
       { name: "Aisys CS2", label: "Aisys CS2", equipmentType: 'anesthesia' },
       { name: "Aespire 7900", label: "Aespire 7900", equipmentType: 'anesthesia' },
       { name: "Avance CS2", label: "Avance CS2", equipmentType: 'anesthesia' },
@@ -277,7 +274,7 @@ export const BIOMED_CATALOG: EquipmentCatalogManufacturer[] = [
     models: [
       { name: "A7", label: "A7", equipmentType: 'anesthesia' },
       { name: "WATO EX-65", label: "WATO EX-65", equipmentType: 'anesthesia' },
-      { name: "ePM 10", label: "ePM 10", equipmentType: 'patient_monitor' },
+      { name: "ePM 10M", label: "ePM 10M", equipmentType: 'patient_monitor' },
       { name: "Passport 12", label: "Passport 12", equipmentType: 'patient_monitor' },
       { name: "BeneView T5", label: "BeneView T5", equipmentType: 'patient_monitor' },
     ],

@@ -65,9 +65,9 @@ export const EQUIPMENT_TYPES: readonly EquipmentTypeMeta[] = [
   },
   {
     value: 'beds',
-    label: 'Beds',
+    label: 'Beds / exam tables & chairs',
     roomLabel: 'Beds room',
-    blurb: 'Hospital beds, stretchers, and infant warmers.',
+    blurb: 'Hospital beds, stretchers, and power exam / procedure tables and chairs (Midmark Ritter and similar).',
     icon: '🛏️',
   },
   {

@@ -2757,6 +2757,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Leitos',
     'الأسرّة',
   ),
+  'Beds / exam tables & chairs': row(
+    'تخت‌ها / تخت و صندلی معاینه',
+    'Camas / mesas y sillones de exploración',
+    'Lits / tables et fauteuils d’examen',
+    'מיטות / שולחנות וכיסאות בדיקה',
+    'Letti / lettini e poltrone da visita',
+    'Betten / Untersuchungsliegen und -stühle',
+    'Leitos / mesas e cadeiras de exame',
+    'الأسرّة / طاولات وكراسي الفحص',
+  ),
   'Defibrillator': row(
     'دفیبریلاتور',
     'Desfibrilador',
