@@ -393,31 +393,50 @@ export function buildPartCheckoutSessionFields(input: {
     }
     Object.assign(fields, input.charge.fields);
   }
-  if (input.maxQuantity != null && input.maxQuantity > 1) {
-    fields['line_items[0][adjustable_quantity][enabled]'] = 'true';
-    fields['line_items[0][adjustable_quantity][minimum]'] = 1;
-    fields['line_items[0][adjustable_quantity][maximum]'] = input.maxQuantity;
-  }
+  // No adjustable_quantity: Stripe does not recompute application_fee_amount when the
+  // buyer changes the quantity in Checkout, so the fee would stay at the 1-unit amount.
+  // The quantity is validated and fixed server-side instead (createPartCheckoutSession).
   if (email && email.includes('@')) {
     fields.customer_email = email;
   }
   return fields;
 }
 
+/**
+ * Quantity for a part checkout, fixed server-side. Missing (undefined/null) means 1.
+ * Strict: only a JS integer or a plain decimal digit string (/^[1-9][0-9]*$/) is
+ * accepted, so true, [2], '0x2', '1e1', ' 2', '2.0', '' are 400s. It must also be
+ * from 1 to the listing's stock (1 when stock is unknown).
+ */
+export function validatedPartQuantity(requested: unknown, maxQty: number | null): number {
+  if (requested === undefined || requested === null) return 1;
+  let n: number;
+  if (typeof requested === 'number') n = requested;
+  else if (typeof requested === 'string' && /^[1-9][0-9]*$/.test(requested)) n = Number(requested);
+  else n = NaN;
+  const max = maxQty == null ? 1 : Math.max(1, Math.floor(maxQty));
+  if (!Number.isSafeInteger(n) || n < 1 || n > max) {
+    throw new StripeMarketplaceError(`Quantity must be a whole number from 1 to ${max}`, 400);
+  }
+  return n;
+}
+
 export async function createPartCheckoutSession(input: {
   listing: MarketplaceListingLike & { id?: string; title?: string; description?: string; notes?: string };
   customerEmail?: string | null;
-  quantity?: number;
+  quantity?: unknown;
 }): Promise<PartCheckoutResult> {
+  // Validate quantity BEFORE syncPartStripeCatalog: a 400 must never create Stripe
+  // products/prices or write their ids back to the listing.
+  const maxQty = listingQuantity(input.listing);
+  const qty = validatedPartQuantity(input.quantity, maxQty);
   const catalog = await syncPartStripeCatalog(input.listing);
   const avail = listingAvailability(input.listing);
   if (!avail.purchasable) {
     throw new StripeMarketplaceError(avail.reason || 'Not purchaseable', 409);
   }
-  const maxQty = listingQuantity(input.listing);
-  const qty = Math.max(1, Math.min(input.quantity || 1, maxQty == null ? 1 : maxQty));
-  const adjustable = maxQty != null && maxQty > 1;
-  const feeBaseCents = adjustable ? catalog.amountCents : catalog.amountCents * qty;
+  // Fee base = unit price x the fixed quantity the buyer will pay for.
+  const feeBaseCents = catalog.amountCents * qty;
   const loaded = await loadSellerPayoutAccount(input.listing.organization_id);
   const decision = decideSellerChargeRoute({
     organizationId: input.listing.organization_id,
