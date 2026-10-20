@@ -427,9 +427,10 @@ test('estimate form and invoice form load the live catalog join', () => {
 test('service tickets join models by manufacturer id or name without a label column', () => {
   const tickets = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
   const schedule = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
-  assert.match(tickets, /listManufacturerChoices/);
-  assert.match(tickets, /listModelChoices/);
-  assert.match(tickets, /select\('id, name, manufacturer_id'\)/);
+  // Ticket edit uses the shared type → make → model cascade with equipment_type loaded.
+  assert.match(tickets, /useEquipmentCascade\(liveCatalog\)/);
+  assert.match(tickets, /EquipmentCascadeFields/);
+  assert.match(tickets, /select\('id, name, manufacturer_id, equipment_type'\)/);
   assert.doesNotMatch(tickets, /select\('id, name, label/);
   assert.match(schedule, /listManufacturerChoices/);
   assert.match(schedule, /listModelChoices/);
@@ -622,12 +623,10 @@ test('stored manufacturer alias selects the merged dropdown option', () => {
   assert.equal(dedupeManufacturerNames(['Coherent', 'Lumenis', 'Coherent / Lumenis']).join('|'), 'Lumenis (Coherent)');
 
   const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
-  assert.match(edit, /mergedManufacturerOption/);
-  assert.match(edit, /mergedModelOption/);
-  assert.match(edit, /withSavedModelChoice/);
-  assert.match(edit, /withSavedManufacturerChoice/);
-  assert.match(edit, /value=\{makeValue\}/);
-  assert.match(edit, /value=\{modelValue\}/);
+  // Ticket edit now hydrates the shared cascade; alias spellings land on the merged option
+  // and off-list values become Other + text (see equipment-cascade.test.ts).
+  assert.match(edit, /cascade\.hydrate\(/);
+  assert.match(edit, /<EquipmentCascadeFields cascade=\{cascade\}/);
 });
 
 test('near-duplicate models share one display label and keep the stored code', () => {

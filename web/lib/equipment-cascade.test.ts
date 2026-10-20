@@ -127,6 +127,39 @@ test('000937 seed rows match BIOMED_CATALOG exactly (web and DB agree)', async (
     (m) => `${m[1]}|${m[2]}|${m[3]}`
   );
   const fromTs = BIOMED_CATALOG.flatMap((mfr) => mfr.models.map((m) => `${mfr.name}|${m.name}|${m.equipmentType}`));
-  assert.equal(rows.length, 128);
+  assert.equal(rows.length, 125);
   assert.deepEqual([...rows].sort(), [...fromTs].sort());
+});
+
+test('Android offline estimate asset mirrors BIOMED_CATALOG and saves Other text', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { BIOMED_CATALOG } = await import('./equipment-catalog.ts');
+  const html = readFileSync(
+    new URL('../../app/src/main/assets/estimate_generator.html', import.meta.url),
+    'utf8'
+  );
+  const m = html.match(/const BIOMED_STATIC = (\[[\s\S]*?\]);\n/);
+  assert.ok(m, 'BIOMED_STATIC block missing');
+  const rows = (JSON.parse(m![1]) as string[][]).map((r) => r.join('|')).sort();
+  const fromTs = BIOMED_CATALOG.flatMap((mfr) => mfr.models.map((x) => `${mfr.name}|${x.name}|${x.equipmentType}`)).sort();
+  assert.deepEqual(rows, fromTs);
+  assert.match(html, /id="manufacturerOther"/);
+  assert.match(html, /id="modelOther"/);
+  assert.match(html, /\[estimateManufacturer\(\), estimateModel\(\)\]/);
+  assert.doesNotMatch(html, /<option value="Other">Other<\/option>/);
+});
+
+test('Beds no longer lists infant warmers; Mindray ePM 10M spelled correctly', () => {
+  const beds = names('beds');
+  assert.ok(!beds.includes('GE Healthcare'));
+  const mindray = modelChoicesFor(empty, 'patient_monitor', 'Mindray').map((c) => c.value);
+  assert.ok(mindray.includes('ePM 10M'));
+  assert.ok(!mindray.includes('ePM 10'));
+});
+
+test('ticket edit hydrate: stored alias spellings select the merged manufacturer', () => {
+  const s = hydrateCascade(empty, { equipmentType: 'laser', manufacturer: 'Alma Lasers', model: '' });
+  assert.equal(s.manufacturer, 'Alma');
+  const q = hydrateCascade(empty, { equipmentType: 'laser', manufacturer: 'Quanta', model: '' });
+  assert.equal(q.manufacturer, 'Quanta System');
 });
