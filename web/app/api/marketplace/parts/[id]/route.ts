@@ -23,6 +23,8 @@ import {
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { resolveListingStorefront } from '@/lib/marketplace/storefront-server';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
+import { stripPrivatePartFields, viewerSeesPartSerial } from '@/lib/marketplace/part-public';
+import type { MarketplaceCaller } from '@/lib/marketplace/caller';
 
 export const dynamic = 'force-dynamic';
 
@@ -43,11 +45,17 @@ function publicListingPayload(
   listing: ListingRow,
   sellerName: string | null,
   canManage: boolean,
-  viewerOrgId?: string | number | null
+  caller: MarketplaceCaller | null
 ) {
+  const viewerOrgId = caller?.orgId;
+  // No Stripe ids; serial only for the seller org's members; details sanitized.
+  const safe = stripPrivatePartFields(
+    listing as ListingRow & Record<string, unknown>,
+    viewerSeesPartSerial(listing, caller)
+  );
   return {
-    ...listing,
-    details: sanitizeListingDetails(listing.details),
+    ...safe,
+    details: sanitizeListingDetails(safe.details),
     images: listingImages(listing),
     seller_id: canManage ? listing.seller_id : undefined,
     created_by: canManage ? listing.created_by : undefined,
@@ -91,7 +99,7 @@ export async function GET(
     const sellerStorefront = await resolveListingStorefront(listing.organization_id);
 
     return NextResponse.json({
-      listing: publicListingPayload(listing, sellerName, canManage, caller?.orgId),
+      listing: publicListingPayload(listing, sellerName, canManage, caller),
       availability,
       price_label: formatListingPrice(listing),
       path: partsDetailPath(id),
@@ -173,7 +181,8 @@ export async function PATCH(
     return NextResponse.json({
       ok: true,
       listing: {
-        ...listing,
+        // Manager response: serial kept, Stripe ids still dropped.
+        ...stripPrivatePartFields(listing as ListingRow & Record<string, unknown>, true),
         details: sanitizeListingDetails(listing.details),
         images: listingImages(listing),
         quantity: listingQuantity(listing),
