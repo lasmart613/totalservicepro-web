@@ -25,6 +25,7 @@ import { resolveListingStorefront } from '@/lib/marketplace/storefront-server';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { stripPrivatePartFields, viewerSeesPartSerial } from '@/lib/marketplace/part-public';
 import type { MarketplaceCaller } from '@/lib/marketplace/caller';
+import { isMarketplaceListingId } from '@/lib/marketplace/listing-id';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,6 +79,8 @@ export async function GET(
   try {
     const id = await listingParams(ctx);
     if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+    // A non-uuid id can never match; Postgres would raise 22P02 (and leak its text).
+    if (!isMarketplaceListingId(id)) return NextResponse.json({ error: 'Listing not found' }, { status: 404 });
 
     const listing = (await loadMarketplaceListing(id)) as ListingRow | null;
     if (!listing) return NextResponse.json({ error: 'Listing not found' }, { status: 404 });
@@ -108,7 +111,8 @@ export async function GET(
     });
   } catch (e: unknown) {
     const status = e instanceof StripeMarketplaceError ? e.status : 500;
-    const message = e instanceof Error ? e.message : 'Server error';
+    // Never echo database text to the client on a 500.
+    const message = status >= 500 && status !== 503 ? 'Server error' : e instanceof Error ? e.message : 'Server error';
     console.error('[marketplace/parts GET]', e);
     return NextResponse.json({ error: message }, { status });
   }
@@ -118,6 +122,9 @@ async function requireManager(
   req: NextRequest,
   id: string
 ): Promise<{ listing: ListingRow } | NextResponse> {
+  if (!isMarketplaceListingId(id)) {
+    return NextResponse.json({ error: 'Listing not found' }, { status: 404 });
+  }
   const caller = await getMarketplaceCaller(req);
   if (!caller) {
     return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
