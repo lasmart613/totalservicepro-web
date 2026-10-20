@@ -403,14 +403,19 @@ export function buildPartCheckoutSessionFields(input: {
 }
 
 /**
- * Quantity for a part checkout, fixed server-side. Missing means 1. Anything that is
- * not a whole number from 1 to the listing's stock (1 when stock is unknown) is a 400.
+ * Quantity for a part checkout, fixed server-side. Missing (undefined/null) means 1.
+ * Strict: only a JS integer or a plain decimal digit string (/^[1-9][0-9]*$/) is
+ * accepted, so true, [2], '0x2', '1e1', ' 2', '2.0', '' are 400s. It must also be
+ * from 1 to the listing's stock (1 when stock is unknown).
  */
 export function validatedPartQuantity(requested: unknown, maxQty: number | null): number {
-  if (requested == null || requested === '') return 1;
-  const n = typeof requested === 'number' ? requested : Number(requested);
+  if (requested === undefined || requested === null) return 1;
+  let n: number;
+  if (typeof requested === 'number') n = requested;
+  else if (typeof requested === 'string' && /^[1-9][0-9]*$/.test(requested)) n = Number(requested);
+  else n = NaN;
   const max = maxQty == null ? 1 : Math.max(1, Math.floor(maxQty));
-  if (!Number.isInteger(n) || n < 1 || n > max) {
+  if (!Number.isSafeInteger(n) || n < 1 || n > max) {
     throw new StripeMarketplaceError(`Quantity must be a whole number from 1 to ${max}`, 400);
   }
   return n;
@@ -421,13 +426,15 @@ export async function createPartCheckoutSession(input: {
   customerEmail?: string | null;
   quantity?: unknown;
 }): Promise<PartCheckoutResult> {
+  // Validate quantity BEFORE syncPartStripeCatalog: a 400 must never create Stripe
+  // products/prices or write their ids back to the listing.
+  const maxQty = listingQuantity(input.listing);
+  const qty = validatedPartQuantity(input.quantity, maxQty);
   const catalog = await syncPartStripeCatalog(input.listing);
   const avail = listingAvailability(input.listing);
   if (!avail.purchasable) {
     throw new StripeMarketplaceError(avail.reason || 'Not purchaseable', 409);
   }
-  const maxQty = listingQuantity(input.listing);
-  const qty = validatedPartQuantity(input.quantity, maxQty);
   // Fee base = unit price x the fixed quantity the buyer will pay for.
   const feeBaseCents = catalog.amountCents * qty;
   const loaded = await loadSellerPayoutAccount(input.listing.organization_id);
