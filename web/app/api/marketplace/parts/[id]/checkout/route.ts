@@ -9,6 +9,10 @@ import {
 } from '@/lib/billing/stripe-marketplace';
 import { isPartListing, listingAvailability } from '@/lib/marketplace/parts';
 import { resolveStripeSecret } from '@/lib/billing/stripe-pay';
+import {
+  isMarketplaceCheckoutEnabled,
+  marketplaceCheckoutPausedBody,
+} from '@/lib/marketplace/checkout-pause';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,6 +43,14 @@ export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> | { id: string } }
 ) {
+  // Kill switch: paused unless MARKETPLACE_CHECKOUT_ENABLED === 'true'.
+  // Checked first, before any DB or Stripe call (covers syncOnly too).
+  if (!isMarketplaceCheckoutEnabled()) {
+    return NextResponse.json(marketplaceCheckoutPausedBody(), {
+      status: 503,
+      headers: { 'Cache-Control': 'no-store', 'Retry-After': '3600' },
+    });
+  }
   try {
     const raw = await Promise.resolve(ctx.params);
     const id = raw?.id;
