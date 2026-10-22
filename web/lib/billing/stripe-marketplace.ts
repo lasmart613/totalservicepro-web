@@ -261,27 +261,15 @@ async function persistStripeIds(
     stripe_price_id: priceId,
     stripe_price_cents: amountCents,
   };
-  const admin = getSupabaseAdmin();
-  const withCols = await admin
+  // Stripe ids are stored in details only: live marketplace_listings has no
+  // stripe_product_id / stripe_price_id columns, so a column update always
+  // came back as a PostgREST 400 (PGRST204) before the details-only fallback.
+  const { error } = await getSupabaseAdmin()
     .from('marketplace_listings')
-    .update({
-      stripe_product_id: productId,
-      stripe_price_id: priceId,
-      details,
-      updated_at: new Date().toISOString(),
-    })
+    .update({ details, updated_at: new Date().toISOString() })
     .eq('id', listing.id);
-  if (withCols.error && /column|does not exist|schema cache/i.test(withCols.error.message || '')) {
-    const fallback = await admin
-      .from('marketplace_listings')
-      .update({ details, updated_at: new Date().toISOString() })
-      .eq('id', listing.id);
-    if (fallback.error) console.warn('[stripe-marketplace] persist details failed', fallback.error.message);
-    return;
-  }
-  if (withCols.error) {
-    console.warn('[stripe-marketplace] persist columns failed', withCols.error.message);
-  }
+  if (error) console.warn('[stripe-marketplace] persist details failed', error.message);
+
 }
 
 export async function syncPartStripeCatalog(listing: MarketplaceListingLike & { id?: string; title?: string; description?: string; notes?: string }): Promise<StripeCatalogResult> {
@@ -488,7 +476,10 @@ export async function createPartCheckoutSession(input: {
 }
 
 const LISTING_SELECTS = [
-  'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, organization_id, seller_id, created_by, stripe_product_id, stripe_price_id, currency',
+  // No stripe_product_id / stripe_price_id: those columns do not exist on live
+  // marketplace_listings (Stripe ids live in details). Selecting them made every
+  // load start with a PostgREST 400 (42703) before the fallback.
+  'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, organization_id, seller_id, created_by, currency',
   'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, organization_id, seller_id, created_by',
   'id, title, description, status, condition, price, manufacturer, model, serial_number, part_number, quantity, listing_type, category, images, details, created_at, organization_id, seller_id, created_by',
   'id, title, description, status, condition, price, manufacturer, model, listing_type, images, details, created_at',
