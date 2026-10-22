@@ -41,6 +41,8 @@ import {
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
 import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
+import CustomerEquipmentPicker, { AddToOrgCheckbox } from '@/components/CustomerEquipmentPicker';
+import { useCustomerEquipment } from '@/lib/use-customer-equipment';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import { documentDirection } from '@/lib/i18n/translate-app';
 import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
@@ -93,6 +95,13 @@ export default function EstimateFormClient() {
   // Pulse counts only mean something for lasers; hidden and not saved otherwise.
   const showPulseCount = equipmentType === 'laser';
   const [serial, setSerial] = useState('');
+  const customerEquipment = useCustomerEquipment({
+    client: supabase,
+    customerOrgId,
+    cascade,
+    serial,
+    setSerial,
+  });
   const [pulseCount, setPulseCount] = useState('');
 
   // Services / notes
@@ -674,6 +683,11 @@ export default function EstimateFormClient() {
         }
       }
 
+      if (result.id || existingId) {
+        const eqRes = await customerEquipment.saveToOrgIfChecked(name);
+        if (eqRes.message) (eqRes.ok ? toast.success : toast.warning)(eqRes.message);
+      }
+
       if (!opts?.quiet) {
         if (nextStatus === 'draft') {
           toast.success(
@@ -1007,11 +1021,30 @@ export default function EstimateFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {customerEquipment.visible && (
+              <CustomerEquipmentPicker
+                orgName={customerName.trim() || custSearch.trim()}
+                equipment={customerEquipment.list}
+                loading={customerEquipment.loading}
+                selectedId={customerEquipment.selectedId}
+                onPick={customerEquipment.pick}
+                t={t}
+                idPrefix="est-eq-cust"
+              />
+            )}
             <EquipmentCascadeFields cascade={cascade} t={t} idPrefix="est-eq" />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
+            {customerEquipment.offerAdd && (
+              <AddToOrgCheckbox
+                orgName={customerName.trim() || custSearch.trim()}
+                checked={customerEquipment.addToOrg}
+                onChange={customerEquipment.setAddToOrg}
+                t={t}
+              />
+            )}
             {showPulseCount && (
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
