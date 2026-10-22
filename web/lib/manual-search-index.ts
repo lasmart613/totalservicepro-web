@@ -1043,11 +1043,32 @@ export async function indexManualSearchText(
 export const ALREADY_INDEXED = 'already_indexed';
 /** Skipped reason when another chunked write for the manual started < 10 min ago. */
 export const INDEX_WRITE_BUSY = 'index_write_busy';
-/** Retries of one append call cancelled by the 8 s statement_timeout. The row-count guard makes a retry safe. */
-export const APPEND_TIMEOUT_RETRIES = 2;
+/** Retries of one append call after a statement timeout or a transient gateway/network failure. The row-count guard makes a retry safe. */
+export const APPEND_TIMEOUT_RETRIES = 3;
 
 function isStatementTimeout(message: string): boolean {
   return /statement timeout|canceling statement/i.test(message);
+}
+
+/**
+ * A failure where the append may or may not have committed and a retry is
+ * safe: the statement timeout, and gateway / PostgREST / network failures
+ * (an HTTP 5xx with no Postgres error, e.g. PostgREST's "Thread killed by
+ * timeout manager", a 502/504 from the gateway, or a dropped connection).
+ * Postgres errors (bad input, permission) are not retried.
+ */
+export function isTransientAppendError(message: string): boolean {
+  if (isStatementTimeout(message)) return true;
+  const m = String(message || '').trim();
+  if (!m || m === 'unknown' || m === '{}') return true;
+  return /\b50[0234]\b|internal server error|bad gateway|gateway time-?out|service unavailable|upstream|fetch failed|failed to fetch|network|socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|terminated|thread killed|timeout manager|aborted/i.test(m);
+}
+
+/** Backoff before append retry `attempt` (1-based): 1 s, 2 s, 4 s ... */
+export const APPEND_RETRY_BASE_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function chunkedRpcMissing(message: string): boolean {
@@ -1089,6 +1110,7 @@ export async function writeChunkedManualSearchIndex(
   db: TableClient,
   manualId: number,
   chunks: readonly IndexChunk[],
+  retryDelayMs: number = APPEND_RETRY_BASE_MS,
 ): Promise<ChunkedWriteResult> {
   if (typeof db.rpc !== 'function') return { ok: false, reason: 'Refused: chunked writes need the Supabase RPC client.' };
   // Bound: SupabaseClient.rpc reads this.rest. A detached `db.rpc` threw
@@ -1126,7 +1148,9 @@ export async function writeChunkedManualSearchIndex(
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
     let appended: { data: unknown; error: string | null } = { data: undefined, error: 'not attempted' };
+    let hadTransient = false;
     for (let attempt = 0; attempt <= APPEND_TIMEOUT_RETRIES; attempt += 1) {
+      if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs * 2 ** (attempt - 1));
       appended = await call('append_manual_search_index_chunks', {
         p_manual_id: manualId,
         p_token: token,
@@ -1135,9 +1159,17 @@ export async function writeChunkedManualSearchIndex(
         p_clipped: [chunk.clipped === true],
         p_page_max: [chunk.indexedPageMax == null ? null : chunk.indexedPageMax],
       });
-      if (!appended.error || !isStatementTimeout(appended.error)) break;
+      if (!appended.error || !isTransientAppendError(appended.error)) break;
+      hadTransient = true;
     }
     if (appended.error) return abort(`append chunk ${i + 1}/${chunks.length} failed: ${appended.error}`);
+    if (appended.data !== true && hadTransient) {
+      // The failed attempt may have committed before its response was lost;
+      // then the retry is refused by the row-count guard. Accept it when the
+      // manual now holds exactly i + 1 rows (this chunk landed once).
+      const landed = await readExistingSearchText(db, manualId);
+      if (landed.ok && landed.chunks.length === i + 1 && landed.chunks[i] === chunk.text) continue;
+    }
     if (appended.data !== true) return abort(`append chunk ${i + 1}/${chunks.length} refused (marker replaced or row count changed)`);
   }
   const finish = await call('finish_manual_search_index_append', { p_manual_id: manualId, p_token: token });

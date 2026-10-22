@@ -9,6 +9,7 @@ import {
   appendChunks,
   INDEX_WRITE_BUSY,
   indexMissingManualSearchText,
+  isTransientAppendError,
   indexTextMd5,
   listIndexedManualIds,
   listPendingIndexIds,
@@ -579,6 +580,58 @@ test('an append cancelled by the statement timeout is retried (row-count guard m
   assert.equal(out.ok, true);
   assert.equal(timeouts, APPEND_TIMEOUT_RETRIES);
   assert.equal(s.index.filter((r) => r.manual_id === 1757).length, chunks.length);
+});
+
+test('an append that fails with a gateway/PostgREST 500 is retried', async () => {
+  const s = scenario();
+  let fails = 0;
+  const admin = fakeAdmin({
+    ...s,
+    onRpc: (fn, args) => {
+      if (fn === 'append_manual_search_index_chunks' && args.p_expected_rows === 1 && fails < 2) {
+        fails += 1;
+        return { data: null, error: { message: fails === 1 ? 'Internal Server Error' : '' } };
+      }
+      return undefined;
+    },
+  });
+  const chunks = appendChunks(bigManualChunks(500_000));
+  const out = await writeChunkedManualSearchIndex(admin, 1757, chunks, 0);
+  assert.equal(out.ok, true);
+  assert.equal(fails, 2);
+  assert.equal(s.index.filter((r) => r.manual_id === 1757).length, chunks.length);
+});
+
+test('an append whose response was lost (it committed) is accepted, not aborted', async () => {
+  const s = scenario();
+  let lost = false;
+  const admin = fakeAdmin({
+    ...s,
+    onRpc: (fn, args) => {
+      if (fn === 'append_manual_search_index_chunks' && args.p_expected_rows === 1 && !lost) {
+        lost = true;
+        // The insert lands, then the HTTP response is lost (thread killed / 502).
+        (args.p_chunks as string[]).forEach((text, i) => s.index.push({ manual_id: 1757, chunk_index: 1 + i, search_text: text }));
+        return { data: null, error: { message: 'upstream connect error or disconnect/reset before headers (502)' } };
+      }
+      return undefined;
+    },
+  });
+  const chunks = appendChunks(bigManualChunks(500_000));
+  const out = await writeChunkedManualSearchIndex(admin, 1757, chunks, 0);
+  assert.equal(out.ok, true);
+  const rows = s.index.filter((r) => r.manual_id === 1757).sort((a, b) => Number(a.chunk_index) - Number(b.chunk_index));
+  assert.equal(rows.length, chunks.length);
+  assert.deepEqual(rows.map((r) => r.search_text), chunks.map((c) => c.text));
+});
+
+test('isTransientAppendError: gateway/network yes, Postgres errors no', () => {
+  for (const m of ['canceling statement due to statement timeout', 'Internal Server Error', '', 'fetch failed', 'Bad Gateway', '504 Gateway Time-out', 'socket hang up']) {
+    assert.equal(isTransientAppendError(m), true, m);
+  }
+  for (const m of ['permission denied for table manual_search_index', 'append_manual_search_index_chunks requires p_chunks', 'invalid input syntax for type uuid']) {
+    assert.equal(isTransientAppendError(m), false, m);
+  }
 });
 
 test('an abort that fails is reported, not swallowed', async () => {
