@@ -10,6 +10,7 @@ import { APP_CHANNEL, APP_VERSION, buildLabel } from '@/lib/app-version';
 import { useSetSiteLanguage, useSiteLocale, useT } from '@/lib/fa/locale';
 import { PUBLIC_LOCALES, type PublicLocale } from '@/lib/i18n/locales';
 import { useAutoOpenCitedManual } from '@/components/useAssistantCitationOpen';
+import { isTspAndroidWebView } from '@/lib/android-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +31,9 @@ export default function Settings() {
   const [sound, setSound] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
   const [autoOpenCited, setAutoOpenCited] = useAutoOpenCitedManual();
+  const [androidApp, setAndroidApp] = useState(false);
+  const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioAvailable, setBioAvailable] = useState(false);
 
   const TIME_ZONES = [
     'UTC',
@@ -74,8 +78,42 @@ export default function Settings() {
       setBrowserNotif(localStorage.getItem('browserNotifications') !== 'false');
       setSound(localStorage.getItem('notificationSound') !== 'false');
       setTheme(applyStoredTheme());
+      setAndroidApp(isTspAndroidWebView());
     }
   }, []);
+
+  useEffect(() => {
+    if (!androidApp) return;
+    const read = (detail?: { enabled?: boolean; available?: boolean }) => {
+      const state = detail || (window as Window & { __tspBiometric?: { enabled?: boolean; available?: boolean } }).__tspBiometric;
+      if (!state) return;
+      setBioEnabled(!!state.enabled);
+      setBioAvailable(!!state.available);
+    };
+    read();
+    const onState = (ev: Event) => {
+      read((ev as CustomEvent<{ enabled?: boolean; available?: boolean }>).detail);
+    };
+    window.addEventListener('tsp-biometric', onState);
+    try {
+      const native = (window as Window & { tspNative?: { postMessage: (body: string) => void } }).tspNative;
+      native?.postMessage(JSON.stringify({ m: 'queryBiometric' }));
+    } catch {
+      /* file page has no tspNative */
+    }
+    return () => window.removeEventListener('tsp-biometric', onState);
+  }, [androidApp]);
+
+  const toggleBiometric = () => {
+    const next = !bioEnabled;
+    setBioEnabled(next);
+    const android = (window as Window & { Android?: { setBiometricEnabled?: (on: boolean) => void } }).Android;
+    try {
+      android?.setBiometricEnabled?.(next);
+    } catch {
+      setBioEnabled(!next);
+    }
+  };
 
   const save = (key: string, value: any) => {
     if (typeof window !== 'undefined') {
@@ -270,6 +308,28 @@ export default function Settings() {
           </div>
 
           <MembershipsSettings />
+
+          {androidApp && (
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="font-semibold">{t('Fingerprint or screen lock')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">
+                  {bioAvailable
+                    ? t('Ask for fingerprint or your screen lock before restoring this sign-in. Turning it off keeps you signed in without that prompt.')
+                    : t('Set a screen lock on this phone to use biometric sign-in.')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={toggleBiometric}
+                disabled={!bioAvailable && !bioEnabled}
+                aria-pressed={bioEnabled}
+                className={`px-3 py-1 rounded text-xs shrink-0 ${bioEnabled ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}
+              >
+                {bioEnabled ? t('ON') : t('OFF')}
+              </button>
+            </div>
+          )}
 
           <div>
             <div className="font-semibold mb-2">{t('Account')}</div>

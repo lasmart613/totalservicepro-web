@@ -161,12 +161,17 @@ public final class CardScanController {
             return;
         }
         if (dialog != null && dialog.isShowing()) dialog.dismiss();
+        final boolean prefill = request.prefillForm;
         String notice = ocrFailed
-                ? "No text was recognized on this device. Type the customer details or retake the photo. Nothing is saved until you tap Save."
-                : "Review the fields read on this device. Nothing is saved until you tap Save.";
-        String footer = "update".equals(request.mode)
+                ? "No text was recognized on this device. Type the customer details or retake the photo. Nothing is saved until you confirm."
+                : (prefill
+                ? "Review the fields read on this device. Nothing is saved until you tap Save on the customer form."
+                : "Review the fields read on this device. Nothing is saved until you tap Save.");
+        String footer = prefill
+                ? "Fill form puts these fields on the customer form. Nothing is saved until you tap Save there."
+                : ("update".equals(request.mode)
                 ? "Empty fields on an existing customer are left as they are. Nothing is saved until you tap Save."
-                : "Company is the customer name in your directory. Nothing is saved until you tap Save.";
+                : "Company is the customer name in your directory. Nothing is saved until you tap Save.");
         LinearLayout form = new LinearLayout(activity);
         form.setOrientation(LinearLayout.VERTICAL);
         int pad = dp(activity, 16);
@@ -204,12 +209,13 @@ public final class CardScanController {
         ScrollView scroll = new ScrollView(activity);
         scroll.addView(form);
         final boolean[] saving = new boolean[]{false};
+        String saveLabel = prefill ? "Fill form" : "Save";
         AlertDialog built = new AlertDialog.Builder(activity)
                 .setTitle("update".equals(request.mode) ? "Update from card" : "Scan card")
                 .setView(scroll)
                 .setNegativeButton("Cancel", null)
                 .setNeutralButton("Retake", null)
-                .setPositiveButton("Save", null)
+                .setPositiveButton(saveLabel, null)
                 .setCancelable(true)
                 .create();
         dialog = built;
@@ -237,6 +243,13 @@ public final class CardScanController {
             save.setOnClickListener(v -> {
                 if (saving[0]) return;
                 BusinessCardFields edited = readFields(inputs);
+                if (prefill) {
+                    saving[0] = true;
+                    built.setOnCancelListener(null);
+                    built.dismiss();
+                    finishPrefilled(edited);
+                    return;
+                }
                 saving[0] = true;
                 errorView.setText("");
                 save.setEnabled(false);
@@ -282,6 +295,17 @@ public final class CardScanController {
         if (inputs == null || index >= inputs.length || inputs[index] == null) return "";
         CharSequence value = inputs[index].getText();
         return value == null ? "" : value.toString();
+    }
+
+    private void finishPrefilled(BusinessCardFields fields) {
+        busy = false;
+        dialog = null;
+        String value = null;
+        try {
+            value = CardScanContract.outcomeJson(false, false, request.organizationId, fields).toString();
+        } catch (Exception ignored) {
+        }
+        host.complete(requestId, true, value, null);
     }
 
     private void finishSaved(CustomerCardClient.SaveResult result) {

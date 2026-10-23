@@ -86,10 +86,17 @@ public final class CardScanContract {
     public static final class Request {
         public final String mode;
         public final String organizationId;
+        /** Live customer form: confirm, then hand the fields back to the page. */
+        public final boolean prefillForm;
 
         public Request(String mode, String organizationId) {
+            this(mode, organizationId, false);
+        }
+
+        public Request(String mode, String organizationId, boolean prefillForm) {
             this.mode = mode;
             this.organizationId = organizationId;
+            this.prefillForm = prefillForm;
         }
     }
 
@@ -100,11 +107,12 @@ public final class CardScanContract {
         String explicit = firstString(payload, "organizationId");
         if (explicit == null) explicit = firstString(payload, "organization_id");
         if (explicit == null) explicit = firstString(payload, "id");
+        boolean prefill = payload != null && payload.optBoolean("prefillForm", false);
         String profileId = page.isProfile() ? page.profileId : null;
         if ("update".equals(mode) || (mode.isEmpty() && profileId != null)) {
-            return new Request("update", explicit != null ? explicit : profileId);
+            return new Request("update", explicit != null ? explicit : profileId, prefill);
         }
-        return new Request("create", null);
+        return new Request("create", null, prefill);
     }
 
     public static JSONObject outcomeJson(boolean saved, boolean queued, String organizationId, BusinessCardFields fields)

@@ -50,6 +50,15 @@ public class CardScanContractTest {
                 new JSONObject(), "https://www.repairplanet.net/customers/abc");
         assertEquals("update", fromPage.mode);
         assertEquals("abc", fromPage.organizationId);
+        assertFalse(fromPage.prefillForm);
+
+        JSONObject prefill = new JSONObject();
+        prefill.put("mode", "create");
+        prefill.put("prefillForm", true);
+        CardScanContract.Request fill = CardScanContract.requestFrom(
+                prefill, "https://repairplanet.net/customers");
+        assertEquals("create", fill.mode);
+        assertTrue(fill.prefillForm);
     }
 
     @Test

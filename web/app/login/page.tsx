@@ -25,7 +25,9 @@ import { googleOAuthRedirectTo, isTspAndroidWebView } from '@/lib/android-sessio
 function LoginInner() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
@@ -455,15 +457,26 @@ function LoginInner() {
 
             <div>
               <label className="label">{t('Password')}</label>
-              <input
-                type="password"
-                className="input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={isSignUp ? 8 : 6}
-                autoComplete={isSignUp ? 'new-password' : 'current-password'}
-              />
+              <div className="relative">
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  className="input w-full pr-16"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  minLength={isSignUp ? 8 : 6}
+                  autoComplete={isSignUp ? 'new-password' : 'current-password'}
+                />
+                <button
+                  type="button"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-[var(--gold)] px-1"
+                  aria-label={showPassword ? t('Hide password') : t('Show password')}
+                  aria-pressed={showPassword}
+                  onClick={() => setShowPassword((open) => !open)}
+                >
+                  {showPassword ? t('Hide') : t('Show')}
+                </button>
+              </div>
               {isSignUp && (
                 <p className="text-[10px] text-[var(--text3)] mt-1">{t('At least 8 characters')}</p>
               )}
@@ -472,15 +485,26 @@ function LoginInner() {
             {isSignUp && (
               <div>
                 <label className="label">{t('Confirm password')}</label>
-                <input
-                  type="password"
-                  className="input"
-                  value={confirmPassword}
-                  onChange={(e) => setConfirmPassword(e.target.value)}
-                  required
-                  minLength={8}
-                  autoComplete="new-password"
-                />
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    className="input w-full pr-16"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                    minLength={8}
+                    autoComplete="new-password"
+                  />
+                  <button
+                    type="button"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-[var(--gold)] px-1"
+                    aria-label={showConfirmPassword ? t('Hide password') : t('Show password')}
+                    aria-pressed={showConfirmPassword}
+                    onClick={() => setShowConfirmPassword((open) => !open)}
+                  >
+                    {showConfirmPassword ? t('Hide') : t('Show')}
+                  </button>
+                </div>
               </div>
             )}
 
