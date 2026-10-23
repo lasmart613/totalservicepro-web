@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appStrings, APP_STRING_KEYS } from './app-copy.ts';
 import { FA_COPY } from '../fa/copy.ts';
+import { CRM_EMAIL_STRINGS } from './crm-email-copy.ts';
 import { formatLocaleDate } from './format-date.ts';
 import { PUBLIC_LOCALES, type PublicLocale } from './locales.ts';
 import { roleLabel } from '../labels.ts';
@@ -303,7 +304,8 @@ test('every t() literal exists in the signed-in or public dictionary', () => {
   const files: string[] = [];
   walkTsx(join(webDir, 'app'), files);
   walkTsx(join(webDir, 'components'), files);
-  const known = new Set([...APP_STRING_KEYS, ...Object.keys(FA_COPY)]);
+  // CRM email composer + sending-domain settings use their own dictionary (crm-email-copy.ts, all 8 locales, checked in crm-email.test.ts).
+  const known = new Set([...APP_STRING_KEYS, ...Object.keys(FA_COPY), ...Object.keys(CRM_EMAIL_STRINGS)]);
   const missing = new Set<string>();
   const re = /(?<![\w$.])t\(\s*(['"])((?:\\.|(?!\1).)*)\1/g;
   for (const file of files) {

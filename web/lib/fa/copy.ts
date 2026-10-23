@@ -509,6 +509,7 @@ export const FA_COPY: Record<string, string> = {
   '50 service manuals': '50 دفترچه سرویس',
   'Up to 10 user seats': 'تا 10 کاربر',
   'Find rated repair and maintenance pros': 'تعمیرکار و سرویس‌کار امتیازدار پیدا کنید',
+  'Find trusted repair and maintenance pros': 'تعمیرکار و سرویس‌کار مورد اعتماد پیدا کنید',
   'Request service and order consumables': 'سرویس بخواهید و مصرفی سفارش دهید',
   'Keep FDA-style service records with the machine':
     'سابقه سرویس را کنار خود دستگاه نگه دارید',

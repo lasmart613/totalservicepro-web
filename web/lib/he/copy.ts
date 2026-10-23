@@ -496,6 +496,7 @@ export const HE_COPY: Record<string, string> = {
   '50 service manuals': '50 ספרי שירות',
   'Up to 10 user seats': 'עד 10 משתמשים',
   'Find rated repair and maintenance pros': 'מוצאים אנשי תיקון ואחזקה עם דירוג',
+  'Find trusted repair and maintenance pros': 'מוצאים אנשי תיקון ואחזקה אמינים',
   'Request service and order consumables': 'מבקשים שירות ומזמינים מתכלים',
   'Keep FDA-style service records with the machine':
     'שומרים רשומות שירות בסגנון FDA ליד המכשיר',

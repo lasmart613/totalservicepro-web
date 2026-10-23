@@ -497,6 +497,7 @@ export const AR_COPY: Record<string, string> = {
   '50 service manuals': '50 كتيب خدمة',
   'Up to 10 user seats': 'حتى 10 مستخدمين',
   'Find rated repair and maintenance pros': 'اعثروا على محترفي الإصلاح والصيانة ذوي التقييم',
+  'Find trusted repair and maintenance pros': 'اعثروا على محترفي إصلاح وصيانة موثوقين',
   'Request service and order consumables': 'اطلبوا خدمة واطلبوا المستهلكات',
   'Keep FDA-style service records with the machine':
     'احتفظوا بسجلات خدمة على نمط FDA مع الجهاز',
