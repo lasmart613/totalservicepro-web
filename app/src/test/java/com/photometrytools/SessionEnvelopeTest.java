@@ -52,6 +52,16 @@ public class SessionEnvelopeTest {
         assertNull(lock.rotate(session("rt-2")));
     }
 
+    @Test
+    public void unpackZerosThePackedDataKey() throws Exception {
+        String json = session("rt-9");
+        SessionEnvelope.Lock lock = SessionEnvelope.Lock.sealNew(json);
+        byte[] packed = lock.exportPackedDataKey();
+        javax.crypto.SecretKey key = SessionEnvelope.unpackDataKey(packed);
+        for (byte b : packed) assertEquals(0, b);
+        assertEquals(json, SessionEnvelope.open(key, lock.ciphertext()));
+    }
+
     private static String session(String refresh) {
         return "{\"refresh_token\":\"" + refresh + "\",\"access_token\":\"access\"}";
     }

@@ -38,6 +38,8 @@ public final class KeystoreSessionStore {
 
     private final SharedPreferences prefs;
     private byte[] pendingDecryptBody;
+    private boolean decryptInvalidated;
+    private boolean decryptTransient;
 
     public KeystoreSessionStore(SharedPreferences prefs) {
         this.prefs = prefs;
@@ -48,18 +50,26 @@ public final class KeystoreSessionStore {
         public final boolean needsAuth;
         public final boolean invalidated;
 
-        Prepared(Cipher cipher, boolean needsAuth, boolean invalidated) {
+        public final boolean transientFailure;
+
+        Prepared(Cipher cipher, boolean needsAuth, boolean invalidated, boolean transientFailure) {
             this.cipher = cipher;
             this.needsAuth = needsAuth;
             this.invalidated = invalidated;
+            this.transientFailure = transientFailure;
         }
 
         static Prepared ready(Cipher cipher, boolean needsAuth) {
-            return new Prepared(cipher, needsAuth, false);
+            return new Prepared(cipher, needsAuth, false, false);
         }
 
         static Prepared invalidated() {
-            return new Prepared(null, false, true);
+            return new Prepared(null, false, true, false);
+        }
+
+        /** Keystore was busy or unavailable. The session must stay sealed. */
+        static Prepared transientFailure() {
+            return new Prepared(null, false, false, true);
         }
     }
 
@@ -160,50 +170,56 @@ public final class KeystoreSessionStore {
         deleteKey(KEY_BIO);
     }
 
-    /** Cipher for sealing the session. Null when the key cannot be created. */
+    /** Cipher for wrapping the data key. Transient failures are not an invalidation. */
     public Prepared prepareEncrypt() {
-        SecretKey key = bioKey(true);
-        if (key == null) return null;
+        KeyMaterial material = lookupBio(true);
+        if (material.invalidated) return Prepared.invalidated();
+        if (material.missing || material.transientFailure || material.key == null) {
+            return material.missing ? Prepared.invalidated() : Prepared.transientFailure();
+        }
         try {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             try {
-                cipher.init(Cipher.ENCRYPT_MODE, key);
+                cipher.init(Cipher.ENCRYPT_MODE, material.key);
                 return Prepared.ready(cipher, false);
             } catch (UserNotAuthenticatedException expected) {
                 return Prepared.ready(cipher, true);
             }
-        } catch (KeyPermanentlyInvalidatedException e) {
-            return Prepared.invalidated();
         } catch (Exception e) {
-            return null;
+            if (isPermanentInvalidation(e)) return Prepared.invalidated();
+            return Prepared.transientFailure();
         }
     }
 
-    /** Cipher for opening the biometric blob. Null when there is nothing to open. */
+    /**
+     * Cipher for unwrapping the data key.
+     * Missing and {@link KeyPermanentlyInvalidatedException} are permanent.
+     * Other keystore failures are transient and leave the sealed session in place.
+     */
     public Prepared prepareDecrypt() {
+        SessionEnvelope.zero(pendingDecryptBody);
         pendingDecryptBody = null;
         String raw = prefs.getString(PREF_BIO, null);
-        if (raw == null || raw.isEmpty()) return null;
-        SecretKey key = bioKey(false);
-        if (key == null) {
-            return Prepared.invalidated();
-        }
+        if (raw == null || raw.isEmpty()) return Prepared.invalidated();
+        KeyMaterial material = lookupBio(false);
+        if (material.invalidated || material.missing) return Prepared.invalidated();
+        if (material.transientFailure || material.key == null) return Prepared.transientFailure();
         try {
             byte[] sealed = Base64.decode(raw, Base64.NO_WRAP);
             byte[] iv = SessionSealed.ivOf(sealed);
             pendingDecryptBody = SessionSealed.bodyOf(sealed);
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             try {
-                cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(TAG_BITS, iv));
+                cipher.init(Cipher.DECRYPT_MODE, material.key, new GCMParameterSpec(TAG_BITS, iv));
                 return Prepared.ready(cipher, false);
             } catch (UserNotAuthenticatedException expected) {
                 return Prepared.ready(cipher, true);
             }
-        } catch (KeyPermanentlyInvalidatedException e) {
-            return Prepared.invalidated();
         } catch (Exception e) {
+            SessionEnvelope.zero(pendingDecryptBody);
             pendingDecryptBody = null;
-            return Prepared.invalidated();
+            if (isPermanentInvalidation(e)) return Prepared.invalidated();
+            return Prepared.transientFailure();
         }
     }
 
@@ -223,25 +239,96 @@ public final class KeystoreSessionStore {
         }
     }
 
+    public boolean decryptWasInvalidated() {
+        return decryptInvalidated;
+    }
+
+    public boolean decryptWasTransient() {
+        return decryptTransient;
+    }
+
     public byte[] finishDecrypt(Cipher cipher) {
+        decryptInvalidated = false;
+        decryptTransient = false;
         byte[] body = pendingDecryptBody;
         pendingDecryptBody = null;
         if (cipher == null || body == null) return null;
         try {
             byte[] plain = cipher.doFinal(body);
+            SessionEnvelope.zero(body);
             return plain == null || plain.length == 0 ? null : plain;
         } catch (Exception e) {
-            if (e instanceof KeyPermanentlyInvalidatedException) clearBiometric();
+            SessionEnvelope.zero(body);
+            if (isPermanentInvalidation(e)) {
+                decryptInvalidated = true;
+                clearBiometric();
+            } else {
+                decryptTransient = true;
+            }
             return null;
+        }
+    }
+
+    private KeyMaterial lookupBio(boolean create) {
+        try {
+            KeyStore ks = KeyStore.getInstance(ANDROID_KEYSTORE);
+            ks.load(null);
+            if (ks.containsAlias(KEY_BIO)) {
+                KeyStore.SecretKeyEntry entry = (KeyStore.SecretKeyEntry) ks.getEntry(KEY_BIO, null);
+                if (entry == null || entry.getSecretKey() == null) return KeyMaterial.missing();
+                return KeyMaterial.found(entry.getSecretKey());
+            }
+            if (!create) return KeyMaterial.missing();
+            SecretKey created = key(KEY_BIO, true, true);
+            if (created == null) return KeyMaterial.unavailable();
+            return KeyMaterial.found(created);
+        } catch (Exception e) {
+            if (isPermanentInvalidation(e)) return KeyMaterial.invalidated();
+            return KeyMaterial.unavailable();
+        }
+    }
+
+    private static boolean isPermanentInvalidation(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof KeyPermanentlyInvalidatedException) return true;
+            current = current.getCause();
+        }
+        return false;
+    }
+
+    private static final class KeyMaterial {
+        final SecretKey key;
+        final boolean invalidated;
+        final boolean missing;
+        final boolean transientFailure;
+
+        private KeyMaterial(SecretKey key, boolean invalidated, boolean missing, boolean transientFailure) {
+            this.key = key;
+            this.invalidated = invalidated;
+            this.missing = missing;
+            this.transientFailure = transientFailure;
+        }
+
+        static KeyMaterial found(SecretKey key) {
+            return new KeyMaterial(key, false, false, false);
+        }
+
+        static KeyMaterial invalidated() {
+            return new KeyMaterial(null, true, false, false);
+        }
+
+        static KeyMaterial missing() {
+            return new KeyMaterial(null, false, true, false);
+        }
+
+        static KeyMaterial unavailable() {
+            return new KeyMaterial(null, false, false, true);
         }
     }
 
     private SecretKey plainKey() {
         return key(KEY_PLAIN, false, true);
-    }
-
-    private SecretKey bioKey(boolean create) {
-        return key(KEY_BIO, true, create);
     }
 
     private SecretKey key(String alias, boolean userAuth, boolean create) {

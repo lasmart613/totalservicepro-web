@@ -33,6 +33,7 @@ public final class SessionEnvelope {
         byte[] packed = new byte[DK_LEN + 1];
         packed[0] = PACKED_MARK;
         System.arraycopy(raw, 0, packed, 1, DK_LEN);
+        zero(raw);
         return packed;
     }
 
@@ -41,7 +42,15 @@ public final class SessionEnvelope {
         if (packed == null || packed.length != DK_LEN + 1 || packed[0] != PACKED_MARK) return null;
         byte[] raw = new byte[DK_LEN];
         System.arraycopy(packed, 1, raw, 0, DK_LEN);
-        return new SecretKeySpec(raw, "AES");
+        SecretKey key = new SecretKeySpec(raw, "AES");
+        zero(raw);
+        zero(packed);
+        return key;
+    }
+
+    public static void zero(byte[] raw) {
+        if (raw == null) return;
+        Arrays.fill(raw, (byte) 0);
     }
 
     public static byte[] seal(SecretKey dataKey, String json) throws GeneralSecurityException {
@@ -53,6 +62,7 @@ public final class SessionEnvelope {
         byte[] plain = SessionSealed.open(dataKey, sealed);
         if (plain == null || plain.length == 0) return null;
         String json = new String(plain, java.nio.charset.StandardCharsets.UTF_8);
+        zero(plain);
         return json.isEmpty() ? null : json;
     }
 
@@ -130,14 +140,16 @@ public final class SessionEnvelope {
         }
 
         public void dropDataKey() {
+            zeroKey(dataKey);
             dataKey = null;
         }
 
         /** Forget the ciphertext. Later unlock and rotate stay empty. */
         public void invalidate() {
-            invalidated = true;
-            dataKey = null;
+            dropDataKey();
+            zero(ciphertext);
             ciphertext = null;
+            invalidated = true;
         }
 
         /**
@@ -160,5 +172,20 @@ public final class SessionEnvelope {
     private static byte[] copy(byte[] raw) {
         if (raw == null) return null;
         return Arrays.copyOf(raw, raw.length);
+    }
+
+    private static void zeroKey(SecretKey key) {
+        if (key == null) return;
+        try {
+            java.lang.reflect.Field field = key.getClass().getDeclaredField("key");
+            field.setAccessible(true);
+            Object value = field.get(key);
+            if (value instanceof byte[]) zero((byte[]) value);
+        } catch (Exception ignored) {
+        }
+        try {
+            zero(key.getEncoded());
+        } catch (Exception ignored) {
+        }
     }
 }

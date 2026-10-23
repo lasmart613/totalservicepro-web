@@ -61,7 +61,11 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   assert.match(shell, /clearHistory\(/);
   assert.match(shell, /BACKGROUND_LOCK_MS/);
   assert.match(shell, /getOrigins\(/);
+  assert.match(shell, /FLAG_SECURE/);
+  assert.match(shell, /loadUrl\("about:blank"\)/);
+  assert.match(shell, /clearPlain\(\)/);
   assert.match(keystore, /session_envelope/);
+  assert.match(keystore, /transientFailure/);
   assert.doesNotMatch(shell, /tsp-unlock:/);
   assert.doesNotMatch(shell, /resealBiometric/);
   assert.match(bridge, /androidSessionIsFresh/);
