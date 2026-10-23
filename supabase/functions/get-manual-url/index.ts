@@ -41,6 +41,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
+import { libraryRowIsFree, manualIsIncomplete, mayViewIncompleteFree, slotCountedManuals } from "./incomplete.ts";
 import { indexWriteInProgress } from "../_shared/index-pending.ts";
 import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
 import {
@@ -304,6 +305,8 @@ type Owned = {
   storage_path: string;
   xai_file_id: string;
   xai_public_url: string;
+  /** Free: added while incomplete (sticky free_at_add) or incomplete now. Never uses a slot. */
+  incomplete: boolean;
 };
 
 async function loadOwned(
@@ -314,8 +317,14 @@ async function loadOwned(
   const map = new Map<string, Owned>();
 
   async function pull(table: string, col: string, val: string | number) {
-    let sel = "manual_id, manuals(id, storage_path)";
+    // Row "*" picks up free_at_add once 000942 is applied, without failing before.
+    let sel = "*, manuals(id, storage_path, is_incomplete)";
     let { data, error } = await admin.from(table).select(sel).eq(col, val);
+    if (error && /is_incomplete/i.test(error.message || "")) {
+      // Column missing: nothing is free, everything counts (old behavior).
+      sel = "manual_id, manuals(id, storage_path)";
+      ({ data, error } = await admin.from(table).select(sel).eq(col, val));
+    }
     if (error) {
       console.warn(table, error.message);
       return;
@@ -324,11 +333,13 @@ async function loadOwned(
       const m = (row as any).manuals;
       if (!m) continue;
       const id = String(m.id ?? (row as any).manual_id);
+      const free = libraryRowIsFree(row as any, m) || map.get(id)?.incomplete === true;
       map.set(id, {
         id,
         storage_path: cleanPath(m.storage_path),
         xai_file_id: "",
         xai_public_url: "",
+        incomplete: free,
       });
     }
   }
@@ -998,6 +1009,23 @@ Deno.serve(async (req) => {
     const hidden = unpublishedManualResponse(man);
     if (hidden) return hidden;
 
+    // Incomplete manuals are free: no slot, and members may open them without
+    // adding. Read separately so a missing column only turns the feature off.
+    let incompleteRow: { is_incomplete?: unknown; doc_kind?: unknown; storage_path?: unknown } | null = null;
+    if (manualId) {
+      try {
+        let iq = await admin.from("manuals").select("is_incomplete, doc_kind, storage_path").eq("id", manualId).maybeSingle();
+        if (iq.error && /doc_kind/i.test(iq.error.message || "")) {
+          iq = await admin.from("manuals").select("is_incomplete, storage_path").eq("id", manualId).maybeSingle();
+        }
+        if (!iq.error && iq.data) incompleteRow = iq.data;
+      } catch {
+        incompleteRow = null;
+      }
+    }
+    const targetIncomplete = manualIsIncomplete(incompleteRow);
+    const slotsUsedBy = () => slotCountedManuals(owned.values());
+
     // ----- Add to company library (Browse All → claim a slot) -----
     if (wantAdd) {
       if (!manualId) {
@@ -1029,12 +1057,14 @@ Deno.serve(async (req) => {
             reAddHeld = false;
           }
         }
-        if (owned.size + slotsHeld >= slotLimit && !reAddHeld) {
+        // Incomplete manuals never use a slot, so they can be added when full.
+        const usedSlots = slotsUsedBy();
+        if (!targetIncomplete && usedSlots + slotsHeld >= slotLimit && !reAddHeld) {
           return json(403, {
-            error: `Library full (${owned.size + slotsHeld}/${slotLimit}). Upgrade for more slots or remove a manual.`,
+            error: `Library full (${usedSlots + slotsHeld}/${slotLimit}). Upgrade for more slots or remove a manual.`,
             requires_add: true,
             library_full: true,
-            owned_count: owned.size,
+            owned_count: usedSlots,
             slots_held: slotsHeld,
             slot_limit: slotLimit,
           });
@@ -1112,12 +1142,25 @@ Deno.serve(async (req) => {
     // True only when organization_manuals / user_manuals covers this open.
     // Computed before the cite bypass so catalog reads stay in_library: false.
     const inLibrary = allowed;
+    // Incomplete manuals are free to view for company members (shelf-checked,
+    // path-checked). Not counted as a library read (no url_issued event).
+    const freeIncomplete =
+      !allowed &&
+      mayViewIncompleteFree({
+        manual: incompleteRow,
+        orgId,
+        serviceCompany: access.repairAiAllowed,
+        requestedPath: storagePath,
+      });
+    if (freeIncomplete) allowed = true;
     const aiContext = wantsAiCatalogRead(body);
     // Shared catalog without a library slot — AI cite / in-app reader only.
     if (!allowed && aiContext) {
       allowed = mayViewAiCatalog(access.repairAiAllowed, storagePath, man?.storage_path);
     }
-    const readMeta = catalogReadMeta(inLibrary);
+    const readMeta = freeIncomplete
+      ? { in_library: false, free_incomplete: true }
+      : { ...catalogReadMeta(inLibrary), ...(targetIncomplete ? { free_incomplete: true } : {}) };
 
     console.log(JSON.stringify({
       uid: user.id,
@@ -1129,6 +1172,7 @@ Deno.serve(async (req) => {
       inLibrary,
       aiContext,
       catalogView: !inLibrary && allowed,
+      freeIncomplete,
       wantList,
       wantAdd,
       preferBase64,
@@ -1140,9 +1184,10 @@ Deno.serve(async (req) => {
         // Client uses this to show "Add to library?" instead of a dead-end error
         requires_add: true,
         organization_id: orgId,
-        owned_count: owned.size,
+        owned_count: slotsUsedBy(),
         slot_limit: slotLimit,
-        slots_remaining: Math.max(0, slotLimit - owned.size),
+        slots_remaining: Math.max(0, slotLimit - slotsUsedBy() - slotsHeld),
+        ...(targetIncomplete ? { free_incomplete: true } : {}),
         owned_manual_ids: Array.from(owned.keys()),
         requested_manual_id: manualId,
         requested_path: storagePath,

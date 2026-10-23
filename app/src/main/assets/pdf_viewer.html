@@ -310,6 +310,17 @@
                 status: res.status,
                 response: data
             });
+            // Free incomplete manual opened from the shelf without a library row,
+            // but the server refused the free view (edge not deployed yet, no org,
+            // or an owner-side org on a non-operator doc): go back to the shelf's
+            // Add prompt (adding an incomplete manual is free) instead of a dead end.
+            const vp = new URLSearchParams(window.location.search);
+            if ((data.requires_add === true || res.status === 403) &&
+                vp.get('incomplete') === '1' && vp.get('owned') === '0' && vp.get('manual_id') &&
+                vp.get('from') !== 'assistant' && path === (vp.get('storage_path') || '')) {
+                window.location.replace('manual_library.html?add=' + encodeURIComponent(vp.get('manual_id')));
+                return new Promise(() => {});
+            }
             const message = data.error || `Access denied or file not found (status ${res.status})`;
             throw new Error(message);
         }
