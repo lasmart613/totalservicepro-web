@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { normalizeAndroidSession, persistableAndroidSession } from '@/lib/android-session';
+import { androidSessionIsFresh, normalizeAndroidSession, persistableAndroidSession } from '@/lib/android-session';
 
 type AndroidBridge = {
   saveSession?: (json: string) => void;
@@ -69,7 +69,7 @@ async function applyTokens(
   raw: unknown
 ): Promise<boolean> {
   const tokens = normalizeAndroidSession(raw);
-  if (!tokens?.access_token) return false;
+  if (!tokens?.access_token || !androidSessionIsFresh(raw)) return false;
   try {
     localStorage.setItem('tsp-auth-token', persistableAndroidSession(tokens));
   } catch {
@@ -92,6 +92,9 @@ export function AndroidSessionBridge() {
     const bridge = androidBridge();
 
     const restore = async (raw?: unknown) => {
+      if (raw) return applyTokens(supabase, raw);
+      const stored = await requestStoredSession();
+      if (stored) return applyTokens(supabase, stored);
       const { data } = await supabase.auth.getSession();
       if (data.session?.access_token) {
         const json = JSON.stringify(data.session);
@@ -104,9 +107,7 @@ export function AndroidSessionBridge() {
         }
         return true;
       }
-      const stored = raw ?? (await requestStoredSession());
-      if (!stored) return false;
-      return applyTokens(supabase, stored);
+      return false;
     };
 
     (window as Window & { __tspRestoreAndroidSession?: (raw: unknown) => Promise<boolean> }).__tspRestoreAndroidSession =
@@ -118,6 +119,7 @@ export function AndroidSessionBridge() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (!bridge && !tspNative()) return;
+      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return;
       try {
         if (session?.access_token) {
           const json = JSON.stringify(session);

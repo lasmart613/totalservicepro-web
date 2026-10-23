@@ -44,6 +44,14 @@ public class BillingManager implements PurchasesUpdatedListener {
     // ── Supabase config ───────────────────────────────────────────
     private static final String SUPABASE_URL      = "https://yljztfajyvjzqikxdddf.supabase.co";
     private static final String SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM";
+
+    static String supabaseRest(String table) {
+        return SUPABASE_URL + "/rest/v1/" + table;
+    }
+
+    static String supabaseAnonKey() {
+        return SUPABASE_ANON_KEY;
+    }
     private static final String VERIFY_ENDPOINT   = SUPABASE_URL + "/functions/v1/verify-subscription";
     private static final String PACKAGE_NAME      = "com.photometrytools";
 

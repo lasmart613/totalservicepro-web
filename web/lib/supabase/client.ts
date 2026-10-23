@@ -11,6 +11,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
 import { ensureOrganizationMembership } from '@/lib/pending-signup';
+import { androidSessionIsFresh, isTspAndroidWebView } from '@/lib/android-session';
 
 const FALLBACK_SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
 const FALLBACK_SUPABASE_ANON_KEY =
@@ -26,6 +27,30 @@ function supabaseAnonKey(): string {
 
 let supabaseInstance: SupabaseClient | null = null;
 
+/**
+ * On Android, an expired persisted session is invisible. supabase-js would
+ * refresh it during init even with autoRefreshToken off. Native refreshes first
+ * and then setSession is called with a fresh token.
+ */
+function browserAuthStorage() {
+  if (typeof window === 'undefined') return undefined;
+  if (!isTspAndroidWebView()) return window.localStorage;
+  const base = window.localStorage;
+  return {
+    getItem(key: string) {
+      const raw = base.getItem(key);
+      if (key !== 'tsp-auth-token' || raw == null) return raw;
+      return androidSessionIsFresh(raw) ? raw : null;
+    },
+    setItem(key: string, value: string) {
+      base.setItem(key, value);
+    },
+    removeItem(key: string) {
+      base.removeItem(key);
+    },
+  };
+}
+
 export function getSupabaseClient(): SupabaseClient {
   if (supabaseInstance) return supabaseInstance;
 
@@ -33,8 +58,8 @@ export function getSupabaseClient(): SupabaseClient {
     auth: {
       persistSession: true,
       storageKey: 'tsp-auth-token',
-      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-      autoRefreshToken: true,
+      storage: browserAuthStorage(),
+      autoRefreshToken: !isTspAndroidWebView(),
       detectSessionInUrl: true,
     },
   });

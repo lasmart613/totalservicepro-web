@@ -8,6 +8,7 @@ import {
   ANDROID_AUTH_SCHEME,
   buildAndroidHandoff,
   googleOAuthRedirectTo,
+  androidSessionIsFresh,
   isTspAndroidWebView,
   normalizeAndroidSession,
   persistableAndroidSession,
@@ -41,8 +42,53 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   assert.doesNotMatch(shell, /host\.getStoredSession/);
   assert.match(shell, /"getStoredSession"/);
   assert.match(shell, /isMainFrame/);
+  assert.match(shell, /CryptoObject/);
+  assert.match(shell, /deleteAllData/);
+  assert.match(shell, /PREFS_CARD_DRAFTS/);
+  assert.match(shell, /setAllowedAuthenticators\(BiometricManager\.Authenticators\.BIOMETRIC_STRONG\)/);
+  const keystore = readFileSync(
+    join(here, '../../app/src/main/java/com/photometrytools/KeystoreSessionStore.java'),
+    'utf8'
+  );
+  assert.match(keystore, /setInvalidatedByBiometricEnrollment\(true\)/);
+  assert.match(keystore, /setUserAuthenticationParameters\(0/);
+  const client = readFileSync(join(here, 'supabase/client.ts'), 'utf8');
+  assert.match(client, /autoRefreshToken:\s*!isTspAndroidWebView\(\)/);
+  assert.match(client, /androidSessionIsFresh/);
+  assert.match(shell, /removeAllCookies\(/);
+  assert.match(shell, /loadDataWithBaseURL/);
+  assert.match(shell, /retainDraftsForUser/);
+  assert.match(shell, /clearHistory\(/);
+  assert.match(shell, /BACKGROUND_LOCK_MS/);
+  assert.match(shell, /getOrigins\(/);
+  assert.match(shell, /FLAG_SECURE/);
+  assert.match(shell, /loadUrl\("about:blank"\)/);
+  assert.match(shell, /clearPlain\(\)/);
+  assert.match(keystore, /session_envelope/);
+  assert.match(keystore, /transientFailure/);
+  assert.doesNotMatch(shell, /tsp-unlock:/);
+  assert.doesNotMatch(shell, /resealBiometric/);
+  assert.match(bridge, /androidSessionIsFresh/);
+  assert.match(bridge, /TOKEN_REFRESHED/);
+  assert.match(bridge, /INITIAL_SESSION/);
+  assert.match(bridge, /if \(raw\) return applyTokens/);
   const providers = readFileSync(join(here, '../components/providers.tsx'), 'utf8');
   assert.match(providers, /AndroidSessionBridge/);
+});
+
+test('an expired Android session is not fresh enough to seed', () => {
+  const now = 1_700_000_000_000;
+  const fresh = androidSessionIsFresh(
+    { access_token: 'a', refresh_token: 'r', expires_at: now / 1000 + 3600 },
+    now
+  );
+  const expired = androidSessionIsFresh(
+    { access_token: 'a', refresh_token: 'r', expires_at: now / 1000 + 30 },
+    now
+  );
+  assert.equal(fresh, true);
+  assert.equal(expired, false);
+  assert.equal(androidSessionIsFresh({ access_token: 'a', refresh_token: 'r' }, now), false);
 });
 
 test('Android session blobs normalize to access/refresh tokens', () => {
