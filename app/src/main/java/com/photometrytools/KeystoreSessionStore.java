@@ -169,10 +169,8 @@ public final class KeystoreSessionStore {
             byte[] packed = SessionSealed.join(iv, enc);
             prefs.edit().putString(PREF_BIO, Base64.encodeToString(packed, Base64.NO_WRAP)).apply();
             return true;
-        } catch (KeyPermanentlyInvalidatedException e) {
-            clearBiometric();
-            return false;
         } catch (Exception e) {
+            if (e instanceof KeyPermanentlyInvalidatedException) clearBiometric();
             return false;
         }
     }
@@ -185,10 +183,8 @@ public final class KeystoreSessionStore {
             byte[] plain = cipher.doFinal(body);
             String text = new String(plain, StandardCharsets.UTF_8);
             return text.isEmpty() ? null : text;
-        } catch (KeyPermanentlyInvalidatedException e) {
-            clearBiometric();
-            return null;
         } catch (Exception e) {
+            if (e instanceof KeyPermanentlyInvalidatedException) clearBiometric();
             return null;
         }
     }
