@@ -497,6 +497,7 @@ export const FR_COPY: Record<string, string> = {
   '50 service manuals': '50 manuels de service',
   'Up to 10 user seats': 'Jusqu’à 10 utilisateurs',
   'Find rated repair and maintenance pros': 'Trouvez des pros de la réparation et de l’entretien, avec une note',
+  'Find trusted repair and maintenance pros': 'Trouvez des pros de la réparation et de l’entretien de confiance',
   'Request service and order consumables': 'Demandez un service et commandez des consommables',
   'Keep FDA-style service records with the machine':
     'Gardez des dossiers de service de type FDA avec l’appareil',
