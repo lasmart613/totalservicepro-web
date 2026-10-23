@@ -41,10 +41,11 @@ import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
 import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
 import { useT } from '@/lib/fa/locale';
+import CustomerEmailComposer, { useCrmEmailEnabled, useCrmEmailT } from '@/components/CustomerEmailComposer';
 import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
 import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, type OrgPrivateFields } from '@/lib/org-columns';
 
-type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
+type TabKey = 'overview' | 'equipment' | 'history' | 'contacts' | 'email';
 
 type CustomerOrg = {
   id: number | string;
@@ -161,6 +162,9 @@ export default function CustomerProfilePage() {
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [tab, setTab] = useState<TabKey>('overview');
+  const crmEmailOn = useCrmEmailEnabled();
+  const tEmail = useCrmEmailT();
+  const [myOrgName, setMyOrgName] = useState('');
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
@@ -201,7 +205,7 @@ export default function CustomerProfilePage() {
     // Notification links open a tab directly (/customers/:id?tab=equipment&eq=:laser).
     if (typeof window === 'undefined') return;
     const want = new URLSearchParams(window.location.search).get('tab');
-    if (want !== 'equipment' && want !== 'history' && want !== 'contacts' && want !== 'overview') return;
+    if (want !== 'equipment' && want !== 'history' && want !== 'contacts' && want !== 'overview' && want !== 'email') return;
     const t = window.setTimeout(() => setTab(want), 0);
     return () => window.clearTimeout(t);
   }, []);
@@ -243,6 +247,7 @@ export default function CustomerProfilePage() {
         .maybeSingle();
 
       const orgType = myOrg?.type || '';
+      setMyOrgName(String(myOrg?.name || ''));
       setUserOrgType(orgType);
       const role = prof.role || '';
 
@@ -650,6 +655,7 @@ export default function CustomerProfilePage() {
     { key: 'equipment', label: `Equipment (${equipment.length})` },
     { key: 'history', label: `History (${reports.length})` },
     { key: 'contacts', label: `Contacts (${filledDirectoryRoles(form.directory).length + extraContacts.length})` },
+    ...(crmEmailOn ? [{ key: 'email' as TabKey, label: tEmail('Email') }] : []),
   ];
 
   return (
@@ -936,6 +942,15 @@ export default function CustomerProfilePage() {
               Add equipment via Service Report or the facility&apos;s My Lasers.
             </p>
           </div>
+        )}
+
+        {tab === 'email' && crmEmailOn && customer && (
+          <CustomerEmailComposer
+            customerId={customer.id}
+            customerName={customer.name}
+            customerType={customer.type}
+            senderCompany={myOrgName}
+          />
         )}
 
         {/* Service History */}
