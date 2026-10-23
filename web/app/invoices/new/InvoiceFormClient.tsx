@@ -31,6 +31,8 @@ import { getOrgRole, voidInvoiceRole } from '@/lib/org-role';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
 import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
+import CustomerEquipmentPicker, { AddToOrgCheckbox } from '@/components/CustomerEquipmentPicker';
+import { useCustomerEquipment } from '@/lib/use-customer-equipment';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
   collectableInvoiceDataFields,
@@ -93,6 +95,13 @@ export default function InvoiceFormClient() {
   const cascade = useEquipmentCascade(catalog);
   const { manufacturer, model, equipment_type: equipmentType } = cascade.resolved;
   const [serial, setSerial] = useState('');
+  const customerEquipment = useCustomerEquipment({
+    client: supabase,
+    customerOrgId,
+    cascade,
+    serial,
+    setSerial,
+  });
   const [pulseCount, setPulseCount] = useState('');
 
   const invoiceDateTouched = useRef(false);
@@ -636,6 +645,11 @@ export default function InvoiceFormClient() {
         }
       }
 
+      if (result.id || existingId) {
+        const eqRes = await customerEquipment.saveToOrgIfChecked(name);
+        if (eqRes.message) (eqRes.ok ? toast.success : toast.warning)(eqRes.message);
+      }
+
       if (sourceEstimateId) {
         try {
           await supabase
@@ -1055,11 +1069,30 @@ export default function InvoiceFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment (optional)')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {customerEquipment.visible && (
+              <CustomerEquipmentPicker
+                orgName={customerName.trim() || custSearch.trim()}
+                equipment={customerEquipment.list}
+                loading={customerEquipment.loading}
+                selectedId={customerEquipment.selectedId}
+                onPick={customerEquipment.pick}
+                t={t}
+                idPrefix="inv-eq-cust"
+              />
+            )}
             <EquipmentCascadeFields cascade={cascade} t={t} idPrefix="inv-eq" />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
+            {customerEquipment.offerAdd && (
+              <AddToOrgCheckbox
+                orgName={customerName.trim() || custSearch.trim()}
+                checked={customerEquipment.addToOrg}
+                onChange={customerEquipment.setAddToOrg}
+                t={t}
+              />
+            )}
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
               <input
