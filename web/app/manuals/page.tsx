@@ -40,7 +40,13 @@ import {
   SERVICE_MANUALS_FORBIDDEN,
 } from '@/lib/manuals-access';
 import { manualOpenErrorMessage } from '@/lib/manual-file';
-import { INCOMPLETE_FREE_BADGE, INCOMPLETE_FREE_TITLE, manualIsIncomplete } from '@/lib/manual-incomplete';
+import {
+  INCOMPLETE_FREE_BADGE,
+  INCOMPLETE_FREE_TITLE,
+  libraryRowIsFree,
+  manualIsIncomplete,
+  mayViewIncompleteFree,
+} from '@/lib/manual-incomplete';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPE_VALUES,
@@ -289,18 +295,20 @@ export default function ManualsLibrary() {
       }
 
       const ids = new Set<string>();
+      const freeIds = new Set<string>();
       const lib: any[] = [];
 
       // Company library (preferred)
       if (oId != null) {
         const { data: orgOwned, error: omErr } = await supabase
           .from('organization_manuals')
-          .select('manual_id, manuals(*)')
+          .select('*, manuals(*)')
           .eq('organization_id', oId);
         if (!omErr && orgOwned) {
           orgOwned.forEach((row: any) => {
             if (isUnpublishedManual(row.manuals)) return;
             if (row.manual_id != null) ids.add(String(row.manual_id));
+            if (row.manual_id != null && libraryRowIsFree(row, row.manuals)) freeIds.add(String(row.manual_id));
             if (row.manuals) lib.push(row.manuals);
           });
         }
@@ -309,21 +317,18 @@ export default function ManualsLibrary() {
       // Legacy personal library merge
       const { data: userOwned } = await supabase
         .from('user_manuals')
-        .select('manual_id, manuals(*)')
+        .select('*, manuals(*)')
         .eq('user_id', user.id);
       (userOwned || []).forEach((row: any) => {
         if (isUnpublishedManual(row.manuals)) return;
         if (row.manual_id != null) ids.add(String(row.manual_id));
+        if (row.manual_id != null && libraryRowIsFree(row, row.manuals)) freeIds.add(String(row.manual_id));
         if (row.manuals && !lib.some((m) => String(m.id) === String(row.manuals.id))) {
           lib.push(row.manuals);
         }
       });
 
       const visibleLib = access.service ? lib : lib.filter((m) => manualLibraryShelf(m) === 'operators');
-      const freeIds = new Set<string>();
-      for (const m of lib) {
-        if (m?.id != null && ids.has(String(m.id)) && manualIsIncomplete(m)) freeIds.add(String(m.id));
-      }
       setOwnedIds(ids);
       setOwnedFreeIds(freeIds);
       setMyLibrary(visibleLib);
@@ -581,8 +586,13 @@ export default function ManualsLibrary() {
       // Shelf / Browse clicks are not AI cite reads. Do not stream a shared
       // catalog PDF until this company owns the manual — even if get-manual-url
       // would return a URL for an ai_context reader.
-      // Incomplete manuals are free: open them directly (the server decides).
-      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m), incomplete: manualIsIncomplete(m) })) {
+      // Incomplete manuals are free: open directly only when get-manual-url
+      // would serve the free view (same org / doc_kind rule). Otherwise prompt
+      // the (free) add. A requires_add / denied reply below also falls back.
+      const freeView =
+        manualIsIncomplete(m) &&
+        mayViewIncompleteFree({ manual: m, orgId, serviceCompany: canService === true, requestedPath: m.storage_path });
+      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m), incomplete: freeView })) {
         const added = await confirmAddManual(m, shownTitle);
         if (!added) return;
         await openAddedManual(m, shownTitle, payload);

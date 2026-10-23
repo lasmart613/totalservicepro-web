@@ -5,7 +5,7 @@ import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import { canAccessServiceManuals } from '@/lib/roles';
 import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
-import { manualIsIncomplete, slotCountedManuals } from '@/lib/manual-incomplete';
+import { libraryRowIsFree, manualIsIncomplete, slotCountedManuals } from '@/lib/manual-incomplete';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
 import { isPublishedColumnMissing, wherePublished } from '@/lib/manual-published';
 import { normalizeLibrarySource } from '@/lib/manual-library-refund';
@@ -80,7 +80,8 @@ async function ownedManualIds(
 ): Promise<OwnedManuals> {
   const rows = new Map<string, { is_incomplete?: unknown }>();
   const load = async (table: string, col: string, val: string) => {
-    let res = await client.from(table).select('manual_id, manuals(is_incomplete)').eq(col, val);
+    // Row '*' includes free_at_add once 000942 is applied (sticky free add).
+    let res = await client.from(table).select('*, manuals(is_incomplete)').eq(col, val);
     // Column or embed missing: count every row (old behavior).
     if (res.error) res = await client.from(table).select('manual_id').eq(col, val);
     for (const row of res.data || []) {
@@ -88,8 +89,8 @@ async function ownedManualIds(
       const m = Array.isArray(row.manuals) ? row.manuals[0] : row.manuals;
       const key = String(row.manual_id);
       const prev = rows.get(key);
-      // Same manual in both tables counts once; free only if flagged.
-      rows.set(key, { is_incomplete: prev?.is_incomplete === true || m?.is_incomplete === true });
+      // Same manual in both tables counts once; free if added free or flagged now.
+      rows.set(key, { is_incomplete: prev?.is_incomplete === true || libraryRowIsFree(row, m) });
     }
   };
   if (orgId) await load('organization_manuals', 'organization_id', orgId);

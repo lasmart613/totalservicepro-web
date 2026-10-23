@@ -41,7 +41,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
-import { manualIsIncomplete, mayViewIncompleteFree, slotCountedManuals } from "./incomplete.ts";
+import { libraryRowIsFree, manualIsIncomplete, mayViewIncompleteFree, slotCountedManuals } from "./incomplete.ts";
 import { indexWriteInProgress } from "../_shared/index-pending.ts";
 import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
 import {
@@ -305,7 +305,7 @@ type Owned = {
   storage_path: string;
   xai_file_id: string;
   xai_public_url: string;
-  /** manuals.is_incomplete: free, never uses a slot. */
+  /** Free: added while incomplete (sticky free_at_add) or incomplete now. Never uses a slot. */
   incomplete: boolean;
 };
 
@@ -317,7 +317,8 @@ async function loadOwned(
   const map = new Map<string, Owned>();
 
   async function pull(table: string, col: string, val: string | number) {
-    let sel = "manual_id, manuals(id, storage_path, is_incomplete)";
+    // Row "*" picks up free_at_add once 000942 is applied, without failing before.
+    let sel = "*, manuals(id, storage_path, is_incomplete)";
     let { data, error } = await admin.from(table).select(sel).eq(col, val);
     if (error && /is_incomplete/i.test(error.message || "")) {
       // Column missing: nothing is free, everything counts (old behavior).
@@ -332,12 +333,13 @@ async function loadOwned(
       const m = (row as any).manuals;
       if (!m) continue;
       const id = String(m.id ?? (row as any).manual_id);
+      const free = libraryRowIsFree(row as any, m) || map.get(id)?.incomplete === true;
       map.set(id, {
         id,
         storage_path: cleanPath(m.storage_path),
         xai_file_id: "",
         xai_public_url: "",
-        incomplete: manualIsIncomplete(m),
+        incomplete: free,
       });
     }
   }
