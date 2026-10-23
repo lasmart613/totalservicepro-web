@@ -10,6 +10,9 @@ import { NextRequest } from 'next/server';
 import { runTeamList } from '../app/api/team/list/route.ts';
 import { isTeamInviteManager, rosterForCaller } from './team-list-access.ts';
 
+// These tests exercise the opt-in auth-schema REST path (see authSchemaRestEnabled).
+process.env.SUPABASE_AUTH_SCHEMA_EXPOSED = 'true';
+
 type Rows = Record<string, Array<Record<string, unknown>>>;
 
 function fakeQuery(rows: Array<Record<string, unknown>>, log: string[], table: string) {

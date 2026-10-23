@@ -121,11 +121,21 @@ async function lookupByAdminGetter(
   }
 }
 
+/**
+ * PostgREST does not expose the `auth` schema on this project, so
+ * `.schema('auth').from('users')` always answers 406 (PGRST106). That showed
+ * up as 406s on GET /rest/v1/users from the site server (Oct 20/22 stats).
+ * Only try it when an operator has explicitly exposed the schema.
+ */
+export function authSchemaRestEnabled(): boolean {
+  return process.env.SUPABASE_AUTH_SCHEMA_EXPOSED === 'true';
+}
+
 async function lookupAuthTable(
   admin: AuthEmailLookupClient,
   email: string,
 ): Promise<AuthEmailLookup | 'unavailable'> {
-  if (typeof admin.schema !== 'function') return 'unavailable';
+  if (!authSchemaRestEnabled() || typeof admin.schema !== 'function') return 'unavailable';
   try {
     const result = await admin
       .schema('auth')
@@ -255,7 +265,7 @@ export async function loadAuthEmailsByUserId(
 
   const client = admin as AuthEmailByIdClient;
 
-  if (typeof client.schema === 'function') {
+  if (authSchemaRestEnabled() && typeof client.schema === 'function') {
     try {
       const result = await client.schema('auth').from('users').select('id, email').in('id', ids);
       if (result && !result.error && Array.isArray(result.data)) {
