@@ -38,6 +38,9 @@ import {
   teamInvitePublicBody,
 } from './team-invite-flow.ts';
 
+// These tests exercise the opt-in auth-schema REST path (see authSchemaRestEnabled).
+process.env.SUPABASE_AUTH_SCHEMA_EXPOSED = 'true';
+
 const here = dirname(fileURLToPath(import.meta.url));
 
 function assertNoCredential(body: unknown) {
@@ -2096,4 +2099,25 @@ test('team invite authority is the membership role in that org', async () => {
   });
   assert.equal(lookup.status, 503);
   assert.equal(lookup.sent.length, 0);
+});
+
+test('auth schema REST lookups are off unless SUPABASE_AUTH_SCHEMA_EXPOSED=true (406 PGRST106 fix)', async () => {
+  const { loadAuthEmailsByUserId, authSchemaRestEnabled } = await import('./team-profile.ts');
+  const prev = process.env.SUPABASE_AUTH_SCHEMA_EXPOSED;
+  delete process.env.SUPABASE_AUTH_SCHEMA_EXPOSED;
+  try {
+    assert.equal(authSchemaRestEnabled(), false);
+    let schemaCalls = 0;
+    const client = {
+      schema() { schemaCalls += 1; throw new Error('should not be called'); },
+      auth: { admin: { getUserById: async (id: string) => ({ data: { user: { id, email: `${id}@x.test` } }, error: null }) } },
+    };
+    const m = await loadAuthEmailsByUserId(client as never, ['a', 'b']);
+    assert.equal(schemaCalls, 0);
+    assert.equal(m?.get('a'), 'a@x.test');
+    process.env.SUPABASE_AUTH_SCHEMA_EXPOSED = 'true';
+    assert.equal(authSchemaRestEnabled(), true);
+  } finally {
+    if (prev === undefined) delete process.env.SUPABASE_AUTH_SCHEMA_EXPOSED; else process.env.SUPABASE_AUTH_SCHEMA_EXPOSED = prev;
+  }
 });
