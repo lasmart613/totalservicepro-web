@@ -60,6 +60,7 @@ export function addConfirmArmed(openedAt: number, now: number, armMs = ADD_CONFI
 
 export type RefundReason =
   | 'refund'
+  | 'incomplete_free'
   | 'window_expired'
   | 'downloaded'
   | 'printed'
@@ -112,6 +113,8 @@ export function refundReasonMessage(reason: string | undefined | null): string {
   switch (reason) {
     case 'refund':
       return 'Removed. The slot was refunded.';
+    case 'incomplete_free':
+      return 'Removed. Incomplete manuals are free, so no slot was used.';
     case 'window_expired':
       return 'Removed. No slot refund: it was added more than 24 hours ago.';
     case 'downloaded':

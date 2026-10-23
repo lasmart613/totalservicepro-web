@@ -188,9 +188,9 @@ test('add paths count held slots and record the source', () => {
   assert.ok(!/hasServiceRole\(\) \? getSupabaseAdmin\(\) : supabase/.test(route), 'no user-client writer fallback');
   assert.ok(/source,\n\s*\}\);/.test(route));
   const edge = readFileSync(join(webDir, '..', 'supabase/functions/get-manual-url/index.ts'), 'utf8');
-  assert.ok(edge.includes('"manual_slots_held"') && edge.includes('owned.size + slotsHeld >= slotLimit'));
+  assert.ok(edge.includes('"manual_slots_held"') && edge.includes('usedSlots + slotsHeld >= slotLimit'));
   assert.ok(edge.includes('"manual_record_url_issued"'));
-  assert.ok(edge.includes('"manual_slot_is_held"') && edge.includes('owned.size + slotsHeld >= slotLimit && !reAddHeld'));
+  assert.ok(edge.includes('"manual_slot_is_held"') && edge.includes('!targetIncomplete && usedSlots + slotsHeld >= slotLimit && !reAddHeld'));
   const viewer = read('components/ManualPdfViewer.tsx');
   assert.ok(viewer.includes("'beforeprint'") && viewer.includes("'page_view'") && viewer.includes('onClick={reportDownload}'));
   assert.ok(/pageCount: isFolder \? undefined : pageCountRef\.current/.test(viewer), 'single-file page count sent as fallback only');

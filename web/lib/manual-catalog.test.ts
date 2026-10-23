@@ -227,7 +227,7 @@ test('Incomplete badge follows is_incomplete, not the H20/H30 title', () => {
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
   const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
   assert.match(page, /showIncompleteBadge/);
-  assert.match(page, />\s*Incomplete\s*</);
+  assert.match(page, /\{INCOMPLETE_FREE_BADGE\}/);
   assert.match(viewer, /Incomplete/);
   assert.match(viewer, /is_incomplete/);
 });
