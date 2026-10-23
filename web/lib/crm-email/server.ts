@@ -30,6 +30,18 @@ import {
   sendViaProvider,
   sendViaResend,
 } from './providers.ts';
+import {
+  canManageDomain,
+  domainsApiKey,
+  loadOrgDomain,
+  ownDomainEnabled,
+  ownDomainSender,
+  POLL_MIN_SECONDS,
+  publicDomain,
+  resendDomains,
+  validateSendingDomain,
+  type OrgDomainRow,
+} from './domains.ts';
 import { fallbackFooter, MAX_BODY, MAX_SUBJECT, parseAudience, textToHtml } from './templates.ts';
 
 export const STATE_COOKIE = 'rp_mbx_state';
@@ -165,6 +177,10 @@ export async function handleStatus(token: string, customerOrgId: number | null, 
     if (!(await isCustomer(u.userDb, u.orgId, customerOrgId))) return { status: 403, body: { error: 'Customer is not in your directory' } };
     recipients = await customerRecipients(u.userDb, customerOrgId);
   }
+  const orgDomain = ownDomainEnabled(d.env) ? await loadOrgDomain(admin, u.orgId) : null;
+  const ownDomainInfo = orgDomain
+    ? { domain: orgDomain.domain_name, status: orgDomain.status, sendsAs: ownDomainSender(ownAddresses(u), orgDomain) || null }
+    : null;
   const since = new Date(Date.now() - 86400000).toISOString();
   const { data: recent } = await admin
     .from('customer_email_sends')
@@ -180,6 +196,7 @@ export async function handleStatus(token: string, customerOrgId: number | null, 
       providers: MAILBOX_PROVIDERS.filter((p) => providerEnabled(p, d.env)),
       connections: conns.map((c) => ({ provider: c.provider, email: c.email })),
       fallback: fallbackEnabled(d.env),
+      ownDomain: ownDomainInfo,
       senderName: u.name,
       senderEmail: ownAddresses(u)[0] || '',
       recipients,
@@ -331,8 +348,10 @@ export async function handleSend(token: string, body: Json, deps: Deps = {}): Pr
   const key = mailboxTokenKey(d.env);
   const conns = (await loadConnections(admin, u.userId)).filter((c) => providerEnabled(c.provider, d.env) && own.includes(lc(c.email)));
   const conn = conns.find((c) => c.provider === 'microsoft') || conns.find((c) => c.provider === 'google') || null;
-  const transport: MailboxProvider | 'resend' = conn ? conn.provider : 'resend';
-  if (!conn && !fallbackEnabled(d.env)) {
+  const orgDomain = !conn && ownDomainEnabled(d.env) && String(d.env.RESEND_API_KEY || '').trim() ? await loadOrgDomain(admin, u.orgId) : null;
+  const domainFrom = conn ? '' : ownDomainSender(own, orgDomain);
+  const transport: MailboxProvider | 'resend' | 'resend_domain' = conn ? conn.provider : domainFrom ? 'resend_domain' : 'resend';
+  if (!conn && !domainFrom && !fallbackEnabled(d.env)) {
     return { status: 409, body: { error: 'Connect your mailbox to send.', code: 'no_transport' } };
   }
 
@@ -345,7 +364,7 @@ export async function handleSend(token: string, body: Json, deps: Deps = {}): Pr
     p_audience: audience,
     p_transport: transport,
     p_sender_name: u.name,
-    p_sender_email: conn ? lc(conn.email) : senderEmail,
+    p_sender_email: conn ? lc(conn.email) : domainFrom || senderEmail,
   });
   if (resErr) return { status: 503, body: { error: 'Email is not available right now. Nothing was sent.' } };
   const r = (res || {}) as { ok?: boolean; code?: string; id?: number };
@@ -373,6 +392,14 @@ export async function handleSend(token: string, body: Json, deps: Deps = {}): Pr
         .update(sent.ok ? { last_used_at: new Date().toISOString(), last_error: null } : { last_error: sent.error })
         .eq('user_id', u.userId)
         .eq('provider', conn.provider);
+    } else if (domainFrom) {
+      sent = await sendViaResend(
+        String(d.env.RESEND_API_KEY || ''),
+        ownDomainFromHeader(u.name, domainFrom),
+        domainFrom,
+        { to, subject, text, html: textToHtml(text) },
+        d.fetchImpl
+      );
     } else {
       const footer = fallbackFooter(u.name, senderEmail);
       sent = await sendViaResend(
@@ -395,5 +422,128 @@ export async function handleSend(token: string, body: Json, deps: Deps = {}): Pr
   if (!sent.ok) {
     return { status: 502, body: { error: 'The email could not be sent. Check your mailbox connection and try again.', code: sent.error, transport } };
   }
-  return { status: 200, body: { ok: true, transport, id: r.id, from: transport === 'resend' ? `${u.name} via RepairPlanet` : conn!.email, replyTo: senderEmail } };
+  return { status: 200, body: { ok: true, transport, id: r.id, from: transport === 'resend' ? `${u.name} via RepairPlanet` : transport === 'resend_domain' ? domainFrom : conn!.email, replyTo: domainFrom || senderEmail } };
+}
+
+/** From header for a verified own domain: "<Name>" <user@theirdomain>. */
+export function ownDomainFromHeader(userName: string, address: string): string {
+  const name = String(userName || '').replace(/["<>\r\n\\]/g, '').trim().slice(0, 80);
+  return name ? `"${name}" <${address}>` : address;
+}
+
+// ---- Send from your own domain (000941) ----
+
+async function requireDomainManager(token: string, d: ReturnType<typeof ctxDeps>, manage: boolean): Promise<{ u: UserCtx; admin: Db; canManage: boolean } | Result> {
+  const u = await requireUser(token, d);
+  if (isResult(u)) return u;
+  if (!ownDomainEnabled(d.env)) return { status: 404, body: { error: 'Sending from your own domain is not turned on yet.', code: 'domain_disabled' } };
+  const admin = d.admin();
+  const canManage = await canManageDomain(admin, u.userId, u.orgId);
+  if (manage && !canManage) return { status: 403, body: { error: 'Only an owner or admin can manage the sending domain.', code: 'not_admin' } };
+  return { u, admin, canManage };
+}
+
+function domainBody(row: OrgDomainRow | null, canManage: boolean, u: UserCtx, extra: Json = {}): Json {
+  return { enabled: true, canManage, domain: publicDomain(row), sendsAs: ownDomainSender(ownAddresses(u), row) || null, ...extra };
+}
+
+async function saveRemote(admin: Db, orgId: number, remote: { status: string; records: unknown[]; region: string | null }): Promise<void> {
+  await admin
+    .from('org_sending_domains')
+    .update({ status: remote.status, records: remote.records, region: remote.region, checked_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+    .eq('organization_id', orgId);
+}
+
+/** GET domain status. refresh=true polls Resend (GET /domains/{id}) at most once per POLL_MIN_SECONDS per org. */
+export async function handleDomainStatus(token: string, refresh: boolean, deps: Deps = {}): Promise<Result> {
+  const d = ctxDeps(deps);
+  const g = await requireDomainManager(token, d, false);
+  if (isResult(g)) return g.body.code === 'domain_disabled' || g.body.code === 'disabled' ? { status: 200, body: { enabled: false } } : g;
+  let row = await loadOrgDomain(g.admin, g.u.orgId);
+  if (row && refresh && row.status !== 'verified') {
+    const age = row.checked_at ? (Date.now() - Date.parse(row.checked_at)) / 1000 : Infinity;
+    if (age >= POLL_MIN_SECONDS) {
+      const r = await resendDomains.get(domainsApiKey(d.env), row.resend_domain_id, d.fetchImpl);
+      if (r.ok) {
+        await saveRemote(g.admin, g.u.orgId, r.data);
+        row = { ...row, status: r.data.status, records: r.data.records, region: r.data.region, checked_at: new Date().toISOString() };
+      }
+    }
+  }
+  return { status: 200, body: domainBody(row, g.canManage, g.u) };
+}
+
+/** POST create: { domain }. One domain per org; owner/company_admin/admin only. */
+export async function handleDomainCreate(token: string, body: Json, deps: Deps = {}): Promise<Result> {
+  const d = ctxDeps(deps);
+  const g = await requireDomainManager(token, d, true);
+  if (isResult(g)) return g;
+  const v = validateSendingDomain(body.domain, g.u.orgId, d.env);
+  if (!v.ok) return { status: 400, body: { error: v.error, code: v.code } };
+  if (await loadOrgDomain(g.admin, g.u.orgId)) {
+    return { status: 409, body: { error: 'Your organization already has a sending domain. Remove it first.', code: 'domain_exists' } };
+  }
+  const { data: taken } = await g.admin.from('org_sending_domains').select('organization_id').eq('domain_name', v.domain).maybeSingle();
+  if (taken) return { status: 409, body: { error: 'This domain is already set up by another organization.', code: 'domain_taken' } };
+  const key = domainsApiKey(d.env);
+  const r = await resendDomains.create(key, v.domain, d.fetchImpl);
+  if (!r.ok || !r.data.id) {
+    const code = r.ok ? 'resend_bad_response' : r.status === 403 || r.status === 422 || r.status === 409 ? 'resend_refused' : 'resend_unavailable';
+    return { status: r.ok ? 502 : r.status === 0 || r.status >= 500 ? 503 : 400, body: { error: 'The domain could not be added. Check the name and try again.', code } };
+  }
+  const row = {
+    organization_id: g.u.orgId,
+    resend_domain_id: r.data.id,
+    domain_name: v.domain,
+    status: r.data.status,
+    region: r.data.region,
+    records: r.data.records,
+    created_by: g.u.userId,
+    checked_at: new Date().toISOString(),
+  };
+  const { error } = await g.admin.from('org_sending_domains').insert(row);
+  if (error) {
+    // Do not leave an orphan in the Resend account.
+    await resendDomains.remove(key, r.data.id, d.fetchImpl);
+    return { status: 503, body: { error: 'The domain could not be saved. Nothing was added.', code: 'save_failed' } };
+  }
+  return { status: 200, body: domainBody({ ...row, records: r.data.records } as OrgDomainRow, true, g.u) };
+}
+
+/** POST verify: DB rate limit (1/30s, 10/hour per org), then POST /domains/{id}/verify and GET /domains/{id}. */
+export async function handleDomainVerify(token: string, deps: Deps = {}): Promise<Result> {
+  const d = ctxDeps(deps);
+  const g = await requireDomainManager(token, d, true);
+  if (isResult(g)) return g;
+  const { data: claim, error } = await g.admin.rpc('org_sending_domain_claim_verify', { p_org: g.u.orgId });
+  if (error) return { status: 503, body: { error: 'Verify is not available right now.', code: 'unavailable' } };
+  const c = (claim || {}) as { ok?: boolean; code?: string; retry_after?: number; resend_domain_id?: string };
+  if (c.ok !== true || !c.resend_domain_id) {
+    if (c.code === 'not_found') return { status: 404, body: { error: 'Add a domain first.', code: 'not_found' } };
+    return { status: 429, body: { error: 'Please wait before checking again.', code: c.code || 'rate_limited', retryAfter: c.retry_after ?? 30 } };
+  }
+  const key = domainsApiKey(d.env);
+  const v = await resendDomains.verify(key, c.resend_domain_id, d.fetchImpl);
+  if (!v.ok) return { status: v.status === 0 || v.status >= 500 ? 503 : 400, body: { error: 'Resend could not start verification. Try again shortly.', code: 'resend_verify_failed' } };
+  let row = await loadOrgDomain(g.admin, g.u.orgId);
+  const r = await resendDomains.get(key, c.resend_domain_id, d.fetchImpl);
+  if (r.ok && row) {
+    await saveRemote(g.admin, g.u.orgId, r.data);
+    row = { ...row, status: r.data.status, records: r.data.records, region: r.data.region, checked_at: new Date().toISOString() };
+  }
+  return { status: 200, body: domainBody(row, true, g.u, { verifyStarted: true }) };
+}
+
+/** DELETE: removes the domain from Resend (DELETE /domains/{id}) and the org row. */
+export async function handleDomainRemove(token: string, deps: Deps = {}): Promise<Result> {
+  const d = ctxDeps(deps);
+  const g = await requireDomainManager(token, d, true);
+  if (isResult(g)) return g;
+  const row = await loadOrgDomain(g.admin, g.u.orgId);
+  if (!row) return { status: 200, body: domainBody(null, true, g.u, { removed: 'none' }) };
+  const r = await resendDomains.remove(domainsApiKey(d.env), row.resend_domain_id, d.fetchImpl);
+  if (!r.ok && r.status !== 404) return { status: 503, body: { error: 'Could not remove the domain from Resend. Try again.', code: 'resend_delete_failed' } };
+  const { error } = await g.admin.from('org_sending_domains').delete().eq('organization_id', g.u.orgId);
+  if (error) return { status: 503, body: { error: 'Could not remove the domain. Try again.', code: 'save_failed' } };
+  return { status: 200, body: domainBody(null, true, g.u, { removed: 'ok' }) };
 }

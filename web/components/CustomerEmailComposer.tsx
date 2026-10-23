@@ -23,6 +23,7 @@ type Status = {
   providers?: ('microsoft' | 'google')[];
   connections?: { provider: 'microsoft' | 'google'; email: string }[];
   fallback?: boolean;
+  ownDomain?: { domain: string; status: string; sendsAs: string | null } | null;
   senderName?: string;
   senderEmail?: string;
   recipients?: string[];
@@ -147,6 +148,7 @@ export default function CustomerEmailComposer(props: {
   const transportLabel = useMemo(() => {
     const c = connected.find((x) => x.provider === 'microsoft') || connected.find((x) => x.provider === 'google');
     if (c) return t('Sends from your mailbox: {email}').replace('{email}', c.email);
+    if (status?.ownDomain?.sendsAs) return t('Sends from your verified domain: {email}').replace('{email}', status.ownDomain.sendsAs);
     if (status?.fallback)
       return t('No mailbox connected. Sends as “{name} via RepairPlanet”; replies go to {email}.')
         .replace('{name}', status.senderName || t('You'))
@@ -157,7 +159,7 @@ export default function CustomerEmailComposer(props: {
   if (!status) return <div className="section text-sm text-[var(--text3)]">{t('Loading…')}</div>;
   if (!status.enabled) return null;
 
-  const canSend = Boolean(connected.length || status.fallback) && Boolean(status.recipients?.length);
+  const canSend = Boolean(connected.length || status.ownDomain?.sendsAs || status.fallback) && Boolean(status.recipients?.length);
 
   async function connect(provider: 'microsoft' | 'google') {
     setBusy(true);
@@ -318,7 +320,7 @@ export default function CustomerEmailComposer(props: {
                 <div className="font-medium">{h.subject}</div>
                 <div className="text-xs text-[var(--text3)]">
                   {new Date(h.created_at).toLocaleString()} · {h.sender_name || ''} → {h.recipient_email} ·{' '}
-                  {h.transport === 'resend' ? t('via RepairPlanet') : t('from own mailbox')} · {t(h.status === 'sent' ? 'Sent' : h.status === 'failed' ? 'Failed' : 'Sending…')}
+                  {h.transport === 'resend' ? t('via RepairPlanet') : h.transport === 'resend_domain' ? t('from own domain') : t('from own mailbox')} · {t(h.status === 'sent' ? 'Sent' : h.status === 'failed' ? 'Failed' : 'Sending…')}
                 </div>
               </li>
             ))}
