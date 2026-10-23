@@ -13,8 +13,10 @@ import {
   isMarketplaceCheckoutEnabled,
   marketplaceCheckoutPausedBody,
 } from '@/lib/marketplace/checkout-pause';
+import { publicCatalogFields } from '@/lib/marketplace/checkout-response';
 
 export const dynamic = 'force-dynamic';
+
 
 async function callerEmail(req: NextRequest): Promise<string | null> {
   const auth = req.headers.get('authorization') || '';
@@ -75,10 +77,11 @@ export async function POST(
     }
 
     if (body?.syncOnly) {
+      // Sync runs server-side; Stripe product/price ids are never returned to clients.
       const catalog = await syncPartStripeCatalog(listing);
       return NextResponse.json({
         ok: true,
-        ...catalog,
+        ...publicCatalogFields(catalog),
         availability,
         livemode: resolveStripeSecret().livemode,
       });
@@ -92,8 +95,6 @@ export async function POST(
     return NextResponse.json({
       url: session.url,
       sessionId: session.sessionId,
-      productId: session.productId,
-      priceId: session.priceId,
       amountCents: session.amountCents,
       livemode: session.livemode,
     });
