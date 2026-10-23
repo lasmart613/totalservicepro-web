@@ -16,15 +16,29 @@ export function manualIsIncomplete(row: { is_incomplete?: unknown; isIncomplete?
 }
 
 /**
- * Slots used by owned manuals: incomplete manuals are not counted.
+ * Free-at-add is sticky (000942 free_at_add, set by a DB trigger from
+ * manuals.is_incomplete at insert time and immutable after). A library row is
+ * free when it was added free OR its manual is incomplete now. So an admin
+ * flipping a manual incomplete -> complete never pushes an org over its cap;
+ * complete -> incomplete frees the slot. Missing column (pre-000942) = false.
+ */
+export function libraryRowIsFree(
+  row: { free_at_add?: unknown } | null | undefined,
+  manual: { is_incomplete?: unknown; isIncomplete?: unknown } | null | undefined,
+): boolean {
+  return (row != null && isIncompleteFlag(row.free_at_add)) || manualIsIncomplete(manual);
+}
+
+/**
+ * Slots used by owned manuals: incomplete (or added-free) manuals are not counted.
  * `owned` is any iterable of rows that carry an is_incomplete flag.
  */
 export function slotCountedManuals(
-  owned: Iterable<{ is_incomplete?: unknown; isIncomplete?: unknown; incomplete?: unknown }>,
+  owned: Iterable<{ is_incomplete?: unknown; isIncomplete?: unknown; incomplete?: unknown; free_at_add?: unknown }>,
 ): number {
   let n = 0;
   for (const row of owned) {
-    const inc = row && (row.incomplete === true || manualIsIncomplete(row));
+    const inc = row && (row.incomplete === true || isIncompleteFlag(row.free_at_add) || manualIsIncomplete(row));
     if (!inc) n += 1;
   }
   return n;

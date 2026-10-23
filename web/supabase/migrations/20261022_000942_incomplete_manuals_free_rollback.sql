@@ -1,6 +1,6 @@
 -- Rollback for 000942. Exact: restores the 000936 bodies, comments and grants of
 -- manual_slots_held, manual_slot_is_held, manual_library_status and
--- manual_library_remove. Ledger rows written while 000942 was live keep
+-- manual_library_remove, and drops the free_at_add columns/trigger. Ledger rows written while 000942 was live keep
 -- reason 'incomplete_free' (refunded=true): they hold no slot and do not count
 -- toward the monthly cap under 000936 either. Re-runnable (no-op when 000942 is
 -- not applied).
@@ -146,5 +146,13 @@ $$;
 COMMENT ON FUNCTION public.manual_library_remove(bigint, text) IS '000936 remove from company library; refunds the slot only under the 000936 rules';
 REVOKE ALL ON FUNCTION public.manual_library_remove(bigint, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.manual_library_remove(bigint, text) TO authenticated;
+
+-- Sticky free hold (000942). Rows lose free_at_add; slots count by today's
+-- manuals.is_incomplete again (000942 web/edge code tolerates the missing column).
+DROP TRIGGER IF EXISTS organization_manuals_free_at_add ON public.organization_manuals;
+DROP TRIGGER IF EXISTS user_manuals_free_at_add ON public.user_manuals;
+DROP FUNCTION IF EXISTS public.manual_library_set_free_at_add();
+ALTER TABLE public.organization_manuals DROP COLUMN IF EXISTS free_at_add;
+ALTER TABLE public.user_manuals DROP COLUMN IF EXISTS free_at_add;
 
 COMMIT;

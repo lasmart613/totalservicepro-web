@@ -4,6 +4,7 @@
  */
 export {
   isIncompleteFlag,
+  libraryRowIsFree,
   manualIsIncomplete,
   mayViewIncompleteFree,
   pathWithinManual,

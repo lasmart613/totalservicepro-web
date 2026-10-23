@@ -18,8 +18,18 @@
 --     with reason 'incomplete_free'. It does NOT use one of the 3 monthly
 --     refunds (the cap counts reason = 'refund' only) and refunds_used is not
 --     bumped.
--- Signatures, SECURITY DEFINER, search_path '', and grants are unchanged from
--- 000936 and re-stated explicitly. No table, column, RLS or data change.
+--   * free_at_add (sticky free hold, QA LOW on PR #343): organization_manuals
+--     and user_manuals get free_at_add boolean NOT NULL DEFAULT false. A
+--     BEFORE INSERT OR UPDATE trigger sets it from manuals.is_incomplete at
+--     insert time (client values are ignored) and keeps it immutable after
+--     (recomputed only if manual_id itself changes). A row is free when
+--     free_at_add OR the manual is incomplete now. Choice: keep the free hold,
+--     because an admin flipping a manual incomplete -> complete must never
+--     push an org over its cap (16/15 and blocked). complete -> incomplete
+--     still frees the slot. Existing rows of currently-incomplete manuals are
+--     backfilled to true.
+-- Function signatures, SECURITY DEFINER, search_path '', and grants are
+-- unchanged from 000936 and re-stated explicitly. No RLS or policy change.
 -- Comments keep the '000936' prefix (so the 000936 rollback still recognizes
 -- them) plus a '(000942: incomplete manuals are free)' suffix for the 000942 guards.
 -- Wrapped in BEGIN/COMMIT. Idempotent. Rollback: *_rollback.sql (exact 000936 bodies).
@@ -50,7 +60,59 @@ BEGIN
       WHERE n.nspname = 'public' AND p.proname IN ('manual_slots_held','manual_slot_is_held','manual_library_status','manual_library_remove')) <> 4 THEN
     RAISE EXCEPTION '000942 drift: unexpected overloads of the manual library functions';
   END IF;
+  IF to_regclass('public.user_manuals') IS NULL THEN
+    RAISE EXCEPTION '000942 drift: public.user_manuals is missing';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_attribute
+             WHERE attrelid IN ('public.organization_manuals'::regclass, 'public.user_manuals'::regclass)
+               AND attname = 'free_at_add' AND NOT attisdropped AND atttypid <> 'boolean'::regtype) THEN
+    RAISE EXCEPTION '000942 drift: free_at_add exists with a non-boolean type';
+  END IF;
 END $$;
+
+-- ---------- sticky free hold ----------
+ALTER TABLE public.organization_manuals ADD COLUMN IF NOT EXISTS free_at_add boolean NOT NULL DEFAULT false;
+ALTER TABLE public.user_manuals         ADD COLUMN IF NOT EXISTS free_at_add boolean NOT NULL DEFAULT false;
+COMMENT ON COLUMN public.organization_manuals.free_at_add IS '000942 added while the manual was incomplete: free forever (trigger-set)';
+COMMENT ON COLUMN public.user_manuals.free_at_add IS '000942 added while the manual was incomplete: free forever (trigger-set)';
+
+CREATE OR REPLACE FUNCTION public.manual_library_set_free_at_add()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.manual_id IS NOT DISTINCT FROM OLD.manual_id THEN
+    NEW.free_at_add := OLD.free_at_add;  -- immutable; clients cannot set it
+  ELSE
+    NEW.free_at_add := coalesce((SELECT m.is_incomplete FROM public.manuals m WHERE m.id = NEW.manual_id), false);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+COMMENT ON FUNCTION public.manual_library_set_free_at_add() IS '000942 trigger: free_at_add from manuals.is_incomplete at insert, immutable after';
+REVOKE ALL ON FUNCTION public.manual_library_set_free_at_add() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS organization_manuals_free_at_add ON public.organization_manuals;
+CREATE TRIGGER organization_manuals_free_at_add
+  BEFORE INSERT OR UPDATE ON public.organization_manuals
+  FOR EACH ROW EXECUTE FUNCTION public.manual_library_set_free_at_add();
+DROP TRIGGER IF EXISTS user_manuals_free_at_add ON public.user_manuals;
+CREATE TRIGGER user_manuals_free_at_add
+  BEFORE INSERT OR UPDATE ON public.user_manuals
+  FOR EACH ROW EXECUTE FUNCTION public.manual_library_set_free_at_add();
+
+-- Backfill: rows of manuals that are incomplete today were added free.
+-- (The UPDATE trigger keeps OLD values, so disable it for the backfill only.)
+ALTER TABLE public.organization_manuals DISABLE TRIGGER organization_manuals_free_at_add;
+UPDATE public.organization_manuals om SET free_at_add = true
+  FROM public.manuals m WHERE m.id = om.manual_id AND m.is_incomplete IS TRUE AND NOT om.free_at_add;
+ALTER TABLE public.organization_manuals ENABLE TRIGGER organization_manuals_free_at_add;
+ALTER TABLE public.user_manuals DISABLE TRIGGER user_manuals_free_at_add;
+UPDATE public.user_manuals um SET free_at_add = true
+  FROM public.manuals m WHERE m.id = um.manual_id AND m.is_incomplete IS TRUE AND NOT um.free_at_add;
+ALTER TABLE public.user_manuals ENABLE TRIGGER user_manuals_free_at_add;
 
 CREATE OR REPLACE FUNCTION public.manual_slots_held(p_org bigint)
 RETURNS integer
@@ -122,7 +184,7 @@ BEGIN
   IF NOT FOUND THEN
     RETURN jsonb_build_object('owned', false, 'slots_held', public.manual_slots_held(v_org));
   END IF;
-  IF EXISTS (SELECT 1 FROM public.manuals m WHERE m.id = v_row.manual_id AND m.is_incomplete IS TRUE) THEN
+  IF v_row.free_at_add OR EXISTS (SELECT 1 FROM public.manuals m WHERE m.id = v_row.manual_id AND m.is_incomplete IS TRUE) THEN
     -- 000942: free manual. Removing it frees nothing and uses no monthly refund.
     RETURN public.manual_refund_check(v_row.id, v_org, v_row.created_at, v_row.manual_id)
            || jsonb_build_object('refund_eligible', true, 'reason', 'incomplete_free', 'free', true,
@@ -174,7 +236,7 @@ BEGIN
   v_refund := (v_check->>'refund_eligible')::boolean;
   -- 000942: incomplete manuals are free. Logged refunded=true with reason
   -- 'incomplete_free': no held slot, and the monthly cap counts only 'refund'.
-  IF EXISTS (SELECT 1 FROM public.manuals m WHERE m.id = v_row.manual_id AND m.is_incomplete IS TRUE) THEN
+  IF v_row.free_at_add OR EXISTS (SELECT 1 FROM public.manuals m WHERE m.id = v_row.manual_id AND m.is_incomplete IS TRUE) THEN
     v_free := true;
     v_refund := true;
     v_check := v_check || jsonb_build_object('reason', 'incomplete_free');
