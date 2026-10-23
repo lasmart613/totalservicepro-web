@@ -1325,10 +1325,10 @@ function bodyRpcMissing(message: string): boolean {
 
 /**
  * Body-search ids for one tsquery, optionally narrowed by imatch regexes.
- * Prefers manual_search_index_ids (000938), which forces the GIN index: the
+ * Prefers manual_search_index_ids (000939), which forces the GIN index: the
  * planner costs only the 416 kB heap, not the 300 MB of TOAST, so the plain
  * REST filter seq-scans for ~17 s and hits the 8 s statement_timeout. Falls
- * back to the REST filter while 000938 is not applied.
+ * back to the REST filter while 000939 is not applied.
  */
 async function bodySearchIds(
   db: TableClient,

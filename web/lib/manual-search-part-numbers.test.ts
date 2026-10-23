@@ -333,7 +333,7 @@ test('a non-timeout FTS error still uses the imatch fallback', async () => {
   assert.equal(indexCalls().length, 2);
 });
 
-test('manual_search_index_ids (000938) is used when present; REST filter is not touched', async () => {
+test('manual_search_index_ids (000939) is used when present; REST filter is not touched', async () => {
   const { db, indexCalls } = fakeDb(() => {
     throw new Error('REST filter must not run when the RPC answers');
   });
@@ -352,7 +352,7 @@ test('manual_search_index_ids (000938) is used when present; REST filter is not 
   assert.deepEqual(rpcCalls, [['manual_search_index_ids', { p_query: 'cyno pump', p_plain: true, p_patterns: null }]]);
 });
 
-test('before 000938 is applied (function missing) the REST filter runs as before', async () => {
+test('before 000939 is applied (function missing) the REST filter runs as before', async () => {
   const { db, indexCalls } = fakeDb(() => ({ data: [{ manual_id: 9 }], error: null }));
   (db as any).rpc = async () => ({
     data: null,
