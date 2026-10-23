@@ -258,6 +258,12 @@ test('composer copy is translated for every locale and used keys exist', async (
     assert.equal(Object.keys(v).length, 8, k);
     for (const [loc, s] of Object.entries(v)) assert.ok(s && s !== k, `${loc} left English: ${k}`);
   }
-  const src = readFileSync(join(here, '../../components/CustomerEmailComposer.tsx'), 'utf8');
-  for (const m of src.matchAll(/\bt\('([^']+)'\)/g)) assert.ok(CRM_EMAIL_STRINGS[m[1]], `missing copy: ${m[1]}`);
+  for (const f of ['CustomerEmailComposer.tsx', 'SendingDomainSettings.tsx']) {
+    const src = readFileSync(join(here, '../../components/' + f), 'utf8');
+    for (const m of src.matchAll(/\bt\('([^']+)'\)/g)) assert.ok(CRM_EMAIL_STRINGS[m[1]], `missing copy in ${f}: ${m[1]}`);
+    if (f === 'SendingDomainSettings.tsx') {
+      const block = src.slice(src.indexOf('STATUS_LABEL'), src.indexOf('};', src.indexOf('STATUS_LABEL')));
+      for (const m of block.matchAll(/: '([^']+)'/g)) assert.ok(CRM_EMAIL_STRINGS[m[1]], `missing status copy: ${m[1]}`);
+    }
+  }
 });
