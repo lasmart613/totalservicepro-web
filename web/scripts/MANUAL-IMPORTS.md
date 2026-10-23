@@ -142,7 +142,7 @@ Live check at about 5 PM MST on Oct 22: 35 published manuals have no
 
 **33 are over 20 MiB** (no failure rows; the catch-up never picks them). Run
 from a box with the service-role key, after #337 is deployed (its append
-retry covers the 57014 timeouts these large manuals hit), ideally after 000938
+retry covers the 57014 timeouts these large manuals hit), ideally after 000939
 (GIN `fastupdate = off`, so an append no longer pays for a pending-list
 merge):
 
