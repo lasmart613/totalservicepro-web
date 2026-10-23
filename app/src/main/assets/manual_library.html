@@ -249,6 +249,8 @@
 
     let allManuals = [];
     let userManualIds = new Set();
+    // Owned manuals flagged is_incomplete: free, they never use a slot.
+    let freeManualIds = new Set();
     let currentTab = 'browse';
     let currentRoom = 'laser';
     let currentManual = null;
@@ -360,11 +362,21 @@
         currentUser = user;
 
         const [manualsRes, profileRes] = await Promise.all([
-            supabaseClient.from('user_manuals').select('manual_id').eq('user_id', user.id),
+            supabaseClient.from('user_manuals').select('manual_id, manuals(is_incomplete)').eq('user_id', user.id),
             supabaseClient.from('user_profiles').select('manual_slots').eq('id', user.id).single()
         ]);
 
-        userManualIds = new Set((manualsRes.data || []).map(r => r.manual_id));
+        let rows = manualsRes.data || [];
+        if (manualsRes.error) {
+            // Embed/column missing: count every row (old behavior).
+            const plain = await supabaseClient.from('user_manuals').select('manual_id').eq('user_id', user.id);
+            rows = plain.data || [];
+        }
+        userManualIds = new Set(rows.map(r => r.manual_id));
+        freeManualIds = new Set(rows.filter(r => {
+            const m = Array.isArray(r.manuals) ? r.manuals[0] : r.manuals;
+            return m && m.is_incomplete === true;
+        }).map(r => r.manual_id));
         if (profileRes.data?.manual_slots) FREE_LIMIT = profileRes.data.manual_slots;
     }
 
@@ -456,7 +468,7 @@
                                             <div class="book-title">${catalogTitle(m)}</div>
                                         </div>
                                         ${isOp ? '<div class="op-badge" title="Operators Manual">OP</div>' : ''}
-                                        ${isInc ? '<div class="inc-badge" title="This document is incomplete">Incomplete</div>' : ''}
+                                        ${isInc ? '<div class="inc-badge" title="Incomplete document: free, does not use a library slot">Incomplete – free</div>' : ''}
                                         ${isOwned ? '<div class="owned-badge">✓</div>' : ''}
                                     </div>
                                 `;
@@ -484,7 +496,8 @@
 
         const alreadyOwns = userManualIds.has(manual.id);
 
-        if (alreadyOwns) {
+        // Incomplete manuals are free: open without adding (get-manual-url serves them).
+        if (alreadyOwns || isManualIncomplete(manual)) {
             await openManual(manual);
         } else {
             if (currentTab === 'browse') {
@@ -496,6 +509,12 @@
         }
     }
 
+    function slotsUsed() {
+        let n = 0;
+        for (const id of userManualIds) if (!freeManualIds.has(id)) n++;
+        return n;
+    }
+
     function showAddModal(manual) {
         const modal = document.getElementById('addModal');
         const titleEl = document.getElementById('modalManualTitle');
@@ -504,14 +523,14 @@
         const upgradePrompt = document.getElementById('upgradePrompt');
 
         titleEl.textContent = catalogTitle(manual);
-        const used = userManualIds.size;
+        const used = slotsUsed();
 
         slotText.textContent = `${used} of ${FREE_LIMIT} slots used`;
 
         upgradePrompt.style.display = 'none';
         addBtn.style.display = 'block';
 
-        if (used >= FREE_LIMIT) {
+        if (used >= FREE_LIMIT && !isManualIncomplete(manual)) {
             addBtn.style.display = 'none';
             upgradePrompt.style.display = 'block';
         }
@@ -540,6 +559,7 @@
             });
 
             userManualIds.add(currentManual.id);
+            if (isManualIncomplete(currentManual)) freeManualIds.add(currentManual.id);
             closeModal();
             renderContent();
 
