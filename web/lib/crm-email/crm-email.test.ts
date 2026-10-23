@@ -59,7 +59,12 @@ test('templates: three audiences, free signup CTA, real free-plan lines, rental 
     assert.match(body, /free/i);
   }
   const tiles = readFileSync(join(here, '../billing/plan-tiles.ts'), 'utf8');
-  for (const a of CRM_EMAIL_AUDIENCES) for (const b of CRM_EMAIL_TEMPLATES[a].bullets) assert.ok(tiles.includes(b), `invented bullet: ${b}`);
+  for (const a of CRM_EMAIL_AUDIENCES) for (const b of CRM_EMAIL_TEMPLATES[a].bullets) {
+    // The directory has no ratings, so email copy says "trusted" where the tile says "rated".
+    const tileLine = b.replace('Find trusted repair', 'Find rated repair');
+    assert.ok(tiles.includes(tileLine), `invented bullet: ${b}`);
+  }
+  for (const a of CRM_EMAIL_AUDIENCES) assert.doesNotMatch(JSON.stringify(CRM_EMAIL_TEMPLATES[a]), /\brated\b/i);
   assert.ok(CRM_EMAIL_TEMPLATES.repair_shop.bullets.includes(FREE_AI_LINE));
   assert.ok(CRM_EMAIL_TEMPLATES.clinic.bullets.includes(SHARED_SERVICE_HISTORY_LINE));
   const rental = JSON.stringify(CRM_EMAIL_TEMPLATES.rental_shop) + templateBody('rental_shop', { origin: 'https://x' });

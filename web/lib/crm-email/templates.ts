@@ -24,7 +24,7 @@ export const CRM_EMAIL_TEMPLATES: Record<CrmEmailAudience, CrmEmailTemplate> = {
     intro:
       'I use RepairPlanet (Total Service Pro) to manage service on the lasers I work on, and I think it would help your practice too. The Free Plan costs nothing to sign up for and use:',
     bullets: [
-      'Find rated repair and maintenance pros',
+      'Find trusted repair and maintenance pros',
       'Request service and order consumables',
       'Keep FDA-style service records with the machine',
       SHARED_SERVICE_HISTORY_LINE,
@@ -55,7 +55,7 @@ export const CRM_EMAIL_TEMPLATES: Record<CrmEmailAudience, CrmEmailTemplate> = {
       'Keep FDA-style service records with the machine',
       SHARED_SERVICE_HISTORY_LINE,
       'Request service and order consumables',
-      'Find rated repair and maintenance pros',
+      'Find trusted repair and maintenance pros',
     ],
     signupPath: '/signup/owner',
     cta: 'Create your free account',
