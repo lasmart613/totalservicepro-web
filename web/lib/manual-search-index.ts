@@ -1043,11 +1043,32 @@ export async function indexManualSearchText(
 export const ALREADY_INDEXED = 'already_indexed';
 /** Skipped reason when another chunked write for the manual started < 10 min ago. */
 export const INDEX_WRITE_BUSY = 'index_write_busy';
-/** Retries of one append call cancelled by the 8 s statement_timeout. The row-count guard makes a retry safe. */
-export const APPEND_TIMEOUT_RETRIES = 2;
+/** Retries of one append call after a statement timeout or a transient gateway/network failure. The row-count guard makes a retry safe. */
+export const APPEND_TIMEOUT_RETRIES = 3;
 
 function isStatementTimeout(message: string): boolean {
   return /statement timeout|canceling statement/i.test(message);
+}
+
+/**
+ * A failure where the append may or may not have committed and a retry is
+ * safe: the statement timeout, and gateway / PostgREST / network failures
+ * (an HTTP 5xx with no Postgres error, e.g. PostgREST's "Thread killed by
+ * timeout manager", a 502/504 from the gateway, or a dropped connection).
+ * Postgres errors (bad input, permission) are not retried.
+ */
+export function isTransientAppendError(message: string): boolean {
+  if (isStatementTimeout(message)) return true;
+  const m = String(message || '').trim();
+  if (!m || m === 'unknown' || m === '{}') return true;
+  return /\b50[0234]\b|internal server error|bad gateway|gateway time-?out|service unavailable|upstream|fetch failed|failed to fetch|network|socket hang up|ECONNRESET|ETIMEDOUT|EPIPE|terminated|thread killed|timeout manager|aborted/i.test(m);
+}
+
+/** Backoff before append retry `attempt` (1-based): 1 s, 2 s, 4 s ... */
+export const APPEND_RETRY_BASE_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function chunkedRpcMissing(message: string): boolean {
@@ -1089,6 +1110,7 @@ export async function writeChunkedManualSearchIndex(
   db: TableClient,
   manualId: number,
   chunks: readonly IndexChunk[],
+  retryDelayMs: number = APPEND_RETRY_BASE_MS,
 ): Promise<ChunkedWriteResult> {
   if (typeof db.rpc !== 'function') return { ok: false, reason: 'Refused: chunked writes need the Supabase RPC client.' };
   // Bound: SupabaseClient.rpc reads this.rest. A detached `db.rpc` threw
@@ -1126,7 +1148,9 @@ export async function writeChunkedManualSearchIndex(
   for (let i = 0; i < chunks.length; i += 1) {
     const chunk = chunks[i];
     let appended: { data: unknown; error: string | null } = { data: undefined, error: 'not attempted' };
+    let hadTransient = false;
     for (let attempt = 0; attempt <= APPEND_TIMEOUT_RETRIES; attempt += 1) {
+      if (attempt > 0 && retryDelayMs > 0) await sleep(retryDelayMs * 2 ** (attempt - 1));
       appended = await call('append_manual_search_index_chunks', {
         p_manual_id: manualId,
         p_token: token,
@@ -1135,9 +1159,17 @@ export async function writeChunkedManualSearchIndex(
         p_clipped: [chunk.clipped === true],
         p_page_max: [chunk.indexedPageMax == null ? null : chunk.indexedPageMax],
       });
-      if (!appended.error || !isStatementTimeout(appended.error)) break;
+      if (!appended.error || !isTransientAppendError(appended.error)) break;
+      hadTransient = true;
     }
     if (appended.error) return abort(`append chunk ${i + 1}/${chunks.length} failed: ${appended.error}`);
+    if (appended.data !== true && hadTransient) {
+      // The failed attempt may have committed before its response was lost;
+      // then the retry is refused by the row-count guard. Accept it when the
+      // manual now holds exactly i + 1 rows (this chunk landed once).
+      const landed = await readExistingSearchText(db, manualId);
+      if (landed.ok && landed.chunks.length === i + 1 && landed.chunks[i] === chunk.text) continue;
+    }
     if (appended.data !== true) return abort(`append chunk ${i + 1}/${chunks.length} refused (marker replaced or row count changed)`);
   }
   const finish = await call('finish_manual_search_index_append', { p_manual_id: manualId, p_token: token });
@@ -1286,6 +1318,52 @@ function idsFromRows(rows: unknown): string[] {
   return ids;
 }
 
+function bodyRpcMissing(message: string): boolean {
+  return /manual_search_index_ids/i.test(message)
+    && /schema cache|does not exist|could not find the function|not found/i.test(message);
+}
+
+/**
+ * Body-search ids for one tsquery, optionally narrowed by imatch regexes.
+ * Prefers manual_search_index_ids (000939), which forces the GIN index: the
+ * planner costs only the 416 kB heap, not the 300 MB of TOAST, so the plain
+ * REST filter seq-scans for ~17 s and hits the 8 s statement_timeout. Falls
+ * back to the REST filter while 000939 is not applied.
+ */
+async function bodySearchIds(
+  db: TableClient,
+  query: string,
+  plain: boolean,
+  patterns: string[] = [],
+): Promise<{ ids: string[]; error?: string }> {
+  if (typeof db.rpc === 'function') {
+    const rpc = await db.rpc('manual_search_index_ids', {
+      p_query: query,
+      p_plain: plain,
+      p_patterns: patterns.length ? patterns : null,
+    });
+    if (!rpc?.error) {
+      const ids: string[] = [];
+      for (const v of (Array.isArray(rpc?.data) ? rpc.data : []) as unknown[]) {
+        const raw = v && typeof v === 'object' ? (v as Record<string, unknown>).manual_search_index_ids ?? (v as Record<string, unknown>).manual_id : v;
+        const id = String(raw ?? '').trim();
+        if (id && !ids.includes(id)) ids.push(id);
+      }
+      return { ids };
+    }
+    const message = String(rpc.error.message || '');
+    if (!bodyRpcMissing(message)) return { ids: [], error: message || 'body search failed' };
+  }
+  let q = db
+    .from('manual_search_index')
+    .select('manual_id')
+    .textSearch('search_tsv', query, plain ? { type: 'plain', config: 'simple' } : { config: 'simple' });
+  for (const re of patterns) q = q.filter('search_text', 'imatch', re);
+  const res = await q;
+  if (res.error) return { ids: [], error: String(res.error.message || 'body search failed') };
+  return { ids: idsFromRows(res.data) };
+}
+
 /**
  * Find catalog ids whose indexed PDF body contains every token.
  * Selects only manual_id — never returns search_text to the client.
@@ -1311,26 +1389,16 @@ export async function findManualIdsByBodyText(
   const raw = String(rawQuery ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   const partNumbers = raw ? manualPartNumberTokens(raw) : [];
   if (partNumbers.length) {
-    const viaRaw = await db
-      .from('manual_search_index')
-      .select('manual_id')
-      .textSearch('search_tsv', raw, { type: 'plain', config: 'simple' });
+    const viaRaw = await bodySearchIds(db, raw, true);
     if (!viaRaw.error) {
-      const ids = idsFromRows(viaRaw.data);
+      const ids = viaRaw.ids;
       if (ids.length > 1) {
         // plainto_tsquery ANDs the groups ('7111' & '-00' & '-2709'), so a
         // manual with '-00' and the other groups scattered also matches.
         // When some manuals hold the number as written, show only those.
-        let exact = db
-          .from('manual_search_index')
-          .select('manual_id')
-          .textSearch('search_tsv', raw, { type: 'plain', config: 'simple' });
-        for (const token of partNumbers) {
-          exact = exact.filter('search_text', 'imatch', exactPartNumberImatch(token));
-        }
-        const viaExact = await exact;
+        const viaExact = await bodySearchIds(db, raw, true, partNumbers.map(exactPartNumberImatch));
         if (!viaExact.error) {
-          const exactIds = await keepPublishedManualIds(db, idsFromRows(viaExact.data));
+          const exactIds = await keepPublishedManualIds(db, viaExact.ids);
           if (exactIds.length) return { ids: exactIds, available: true };
         }
       }
@@ -1343,37 +1411,30 @@ export async function findManualIdsByBodyText(
       // prefix (`PN7111-00-2709` → 'pn7111').
       const narrow = partNumberNarrowQuery(partNumbers);
       if (narrow) {
-        let literal = db
-          .from('manual_search_index')
-          .select('manual_id')
-          .textSearch('search_tsv', narrow, { config: 'simple' });
-        for (const token of partNumbers) {
-          literal = literal.filter('search_text', 'imatch', containsTextImatch(token));
-        }
-        const viaLiteral = await literal;
-        if (!viaLiteral.error) {
-          const literalIds = idsFromRows(viaLiteral.data);
-          if (literalIds.length) return { ids: await keepPublishedManualIds(db, literalIds), available: true };
+        const viaLiteral = await bodySearchIds(db, narrow, false, partNumbers.map(containsTextImatch));
+        if (!viaLiteral.error && viaLiteral.ids.length) {
+          return { ids: await keepPublishedManualIds(db, viaLiteral.ids), available: true };
         }
       }
-    } else if (/schema cache|does not exist|column|relation/i.test(viaRaw.error.message || '')) {
-      return { ids: [], available: false, error: viaRaw.error.message };
+    } else if (/schema cache|does not exist|column|relation/i.test(viaRaw.error)
+      || isStatementTimeout(viaRaw.error)) {
+      return { ids: [], available: false, error: viaRaw.error };
     }
     // Nothing for the part number: fall through to the token search below.
   }
 
-  const fts = clean.join(' ');
-  const viaFts = await db
-    .from('manual_search_index')
-    .select('manual_id')
-    .textSearch('search_tsv', fts, { type: 'plain', config: 'simple' });
+  const viaFts = await bodySearchIds(db, clean.join(' '), true);
   if (!viaFts.error) {
-    return { ids: await keepPublishedManualIds(db, idsFromRows(viaFts.data)), available: true };
+    return { ids: await keepPublishedManualIds(db, viaFts.ids), available: true };
   }
 
   // Column / table missing (migration not applied) or textSearch unavailable.
-  if (/schema cache|does not exist|column|relation/i.test(viaFts.error.message || '')) {
-    return { ids: [], available: false, error: viaFts.error.message };
+  // A statement timeout also stops here: the imatch fallback below is an
+  // unindexed scan of every chunk and would time out too (Oct 22: every FTS
+  // 500 was followed by an imatch 500 on the same term).
+  if (/schema cache|does not exist|column|relation/i.test(viaFts.error)
+    || isStatementTimeout(viaFts.error)) {
+    return { ids: [], available: false, error: viaFts.error };
   }
 
   let body = db.from('manual_search_index').select('manual_id');

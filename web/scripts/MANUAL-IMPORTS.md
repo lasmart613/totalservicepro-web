@@ -134,3 +134,38 @@ Until that finishes, keep `MANUAL_INDEX_CATCHUP_DISABLED=1` set in the Netlify
 environment (Functions scope). The function then logs `disabled` and does
 nothing. Unset it (and redeploy, or wait for the next deploy) once the dry run
 reports nothing missing except files that keep failing.
+
+### Catch-up reindex plan (Oct 22, 2026)
+
+Live check at about 5 PM MST on Oct 22: 35 published manuals have no
+`manual_search_index` rows and none has an in-progress marker.
+
+**33 are over 20 MiB** (no failure rows; the catch-up never picks them). Run
+from a box with the service-role key, after #337 is deployed (its append
+retry covers the 57014 timeouts these large manuals hit), ideally after 000939
+(GIN `fastupdate = off`, so an append no longer pays for a pending-list
+merge):
+
+```sh
+# dry run first: should list exactly these 33
+node scripts/index-missing-manuals.mjs --ids=1860,1871,1887,1909,1941,1959,1992,2000,2022,2057,2137,2150,2167,2298,2300,2321,2324,2344,2358,2360,2361,2371,2394,2413,2424,2474,2475,2494,2512,2522,2540,2556,2594
+node scripts/index-missing-manuals.mjs --apply --report=index_report_1022.json --ids=1860,1871,1887,1909,1941,1959,1992,2000,2022,2057,2137,2150,2167,2298,2300,2321,2324,2344,2358,2360,2361,2371,2394,2413,2424,2474,2475,2494,2512,2522,2540,2556,2594
+```
+
+The first 22 were already oversize before Oct 22; 2394-2594 (11) came with the
+Oct 22 import.
+
+**2 are real extraction failures**, both under 20 MiB, both
+`Could not extract PDF text: Page dictionary kid reference points to wrong
+type of object.` (a broken page-tree entry that pdf.js rejects):
+
+- **2390** Bio-Rad Tango blood bank service manual (20,126,438 bytes, 761
+  pages; pages 146-152 are broken). With #337 the bad pages are skipped and
+  the other 754 pages index (about 580k chars). After deploy the catch-up
+  retries it on its own when `retry_after` passes, or run
+  `node scripts/index-missing-manuals.mjs --apply --ids=2390`.
+- **2551** MDE Escort II 20101 service manual (17,283,208 bytes, 46 pages).
+  Pages 1-45 are scanned images with no text layer and page 46 is broken, so
+  even with #337 it ends as `no_extractable_text`. Fix: replace the Storage
+  object with the OCR'd copy (17,345,669 bytes, 79,877 chars, no broken
+  pages), then run `--apply --ids=2551`.

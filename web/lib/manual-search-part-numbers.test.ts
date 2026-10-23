@@ -302,3 +302,70 @@ test('a database without 000918 (no marker table) keeps the hits', async () => {
   const found = await search(db, 'reservoir pump');
   assert.deepEqual(found, { ids: ['4'], available: true });
 });
+
+test('a statement timeout on the token FTS stops there: no unindexed imatch scan (Oct 22 GET 500s)', async () => {
+  const { db, indexCalls } = fakeDb(() => ({
+    data: null,
+    error: { message: 'canceling statement due to statement timeout', code: '57014' },
+  }));
+  const found = await search(db, 'cyno');
+  assert.equal(found.available, false);
+  assert.match(String(found.error), /statement timeout/);
+  assert.equal(indexCalls().length, 1);
+  assert.equal(indexCalls()[0].filters.length, 0);
+});
+
+test('a statement timeout on the part-number FTS stops there too', async () => {
+  const { db, indexCalls } = fakeDb(() => ({
+    data: null,
+    error: { message: 'canceling statement due to statement timeout' },
+  }));
+  const found = await search(db, '7111-00-2709');
+  assert.equal(found.available, false);
+  assert.equal(indexCalls().length, 1);
+});
+
+test('a non-timeout FTS error still uses the imatch fallback', async () => {
+  const { db, indexCalls } = fakeDb((call) =>
+    call.textSearch ? { data: null, error: { message: 'syntax error in tsquery' } } : { data: [{ manual_id: 4 }], error: null },
+  );
+  assert.deepEqual(await search(db, 'cyno'), { ids: ['4'], available: true });
+  assert.equal(indexCalls().length, 2);
+});
+
+test('manual_search_index_ids (000939) is used when present; REST filter is not touched', async () => {
+  const { db, indexCalls } = fakeDb(() => {
+    throw new Error('REST filter must not run when the RPC answers');
+  });
+  const rpcCalls: Array<[string, Record<string, unknown>]> = [];
+  (db as any).rpc = async (fn: string, args: Record<string, unknown>) => {
+    rpcCalls.push([fn, args]);
+    if (args.p_patterns) return { data: [2], error: null };
+    return { data: [1, 2, 2], error: null };
+  };
+  assert.deepEqual(await search(db, '7111-00-2709'), { ids: ['2'], available: true });
+  assert.deepEqual(rpcCalls[0], ['manual_search_index_ids', { p_query: '7111-00-2709', p_plain: true, p_patterns: null }]);
+  assert.equal(rpcCalls[1][1].p_patterns instanceof Array, true);
+  assert.equal(indexCalls().length, 0);
+  rpcCalls.length = 0;
+  assert.deepEqual(await search(db, 'cyno pump'), { ids: ['1', '2'], available: true });
+  assert.deepEqual(rpcCalls, [['manual_search_index_ids', { p_query: 'cyno pump', p_plain: true, p_patterns: null }]]);
+});
+
+test('before 000939 is applied (function missing) the REST filter runs as before', async () => {
+  const { db, indexCalls } = fakeDb(() => ({ data: [{ manual_id: 9 }], error: null }));
+  (db as any).rpc = async () => ({
+    data: null,
+    error: { message: 'Could not find the function public.manual_search_index_ids(p_patterns, p_plain, p_query) in the schema cache' },
+  });
+  assert.deepEqual(await search(db, 'cyno'), { ids: ['9'], available: true });
+  assert.equal(indexCalls().length, 1);
+});
+
+test('an RPC statement timeout reports unavailable without a REST retry', async () => {
+  const { db, indexCalls } = fakeDb(() => ({ data: [{ manual_id: 9 }], error: null }));
+  (db as any).rpc = async () => ({ data: null, error: { message: 'canceling statement due to statement timeout' } });
+  const found = await search(db, 'cyno');
+  assert.equal(found.available, false);
+  assert.equal(indexCalls().length, 0);
+});
