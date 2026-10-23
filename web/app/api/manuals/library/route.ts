@@ -5,6 +5,7 @@ import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import { canAccessServiceManuals } from '@/lib/roles';
 import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
+import { manualIsIncomplete, slotCountedManuals } from '@/lib/manual-incomplete';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
 import { isPublishedColumnMissing, wherePublished } from '@/lib/manual-published';
 import { normalizeLibrarySource } from '@/lib/manual-library-refund';
@@ -70,26 +71,30 @@ async function lookupManual(
   return null;
 }
 
+type OwnedManuals = { ids: Set<string>; /** Slots used: incomplete manuals are free. */ counted: number };
+
 async function ownedManualIds(
   client: { from: (table: string) => any },
   userId: string,
   orgId: string | null
-): Promise<Set<string>> {
-  const ids = new Set<string>();
-  if (orgId) {
-    const { data } = await client
-      .from('organization_manuals')
-      .select('manual_id')
-      .eq('organization_id', orgId);
-    for (const row of data || []) {
-      if (row.manual_id != null) ids.add(String(row.manual_id));
+): Promise<OwnedManuals> {
+  const rows = new Map<string, { is_incomplete?: unknown }>();
+  const load = async (table: string, col: string, val: string) => {
+    let res = await client.from(table).select('manual_id, manuals(is_incomplete)').eq(col, val);
+    // Column or embed missing: count every row (old behavior).
+    if (res.error) res = await client.from(table).select('manual_id').eq(col, val);
+    for (const row of res.data || []) {
+      if (row.manual_id == null) continue;
+      const m = Array.isArray(row.manuals) ? row.manuals[0] : row.manuals;
+      const key = String(row.manual_id);
+      const prev = rows.get(key);
+      // Same manual in both tables counts once; free only if flagged.
+      rows.set(key, { is_incomplete: prev?.is_incomplete === true || m?.is_incomplete === true });
     }
-  }
-  const { data: userRows } = await client.from('user_manuals').select('manual_id').eq('user_id', userId);
-  for (const row of userRows || []) {
-    if (row.manual_id != null) ids.add(String(row.manual_id));
-  }
-  return ids;
+  };
+  if (orgId) await load('organization_manuals', 'organization_id', orgId);
+  await load('user_manuals', 'user_id', userId);
+  return { ids: new Set(rows.keys()), counted: slotCountedManuals(rows.values()) };
 }
 
 function isMissingSourceColumn(error: { message?: string } | null | undefined): boolean {
@@ -201,16 +206,19 @@ export async function POST(req: NextRequest) {
     }
 
     const limit = manualSlotLimit(orgRes.data);
-    const owned = await ownedManualIds(writer, user.id, orgId);
+    const ownedRes = await ownedManualIds(writer, user.id, orgId);
+    const owned = ownedRes.ids;
+    const free = manualIsIncomplete(catalog);
     if (owned.has(String(manualId))) {
-      return NextResponse.json({ ok: true, already: true, slot_limit: limit, used: owned.size });
+      return NextResponse.json({ ok: true, already: true, slot_limit: limit, used: ownedRes.counted });
     }
     // 000936: removals that were not refunded keep holding their slot this month.
     const held = await slotsHeld(writer, orgId);
-    const usedNow = owned.size + held;
+    const usedNow = ownedRes.counted + held;
     // Re-adding a manual whose slot is held nets zero, so it is allowed when full.
     const reAddHeld = held > 0 && (await slotIsHeld(writer, orgId, manualId));
-    if (!isUnlimitedManualSlots(limit) && usedNow >= limit && !reAddHeld) {
+    // Incomplete manuals are free: they never use a slot, so the cap does not apply.
+    if (!free && !isUnlimitedManualSlots(limit) && usedNow >= limit && !reAddHeld) {
       return NextResponse.json(
         {
           error: `Company library is full (${usedNow}/${limit}). Upgrade for more slots.`,
@@ -237,7 +245,7 @@ export async function POST(req: NextRequest) {
       }));
     }
     if (error && /duplicate|unique|23505/i.test(error.message || '')) {
-      return NextResponse.json({ ok: true, already: true, slot_limit: limit, used: owned.size });
+      return NextResponse.json({ ok: true, already: true, slot_limit: limit, used: ownedRes.counted });
     }
     if (error && /schema cache|does not exist|relation/i.test(error.message || '')) {
       const um = await writer.from('user_manuals').insert({
@@ -251,14 +259,14 @@ export async function POST(req: NextRequest) {
         ok: true,
         personal: true,
         slot_limit: limit,
-        used: owned.size + 1,
+        used: free ? ownedRes.counted : ownedRes.counted + 1,
       });
     }
     if (error) {
       return NextResponse.json({ error: error.message || 'Could not add to company library' }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true, slot_limit: limit, used: reAddHeld ? usedNow : usedNow + 1 });
+    return NextResponse.json({ ok: true, slot_limit: limit, used: reAddHeld || free ? usedNow : usedNow + 1, ...(free ? { free_incomplete: true } : {}) });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Could not add manual';
     console.error('[manuals/library]', e);

@@ -1,5 +1,6 @@
 'use client';
 
+import { INCOMPLETE_FREE_BADGE, INCOMPLETE_FREE_TITLE } from '@/lib/manual-incomplete';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient, getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
@@ -985,9 +986,9 @@ export function ManualPdfViewer({
         {isIncomplete && (
           <span
             className="shrink-0 rounded-full bg-stone-600 text-white text-[10px] font-extrabold px-2 py-0.5"
-            title="This document is incomplete"
+            title={INCOMPLETE_FREE_TITLE}
           >
-            Incomplete
+            {INCOMPLETE_FREE_BADGE}
           </span>
         )}
         {languageBadge && (

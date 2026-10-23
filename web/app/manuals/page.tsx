@@ -40,6 +40,7 @@ import {
   SERVICE_MANUALS_FORBIDDEN,
 } from '@/lib/manuals-access';
 import { manualOpenErrorMessage } from '@/lib/manual-file';
+import { INCOMPLETE_FREE_BADGE, INCOMPLETE_FREE_TITLE, manualIsIncomplete } from '@/lib/manual-incomplete';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPE_VALUES,
@@ -94,6 +95,8 @@ export default function ManualsLibrary() {
   const [manuals, setManuals] = useState<any[]>([]);
   const [myLibrary, setMyLibrary] = useState<any[]>([]);
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
+  /** Owned manual ids flagged is_incomplete: free, they never use a slot. */
+  const [ownedFreeIds, setOwnedFreeIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
   const [library, setLibrary] = useState<ManualLibraryShelf>(DEFAULT_MANUAL_LIBRARY);
@@ -122,7 +125,7 @@ export default function ManualsLibrary() {
   }>(null);
   /** Drops repeat clicks while an open/add/remove for the same manual is running. */
   const inFlight = useRef(createInFlightGuard());
-  const slotsUsed = ownedIds.size + slotsHeld;
+  const slotsUsed = Math.max(0, ownedIds.size - ownedFreeIds.size) + slotsHeld;
 
   function askConfirm(opts: {
     title: string;
@@ -229,6 +232,7 @@ export default function ManualsLibrary() {
         setManuals([]);
         setMyLibrary([]);
         setOwnedIds(new Set());
+        setOwnedFreeIds(new Set());
         return;
       }
 
@@ -316,7 +320,12 @@ export default function ManualsLibrary() {
       });
 
       const visibleLib = access.service ? lib : lib.filter((m) => manualLibraryShelf(m) === 'operators');
+      const freeIds = new Set<string>();
+      for (const m of lib) {
+        if (m?.id != null && ids.has(String(m.id)) && manualIsIncomplete(m)) freeIds.add(String(m.id));
+      }
       setOwnedIds(ids);
+      setOwnedFreeIds(freeIds);
       setMyLibrary(visibleLib);
     } catch (e) {
       console.error(e);
@@ -375,7 +384,7 @@ export default function ManualsLibrary() {
       toast.error('No service company on your profile — complete onboarding first. Manuals are shared by your organization.');
       return false;
     }
-    if (!isUnlimitedManualSlots(slotLimit) && slotsUsed >= slotLimit) {
+    if (!manualIsIncomplete(m) && !isUnlimitedManualSlots(slotLimit) && slotsUsed >= slotLimit) {
       toast.error(`Library full (${slotsUsed}/${slotLimit}). Upgrade or remove a manual.`);
       return false;
     }
@@ -471,11 +480,14 @@ export default function ManualsLibrary() {
       const limit = slotLimit;
       const unlimited = isUnlimitedManualSlots(limit);
       const remaining = unlimited ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
-      if (!unlimited && remaining <= 0) {
+      const free = manualIsIncomplete(m);
+      if (!free && !unlimited && remaining <= 0) {
         toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
         return false;
       }
-      const detail = unlimited
+      const detail = free
+        ? t('Incomplete document: free, it does not use a library slot.')
+        : unlimited
         ? t('Slots used: {used} (unlimited).').replace('{used}', String(used))
         : t('Slots used: {used} of {limit} ({left} left).')
             .replace('{used}', String(used))
@@ -569,7 +581,8 @@ export default function ManualsLibrary() {
       // Shelf / Browse clicks are not AI cite reads. Do not stream a shared
       // catalog PDF until this company owns the manual — even if get-manual-url
       // would return a URL for an ai_context reader.
-      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m) })) {
+      // Incomplete manuals are free: open them directly (the server decides).
+      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m), incomplete: manualIsIncomplete(m) })) {
         const added = await confirmAddManual(m, shownTitle);
         if (!added) return;
         await openAddedManual(m, shownTitle, payload);
@@ -580,6 +593,7 @@ export default function ManualsLibrary() {
       if (
         companyLibraryOpenNeedsAdd({
           owned: true,
+          freeIncomplete: json.free_incomplete,
           requiresAdd: json.requires_add,
           suggestAdd: json.suggest_add,
           inLibrary: json.in_library,
@@ -1265,7 +1279,7 @@ export default function ManualsLibrary() {
                             ? `${shownTitle} (in library — tap to open)`
                             : `${shownTitle} (tap to add to company library)`) +
                           `\n${kindLabel}` +
-                          (showIncompleteBadge(m) ? '\nIncomplete document' : '') +
+                          (showIncompleteBadge(m) ? `\n${INCOMPLETE_FREE_BADGE}: does not use a library slot` : '') +
                           (languageBadge ? `\n${languageBadge.label}` : '') +
                           (wlHint ? `\n${wlHint}` : '')
                         }
@@ -1310,9 +1324,10 @@ export default function ManualsLibrary() {
                         {showIncompleteBadge(m) && (
                           <div
                             className="absolute -bottom-1 -left-1 z-10 rounded-full bg-stone-700 text-white text-[7px] font-extrabold px-1 py-0.5 shadow"
-                            title="This document is incomplete"
+                            title={INCOMPLETE_FREE_TITLE}
+                            data-testid="manual-incomplete-free"
                           >
-                            Incomplete
+                            {INCOMPLETE_FREE_BADGE}
                           </div>
                         )}
                         {isOwned(m) && (

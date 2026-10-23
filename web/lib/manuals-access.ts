@@ -51,13 +51,19 @@ export function mayOpenManual(
  */
 export function companyLibraryOpenNeedsAdd(opts: {
   owned: boolean;
+  /** manuals.is_incomplete: free to view, so try opening before prompting an add. */
+  incomplete?: boolean;
+  /** get-manual-url free_incomplete: served for free without a library row. */
+  freeIncomplete?: unknown;
   requiresAdd?: unknown;
   suggestAdd?: unknown;
   inLibrary?: unknown;
   error?: unknown;
 }): boolean {
-  if (!opts.owned) return true;
-  if (opts.requiresAdd === true || opts.suggestAdd === true || opts.inLibrary === false) return true;
+  if (!opts.owned) return opts.incomplete !== true;
+  if (opts.requiresAdd === true) return true;
+  if (opts.freeIncomplete === true && opts.inLibrary === false) return false;
+  if (opts.suggestAdd === true || opts.inLibrary === false) return true;
   return /not in company library|access denied/i.test(String(opts.error || ''));
 }
 
