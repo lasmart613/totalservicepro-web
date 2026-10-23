@@ -5,6 +5,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import {
   INCOMPLETE_FREE_BADGE,
+  libraryRowIsFree,
   manualIsIncomplete,
   mayViewIncompleteFree,
   pathWithinManual,
@@ -106,7 +107,7 @@ test('Android parity: incomplete manuals do not use a slot', () => {
   const html = read('app/src/main/assets/manual_library.html');
   assert.match(html, /function slotsUsed\(\)/);
   assert.match(html, /const used = slotsUsed\(\)/);
-  assert.match(html, /alreadyOwns \|\| isManualIncomplete\(manual\)/);
+  assert.match(html, /else if \(isManualIncomplete\(manual\)\)/);
   assert.match(html, /Incomplete – free/);
 });
 
@@ -114,15 +115,63 @@ test('000942 migration standards', () => {
   const dir = 'web/supabase/migrations/';
   const m = read(dir + '20261022_000942_incomplete_manuals_free.sql');
   const r = read(dir + '20261022_000942_incomplete_manuals_free_rollback.sql');
-  for (const s of [m, r]) {
+  // 000942: 4 replaced library functions + the free_at_add trigger function.
+  for (const [s, n] of [[m, 5], [r, 4]] as const) {
     assert.match(s, /^BEGIN;$/m);
     assert.match(s, /^COMMIT;$/m);
     assert.match(s, /SET LOCAL lock_timeout = '5s';/);
-    assert.equal((s.match(/^SECURITY DEFINER$/gm) || []).length, 4);
-    assert.equal((s.match(/^SET search_path = ''$/gm) || []).length, 4);
-    assert.equal((s.match(/^REVOKE ALL ON FUNCTION/gm) || []).length, 4);
+    assert.equal((s.match(/^SECURITY DEFINER$/gm) || []).length, n);
+    assert.equal((s.match(/^SET search_path = ''$/gm) || []).length, n);
+    assert.equal((s.match(/^REVOKE ALL ON FUNCTION/gm) || []).length, n);
   }
   assert.match(m, /000942 drift/);
   assert.match(r, /000942 rollback:/);
   assert.doesNotMatch(r, /v_free|is_incomplete IS TRUE/);
+});
+
+test('sticky free hold: added free stays free after incomplete -> complete', () => {
+  assert.equal(libraryRowIsFree({ free_at_add: true }, { is_incomplete: false }), true);
+  assert.equal(libraryRowIsFree({ free_at_add: false }, { is_incomplete: true }), true);
+  assert.equal(libraryRowIsFree({ free_at_add: false }, { is_incomplete: false }), false);
+  // Pre-000942: no column -> today's flag only.
+  assert.equal(libraryRowIsFree({}, { is_incomplete: false }), false);
+  assert.equal(libraryRowIsFree(null, null), false);
+  assert.equal(slotCountedManuals([{ free_at_add: true, is_incomplete: false }, { is_incomplete: false }]), 1);
+});
+
+test('shelf skips Add only when the server would serve the free view; refusals fall back', () => {
+  const owner = { orgId: 5, serviceCompany: false };
+  const m = { is_incomplete: true, doc_kind: null, storage_path: 'shared/x' };
+  // Owner-side org, doc_kind NULL: server refuses -> page prompts the (free) add.
+  assert.equal(mayViewIncompleteFree({ manual: m, ...owner, requestedPath: m.storage_path }), false);
+  assert.equal(
+    companyLibraryOpenNeedsAdd({ owned: false, incomplete: mayViewIncompleteFree({ manual: m, ...owner }) }),
+    true,
+  );
+  // Undeployed edge / denied reply after a direct open -> prompt add.
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, requiresAdd: true }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, error: 'Access denied — manual not in company library' }), true);
+});
+
+test('Android: incomplete open mirrors the server rule and falls back to Add', () => {
+  const lib = read('app/src/main/assets/manual_library.html');
+  const viewer = read('app/src/main/assets/pdf_viewer.html');
+  assert.match(lib, /function mayViewIncompleteFreeClient\(m\)/);
+  assert.match(lib, /kind === 'operator' \|\| kind === 'user'/);
+  assert.match(lib, /mayViewIncompleteFreeClient\(manual\) && await probeFreeView\(manual\)/);
+  assert.doesNotMatch(lib, /alreadyOwns \|\| isManualIncomplete\(manual\)/);
+  assert.match(lib, /function openPendingAdd\(\)/);
+  assert.match(lib, /r\.free_at_add === true/);
+  assert.match(viewer, /manual_library\.html\?add=/);
+  assert.match(viewer, /data\.requires_add === true/);
+});
+
+test('000942 keeps a sticky, trigger-set free_at_add', () => {
+  const sql = read('web/supabase/migrations/20261022_000942_incomplete_manuals_free.sql');
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS free_at_add boolean NOT NULL DEFAULT false/);
+  assert.match(sql, /BEFORE INSERT OR UPDATE ON public\.user_manuals/);
+  assert.match(sql, /NEW\.free_at_add := OLD\.free_at_add/);
+  assert.match(sql, /IF v_row\.free_at_add OR EXISTS/);
+  const rb = read('web/supabase/migrations/20261022_000942_incomplete_manuals_free_rollback.sql');
+  assert.match(rb, /DROP COLUMN IF EXISTS free_at_add/);
 });

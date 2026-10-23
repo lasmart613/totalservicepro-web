@@ -12,8 +12,13 @@ const repoRoot = join(webDir, '..');
 const assetLinksPath = join(webDir, 'public', '.well-known', 'assetlinks.json');
 
 const PACKAGE_NAME = 'com.photometrytools';
+// Upload key (sideload / internal builds).
 const FINGERPRINT =
   '51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9';
+// Google Play app signing key (#342).
+const PLAY_FINGERPRINT =
+  'EA:7C:F4:9B:49:89:52:44:33:50:CA:07:5B:18:1C:66:10:AF:B1:D0:A5:F9:12:F2:B5:55:8A:E8:CE:90:08:66';
+const FINGERPRINTS = [FINGERPRINT, PLAY_FINGERPRINT];
 
 const ASSET_LINKS = [
   {
@@ -21,7 +26,7 @@ const ASSET_LINKS = [
     target: {
       namespace: 'android_app',
       package_name: PACKAGE_NAME,
-      sha256_cert_fingerprints: [FINGERPRINT],
+      sha256_cert_fingerprints: FINGERPRINTS,
     },
   },
 ];
@@ -37,8 +42,11 @@ test('assetlinks.json is the photometrytools Digital Asset Links statement', () 
   const parsed = JSON.parse(body);
   assert.deepEqual(parsed, ASSET_LINKS);
   assert.equal(parsed[0].target.package_name, PACKAGE_NAME);
-  assert.deepEqual(parsed[0].target.sha256_cert_fingerprints, [FINGERPRINT]);
-  assert.equal(parsed[0].target.sha256_cert_fingerprints.length, 1);
+  assert.deepEqual(parsed[0].target.sha256_cert_fingerprints, FINGERPRINTS);
+  assert.equal(parsed[0].target.sha256_cert_fingerprints.length, 2);
+  for (const fp of parsed[0].target.sha256_cert_fingerprints) {
+    assert.match(fp, /^([0-9A-F]{2}:){31}[0-9A-F]{2}$/);
+  }
 });
 
 test('middleware does not touch /.well-known/assetlinks.json', () => {

@@ -242,9 +242,10 @@
 <script src="supabase.js"></script>
 <script src="service-company-gate.js"></script>
 <script>
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM';
     const supabaseClient = supabase.createClient(
         'https://yljztfajyvjzqikxdddf.supabase.co',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM'
+        SUPABASE_ANON_KEY
     );
 
     let allManuals = [];
@@ -256,6 +257,9 @@
     let currentManual = null;
     let FREE_LIMIT = 5;
     let currentUser = null;
+    let currentOrgId = null;
+    let isServiceCompany = false;
+    const EDGE_FN_URL = 'https://yljztfajyvjzqikxdddf.supabase.co/functions/v1/get-manual-url';
 
     function isDornierHolmium(hay) {
         return /\bmedilas\b/.test(hay) || /\bh[- ]?20\b/.test(hay) || /\bh[- ]?30\b/.test(hay);
@@ -263,6 +267,38 @@
     function isManualIncomplete(m) {
         const v = m && (m.is_incomplete != null ? m.is_incomplete : m.isIncomplete);
         return v === true || v === 1 || v === '1' || v === 'true' || v === 't';
+    }
+    /**
+     * Mirror of get-manual-url mayViewIncompleteFree: only then skip the Add
+     * prompt. Needs a company (org), and owner-side orgs only get operator/user
+     * docs (doc_kind). The server still decides; a refusal falls back to Add.
+     */
+    function mayViewIncompleteFreeClient(m) {
+        if (!isManualIncomplete(m)) return false;
+        if (currentOrgId == null || String(currentOrgId).trim() === '') return false;
+        if (!String(m.storage_path || '').trim()) return false;
+        if (isServiceCompany) return true;
+        const kind = String(m.doc_kind || '').trim().toLowerCase();
+        return kind === 'operator' || kind === 'user';
+    }
+    /** Ask get-manual-url (shelf open, no ai_context) whether it serves the free view. */
+    async function probeFreeView(manual) {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch(EDGE_FN_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (session?.access_token || ''),
+                    'apikey': SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({ manual_id: manual.id, storage_path: manual.storage_path })
+            });
+            const data = await res.json().catch(() => ({}));
+            return res.ok && !data.error && data.requires_add !== true && data.free_incomplete === true;
+        } catch (e) {
+            return false;
+        }
     }
     function manualRoom(m) {
         const hay = [m && m.title, m && m.brand, m && m.model, m && m.storage_path].join(' ').toLowerCase();
@@ -307,6 +343,7 @@
             return;
         }
         const access = await tspLoadServiceAccess(supabaseClient, user);
+        isServiceCompany = access.allowed === true;
         if (!access.allowed) {
             document.getElementById('mainContent').innerHTML =
                 `<div class="empty-state"><h3>Service Company only</h3><p>Service manuals are for service companies.</p></div>`;
@@ -317,6 +354,7 @@
             await loadManuals();
             await loadUserManuals();
             renderContent();
+            openPendingAdd();
         } catch(err) {
             console.error(err);
             document.getElementById('mainContent').innerHTML =
@@ -362,8 +400,9 @@
         currentUser = user;
 
         const [manualsRes, profileRes] = await Promise.all([
-            supabaseClient.from('user_manuals').select('manual_id, manuals(is_incomplete)').eq('user_id', user.id),
-            supabaseClient.from('user_profiles').select('manual_slots').eq('id', user.id).single()
+            // Row '*' includes free_at_add (sticky free add) once 000942 is applied.
+            supabaseClient.from('user_manuals').select('*, manuals(is_incomplete)').eq('user_id', user.id),
+            supabaseClient.from('user_profiles').select('manual_slots, organization_id').eq('id', user.id).single()
         ]);
 
         let rows = manualsRes.data || [];
@@ -375,9 +414,10 @@
         userManualIds = new Set(rows.map(r => r.manual_id));
         freeManualIds = new Set(rows.filter(r => {
             const m = Array.isArray(r.manuals) ? r.manuals[0] : r.manuals;
-            return m && m.is_incomplete === true;
+            return r.free_at_add === true || (m && m.is_incomplete === true);
         }).map(r => r.manual_id));
         if (profileRes.data?.manual_slots) FREE_LIMIT = profileRes.data.manual_slots;
+        currentOrgId = profileRes.data?.organization_id ?? null;
     }
 
     function updateAuthUI() {
@@ -496,9 +536,17 @@
 
         const alreadyOwns = userManualIds.has(manual.id);
 
-        // Incomplete manuals are free: open without adding (get-manual-url serves them).
-        if (alreadyOwns || isManualIncomplete(manual)) {
+        if (alreadyOwns) {
             await openManual(manual);
+        } else if (isManualIncomplete(manual)) {
+            // Free: open without adding only when the server serves the free view;
+            // otherwise (or on requires_add / denied) show the free Add prompt.
+            if (mayViewIncompleteFreeClient(manual) && await probeFreeView(manual)) {
+                await openManual(manual);
+            } else {
+                currentManual = manual;
+                showAddModal(manual);
+            }
         } else {
             if (currentTab === 'browse') {
                 currentManual = manual;
@@ -507,6 +555,17 @@
                 await openManual(manual);
             }
         }
+    }
+
+    /** pdf_viewer sends ?add=<id> back here when the free view was refused. */
+    function openPendingAdd() {
+        const id = new URLSearchParams(window.location.search).get('add');
+        if (!id) return;
+        try { history.replaceState(null, '', 'manual_library.html'); } catch (e) {}
+        const manual = allManuals.find(m => String(m.id) === String(id));
+        if (!manual || userManualIds.has(manual.id)) return;
+        currentManual = manual;
+        showAddModal(manual);
     }
 
     function slotsUsed() {
@@ -585,7 +644,8 @@
             storage_path: manual.storage_path || '',
             title: catalogTitle(manual),
             manual_id: manual.id,
-            incomplete: isManualIncomplete(manual) ? '1' : '0'
+            incomplete: isManualIncomplete(manual) ? '1' : '0',
+            owned: userManualIds.has(manual.id) ? '1' : '0'
         });
 
         window.location.href = `pdf_viewer.html?${params.toString()}`;
