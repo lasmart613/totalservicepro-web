@@ -55,10 +55,14 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   const client = readFileSync(join(here, 'supabase/client.ts'), 'utf8');
   assert.match(client, /autoRefreshToken:\s*!isTspAndroidWebView\(\)/);
   assert.match(client, /androidSessionIsFresh/);
-  assert.match(shell, /tsp-unlock:/);
   assert.match(shell, /removeAllCookies\(/);
   assert.match(shell, /loadDataWithBaseURL/);
   assert.match(shell, /retainDraftsForUser/);
+  assert.match(shell, /clearHistory\(/);
+  assert.match(shell, /BACKGROUND_LOCK_MS/);
+  assert.match(shell, /getOrigins\(/);
+  assert.match(keystore, /session_envelope/);
+  assert.doesNotMatch(shell, /tsp-unlock:/);
   assert.doesNotMatch(shell, /resealBiometric/);
   assert.match(bridge, /androidSessionIsFresh/);
   assert.match(bridge, /TOKEN_REFRESHED/);

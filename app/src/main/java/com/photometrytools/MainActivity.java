@@ -180,6 +180,13 @@ public class MainActivity extends AppCompatActivity {
     private androidx.webkit.ScriptHandler sessionInjectScript;
     private int refreshFailures = 0;
     private String pendingAfterSeedUrl;
+    private boolean clearHistoryOnNextFinish;
+    private boolean unlockInProgress;
+    private boolean reauthOnResume;
+    private long backgroundElapsed;
+    /** Drop the in-memory data key after this long in the background. */
+    private static final long BACKGROUND_LOCK_MS = 5L * 60L * 1000L;
+    private SessionEnvelope.Lock sessionLock = SessionEnvelope.Lock.locked(null);
     private final android.os.Handler sessionHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable sessionRefreshTask = new Runnable() {
         @Override
@@ -193,6 +200,13 @@ public class MainActivity extends AppCompatActivity {
         public void run() {
             if (isFinishing() || isDestroyed() || webView != null) return;
             beginUnlock();
+        }
+    };
+    private final Runnable lockForBackgroundTask = new Runnable() {
+        @Override
+        public void run() {
+            reauthOnResume = true;
+            lockForBackground();
         }
     };
     private BiometricPrompt biometricPrompt;
@@ -234,21 +248,6 @@ public class MainActivity extends AppCompatActivity {
         if (closedForExternalAuth) {
             finish();
             return;
-        }
-
-        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
-        sessionStore = new KeystoreSessionStore(prefs);
-        String legacy = prefs.getString(PREFS_SESSION_KEY, null);
-        storedSession = sessionStore.readPlain();
-        if ((storedSession == null || storedSession.isEmpty()) && legacy != null && !legacy.isEmpty()) {
-            storedSession = legacy;
-            sessionStore.writePlain(legacy);
-            prefs.edit().remove(PREFS_SESSION_KEY).apply();
-        }
-        biometricEnabled = prefs.getBoolean(PREFS_BIOMETRIC_KEY, false);
-        if (biometricEnabled && !canAuthenticateWithBiometrics()) {
-            dropBiometricLock();
-            if (storedSession == null || storedSession.isEmpty()) sessionHeld = true;
         }
 
         fileChooserLauncher = registerForActivityResult(
@@ -336,11 +335,27 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        boolean gate = biometricEnabled && canAuthenticateWithBiometrics() && sessionStore.hasBiometric();
-        if (gate) {
-            pendingBiometricGate = true;
+        android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        sessionStore = new KeystoreSessionStore(prefs);
+        String legacy = prefs.getString(PREFS_SESSION_KEY, null);
+        biometricEnabled = prefs.getBoolean(PREFS_BIOMETRIC_KEY, false);
+        if (biometricEnabled) {
             storedSession = null;
+            sessionHeld = true;
+            sessionLock = SessionEnvelope.Lock.locked(sessionStore.readEnvelope());
+            if (biometricPermanentlyUnavailable() || !sessionStore.hasBiometric()) {
+                wipeLockedSession();
+            } else {
+                pendingBiometricGate = true;
+            }
         } else {
+            storedSession = sessionStore.readPlain();
+            if ((storedSession == null || storedSession.isEmpty()) && legacy != null && !legacy.isEmpty()) {
+                storedSession = legacy;
+                sessionStore.writePlain(legacy);
+                prefs.edit().remove(PREFS_SESSION_KEY).apply();
+            }
+            sessionLock = SessionEnvelope.Lock.locked(null);
             refreshSessionThenLoad();
         }
     }
@@ -348,22 +363,32 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (biometricEnabled && !canAuthenticateWithBiometrics()) {
-            dropBiometricLock();
-            if (storedSession == null || storedSession.isEmpty()) {
-                loadWithoutSession();
-                return;
-            }
+        sessionHandler.removeCallbacks(lockForBackgroundTask);
+        boolean timedOut = biometricEnabled && backgroundElapsed > 0L
+                && SystemClock.elapsedRealtime() - backgroundElapsed >= BACKGROUND_LOCK_MS;
+        backgroundElapsed = 0L;
+        if (timedOut) {
+            reauthOnResume = true;
+            lockForBackground();
+        }
+        if (biometricEnabled && biometricPermanentlyUnavailable()) {
+            wipeLockedSession();
+            return;
         }
         if (pendingBiometricGate && webView == null) {
             pendingBiometricGate = false;
-            if (!biometricEnabled || !canAuthenticateWithBiometrics()
-                    || sessionStore == null || !sessionStore.hasBiometric()) {
-                if (storedSession == null || storedSession.isEmpty()) loadWithoutSession();
+            if (!biometricEnabled || sessionStore == null || !sessionStore.hasBiometric()) {
+                if (biometricEnabled) wipeLockedSession();
+                else if (storedSession == null || storedSession.isEmpty()) loadWithoutSession();
                 else refreshSessionThenLoad();
                 return;
             }
             sessionHandler.post(biometricGateTask);
+            return;
+        }
+        if (reauthOnResume) {
+            reauthOnResume = false;
+            if (biometricEnabled && !unlockInProgress) beginUnlock();
             return;
         }
         if (webView == null || sessionHeld) return;
@@ -394,6 +419,10 @@ public class MainActivity extends AppCompatActivity {
                     .apply();
         }
         CookieManager.getInstance().flush();
+        backgroundElapsed = SystemClock.elapsedRealtime();
+        if (biometricEnabled && !unlockInProgress && sessionStore != null && sessionStore.hasBiometric()) {
+            sessionHandler.postDelayed(lockForBackgroundTask, BACKGROUND_LOCK_MS);
+        }
     }
 
     private void updateBottomNavVisibilityAndSelection(String url) {
@@ -450,6 +479,10 @@ public class MainActivity extends AppCompatActivity {
             refreshFailures = 0;
             runOnUiThread(() -> {
                 if (!nextUser.isEmpty()) retainDraftsForUser(nextUser);
+                if (biometricEnabled && (sessionLock == null || sessionLock.isLocked())) {
+                    sealUnlockedSession(storedSession, true);
+                    return;
+                }
                 persistStoredSession();
                 removeSessionLockScript();
                 if (webView != null) installSessionInjectScript(webView);
@@ -465,8 +498,13 @@ public class MainActivity extends AppCompatActivity {
             sessionHeld = false;
             refreshFailures = 0;
             runOnUiThread(() -> {
+                storedSession = null;
+                biometricEnabled = false;
+                if (sessionLock != null) sessionLock.invalidate();
+                sessionLock = SessionEnvelope.Lock.locked(null);
                 if (sessionStore != null) sessionStore.clearAll();
                 sessionHandler.removeCallbacks(sessionRefreshTask);
+                sessionHandler.removeCallbacks(lockForBackgroundTask);
                 clearCardDrafts();
                 getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                         .edit()
@@ -796,59 +834,72 @@ public class MainActivity extends AppCompatActivity {
             loadWithoutSession();
             return;
         }
+        if (unlockInProgress) return;
+        if (biometricPermanentlyUnavailable()) {
+            wipeLockedSession();
+            return;
+        }
         KeystoreSessionStore.Prepared prepared = sessionStore.prepareDecrypt();
-        if (prepared == null) {
-            if (biometricEnabled && !sessionStore.hasBiometric()) {
-                biometricEnabled = false;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                        .edit()
-                        .putBoolean(PREFS_BIOMETRIC_KEY, false)
-                        .apply();
-            }
-            String plain = sessionStore.readPlain();
-            if (plain != null && !plain.isEmpty()) {
-                storedSession = plain;
-                sessionHeld = false;
-                refreshSessionThenLoad();
-            } else {
-                loadWithoutSession();
-            }
+        if (prepared == null || prepared.invalidated) {
+            wipeLockedSession();
             return;
         }
         if (!prepared.needsAuth) {
             finishUnlock(prepared.cipher);
             return;
         }
-        promptForCipher(prepared.cipher, this::finishUnlock, this::loadWithoutSession);
+        unlockInProgress = true;
+        promptForCipher(prepared.cipher, new CipherReady() {
+            @Override
+            public void ready(Cipher cipher) {
+                unlockInProgress = false;
+                finishUnlock(cipher);
+            }
+        }, new Runnable() {
+            @Override
+            public void run() {
+                unlockInProgress = false;
+                loadWithoutSession();
+            }
+        });
     }
 
     private void finishUnlock(Cipher cipher) {
-        String opened = sessionStore == null ? null : sessionStore.finishDecrypt(cipher);
-        if (opened == null || opened.isEmpty()) {
-            loadWithoutSession();
-            return;
-        }
-        String plain = sessionStore.readPlain();
-        if (plain == null || plain.isEmpty()) {
-            if (opened.contains("access_token")) {
-                storedSession = opened;
-                sessionStore.writePlain(opened);
-            } else {
-                loadWithoutSession();
+        byte[] opened = sessionStore == null ? null : sessionStore.finishDecrypt(cipher);
+        javax.crypto.SecretKey dataKey = SessionEnvelope.unpackDataKey(opened);
+        if (dataKey != null) {
+            sessionLock = SessionEnvelope.Lock.restore(sessionStore.readEnvelope(), dataKey);
+            storedSession = sessionLock.session();
+            if (storedSession == null) {
+                wipeLockedSession();
                 return;
             }
-        } else {
-            storedSession = plain;
+            sessionStore.clearPlain();
+            sessionHeld = false;
+            removeSessionLockScript();
+            refreshSessionThenLoad();
+            return;
         }
-        sessionHeld = false;
-        removeSessionLockScript();
-        refreshSessionThenLoad();
+        String legacy = null;
+        if (opened != null && opened.length > 0) {
+            String text = new String(opened, java.nio.charset.StandardCharsets.UTF_8);
+            if (text.contains("access_token")) legacy = text;
+        }
+        if ((legacy == null || legacy.isEmpty()) && sessionStore != null) legacy = sessionStore.readPlain();
+        if (legacy == null || legacy.isEmpty()) {
+            wipeLockedSession();
+            return;
+        }
+        storedSession = legacy;
+        sealUnlockedSession(legacy, false);
     }
 
     private void loadWithoutSession() {
         sessionHeld = true;
         storedSession = null;
+        if (sessionLock != null) sessionLock.dropDataKey();
         sessionHandler.removeCallbacks(sessionRefreshTask);
+        clearCardDrafts();
         removeSessionInjectScript();
         if (webView == null) {
             loadApp();
@@ -857,22 +908,136 @@ public class MainActivity extends AppCompatActivity {
         navigateAfterWipe(chooseStartUrl());
     }
 
-    /** The refresh token always goes under the non-auth key. Rotation does not prompt. */
+    /** The refresh token stays under the data key while biometrics are on. */
     private void persistStoredSession() {
         if (sessionStore == null) return;
         if (storedSession == null || storedSession.isEmpty()) {
             sessionStore.clearAll();
+            if (sessionLock != null) sessionLock.invalidate();
+            sessionLock = SessionEnvelope.Lock.locked(null);
+        } else if (biometricEnabled) {
+            if (sessionLock == null || sessionLock.isLocked()) return;
+            if (sessionLock.rotate(storedSession) == null) return;
+            sessionStore.writeEnvelope(sessionLock.ciphertext());
         } else {
             sessionStore.writePlain(storedSession);
-            if (!biometricEnabled) sessionStore.clearBiometric();
+            sessionStore.clearBiometric();
+            sessionStore.clearEnvelope();
         }
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE).edit().remove(PREFS_SESSION_KEY).apply();
     }
 
-    private String newUnlockSecret() {
-        byte[] bytes = new byte[32];
-        new SecureRandom().nextBytes(bytes);
-        return "tsp-unlock:" + Base64.encodeToString(bytes, Base64.NO_WRAP);
+    /**
+     * Wrap a new data key with the biometric cipher and store the session only
+     * as envelope ciphertext. {@code passwordSignIn} keeps the new token under
+     * the non-auth key when the prompt is cancelled, and turns the lock off.
+     */
+    private void sealUnlockedSession(final String json, final boolean passwordSignIn) {
+        if (json == null || json.isEmpty() || sessionStore == null) {
+            publishBiometricState();
+            return;
+        }
+        final javax.crypto.SecretKey dataKey;
+        final byte[] packed;
+        try {
+            dataKey = SessionEnvelope.newDataKey();
+            packed = SessionEnvelope.packDataKey(dataKey);
+        } catch (java.security.GeneralSecurityException e) {
+            if (passwordSignIn) storeWithoutBiometric(json);
+            else if (biometricEnabled) wipeLockedSession();
+            else publishBiometricState();
+            return;
+        }
+        KeystoreSessionStore.Prepared prepared = sessionStore.prepareEncrypt();
+        if (prepared == null || prepared.invalidated) {
+            if (passwordSignIn) storeWithoutBiometric(json);
+            else if (biometricEnabled) wipeLockedSession();
+            else publishBiometricState();
+            return;
+        }
+        final CipherReady seal = new CipherReady() {
+            @Override
+            public void ready(Cipher cipher) {
+                if (sessionStore == null || !sessionStore.finishEncrypt(cipher, packed)) {
+                    if (passwordSignIn) storeWithoutBiometric(json);
+                    else if (biometricEnabled) wipeLockedSession();
+                    else publishBiometricState();
+                    return;
+                }
+                String latest = storedSession != null && !storedSession.isEmpty() ? storedSession : json;
+                try {
+                    byte[] body = SessionEnvelope.seal(dataKey, latest);
+                    sessionLock = SessionEnvelope.Lock.restore(body, dataKey);
+                    storedSession = sessionLock.session();
+                } catch (java.security.GeneralSecurityException e) {
+                    wipeLockedSession();
+                    return;
+                }
+                if (storedSession == null) {
+                    wipeLockedSession();
+                    return;
+                }
+                sessionStore.writeEnvelope(sessionLock.ciphertext());
+                biometricEnabled = true;
+                sessionHeld = false;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putBoolean(PREFS_BIOMETRIC_KEY, true)
+                        .remove(PREFS_SESSION_KEY)
+                        .apply();
+                removeSessionLockScript();
+                if (webView != null) installSessionInjectScript(webView);
+                publishBiometricState();
+                refreshSessionThenLoad();
+            }
+        };
+        final Runnable onCancel = new Runnable() {
+            @Override
+            public void run() {
+                if (passwordSignIn) storeWithoutBiometric(json);
+                else if (!biometricEnabled) publishBiometricState();
+                else loadWithoutSession();
+            }
+        };
+        if (!prepared.needsAuth) {
+            seal.ready(prepared.cipher);
+            return;
+        }
+        unlockInProgress = true;
+        promptForCipher(prepared.cipher, new CipherReady() {
+            @Override
+            public void ready(Cipher cipher) {
+                unlockInProgress = false;
+                seal.ready(cipher);
+            }
+        }, new Runnable() {
+            @Override
+            public void run() {
+                unlockInProgress = false;
+                onCancel.run();
+            }
+        });
+    }
+
+    private void storeWithoutBiometric(String json) {
+        biometricEnabled = false;
+        storedSession = json;
+        sessionHeld = false;
+        if (sessionLock != null) sessionLock.invalidate();
+        sessionLock = SessionEnvelope.Lock.locked(null);
+        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                .edit()
+                .putBoolean(PREFS_BIOMETRIC_KEY, false)
+                .remove(PREFS_SESSION_KEY)
+                .apply();
+        if (sessionStore != null) {
+            sessionStore.clearBiometric();
+            sessionStore.clearEnvelope();
+            sessionStore.writePlain(json);
+        }
+        removeSessionLockScript();
+        if (webView != null) installSessionInjectScript(webView);
+        publishBiometricState();
     }
 
     private void applyBiometricChoice(boolean enabled) {
@@ -886,31 +1051,7 @@ public class MainActivity extends AppCompatActivity {
                 publishBiometricState();
                 return;
             }
-            sessionStore.writePlain(storedSession);
-            final String secret = newUnlockSecret();
-            KeystoreSessionStore.Prepared prepared = sessionStore.prepareEncrypt();
-            if (prepared == null) {
-                Toast.makeText(this, "Set up fingerprint on this phone to use biometric sign-in.", Toast.LENGTH_LONG).show();
-                publishBiometricState();
-                return;
-            }
-            CipherReady seal = cipher -> {
-                if (sessionStore == null || !sessionStore.finishEncrypt(cipher, secret)) {
-                    publishBiometricState();
-                    return;
-                }
-                biometricEnabled = true;
-                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                        .edit()
-                        .putBoolean(PREFS_BIOMETRIC_KEY, true)
-                        .apply();
-                publishBiometricState();
-            };
-            if (!prepared.needsAuth) {
-                seal.ready(prepared.cipher);
-                return;
-            }
-            promptForCipher(prepared.cipher, seal, this::publishBiometricState);
+            sealUnlockedSession(storedSession, false);
             return;
         }
         biometricEnabled = false;
@@ -919,22 +1060,63 @@ public class MainActivity extends AppCompatActivity {
                 .putBoolean(PREFS_BIOMETRIC_KEY, false)
                 .apply();
         if (storedSession != null && sessionStore != null) sessionStore.writePlain(storedSession);
-        if (sessionStore != null) sessionStore.clearBiometric();
+        if (sessionStore != null) {
+            sessionStore.clearBiometric();
+            sessionStore.clearEnvelope();
+        }
+        if (sessionLock != null) sessionLock.dropDataKey();
+        sessionLock = SessionEnvelope.Lock.locked(null);
         publishBiometricState();
     }
 
-    private void dropBiometricLock() {
+    private void lockForBackground() {
+        if (!biometricEnabled) return;
+        if (sessionLock != null) sessionLock.dropDataKey();
+        storedSession = null;
+        sessionHeld = true;
+        sessionHandler.removeCallbacks(sessionRefreshTask);
+        if (webView != null) {
+            webView.evaluateJavascript("try{localStorage.removeItem('tsp-auth-token');}catch(e){}", null);
+        }
+    }
+
+    /** Fingerprints or the screen lock are gone. The encrypted session cannot be opened. */
+    private boolean biometricPermanentlyUnavailable() {
+        int status = BiometricManager.from(this).canAuthenticate(biometricAuthenticators());
+        return status == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED
+                || status == BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE
+                || status == BiometricManager.BIOMETRIC_ERROR_SECURITY_UPDATE_REQUIRED;
+    }
+
+    private void wipeLockedSession() {
+        storedSession = null;
+        sessionHeld = true;
         biometricEnabled = false;
+        unlockInProgress = false;
+        reauthOnResume = false;
         pendingBiometricGate = false;
+        if (sessionLock != null) sessionLock.invalidate();
+        sessionLock = SessionEnvelope.Lock.locked(null);
+        refreshFailures = 0;
+        sessionHandler.removeCallbacks(sessionRefreshTask);
         sessionHandler.removeCallbacks(biometricGateTask);
+        sessionHandler.removeCallbacks(lockForBackgroundTask);
+        if (sessionStore != null) sessionStore.clearAll();
+        clearCardDrafts();
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
                 .edit()
+                .remove(PREFS_SESSION_KEY)
                 .putBoolean(PREFS_BIOMETRIC_KEY, false)
                 .apply();
-        if (sessionStore != null) {
-            if (storedSession == null || storedSession.isEmpty()) storedSession = sessionStore.readPlain();
-            sessionStore.clearBiometric();
+        removeSessionLockScript();
+        removeSessionInjectScript();
+        publishBiometricState();
+        if (webView == null) {
+            if (pendingLaunchUrl == null) pendingLaunchUrl = PRODUCTION_ORIGIN + "/login";
+            loadApp();
+            return;
         }
+        navigateAfterWipe(PRODUCTION_ORIGIN + "/login");
     }
 
     private void maybeOfferBiometric(String previousUser) {
@@ -1024,8 +1206,12 @@ public class MainActivity extends AppCompatActivity {
         biometricEnabled = false;
         refreshFailures = 0;
         pendingBiometricGate = false;
+        reauthOnResume = false;
+        if (sessionLock != null) sessionLock.invalidate();
+        sessionLock = SessionEnvelope.Lock.locked(null);
         sessionHandler.removeCallbacks(sessionRefreshTask);
         sessionHandler.removeCallbacks(biometricGateTask);
+        sessionHandler.removeCallbacks(lockForBackgroundTask);
         if (sessionStore != null) sessionStore.clearAll();
         clearCardDrafts();
         getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
@@ -1075,37 +1261,77 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Cookie removal finishes before {@code after}. A loaded page also awaits
-     * the localStorage remove callback. {@code deleteAllData} has no callback,
-     * so it is used only when the next page must not keep a session. A fresh
-     * seed is written after this returns, and a full wipe would race that write.
+     * Cookie removal and, when requested, the WebStorage wipe both finish
+     * before {@code after}. {@code deleteAllData} reports completion through
+     * the {@code getOrigins} callback posted behind it. The fallback timer
+     * waits for that callback instead of loading over an in-flight wipe.
+     * A fresh seed is written after this returns, so a full wipe is used only
+     * when the next page must not keep a session.
      */
     private void wipeWebSessionThen(boolean deleteAll, Runnable after) {
-        final Runnable next = after == null ? () -> { } : after;
+        final Runnable next = after == null ? new Runnable() {
+            @Override
+            public void run() { }
+        } : after;
         final boolean[] started = new boolean[]{false};
+        final boolean[] storageDone = new boolean[]{!deleteAll};
+        final Runnable[] fallback = new Runnable[1];
         final Runnable once = new Runnable() {
             @Override
             public void run() {
                 if (started[0]) return;
+                if (!storageDone[0]) return;
                 started[0] = true;
-                sessionHandler.removeCallbacks(this);
+                if (fallback[0] != null) sessionHandler.removeCallbacks(fallback[0]);
                 if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) next.run();
                 else runOnUiThread(next);
             }
         };
-        sessionHandler.postDelayed(once, 2000);
-        if (deleteAll) {
-            try {
-                WebStorage.getInstance().deleteAllData();
-            } catch (RuntimeException e) {
-                Log.w(TAG, "Web storage wipe failed", e);
+        fallback[0] = new Runnable() {
+            private int waits = 0;
+
+            @Override
+            public void run() {
+                if (started[0]) return;
+                if (!storageDone[0] && waits < 5) {
+                    waits++;
+                    sessionHandler.postDelayed(this, 2000);
+                    return;
+                }
+                storageDone[0] = true;
+                once.run();
             }
-        }
-        final int[] pending = new int[]{0};
-        Runnable step = () -> {
-            pending[0]--;
-            if (pending[0] <= 0) once.run();
         };
+        sessionHandler.postDelayed(fallback[0], 2000);
+        final int[] pending = new int[]{0};
+        final Runnable step = new Runnable() {
+            @Override
+            public void run() {
+                sessionHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        pending[0]--;
+                        if (pending[0] <= 0) once.run();
+                    }
+                });
+            }
+        };
+        if (deleteAll) {
+            pending[0]++;
+            deleteAllDataThen(new Runnable() {
+                @Override
+                public void run() {
+                    sessionHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            storageDone[0] = true;
+                            pending[0]--;
+                            if (pending[0] <= 0) once.run();
+                        }
+                    });
+                }
+            });
+        }
         pending[0]++;
         if (webView != null && webView.getUrl() != null) {
             webView.evaluateJavascript(
@@ -1127,6 +1353,27 @@ public class MainActivity extends AppCompatActivity {
         } catch (RuntimeException e) {
             Log.w(TAG, "Cookie wipe failed", e);
             step.run();
+        }
+    }
+
+    /** {@code getOrigins} is queued after {@code deleteAllData}, so it runs when the wipe has finished. */
+    private void deleteAllDataThen(final Runnable done) {
+        final Runnable finish = done == null ? new Runnable() {
+            @Override
+            public void run() { }
+        } : done;
+        try {
+            final WebStorage storage = WebStorage.getInstance();
+            storage.deleteAllData();
+            storage.getOrigins(new ValueCallback<java.util.Map>() {
+                @Override
+                public void onReceiveValue(java.util.Map value) {
+                    finish.run();
+                }
+            });
+        } catch (RuntimeException e) {
+            Log.w(TAG, "Web storage wipe failed", e);
+            finish.run();
         }
     }
 
@@ -1414,8 +1661,16 @@ public class MainActivity extends AppCompatActivity {
                 if (pendingAfterSeedUrl != null && view == webView) {
                     String next = pendingAfterSeedUrl;
                     pendingAfterSeedUrl = null;
+                    clearHistoryOnNextFinish = true;
                     view.loadUrl(next);
                     return;
+                }
+                if (clearHistoryOnNextFinish && view == webView) {
+                    String seeded = view.getUrl();
+                    if (seeded == null || url == null || url.equals(seeded)) {
+                        clearHistoryOnNextFinish = false;
+                        view.clearHistory();
+                    }
                 }
                 String main = view.getUrl();
                 if (url != null && main != null && !url.equals(main)) return;
@@ -3276,6 +3531,7 @@ public class MainActivity extends AppCompatActivity {
         }
         sessionHandler.removeCallbacks(sessionRefreshTask);
         sessionHandler.removeCallbacks(biometricGateTask);
+        sessionHandler.removeCallbacks(lockForBackgroundTask);
         stopAnswer(false);
         if (speechRecognizer != null) {
             try { speechRecognizer.destroy(); } catch (Exception ignored) {}
