@@ -2,6 +2,8 @@ package com.photometrytools;
 
 import org.json.JSONObject;
 
+import java.util.Locale;
+
 /**
  * Supabase session JSON used by the Android shell.
  * Access tokens are short-lived. The refresh token is what keeps a sign-in
@@ -90,9 +92,18 @@ public final class SessionTokens {
         return delay > day ? day : delay;
     }
 
-    /** 400/401 from the refresh endpoint means this refresh token must not be retried. */
+    /**
+     * A refresh token is revoked only for invalid_grant / refresh_token_not_found.
+     * Other 400s and 401s are not a sign-out.
+     */
     public static boolean isRevokedRefresh(int status, String body) {
-        return status == 400 || status == 401;
+        if (status != 400 && status != 401) return false;
+        if (body == null || body.isEmpty()) return false;
+        String lower = body.toLowerCase(Locale.US);
+        return lower.contains("invalid_grant")
+                || lower.contains("refresh_token_not_found")
+                || lower.contains("refresh token not found")
+                || lower.contains("invalid refresh token");
     }
 
     /**

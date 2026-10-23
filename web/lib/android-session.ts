@@ -18,6 +18,41 @@ export function isTspAndroidWebView(
   return TSP_ANDROID_UA_RE.test(String(userAgent || ''));
 }
 
+/** Same lead the native shell uses before it refreshes. GoTrue's own margin is shorter. */
+export const ANDROID_REFRESH_LEAD_MS = 120_000;
+
+function expiryMillis(value: unknown): number {
+  const n = typeof value === 'number' ? value : Number(String(value ?? '').trim());
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return n > 10_000_000_000 ? n : n * 1000;
+}
+
+function jwtExpiryMillis(accessToken: string): number {
+  const part = String(accessToken || '').split('.')[1];
+  if (!part) return 0;
+  try {
+    const padded = part.replace(/-/g, '+').replace(/_/g, '/');
+    const json = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+    const payload = JSON.parse(json) as { exp?: unknown };
+    return expiryMillis(payload.exp);
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * True when the access token is outside the native refresh lead.
+ * An expired or near-expiry session must not be handed to supabase-js:
+ * setSession and getSession refresh it even when autoRefreshToken is off.
+ */
+export function androidSessionIsFresh(raw: unknown, nowMs = Date.now()): boolean {
+  const tokens = normalizeAndroidSession(raw);
+  if (!tokens?.access_token) return false;
+  const exp = expiryMillis(tokens.expires_at) || jwtExpiryMillis(tokens.access_token);
+  if (exp <= 0) return false;
+  return exp - nowMs > ANDROID_REFRESH_LEAD_MS;
+}
+
 export type AndroidSessionTokens = {
   access_token: string;
   refresh_token: string;

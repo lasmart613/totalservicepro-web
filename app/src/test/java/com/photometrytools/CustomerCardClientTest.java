@@ -130,4 +130,26 @@ public class CustomerCardClientTest {
         assertTrue(sawBare);
         assertTrue(sawMine);
     }
+
+    @Test
+    public void signInDropsUntaggedAndOtherUsersDrafts() {
+        BusinessCardFields mineFields = new BusinessCardFields();
+        mineFields.company = "Acme";
+        CustomerCardDrafts.Draft mine = CustomerCardDrafts.newDraft("create", null, mineFields);
+        mine.userId = "user-1";
+        BusinessCardFields otherFields = new BusinessCardFields();
+        otherFields.company = "Other";
+        CustomerCardDrafts.Draft other = CustomerCardDrafts.newDraft("create", null, otherFields);
+        other.userId = "user-2";
+        BusinessCardFields bareFields = new BusinessCardFields();
+        bareFields.company = "Bare";
+        CustomerCardDrafts.Draft bare = CustomerCardDrafts.newDraft("create", null, bareFields);
+        String store = CustomerCardDrafts.upsert("[]", mine);
+        store = CustomerCardDrafts.upsert(store, other);
+        store = CustomerCardDrafts.upsert(store, bare);
+        String kept = CustomerCardDrafts.keepForUser(store, "user-1");
+        assertEquals(1, CustomerCardDrafts.all(kept).size());
+        assertEquals("user-1", CustomerCardDrafts.all(kept).get(0).userId);
+        assertEquals("Acme", CustomerCardDrafts.all(kept).get(0).fields.company);
+    }
 }

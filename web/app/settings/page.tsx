@@ -312,7 +312,7 @@ export default function Settings() {
           {androidApp && (
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="font-semibold">{t('Fingerprint unlock')}</div>
+                <div className="font-semibold">{t('Fingerprint')}</div>
                 <div className="text-xs text-[var(--text3)] mt-1">
                   {bioAvailable
                     ? t('Ask for fingerprint before restoring this sign-in. Turning it off keeps you signed in without that prompt.')

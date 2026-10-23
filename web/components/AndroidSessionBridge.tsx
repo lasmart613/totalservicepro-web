@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { normalizeAndroidSession, persistableAndroidSession } from '@/lib/android-session';
+import { androidSessionIsFresh, normalizeAndroidSession, persistableAndroidSession } from '@/lib/android-session';
 
 type AndroidBridge = {
   saveSession?: (json: string) => void;
@@ -69,7 +69,7 @@ async function applyTokens(
   raw: unknown
 ): Promise<boolean> {
   const tokens = normalizeAndroidSession(raw);
-  if (!tokens?.access_token) return false;
+  if (!tokens?.access_token || !androidSessionIsFresh(raw)) return false;
   try {
     localStorage.setItem('tsp-auth-token', persistableAndroidSession(tokens));
   } catch {

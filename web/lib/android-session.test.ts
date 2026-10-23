@@ -8,6 +8,7 @@ import {
   ANDROID_AUTH_SCHEME,
   buildAndroidHandoff,
   googleOAuthRedirectTo,
+  androidSessionIsFresh,
   isTspAndroidWebView,
   normalizeAndroidSession,
   persistableAndroidSession,
@@ -53,11 +54,33 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   assert.match(keystore, /setUserAuthenticationParameters\(0/);
   const client = readFileSync(join(here, 'supabase/client.ts'), 'utf8');
   assert.match(client, /autoRefreshToken:\s*!isTspAndroidWebView\(\)/);
+  assert.match(client, /androidSessionIsFresh/);
+  assert.match(shell, /tsp-unlock:/);
+  assert.match(shell, /removeAllCookies\(/);
+  assert.match(shell, /loadDataWithBaseURL/);
+  assert.match(shell, /retainDraftsForUser/);
+  assert.doesNotMatch(shell, /resealBiometric/);
+  assert.match(bridge, /androidSessionIsFresh/);
   assert.match(bridge, /TOKEN_REFRESHED/);
   assert.match(bridge, /INITIAL_SESSION/);
   assert.match(bridge, /if \(raw\) return applyTokens/);
   const providers = readFileSync(join(here, '../components/providers.tsx'), 'utf8');
   assert.match(providers, /AndroidSessionBridge/);
+});
+
+test('an expired Android session is not fresh enough to seed', () => {
+  const now = 1_700_000_000_000;
+  const fresh = androidSessionIsFresh(
+    { access_token: 'a', refresh_token: 'r', expires_at: now / 1000 + 3600 },
+    now
+  );
+  const expired = androidSessionIsFresh(
+    { access_token: 'a', refresh_token: 'r', expires_at: now / 1000 + 30 },
+    now
+  );
+  assert.equal(fresh, true);
+  assert.equal(expired, false);
+  assert.equal(androidSessionIsFresh({ access_token: 'a', refresh_token: 'r' }, now), false);
 });
 
 test('Android session blobs normalize to access/refresh tokens', () => {

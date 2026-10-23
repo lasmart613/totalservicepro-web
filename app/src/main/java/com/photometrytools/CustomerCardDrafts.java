@@ -90,6 +90,16 @@ public final class CustomerCardDrafts {
         return write(next);
     }
 
+    /** Drops untagged drafts and drafts saved for a different user. */
+    public static String keepForUser(String json, String userId) {
+        if (userId == null || userId.isEmpty()) return "[]";
+        List<Draft> next = new ArrayList<>();
+        for (Draft existing : all(json)) {
+            if (userId.equals(existing.userId)) next.add(existing);
+        }
+        return write(next);
+    }
+
     public static String remove(String json, String id) {
         List<Draft> next = new ArrayList<>();
         for (Draft existing : all(json)) {

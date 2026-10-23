@@ -79,7 +79,12 @@ public class SessionTokensTest {
     @Test
     public void revokedRefreshIsNotANetworkMiss() {
         assertTrue(SessionTokens.isRevokedRefresh(400, "{\"error\":\"invalid_grant\"}"));
-        assertTrue(SessionTokens.isRevokedRefresh(401, ""));
+        assertTrue(SessionTokens.isRevokedRefresh(400, "{\"error_code\":\"refresh_token_not_found\"}"));
+        assertTrue(SessionTokens.isRevokedRefresh(400, "{\"msg\":\"Invalid Refresh Token: Refresh Token Not Found\"}"));
+        assertFalse(SessionTokens.isRevokedRefresh(400, "{\"error\":\"bad_request\"}"));
+        assertFalse(SessionTokens.isRevokedRefresh(401, ""));
+        assertFalse(SessionTokens.isRevokedRefresh(401, "{\"error\":\"unauthorized\"}"));
+        assertTrue(SessionTokens.isRevokedRefresh(401, "{\"error\":\"invalid_grant\"}"));
         assertFalse(SessionTokens.isRevokedRefresh(500, "{\"error\":\"unavailable\"}"));
         assertFalse(SessionTokens.isRevokedRefresh(0, ""));
     }

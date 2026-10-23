@@ -18,10 +18,12 @@ import javax.crypto.spec.GCMParameterSpec;
 
 /**
  * Session ciphertext in TSPPrefs, keys in Android Keystore.
- * The plain key does not ask the user. The biometric key requires a
- * {@code BiometricPrompt} CryptoObject on every use. Device credential cannot
- * be combined with a CryptoObject, so this key is {@code AUTH_BIOMETRIC_STRONG}
- * with a timeout of 0 (per-use on older APIs: validity -1).
+ * The plain key does not ask the user and holds the refresh token, so a
+ * rotation can be re-sealed with no prompt. The biometric key seals only a
+ * small unlock secret and requires a {@code BiometricPrompt} CryptoObject on
+ * every use. Device credential cannot be combined with a CryptoObject, so this
+ * key is {@code AUTH_BIOMETRIC_STRONG} with a timeout of 0 (per-use on older
+ * APIs: validity -1).
  */
 public final class KeystoreSessionStore {
     static final String PREF_PLAIN = "session_sealed";
