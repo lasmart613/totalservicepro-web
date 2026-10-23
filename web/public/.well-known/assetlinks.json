@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.photometrytools",
       "sha256_cert_fingerprints": [
-        "51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9"
+        "51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:B2:0B:9F:C6:91:4E:83:51:5F:22:40:AB:51:A2:A3:43:E9",
+        "EA:7C:F4:9B:49:89:52:44:33:50:CA:07:5B:18:1C:66:10:AF:B1:D0:A5:F9:12:F2:B5:55:8A:E8:CE:90:08:66"
       ]
     }
   }
