@@ -10,6 +10,7 @@ import {
   chunkIndexText,
   clipManualSearchText,
   extractPdfPages,
+  extractPdfPageSlice,
   joinIndexChunks,
   storeIndexText,
   extractPdfSearchText,
@@ -161,6 +162,26 @@ test('multi-page text PDF stamps every physical page', async () => {
   assert.match(text, /\[\[pdfpage:2\]\] error forty three/);
   assert.match(text, /\[\[pdfpage:3\]\] optical collimator/);
   assert.equal(text.split('\f').length, 3);
+});
+
+test('a broken page-tree kid skips that page instead of failing the manual (2390, 2551)', async () => {
+  const good = buildTextPdf(['intro reservoir', 'lost page', 'optical collimator']).toString('latin1');
+  // Same byte length, so the xref offsets stay valid: kid 2 now points at a content stream.
+  const broken = Buffer.from(good.replace('/Kids [4 0 R 6 0 R 8 0 R]', '/Kids [4 0 R 7 0 R 8 0 R]'), 'latin1');
+  assert.notEqual(broken.toString('latin1'), good);
+  const slice = await extractPdfPageSlice(broken);
+  assert.equal(slice.pages[0].text, 'intro reservoir');
+  assert.equal(slice.pages[1].page, 2);
+  assert.equal(slice.pages[1].text, '');
+  assert.deepEqual(slice.failedPages, [2]);
+  const text = await extractPdfSearchText(broken);
+  assert.match(text, /\[\[pdfpage:1\]\] intro reservoir/);
+});
+
+test('a slice where every page is broken still fails loudly', async () => {
+  const good = buildTextPdf(['only page']).toString('latin1');
+  const broken = Buffer.from(good.replace('/Kids [4 0 R]', '/Kids [5 0 R]'), 'latin1');
+  await assert.rejects(extractPdfPages(broken), /Could not extract PDF text/);
 });
 
 test('clip and normalize keep substring search usable', () => {

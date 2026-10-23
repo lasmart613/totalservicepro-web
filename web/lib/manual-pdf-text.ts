@@ -183,10 +183,10 @@ export type PdfPageText = { page: number; text: string };
 export async function extractPdfPageSlice(
   bytes: Uint8Array | Buffer,
   range?: { from?: number; count?: number }
-): Promise<{ total: number; pages: PdfPageText[] }> {
+): Promise<{ total: number; pages: PdfPageText[]; failedPages?: number[] }> {
   const view = Buffer.isBuffer(bytes) ? bytes : bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-  if (!view.byteLength) return { total: 0, pages: [] };
-  if (!looksLikePdf(view)) return { total: 0, pages: [] };
+  if (!view.byteLength) return { total: 0, pages: [], failedPages: [] };
+  if (!looksLikePdf(view)) return { total: 0, pages: [], failedPages: [] };
   const limitError = manualPdfByteLimitError(view.byteLength);
   if (limitError) throw new Error(limitError);
 
@@ -209,18 +209,41 @@ export async function extractPdfPageSlice(
     const count = range?.count == null ? null : Math.max(0, Math.floor(range.count));
     const to = count == null ? total : Math.min(total, from + count - 1);
     const pages: PdfPageText[] = [];
+    const failedPages: number[] = [];
+    let firstPageError: string | null = null;
     if (count !== 0 && from <= total) {
       for (let pageNo = from; pageNo <= to; pageNo++) {
-        const page = await doc.getPage(pageNo);
+        // One broken page-tree entry ("Page dictionary kid reference points
+        // to wrong type of object", manuals 2390 and 2551) used to fail the
+        // whole manual. Skip that page (empty text, stamp kept) and index the
+        // rest; only a slice where every page fails is an error.
+        let page: Awaited<ReturnType<PdfDoc['getPage']>>;
+        try {
+          page = await doc.getPage(pageNo);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'unknown error';
+          failedPages.push(pageNo);
+          firstPageError ??= message;
+          pages.push({ page: pageNo, text: '' });
+          continue;
+        }
         try {
           const content = await page.getTextContent({ includeMarkedContent: false });
           pages.push({ page: pageNo, text: pageTextFromItems(content.items || []) });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'unknown error';
+          failedPages.push(pageNo);
+          firstPageError ??= message;
+          pages.push({ page: pageNo, text: '' });
         } finally {
           page.cleanup();
         }
       }
     }
-    return { total, pages };
+    if (pages.length > 0 && failedPages.length === pages.length) {
+      throw new Error(firstPageError || 'every page failed to load');
+    }
+    return { total, pages, failedPages };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'unknown error';
     if (message.includes('indexer limit')) throw err instanceof Error ? err : new Error(message);
