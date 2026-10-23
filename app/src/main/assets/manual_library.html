@@ -411,11 +411,29 @@
             const plain = await supabaseClient.from('user_manuals').select('manual_id').eq('user_id', user.id);
             rows = plain.data || [];
         }
+        // 000943: adds go through get-manual-url and land in organization_manuals,
+        // so the owned set is company library + legacy personal rows, the same
+        // sources the web /manuals page and the edge function's loadOwned use.
+        const orgId = profileRes.data?.organization_id ?? null;
+        if (orgId != null) {
+            let orgRes = await supabaseClient.from('organization_manuals')
+                .select('*, manuals(is_incomplete)').eq('organization_id', orgId);
+            if (orgRes.error) {
+                orgRes = await supabaseClient.from('organization_manuals')
+                    .select('manual_id').eq('organization_id', orgId);
+            }
+            if (!orgRes.error) rows = (orgRes.data || []).concat(rows);
+        }
         userManualIds = new Set(rows.map(r => r.manual_id));
         freeManualIds = new Set(rows.filter(r => {
             const m = Array.isArray(r.manuals) ? r.manuals[0] : r.manuals;
             return r.free_at_add === true || (m && m.is_incomplete === true);
         }).map(r => r.manual_id));
+        // A manual is a free row only if every row holding it is free (one paid row holds the slot).
+        for (const r of rows) {
+            const m = Array.isArray(r.manuals) ? r.manuals[0] : r.manuals;
+            if (!(r.free_at_add === true || (m && m.is_incomplete === true))) freeManualIds.delete(r.manual_id);
+        }
         if (profileRes.data?.manual_slots) FREE_LIMIT = profileRes.data.manual_slots;
         currentOrgId = profileRes.data?.organization_id ?? null;
     }
@@ -612,10 +630,32 @@
         }
 
         try {
-            await supabaseClient.from('user_manuals').insert({
-                user_id: user.id,
-                manual_id: currentManual.id
+            // 000943: clients can no longer write user_manuals directly. The add goes
+            // through get-manual-url (service role), which enforces the slot cap.
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const res = await fetch(EDGE_FN_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + (session?.access_token || ''),
+                    'apikey': SUPABASE_ANON_KEY
+                },
+                body: JSON.stringify({
+                    action: 'add',
+                    source: 'android',
+                    manual_id: currentManual.id,
+                    storage_path: currentManual.storage_path || ''
+                })
             });
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok || result.error) {
+                if (result.library_full) {
+                    closeModal();
+                    upgradeAccount();
+                    return;
+                }
+                throw new Error(result.error || ('HTTP ' + res.status));
+            }
 
             userManualIds.add(currentManual.id);
             if (isManualIncomplete(currentManual)) freeManualIds.add(currentManual.id);
