@@ -1,5 +1,7 @@
 package com.photometrytools;
 
+import android.os.SystemClock;
+
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -14,9 +16,33 @@ public final class SupabaseSessionRefresh {
 
     private SupabaseSessionRefresh() {}
 
-    public static String refreshBlocking(String previousJson, String anonKey) {
+    public static final class Outcome {
+        public enum Kind { UPDATED, REVOKED, RETRY }
+
+        public final Kind kind;
+        public final String session;
+
+        private Outcome(Kind kind, String session) {
+            this.kind = kind;
+            this.session = session;
+        }
+
+        public static Outcome updated(String session) {
+            return new Outcome(Kind.UPDATED, session);
+        }
+
+        public static Outcome revoked() {
+            return new Outcome(Kind.REVOKED, null);
+        }
+
+        public static Outcome retry() {
+            return new Outcome(Kind.RETRY, null);
+        }
+    }
+
+    public static Outcome refreshBlocking(String previousJson, String anonKey) {
         String refresh = SessionTokens.refreshToken(previousJson);
-        if (refresh.isEmpty() || anonKey == null || anonKey.isEmpty()) return null;
+        if (refresh.isEmpty() || anonKey == null || anonKey.isEmpty()) return Outcome.revoked();
         HttpURLConnection conn = null;
         try {
             byte[] body = SessionTokens.requestJson(refresh).getBytes(StandardCharsets.UTF_8);
@@ -36,9 +62,13 @@ public final class SupabaseSessionRefresh {
             int status = conn.getResponseCode();
             InputStream stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
             String text = read(stream);
-            return SessionTokens.mergeRefresh(previousJson, status, text, System.currentTimeMillis() / 1000L);
+            if (SessionTokens.isRevokedRefresh(status, text)) return Outcome.revoked();
+            String merged = SessionTokens.mergeRefresh(
+                    previousJson, status, text, System.currentTimeMillis() / 1000L, SystemClock.elapsedRealtime());
+            if (merged != null) return Outcome.updated(merged);
+            return Outcome.retry();
         } catch (Exception e) {
-            return null;
+            return Outcome.retry();
         } finally {
             if (conn != null) conn.disconnect();
         }

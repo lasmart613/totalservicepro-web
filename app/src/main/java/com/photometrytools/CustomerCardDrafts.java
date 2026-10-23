@@ -18,6 +18,7 @@ public final class CustomerCardDrafts {
 
     public static final class Draft {
         public String id;
+        public String userId;
         public String mode;
         public String organizationId;
         public boolean needsLink;
@@ -30,6 +31,7 @@ public final class CustomerCardDrafts {
         public Draft copy() {
             Draft next = new Draft();
             next.id = id;
+            next.userId = userId;
             next.mode = mode;
             next.organizationId = organizationId;
             next.needsLink = needsLink;
@@ -100,6 +102,7 @@ public final class CustomerCardDrafts {
     public static JSONObject toJson(Draft draft) throws JSONException {
         JSONObject obj = new JSONObject();
         obj.put("id", draft.id == null ? "" : draft.id);
+        obj.put("userId", draft.userId == null ? "" : draft.userId);
         obj.put("mode", draft.mode == null ? "create" : draft.mode);
         obj.put("organizationId", draft.organizationId == null ? "" : draft.organizationId);
         obj.put("needsLink", draft.needsLink);
@@ -115,6 +118,8 @@ public final class CustomerCardDrafts {
         if (obj == null) return null;
         Draft draft = new Draft();
         draft.id = obj.optString("id", "");
+        String owner = obj.optString("userId", "");
+        draft.userId = owner.isEmpty() ? null : owner;
         draft.mode = obj.optString("mode", "create");
         String org = obj.optString("organizationId", "");
         draft.organizationId = org.isEmpty() ? null : org;

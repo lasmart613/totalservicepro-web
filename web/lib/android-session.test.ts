@@ -41,6 +41,21 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   assert.doesNotMatch(shell, /host\.getStoredSession/);
   assert.match(shell, /"getStoredSession"/);
   assert.match(shell, /isMainFrame/);
+  assert.match(shell, /CryptoObject/);
+  assert.match(shell, /deleteAllData/);
+  assert.match(shell, /PREFS_CARD_DRAFTS/);
+  assert.match(shell, /setAllowedAuthenticators\(BiometricManager\.Authenticators\.BIOMETRIC_STRONG\)/);
+  const keystore = readFileSync(
+    join(here, '../../app/src/main/java/com/photometrytools/KeystoreSessionStore.java'),
+    'utf8'
+  );
+  assert.match(keystore, /setInvalidatedByBiometricEnrollment\(true\)/);
+  assert.match(keystore, /setUserAuthenticationParameters\(0/);
+  const client = readFileSync(join(here, 'supabase/client.ts'), 'utf8');
+  assert.match(client, /autoRefreshToken:\s*!isTspAndroidWebView\(\)/);
+  assert.match(bridge, /TOKEN_REFRESHED/);
+  assert.match(bridge, /INITIAL_SESSION/);
+  assert.match(bridge, /if \(raw\) return applyTokens/);
   const providers = readFileSync(join(here, '../components/providers.tsx'), 'utf8');
   assert.match(providers, /AndroidSessionBridge/);
 });

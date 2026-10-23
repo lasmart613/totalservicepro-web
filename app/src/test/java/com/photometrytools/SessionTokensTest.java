@@ -12,8 +12,8 @@ import static org.junit.Assert.assertTrue;
 
 public class SessionTokensTest {
     @Test
-    public void keystoreWindowIsThirtyDays() {
-        assertEquals(30 * 24 * 60 * 60, SessionTokens.KEY_AUTH_VALIDITY_SECONDS);
+    public void biometricKeyIsPerUse() {
+        assertEquals(0, SessionTokens.KEY_AUTH_VALIDITY_SECONDS);
     }
 
     @Test
@@ -59,6 +59,29 @@ public class SessionTokensTest {
         assertNull(SessionTokens.mergeRefresh(previous, 401, "{\"error\":\"invalid\"}", 5_000L));
         assertTrue(SessionTokens.requestJson("abc").contains("\"refresh_token\":\"abc\""));
         assertFalse(SessionTokens.requestJson("abc").contains("access_token"));
+    }
+
+    @Test
+    public void scheduleUsesServerExpiresInNotTheDeviceClock() {
+        String previous = session("old", "refresh", 1);
+        String body = "{\"access_token\":\"new\",\"refresh_token\":\"refresh\",\"expires_in\":3600,\"expires_at\":9000000000}";
+        long elapsed = 1_000_000L;
+        String merged = SessionTokens.mergeRefresh(previous, 200, body, 5_000L, elapsed);
+        assertEquals(9_000_000_000_000L, SessionTokens.expiresAtMillis(merged));
+        long skewedNow = 9_000_000_000_000L;
+        assertFalse(SessionTokens.needsRefresh(merged, skewedNow, elapsed + 1000L));
+        assertTrue(SessionTokens.needsRefresh(merged, skewedNow, elapsed + 3_500_000L));
+        assertTrue(SessionTokens.needsRefresh(merged, 1L, elapsed - 1));
+        assertTrue(merged.contains("\"expiresInSeconds\":3600"));
+        assertTrue(merged.contains("\"receivedElapsed\":1000000"));
+    }
+
+    @Test
+    public void revokedRefreshIsNotANetworkMiss() {
+        assertTrue(SessionTokens.isRevokedRefresh(400, "{\"error\":\"invalid_grant\"}"));
+        assertTrue(SessionTokens.isRevokedRefresh(401, ""));
+        assertFalse(SessionTokens.isRevokedRefresh(500, "{\"error\":\"unavailable\"}"));
+        assertFalse(SessionTokens.isRevokedRefresh(0, ""));
     }
 
     private static String session(String access, String refresh, long expiresAtSeconds) {

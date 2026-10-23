@@ -239,10 +239,7 @@
         var host = form || doc.body;
         if (!host) return;
         var existing = (form || doc).querySelector('[data-tsp-card-scan="' + ctx.mode + '"]');
-        if (existing) {
-            post('cardButton', '1');
-            return;
-        }
+        if (existing) return;
         var btn = doc.createElement('button');
         btn.type = 'button';
         btn.setAttribute('data-tsp-card-scan', ctx.mode);
@@ -279,7 +276,20 @@
             if (anchor && anchor.parentNode) anchor.parentNode.insertBefore(btn, anchor);
             else doc.body.appendChild(btn);
         }
-        post('cardButton', '1');
+        noteButton('1');
+    }
+
+    var postedPage = null;
+    var postedButton = null;
+    function notePage(href) {
+        if (postedPage === href) return;
+        postedPage = href;
+        post('cardPage', href);
+    }
+    function noteButton(flag) {
+        if (postedButton === flag) return;
+        postedButton = flag;
+        post('cardButton', flag);
     }
 
     function boot() {
@@ -291,11 +301,12 @@
             if (!next) {
                 var stale = doc.querySelector('[data-tsp-injected="1"]');
                 if (stale) stale.remove();
-                post('cardButton', '0');
+                noteButton('0');
+                postedPage = null;
                 return;
             }
             ctx = next;
-            post('cardPage', root.location.href || '');
+            notePage(root.location.href || '');
             installButton(doc, ctx);
         }
         if (!root.__tspAndroidCardTimer) {

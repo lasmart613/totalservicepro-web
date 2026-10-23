@@ -26,6 +26,30 @@ public final class SessionSealed {
         return out;
     }
 
+    public static byte[] join(byte[] iv, byte[] enc) throws GeneralSecurityException {
+        if (iv == null || iv.length != IV_LEN || enc == null) {
+            throw new GeneralSecurityException("unexpected iv");
+        }
+        byte[] out = new byte[iv.length + enc.length];
+        System.arraycopy(iv, 0, out, 0, iv.length);
+        System.arraycopy(enc, 0, out, iv.length, enc.length);
+        return out;
+    }
+
+    public static byte[] ivOf(byte[] sealed) throws GeneralSecurityException {
+        if (sealed == null || sealed.length <= IV_LEN) throw new GeneralSecurityException("missing session");
+        byte[] iv = new byte[IV_LEN];
+        System.arraycopy(sealed, 0, iv, 0, IV_LEN);
+        return iv;
+    }
+
+    public static byte[] bodyOf(byte[] sealed) throws GeneralSecurityException {
+        if (sealed == null || sealed.length <= IV_LEN) throw new GeneralSecurityException("missing session");
+        byte[] enc = new byte[sealed.length - IV_LEN];
+        System.arraycopy(sealed, IV_LEN, enc, 0, enc.length);
+        return enc;
+    }
+
     public static byte[] open(SecretKey key, byte[] sealed) throws GeneralSecurityException {
         if (key == null || sealed == null || sealed.length <= IV_LEN) {
             throw new GeneralSecurityException("missing session");

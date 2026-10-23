@@ -77,4 +77,57 @@ public class CustomerCardClientTest {
         assertFalse(new JSONObject(posts.get(1)).has("website"));
         assertTrue(CustomerCardDrafts.all(result.draftsJson).isEmpty());
     }
+
+    @Test
+    public void offlineSaveTagsTheSignedInUser() {
+        String payload = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString("{\"sub\":\"user-1\"}".getBytes(StandardCharsets.UTF_8));
+        String session = "{\"currentSession\":{\"access_token\":\"h." + payload + ".s\",\"refresh_token\":\"r\"}}";
+        BusinessCardFields fields = new BusinessCardFields();
+        fields.company = "Acme";
+        CustomerCardDrafts.Draft draft = CustomerCardDrafts.newDraft("create", null, fields);
+        CustomerCardClient.SaveResult result = CustomerCardClient.save(draft, session, false, "[]",
+                (method, url, body, token, anon, prefer) -> CustomerCardClient.Result.failed("offline"));
+        assertTrue(result.queued);
+        assertEquals("user-1", CustomerCardDrafts.all(result.draftsJson).get(0).userId);
+    }
+
+    @Test
+    public void flushUploadsOnlyTheSameUser() {
+        BusinessCardFields mineFields = new BusinessCardFields();
+        mineFields.company = "Acme";
+        CustomerCardDrafts.Draft mine = CustomerCardDrafts.newDraft("create", null, mineFields);
+        mine.userId = "user-1";
+        BusinessCardFields otherFields = new BusinessCardFields();
+        otherFields.company = "Other";
+        CustomerCardDrafts.Draft other = CustomerCardDrafts.newDraft("create", null, otherFields);
+        other.userId = "user-2";
+        BusinessCardFields bareFields = new BusinessCardFields();
+        bareFields.company = "Bare";
+        CustomerCardDrafts.Draft bare = CustomerCardDrafts.newDraft("create", null, bareFields);
+        String store = CustomerCardDrafts.upsert("[]", mine);
+        store = CustomerCardDrafts.upsert(store, other);
+        store = CustomerCardDrafts.upsert(store, bare);
+        List<String> calls = new ArrayList<>();
+        CustomerCardClient.Transport transport = (method, url, body, token, anon, prefer) -> {
+            calls.add(method + " " + url);
+            return CustomerCardClient.Result.http(500, "{}");
+        };
+        String skipped = CustomerCardClient.flush(store, "token", "user-9", transport);
+        assertTrue(calls.isEmpty());
+        assertEquals(3, CustomerCardDrafts.all(skipped).size());
+        String flushed = CustomerCardClient.flush(store, "token", "user-1", transport);
+        assertFalse(calls.isEmpty());
+        boolean sawOther = false;
+        boolean sawBare = false;
+        boolean sawMine = false;
+        for (CustomerCardDrafts.Draft draft : CustomerCardDrafts.all(flushed)) {
+            if ("user-2".equals(draft.userId)) sawOther = true;
+            if (draft.userId == null || draft.userId.isEmpty()) sawBare = true;
+            if ("user-1".equals(draft.userId)) sawMine = true;
+        }
+        assertTrue(sawOther);
+        assertTrue(sawBare);
+        assertTrue(sawMine);
+    }
 }

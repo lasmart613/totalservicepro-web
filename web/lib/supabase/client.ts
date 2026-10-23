@@ -11,6 +11,7 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
 import { ensureOrganizationMembership } from '@/lib/pending-signup';
+import { isTspAndroidWebView } from '@/lib/android-session';
 
 const FALLBACK_SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
 const FALLBACK_SUPABASE_ANON_KEY =
@@ -34,7 +35,7 @@ export function getSupabaseClient(): SupabaseClient {
       persistSession: true,
       storageKey: 'tsp-auth-token',
       storage: typeof window !== 'undefined' ? window.localStorage : undefined,
-      autoRefreshToken: true,
+      autoRefreshToken: !isTspAndroidWebView(),
       detectSessionInUrl: true,
     },
   });

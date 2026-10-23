@@ -53,6 +53,12 @@ test('Android gradle version is 0.5.4-beta / 46 and loads production', () => {
   assert.match(androidCard, /prefillForm/);
   assert.doesNotMatch(androidCard, /webkit\.messageHandlers/);
   assert.doesNotMatch(manifest, /android\.permission\.CAMERA/);
+  const backup = readFileSync(join(here, '../../app/src/main/res/xml/backup_rules.xml'), 'utf8');
+  const extraction = readFileSync(join(here, '../../app/src/main/res/xml/data_extraction_rules.xml'), 'utf8');
+  assert.match(manifest, /allowBackup="false"/);
+  assert.match(backup, /<exclude domain="sharedpref" path="TSPPrefs\.xml" \/>/);
+  assert.match(extraction, /<cloud-backup>[\s\S]*TSPPrefs\.xml/);
+  assert.match(extraction, /<device-transfer>[\s\S]*TSPPrefs\.xml/);
   const webSettings = readFileSync(join(here, '../app/settings/page.tsx'), 'utf8');
   assert.match(webSettings, /\{APP_VERSION\}/);
 });

@@ -6,11 +6,12 @@ import org.json.JSONObject;
  * Supabase session JSON used by the Android shell.
  * Access tokens are short-lived. The refresh token is what keeps a sign-in
  * alive. This project does not set auth.sessions.not_after, so the client
- * does not invent a shorter logout. {@link #KEY_AUTH_VALIDITY_SECONDS} is how
- * long the Keystore key stays usable after the user unlocks it.
+ * does not invent a shorter logout. {@link #KEY_AUTH_VALIDITY_SECONDS} is 0:
+ * the biometric key requires authentication on every use.
  */
 public final class SessionTokens {
-    public static final int KEY_AUTH_VALIDITY_SECONDS = 30 * 24 * 60 * 60;
+    /** Per-use Keystore auth. Zero means the cipher needs a prompt every time. */
+    public static final int KEY_AUTH_VALIDITY_SECONDS = 0;
     public static final long REFRESH_LEAD_MS = 120_000L;
 
     private SessionTokens() {}
@@ -49,7 +50,17 @@ public final class SessionTokens {
 
     /** True when the access token is missing an expiry or is inside the lead window. */
     public static boolean needsRefresh(String json, long nowMillis) {
+        return needsRefresh(json, nowMillis, -1L);
+    }
+
+    /**
+     * {@code elapsedNow} is {@code SystemClock.elapsedRealtime()} when the session
+     * was anchored with {@code expires_in}. A skewed wall clock does not move that anchor.
+     */
+    public static boolean needsRefresh(String json, long nowMillis, long elapsedNow) {
         if (!hasRefresh(json)) return false;
+        Long left = anchoredLifeLeft(json, elapsedNow);
+        if (left != null) return left <= REFRESH_LEAD_MS;
         long exp = expiresAtMillis(json);
         if (exp <= 0L) return true;
         return exp - nowMillis <= REFRESH_LEAD_MS;
@@ -60,13 +71,28 @@ public final class SessionTokens {
      * The schedule is capped at one day; resume checks again.
      */
     public static long millisUntilRefresh(String json, long nowMillis) {
+        return millisUntilRefresh(json, nowMillis, -1L);
+    }
+
+    public static long millisUntilRefresh(String json, long nowMillis, long elapsedNow) {
         if (!hasRefresh(json)) return -1L;
-        long exp = expiresAtMillis(json);
-        if (exp <= 0L) return 0L;
-        long delay = (exp - REFRESH_LEAD_MS) - nowMillis;
+        Long left = anchoredLifeLeft(json, elapsedNow);
+        long delay;
+        if (left != null) {
+            delay = left - REFRESH_LEAD_MS;
+        } else {
+            long exp = expiresAtMillis(json);
+            if (exp <= 0L) return 0L;
+            delay = (exp - REFRESH_LEAD_MS) - nowMillis;
+        }
         if (delay <= 0L) return 0L;
         long day = 24L * 60L * 60L * 1000L;
         return delay > day ? day : delay;
+    }
+
+    /** 400/401 from the refresh endpoint means this refresh token must not be retried. */
+    public static boolean isRevokedRefresh(int status, String body) {
+        return status == 400 || status == 401;
     }
 
     /**
@@ -74,6 +100,15 @@ public final class SessionTokens {
      * A rotated refresh token replaces the previous one. Null when the body is not a session.
      */
     public static String mergeRefresh(String previousJson, int status, String body, long nowEpochSeconds) {
+        return mergeRefresh(previousJson, status, body, nowEpochSeconds, -1L);
+    }
+
+    /**
+     * Prefer the server {@code expires_at}. When {@code expires_in} is present and
+     * {@code elapsedNow} is {@code SystemClock.elapsedRealtime()} at receipt, the
+     * refresh schedule follows that lifetime instead of the wall clock.
+     */
+    public static String mergeRefresh(String previousJson, int status, String body, long nowEpochSeconds, long elapsedNow) {
         if (status < 200 || status >= 300 || body == null || body.isEmpty()) return null;
         try {
             JSONObject resp = new JSONObject(body);
@@ -94,17 +129,21 @@ public final class SessionTokens {
             if (sess.has("currentSession")) sess = new JSONObject();
             sess.put("access_token", access);
             sess.put("refresh_token", refresh);
+            long expiresIn = resp.optLong("expires_in", 0L);
             if (resp.has("expires_at")) {
                 sess.put("expires_at", resp.get("expires_at"));
-            } else if (resp.has("expires_in")) {
-                long seconds = resp.optLong("expires_in", 0L);
-                if (seconds > 0L) sess.put("expires_at", nowEpochSeconds + seconds);
+            } else if (expiresIn > 0L) {
+                sess.put("expires_at", nowEpochSeconds + expiresIn);
             }
             if (resp.has("token_type")) sess.put("token_type", resp.get("token_type"));
             if (resp.has("user")) sess.put("user", resp.get("user"));
             JSONObject stored = new JSONObject();
             stored.put("currentSession", sess);
             if (sess.has("expires_at")) stored.put("expiresAt", sess.get("expires_at"));
+            if (expiresIn > 0L && elapsedNow >= 0L) {
+                stored.put("expiresInSeconds", expiresIn);
+                stored.put("receivedElapsed", elapsedNow);
+            }
             return stored.toString();
         } catch (Exception e) {
             return null;
@@ -118,6 +157,27 @@ public final class SessionTokens {
             return body.toString();
         } catch (Exception e) {
             return "{\"refresh_token\":\"\"}";
+        }
+    }
+
+    /** Life left from the elapsed anchor, or null when this session has no anchor. */
+    static Long anchoredLifeLeft(String json, long elapsedNow) {
+        if (elapsedNow < 0L) return null;
+        JSONObject root = rootObject(json);
+        if (root == null) return null;
+        long received = longField(root, "receivedElapsed");
+        long expiresIn = longField(root, "expiresInSeconds");
+        if (received <= 0L || expiresIn <= 0L) return null;
+        if (elapsedNow < received) return 0L;
+        return expiresIn * 1000L - (elapsedNow - received);
+    }
+
+    private static JSONObject rootObject(String json) {
+        if (json == null || json.isEmpty()) return null;
+        try {
+            return new JSONObject(json);
+        } catch (Exception e) {
+            return null;
         }
     }
 

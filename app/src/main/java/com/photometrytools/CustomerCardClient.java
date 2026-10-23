@@ -129,13 +129,16 @@ public final class CustomerCardClient {
         if ("create".equals(current.mode) && current.fields.company.isEmpty()) {
             return SaveResult.stay("Company is required. It becomes the customer name.", store, current.fields);
         }
+        String token = CardScanContract.accessTokenFromSession(sessionJson);
+        String userId = CardScanContract.userIdFromAccessToken(token);
+        if ((current.userId == null || current.userId.isEmpty()) && userId != null && !userId.isEmpty()) {
+            current.userId = userId;
+        }
         if (!online) {
             current.lastError = "Waiting for a network connection.";
             current.pauseAutoRetry = false;
             return SaveResult.queued(current, CustomerCardDrafts.upsert(store, current));
         }
-        String token = CardScanContract.accessTokenFromSession(sessionJson);
-        String userId = CardScanContract.userIdFromAccessToken(token);
         if (token.isEmpty() || userId.isEmpty()) {
             return SaveResult.stay("Sign in again before saving this customer.", store, current.fields);
         }
@@ -191,6 +194,7 @@ public final class CustomerCardClient {
         if (token == null || token.isEmpty() || userId == null || userId.isEmpty() || transport == null) return store;
         List<CustomerCardDrafts.Draft> drafts = CustomerCardDrafts.all(store);
         for (CustomerCardDrafts.Draft draft : drafts) {
+            if (draft.userId == null || draft.userId.isEmpty() || !draft.userId.equals(userId)) continue;
             if (draft.pauseAutoRetry) continue;
             CustomerCardDrafts.Draft current = draft.copy();
             try {

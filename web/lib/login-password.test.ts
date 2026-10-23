@@ -49,6 +49,9 @@ test('android card scan posts through tspNative and fills the customer form fiel
   assert.match(src, /tspNative/);
   assert.match(src, /prefillForm/);
   assert.doesNotMatch(src, /webkit\.messageHandlers/);
+  assert.match(src, /postedPage/);
+  assert.match(src, /postedButton/);
+  assert.match(src, /if \(postedPage === href\) return/);
   const main = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/MainActivity.java'), 'utf8');
   assert.match(main, /AndroidCardScan\.js/);
   assert.match(main, /"cardPage"\.equals\(method\)/);
