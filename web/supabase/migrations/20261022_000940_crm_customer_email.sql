@@ -91,7 +91,7 @@ CREATE TABLE IF NOT EXISTS public.customer_email_sends (
   recipient_email text NOT NULL CHECK (length(recipient_email) BETWEEN 3 AND 320),
   subject text NOT NULL CHECK (length(subject) BETWEEN 1 AND 300),
   audience text CHECK (audience IS NULL OR audience IN ('clinic', 'repair_shop', 'rental_shop', 'custom')),
-  transport text NOT NULL CHECK (transport IN ('microsoft', 'google', 'resend')),
+  transport text NOT NULL CHECK (transport IN ('microsoft', 'google', 'resend', 'resend_domain')),
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'sent', 'failed')),
   provider_message_id text,
   error text,
