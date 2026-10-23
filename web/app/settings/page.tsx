@@ -6,6 +6,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
 import { applyStoredTheme, togglePersistedTheme } from '@/lib/theme';
 import { MembershipsSettings } from '@/components/OrgSwitcher';
+import SendingDomainSettings from '@/components/SendingDomainSettings';
 import { APP_CHANNEL, APP_VERSION, buildLabel } from '@/lib/app-version';
 import { useSetSiteLanguage, useSiteLocale, useT } from '@/lib/fa/locale';
 import { PUBLIC_LOCALES, type PublicLocale } from '@/lib/i18n/locales';
@@ -270,6 +271,8 @@ export default function Settings() {
           </div>
 
           <MembershipsSettings />
+
+          <SendingDomainSettings />
 
           <div>
             <div className="font-semibold mb-2">{t('Account')}</div>
