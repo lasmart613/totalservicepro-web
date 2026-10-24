@@ -10,8 +10,8 @@ android {
         applicationId "com.photometrytools"
         minSdk 24
         targetSdk 36
-        versionCode 44
-        versionName "0.5.2-beta"
+        versionCode 45
+        versionName "0.5.3-beta"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -69,9 +69,12 @@ dependencies {
     implementation 'androidx.browser:browser:1.8.0'
     implementation 'androidx.webkit:webkit:1.12.1'
     implementation 'com.android.billingclient:billing:6.2.1'
+    // Bundled Latin model. Recognition stays on the device; this artifact does not download a model.
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 
-    // Unit tests
+    // Unit tests. The SDK's org.json is a stub in local unit tests.
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 
     // Android instrumentation tests (updated versions)
     androidTestImplementation 'androidx.test.ext:junit:1.2.1'

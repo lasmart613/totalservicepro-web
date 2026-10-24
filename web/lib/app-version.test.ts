@@ -13,15 +13,17 @@ test('product version is the live-customer beta line', () => {
   assert.equal(versionLabel(), '0.5.0-beta');
 });
 
-test('Android gradle version is 0.5.2-beta / 44 and loads production', () => {
+test('Android gradle version is 0.5.3-beta / 45 and loads production', () => {
   const gradle = readFileSync(join(here, '../../app/build.gradle'), 'utf8');
-  assert.match(gradle, /versionCode\s+44/);
-  assert.match(gradle, /versionName\s+"0\.5\.2-beta"/);
+  assert.match(gradle, /versionCode\s+45/);
+  assert.match(gradle, /versionName\s+"0\.5\.3-beta"/);
+  assert.match(gradle, /com\.google\.mlkit:text-recognition:16\.0\.1/);
   assert.doesNotMatch(gradle, /play-services-ads/);
   const main = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/MainActivity.java'), 'utf8');
   assert.match(main, /https:\/\/repairplanet\.net/);
   assert.match(main, /PRODUCTION_ORIGIN/);
-  assert.match(main, /TSPAndroid\/0\.5\.2-beta/);
+  assert.match(main, /TSPAndroid\/0\.5\.3-beta/);
+  assert.match(main, /captureCardImage/);
   assert.match(main, /CustomTabsIntent/);
   const origins = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/TrustedOrigins.java'), 'utf8');
   assert.match(origins, /accounts\.google\.com/);
@@ -38,11 +40,14 @@ test('Android gradle version is 0.5.2-beta / 44 and loads production', () => {
   assert.doesNotMatch(autoVerify, /www\.repairplanet\.net/);
   assert.match(manifest, /android:host="www\.repairplanet\.net"/);
   const assets = readFileSync(join(here, '../../app/src/main/assets/app-version.js'), 'utf8');
-  assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.2-beta'/);
-  assert.match(assets, /TSP_ANDROID_VERSION_CODE = 44/);
+  assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.3-beta'/);
+  assert.match(assets, /TSP_ANDROID_VERSION_CODE = 45/);
   const settings = readFileSync(join(here, '../../app/src/main/assets/settings.html'), 'utf8');
   assert.match(settings, /id="aboutVersion"/);
-  assert.match(settings, /0\.5\.2-beta/);
+  assert.match(settings, /0\.5\.3-beta/);
+  const cardScript = readFileSync(join(here, '../../app/src/main/assets/CardScanPageScript.js'), 'utf8');
+  assert.match(cardScript, /Android\.captureCardImage/);
+  assert.doesNotMatch(manifest, /android\.permission\.CAMERA/);
   const webSettings = readFileSync(join(here, '../app/settings/page.tsx'), 'utf8');
   assert.match(webSettings, /\{APP_VERSION\}/);
 });
