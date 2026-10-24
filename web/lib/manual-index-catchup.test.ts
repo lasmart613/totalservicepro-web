@@ -48,6 +48,8 @@ function harness(opts: {
   clock?: { t: number };
   attemptError?: string;
   deleteError?: string;
+  /** record_manual_search_index_oversize answer (000944). Default: marks 2. */
+  oversizeMark?: { data?: unknown; error?: { message: string } | null } | (() => never);
 }) {
   const calls: Array<{ kind: string; detail: unknown }> = [];
   const index = opts.index || [];
@@ -68,6 +70,10 @@ function harness(opts: {
           data: { ...EMPTY_READ, missing: missing.length, eligible: eligible.length, ids: eligible.slice(0, Number(args.p_limit)) },
           error: null,
         };
+      }
+      if (fn === 'record_manual_search_index_oversize') {
+        if (typeof opts.oversizeMark === 'function') return opts.oversizeMark();
+        return opts.oversizeMark || { data: 2, error: null };
       }
       if (fn === 'record_manual_search_index_attempt') {
         if (opts.attemptError) return { data: null, error: { message: opts.attemptError } };
@@ -289,7 +295,7 @@ test('caps work per run and defers past the time budget', async () => {
 test('parseMissingRead accepts only the RPC shape', () => {
   assert.deepEqual(
     parseMissingRead({ ...EMPTY_READ, missing: 3, eligible: 1, oversized: 1, oversized_ids: [9], unknown_size: 1, unknown_size_ids: [8], no_file: 2, no_file_ids: [6, 7], in_progress: 1, ids: [5] }),
-    { missing: 3, eligible: 1, oversized: 1, oversizedIds: [9], unknownSize: 1, unknownSizeIds: [8], noFile: 2, noFileIds: [6, 7], inProgress: 1, ids: [5] },
+    { missing: 3, eligible: 1, oversized: 1, oversizedIds: [9], oversizeSkipped: 0, oversizeSkippedIds: [], unknownSize: 1, unknownSizeIds: [8], noFile: 2, noFileIds: [6, 7], inProgress: 1, ids: [5] },
   );
   assert.equal(parseMissingRead([]), null);
   assert.equal(parseMissingRead({ ...EMPTY_READ, missing: -1 }), null);
@@ -297,6 +303,14 @@ test('parseMissingRead accepts only the RPC shape', () => {
   assert.equal(parseMissingRead({ ...EMPTY_READ, oversized_ids: ['x'] }), null);
   assert.equal(parseMissingRead({ ...EMPTY_READ, unknown_size_ids: [-1] }), null);
   assert.equal(parseMissingRead({ missing: 1, eligible: 1, oversized: 0, oversized_ids: [], ids: [] }), null);
+  // 000944 keys: optional, but validated when present.
+  assert.deepEqual(
+    parseMissingRead({ ...EMPTY_READ, oversize_skipped: 37, oversize_skipped_ids: [1860, 2701] })?.oversizeSkippedIds,
+    [1860, 2701],
+  );
+  assert.equal(parseMissingRead({ ...EMPTY_READ, oversize_skipped: 37, oversize_skipped_ids: [1860] })?.oversizeSkipped, 37);
+  assert.equal(parseMissingRead({ ...EMPTY_READ, oversize_skipped: -1, oversize_skipped_ids: [] }), null);
+  assert.equal(parseMissingRead({ ...EMPTY_READ, oversize_skipped: 1, oversize_skipped_ids: ['x'] }), null);
 });
 
 test('scheduled function: schedule only, env checked, no URL handler output', () => {
@@ -476,9 +490,47 @@ test('oversized PDFs are logged and left to the CLI, even when nothing else is e
   assert.equal(out.ok, true);
   assert.equal(out.oversized, 2);
   assert.deepEqual(out.oversizedIds, [1803, 1810]);
-  assert.deepEqual(h.calls.map((c) => c.kind), ['rpc:manuals_missing_search_index']);
+  assert.deepEqual(h.calls.map((c) => c.kind), ['rpc:manuals_missing_search_index', 'rpc:record_manual_search_index_oversize']);
+  assert.deepEqual(h.calls[1].detail, { p_max_bytes: 20971520 });
+  assert.equal(out.oversizeMarked, 2);
   const line = logs.find((l) => l.includes('manual-index-catchup-oversized')) || '';
   assert.match(line, /"maxBytes":20971520,"count":2,"ids":\[1803,1810\]/);
+});
+
+// ---- 000944: oversize PDFs are marked once, then reported as skipped.
+
+test('already-marked oversize manuals are reported as oversize_skipped, with no mark call or storage work', async () => {
+  const h = harness({ missingRead: read([], { oversize_skipped: 37, oversize_skipped_ids: [1860, 1871] }) });
+  const logs: string[] = [];
+  const out = await runManualIndexCatchup(h.client, { log: (l) => logs.push(l) });
+  assert.equal(out.ok, true);
+  assert.equal(out.missing, 0);
+  assert.equal(out.oversized, 0);
+  assert.equal(out.oversizeSkipped, 37);
+  assert.deepEqual(out.oversizeSkippedIds, [1860, 1871]);
+  assert.equal(out.oversizeMarked, 0);
+  assert.deepEqual(h.calls.map((c) => c.kind), ['rpc:manuals_missing_search_index']);
+  assert.ok(!logs.some((l) => l.includes('manual-index-catchup-oversized')));
+});
+
+test('a failed or missing oversize mark RPC (000944 not applied) is logged and indexing continues', async () => {
+  for (const oversizeMark of [
+    { data: null, error: { message: 'Could not find the function public.record_manual_search_index_oversize' } },
+    () => {
+      throw new Error('socket hang up');
+    },
+  ]) {
+    const h = harness({
+      missingRead: read([], { missing: 1, oversized: 1, oversized_ids: [2701] }),
+      oversizeMark: oversizeMark as never,
+    });
+    const logs: string[] = [];
+    const out = await runManualIndexCatchup(h.client, { log: (l) => logs.push(l) });
+    assert.equal(out.ok, true);
+    assert.equal(out.oversizeMarked, 0);
+    assert.equal(out.oversizeSkipped, 0);
+    assert.ok(logs.some((l) => l.includes('manual-index-catchup-oversize-mark-failed')));
+  }
 });
 
 // ---- QA lows on 10c4e7cc: unknown size and missing files are logged, never
