@@ -17,6 +17,14 @@
  * off, so it cannot be picked first on every run. Success clears the row; a
  * failure stores the reason with record_manual_search_index_failure.
  *
+ * Oversize PDFs are marked once (record_manual_search_index_oversize,
+ * migration 000944): a manual_search_index_failures row with last_error
+ * 'oversize_skipped: ...' and a 24 h retry_after. While marked, the missing
+ * read skips it (no storage re-scan) and reports it as oversize_skipped
+ * instead of missing/oversized, so the overnight check and Stats do not see
+ * it as stuck. scripts/index-missing-manuals.mjs ignores the mark. Without
+ * 000944 the new keys read as 0 and the mark call only logs its error.
+ *
  * Never eligible, but logged every run (up to 20 ids each) and left to
  * scripts/index-missing-manuals.mjs or a person: oversized PDFs (over
  * maxBytes, default 20 MiB in Storage), PDFs whose Storage size is missing or
@@ -61,6 +69,9 @@ export type CatchupSummary = {
   eligible: number | null;
   oversized: number | null;
   oversizedIds: number[];
+  oversizeSkipped: number | null;
+  oversizeSkippedIds: number[];
+  oversizeMarked: number;
   unknownSize: number | null;
   unknownSizeIds: number[];
   noFile: number | null;
@@ -82,6 +93,8 @@ type MissingRead = {
   eligible: number;
   oversized: number;
   oversizedIds: number[];
+  oversizeSkipped: number;
+  oversizeSkippedIds: number[];
   unknownSize: number;
   unknownSizeIds: number[];
   noFile: number;
@@ -119,13 +132,17 @@ export function parseMissingRead(data: unknown): MissingRead | null {
   const oversizedIds = parseIds(row.oversized_ids);
   const unknownSizeIds = parseIds(row.unknown_size_ids);
   const noFileIds = parseIds(row.no_file_ids);
+  // 000944 keys. Absent (000918 only) means nothing is marked yet.
+  const oversizeSkipped = row.oversize_skipped === undefined ? 0 : count(row.oversize_skipped);
+  const oversizeSkippedIds = row.oversize_skipped_ids === undefined ? [] : parseIds(row.oversize_skipped_ids);
   if (
     missing == null || eligible == null || oversized == null || unknownSize == null || noFile == null ||
-    inProgress == null || !ids || !oversizedIds || !unknownSizeIds || !noFileIds
+    inProgress == null || !ids || !oversizedIds || !unknownSizeIds || !noFileIds ||
+    oversizeSkipped == null || !oversizeSkippedIds
   ) {
     return null;
   }
-  return { missing, eligible, oversized, oversizedIds, unknownSize, unknownSizeIds, noFile, noFileIds, inProgress, ids };
+  return { missing, eligible, oversized, oversizedIds, oversizeSkipped, oversizeSkippedIds, unknownSize, unknownSizeIds, noFile, noFileIds, inProgress, ids };
 }
 
 export async function runManualIndexCatchup(
@@ -153,6 +170,9 @@ export async function runManualIndexCatchup(
     eligible: null,
     oversized: null,
     oversizedIds: [],
+    oversizeSkipped: null,
+    oversizeSkippedIds: [],
+    oversizeMarked: 0,
     unknownSize: null,
     unknownSizeIds: [],
     noFile: null,
@@ -186,6 +206,8 @@ export async function runManualIndexCatchup(
   summary.eligible = parsed.eligible;
   summary.oversized = parsed.oversized;
   summary.oversizedIds = parsed.oversizedIds;
+  summary.oversizeSkipped = parsed.oversizeSkipped;
+  summary.oversizeSkippedIds = parsed.oversizeSkippedIds;
   summary.unknownSize = parsed.unknownSize;
   summary.unknownSizeIds = parsed.unknownSizeIds;
   summary.noFile = parsed.noFile;
@@ -201,6 +223,17 @@ export async function runManualIndexCatchup(
         hint: 'left to scripts/index-missing-manuals.mjs --apply',
       }),
     );
+    // Mark them so later runs skip the storage re-scan and report them as
+    // oversize_skipped. Best effort: a failure here never stops indexing.
+    let markError: string | null = null;
+    try {
+      const marked = await client.rpc('record_manual_search_index_oversize', { p_max_bytes: maxBytes });
+      if (marked?.error) markError = marked.error.message || 'unknown';
+      else summary.oversizeMarked = count(marked?.data) ?? 0;
+    } catch (err) {
+      markError = err instanceof Error ? err.message : String(err);
+    }
+    if (markError != null) log(JSON.stringify({ event: 'manual-index-catchup-oversize-mark-failed', error: markError }));
   }
   if (parsed.unknownSize > 0) {
     log(
