@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   INVOICE_LIST_NEAR_EXPIRY_MS,
+  invoiceListReloadSilently,
   invoiceListStatus,
   invoiceMatchesListFilter,
   invoiceStatusBadgeClass,
@@ -166,6 +167,13 @@ test('resume reruns on visibility and the native resume event, after the bridge 
     __tspRestoreAndroidSession: async () => {
       calls.push('native');
     },
+    addEventListener(type: string, listener: () => void) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)!.add(listener);
+    },
+    removeEventListener(type: string, listener: () => void) {
+      listeners.get(type)?.delete(listener);
+    },
   };
   const stop = subscribeInvoiceListResume(() => calls.push('init'), { document: doc, window: win });
   const emit = (type: string) => {
@@ -177,10 +185,22 @@ test('resume reruns on visibility and the native resume event, after the bridge 
   await new Promise((resolve) => setTimeout(resolve, 0));
   emit('resume');
   await new Promise((resolve) => setTimeout(resolve, 0));
+  emit('focus');
+  await new Promise((resolve) => setTimeout(resolve, 0));
   stop();
   emit('visibilitychange');
+  emit('focus');
   await new Promise((resolve) => setTimeout(resolve, 0));
-  assert.deepEqual(calls, ['native', 'init', 'native', 'init']);
+  assert.deepEqual(calls, ['native', 'init', 'native', 'init', 'native', 'init']);
+});
+
+test('focus and resume reload silently once invoices are already shown', () => {
+  assert.equal(invoiceListReloadSilently(0), false);
+  assert.equal(invoiceListReloadSilently(4), true);
+  assert.match(page, /invoiceListReloadSilently\(rowsRef\.current\.length\)/);
+  assert.match(initSrc, /const silent = Boolean\(opts\?\.silent\)/);
+  assert.match(initSrc, /if \(!silent\) \{\s*setLoading\(true\)/);
+  assert.match(page, /preserveOnError: silent/);
 });
 
 test('invoice list page surfaces query errors, retries, and does not block on role or timezone', () => {

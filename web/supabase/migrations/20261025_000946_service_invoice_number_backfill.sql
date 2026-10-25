@@ -8,26 +8,29 @@
 -- The app number (web/lib/billing/doc-numbers.ts generateDocNumber, kind INV)
 -- is {ORG_PREFIX}-INV-{YYYYMMDD}-{NN}. Prefix is organizations.ticket_prefix
 -- sanitized to A-Z0-9 (max 8), else the first 3 alphanumerics of the org name,
--- else TSP. NN continues after the highest numeric value already used by that
--- org (a whole-number invoice_number, otherwise the integer after the last
--- hyphen) and is zero-padded to 2 while it is below 100. The date is created_at
--- in organizations.timezone, falling back to America/Los_Angeles.
--- JSON copies use invoice_data.invoice_number, then invoice_data.invNumber
--- (the same keys as extractNumberFromRow / the invoice form).
+-- else TSP. The date is created_at in organizations.timezone (America/Los_Angeles
+-- when that zone is missing or invalid). NN is the next sequence for that org
+-- and that day only: the max numeric suffix among numbers matching
+-- {PREFIX}-INV-{YYYYMMDD}- with 1 to 4 digits, then +1, zero-padded to 2 while
+-- it is below 100. A suffix longer than 4 digits does not count, and another
+-- day's number does not carry forward. Whitespace-only invoice_number is
+-- treated as null. JSON copies use invoice_data.invoice_number, then
+-- invoice_data.invNumber (the same keys as extractNumberFromRow).
 --
 -- Order inside one transaction:
 --   1. drift guards (required columns, integer org id, unique index)
 --   2. lock service_invoices (lock_timeout 5s)
---   3. copy a JSON number onto null rows when that value is free for the org
---   4. number the remaining nulls per org in created_at order, after that
---      org's max numeric value, skipping any value the unique index owns
+--   3. copy a JSON number onto null or whitespace rows when that value is free
+--   4. number the remaining blanks in one pass: row_number per org+day after
+--      that day's max, skipping any value the unique index owns
 --   5. record every filled id in public.service_invoice_number_backfill_audit
 --      (RLS on, no grants to anon/authenticated) and NOTICE the mapping
---   6. BEFORE INSERT trigger assigns the next per-org number when the insert
---      leaves invoice_number null or blank (SECURITY DEFINER, search_path '',
---      per-org advisory lock)
---   7. ALTER COLUMN invoice_number SET NOT NULL
---   8. record supabase_migrations.schema_migrations version 20261025_000946
+--   6. CHECK (btrim(invoice_number) <> '') NOT VALID
+--   7. BEFORE INSERT trigger assigns the next per-org per-day number when the
+--      insert leaves invoice_number null or whitespace (SECURITY DEFINER,
+--      search_path '', per-org advisory lock)
+--   8. ALTER COLUMN invoice_number SET NOT NULL
+--   9. record supabase_migrations.schema_migrations version 20261025_000946
 --
 -- Does not DELETE rows. Rollback:
 -- 20261025_000946_service_invoice_number_backfill_rollback.sql
@@ -119,53 +122,20 @@ $drift$;
 
 LOCK TABLE public.service_invoices IN SHARE ROW EXCLUSIVE MODE;
 
-CREATE OR REPLACE FUNCTION public.service_invoice_number_seq(p_number text)
-RETURNS bigint
-LANGUAGE sql
-IMMUTABLE
-SET search_path = ''
-AS $fn$
-  SELECT CASE
-    WHEN p_number IS NULL THEN NULL
-    WHEN pg_catalog.btrim(p_number) ~ '^[0-9]{1,18}$'
-      AND pg_catalog.btrim(p_number)::bigint > 0
-      THEN pg_catalog.btrim(p_number)::bigint
-    ELSE NULLIF((pg_catalog.regexp_match(pg_catalog.btrim(p_number), '-([0-9]{1,18})$'))[1], '')::bigint
-  END
-$fn$;
-COMMENT ON FUNCTION public.service_invoice_number_seq(text) IS
-  '000946 numeric value of an invoice number: a whole number, else the integer after the last hyphen';
-REVOKE ALL ON FUNCTION public.service_invoice_number_seq(text) FROM PUBLIC, anon, authenticated;
-
-CREATE OR REPLACE FUNCTION public.service_invoice_next_number(p_organization_id bigint, p_at timestamptz)
+CREATE OR REPLACE FUNCTION public.service_invoice_org_prefix(p_organization_id bigint)
 RETURNS text
 LANGUAGE plpgsql
+STABLE
 SECURITY DEFINER
 SET search_path = ''
 AS $fn$
 DECLARE
   v_raw_prefix text;
   v_name text;
-  v_zone text;
   v_prefix text;
-  v_at timestamptz;
-  v_ymd text;
-  v_stem text;
-  v_max bigint;
-  v_n bigint;
-  v_candidate text;
 BEGIN
-  -- One allocator per org. Null org shares a single lock.
-  PERFORM pg_catalog.pg_advisory_xact_lock(
-    pg_catalog.hashtextextended(
-      'tsp.service_invoice_number:' || coalesce(p_organization_id::text, ''::text),
-      0
-    )
-  );
-
   v_raw_prefix := NULL;
   v_name := NULL;
-  v_zone := NULL;
   IF p_organization_id IS NOT NULL AND pg_catalog.to_regclass('public.organizations') IS NOT NULL THEN
     IF EXISTS (
       SELECT 1 FROM pg_catalog.pg_attribute
@@ -183,14 +153,6 @@ BEGIN
       EXECUTE 'SELECT name::text FROM public.organizations WHERE id = $1'
         INTO v_name USING p_organization_id;
     END IF;
-    IF EXISTS (
-      SELECT 1 FROM pg_catalog.pg_attribute
-      WHERE attrelid = 'public.organizations'::regclass
-        AND attname = 'timezone' AND NOT attisdropped
-    ) THEN
-      EXECUTE 'SELECT pg_catalog.btrim(timezone::text) FROM public.organizations WHERE id = $1'
-        INTO v_zone USING p_organization_id;
-    END IF;
   END IF;
 
   -- Same rules as web/lib/billing/doc-numbers.ts sanitizePrefix.
@@ -206,25 +168,104 @@ BEGIN
   IF coalesce(v_prefix, ''::text) = '' THEN
     v_prefix := 'TSP';
   END IF;
-  v_prefix := pg_catalog.substr(v_prefix, 1, 8);
+  RETURN pg_catalog.substr(v_prefix, 1, 8);
+END;
+$fn$;
+COMMENT ON FUNCTION public.service_invoice_org_prefix(bigint) IS
+  '000946 organizations.ticket_prefix sanitized like doc-numbers.ts sanitizePrefix';
+REVOKE ALL ON FUNCTION public.service_invoice_org_prefix(bigint) FROM PUBLIC, anon, authenticated;
 
+CREATE OR REPLACE FUNCTION public.service_invoice_org_zone(p_organization_id bigint)
+RETURNS text
+LANGUAGE plpgsql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+DECLARE
+  v_zone text;
+BEGIN
+  v_zone := NULL;
+  IF p_organization_id IS NOT NULL AND pg_catalog.to_regclass('public.organizations') IS NOT NULL THEN
+    IF EXISTS (
+      SELECT 1 FROM pg_catalog.pg_attribute
+      WHERE attrelid = 'public.organizations'::regclass
+        AND attname = 'timezone' AND NOT attisdropped
+    ) THEN
+      EXECUTE 'SELECT pg_catalog.btrim(timezone::text) FROM public.organizations WHERE id = $1'
+        INTO v_zone USING p_organization_id;
+    END IF;
+  END IF;
   v_zone := coalesce(nullif(v_zone, ''::text), 'America/Los_Angeles'::text);
   BEGIN
     PERFORM pg_catalog.to_char(pg_catalog.now() AT TIME ZONE v_zone, 'YYYYMMDD');
   EXCEPTION WHEN others THEN
     v_zone := 'America/Los_Angeles';
   END;
+  RETURN v_zone;
+END;
+$fn$;
+COMMENT ON FUNCTION public.service_invoice_org_zone(bigint) IS
+  '000946 IANA zone for invoice dates, or America/Los_Angeles';
+REVOKE ALL ON FUNCTION public.service_invoice_org_zone(bigint) FROM PUBLIC, anon, authenticated;
 
+-- Seq of {PREFIX}-INV-{YYYYMMDD}-{NN} when NN is 1..4 digits. Anything else,
+-- including a longer suffix, is not part of that day's sequence (parseSeq).
+CREATE OR REPLACE FUNCTION public.service_invoice_day_seq(p_number text, p_stem text)
+RETURNS integer
+LANGUAGE sql
+IMMUTABLE
+SET search_path = ''
+AS $fn$
+  SELECT CASE
+    WHEN p_number IS NULL OR p_stem IS NULL OR pg_catalog.btrim(p_stem) = '' THEN NULL
+    WHEN pg_catalog.upper(pg_catalog.btrim(p_number))
+         ~ ('^' || pg_catalog.upper(pg_catalog.btrim(p_stem)) || '[0-9]{1,4}$')
+    THEN NULLIF(
+      (pg_catalog.regexp_match(pg_catalog.upper(pg_catalog.btrim(p_number)), '[0-9]{1,4}$'))[1]::integer,
+      0
+    )
+    ELSE NULL
+  END
+$fn$;
+COMMENT ON FUNCTION public.service_invoice_day_seq(text, text) IS
+  '000946 1-4 digit suffix when the number matches {PREFIX}-INV-{YYYYMMDD}- exactly';
+REVOKE ALL ON FUNCTION public.service_invoice_day_seq(text, text) FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.service_invoice_next_number(p_organization_id bigint, p_at timestamptz)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+DECLARE
+  v_prefix text;
+  v_zone text;
+  v_at timestamptz;
+  v_ymd text;
+  v_stem text;
+  v_max integer;
+  v_n integer;
+  v_candidate text;
+BEGIN
+  -- One allocator per org. Null org shares a single lock.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(
+      'tsp.service_invoice_number:' || coalesce(p_organization_id::text, ''::text),
+      0
+    )
+  );
+
+  v_prefix := public.service_invoice_org_prefix(p_organization_id);
+  v_zone := public.service_invoice_org_zone(p_organization_id);
   v_at := coalesce(p_at, pg_catalog.now());
   v_ymd := pg_catalog.to_char(v_at AT TIME ZONE v_zone, 'YYYYMMDD');
   v_stem := v_prefix || '-INV-' || v_ymd || '-';
 
-  SELECT coalesce(pg_catalog.max(public.service_invoice_number_seq(si.invoice_number)), 0::bigint)
+  SELECT coalesce(max(public.service_invoice_day_seq(si.invoice_number, v_stem)), 0)
     INTO v_max
   FROM public.service_invoices si
-  WHERE si.organization_id IS NOT DISTINCT FROM p_organization_id
-    AND si.invoice_number IS NOT NULL
-    AND pg_catalog.btrim(si.invoice_number) <> '';
+  WHERE si.organization_id IS NOT DISTINCT FROM p_organization_id;
 
   v_n := v_max + 1;
   LOOP
@@ -249,7 +290,7 @@ BEGIN
 END;
 $fn$;
 COMMENT ON FUNCTION public.service_invoice_next_number(bigint, timestamptz) IS
-  '000946 next {PREFIX}-INV-{YYYYMMDD}-{NN} for one org, after that org''s max numeric value';
+  '000946 next {PREFIX}-INV-{YYYYMMDD}-{NN} for one org on that day; the sequence resets each day';
 REVOKE ALL ON FUNCTION public.service_invoice_next_number(bigint, timestamptz) FROM PUBLIC, anon, authenticated;
 
 CREATE TABLE IF NOT EXISTS public.service_invoice_number_backfill_audit (
@@ -273,15 +314,15 @@ DECLARE
   rec record;
   v_obj jsonb;
   v_num text;
-  v_assigned text;
   v_json int := 0;
   v_seq int := 0;
 BEGIN
   -- Pass 1: JSON number, oldest first, only when the unique index would accept it.
+  -- Whitespace-only invoice_number is missing, same as null.
   FOR rec IN
-    SELECT si.id, si.organization_id, si.invoice_data, si.created_at
+    SELECT si.id, si.organization_id, si.invoice_number AS old_invoice_number, si.invoice_data, si.created_at
     FROM public.service_invoices si
-    WHERE si.invoice_number IS NULL
+    WHERE si.invoice_number IS NULL OR pg_catalog.btrim(si.invoice_number) = ''
     ORDER BY si.created_at ASC NULLS LAST, si.id ASC
   LOOP
     v_obj := NULL;
@@ -321,43 +362,156 @@ BEGIN
 
     UPDATE public.service_invoices
     SET invoice_number = v_num
-    WHERE id = rec.id AND invoice_number IS NULL;
+    WHERE id = rec.id
+      AND (invoice_number IS NULL OR pg_catalog.btrim(invoice_number) = '');
     IF FOUND THEN
       INSERT INTO public.service_invoice_number_backfill_audit
         (invoice_id, organization_id, old_invoice_number, new_invoice_number, source)
-      VALUES (rec.id::text, rec.organization_id::text, NULL, v_num, 'json');
+      VALUES (rec.id::text, rec.organization_id::text, nullif(pg_catalog.btrim(rec.old_invoice_number), ''), v_num, 'json');
       v_json := v_json + 1;
-      RAISE NOTICE '000946 backfill source=json id=% org=% before=<null> after=%', rec.id, rec.organization_id, v_num;
+      RAISE NOTICE '000946 backfill source=json id=% org=% before=% after=%',
+        rec.id, rec.organization_id, coalesce(rec.old_invoice_number, '<null>'), v_num;
     END IF;
   END LOOP;
 
-  -- Pass 2: remaining nulls, per org, created_at order, after the org max.
-  FOR rec IN
-    SELECT si.id, si.organization_id, si.created_at
+  -- Pass 2: one scan. row_number() per org + created_at day, after that day's
+  -- max 1-4 digit {PREFIX}-INV-{ymd}- suffix. A longer suffix does not count.
+  CREATE TEMP TABLE pg_temp_invoice_number_seq_assign (
+    id bigint PRIMARY KEY,
+    organization_id bigint,
+    old_invoice_number text,
+    new_invoice_number text
+  ) ON COMMIT DROP;
+
+  WITH blanks AS (
+    SELECT si.id,
+           si.organization_id,
+           si.invoice_number AS old_invoice_number,
+           coalesce(si.created_at, pg_catalog.now()) AS created_at
     FROM public.service_invoices si
-    WHERE si.invoice_number IS NULL
-    ORDER BY si.organization_id ASC NULLS FIRST, si.created_at ASC NULLS LAST, si.id ASC
+    WHERE si.invoice_number IS NULL OR pg_catalog.btrim(si.invoice_number) = ''
+  ),
+  org_ids AS (
+    SELECT b.organization_id FROM blanks b
+    UNION
+    SELECT si.organization_id
+    FROM public.service_invoices si
+    WHERE si.invoice_number IS NOT NULL AND pg_catalog.btrim(si.invoice_number) <> ''
+  ),
+  org_meta AS (
+    SELECT o.organization_id,
+           public.service_invoice_org_prefix(o.organization_id) AS prefix,
+           public.service_invoice_org_zone(o.organization_id) AS zone
+    FROM org_ids o
+  ),
+  parsed AS (
+    SELECT si.organization_id,
+           (pg_catalog.regexp_match(
+              pg_catalog.upper(pg_catalog.btrim(si.invoice_number)),
+              '-INV-([0-9]{8})-[0-9]{1,4}$'
+            ))[1] AS ymd,
+           public.service_invoice_day_seq(
+             si.invoice_number,
+             m.prefix || '-INV-' || coalesce(
+               (pg_catalog.regexp_match(
+                  pg_catalog.upper(pg_catalog.btrim(si.invoice_number)),
+                  '-INV-([0-9]{8})-[0-9]{1,4}$'
+                ))[1],
+               ''
+             ) || '-'
+           ) AS seq
+    FROM public.service_invoices si
+    JOIN org_meta m ON m.organization_id IS NOT DISTINCT FROM si.organization_id
+    WHERE si.invoice_number IS NOT NULL AND pg_catalog.btrim(si.invoice_number) <> ''
+  ),
+  maxes AS (
+    SELECT p.organization_id, p.ymd, max(p.seq) AS base_seq
+    FROM parsed p
+    WHERE p.seq IS NOT NULL AND p.ymd IS NOT NULL
+    GROUP BY p.organization_id, p.ymd
+  ),
+  ranked AS (
+    SELECT b.id,
+           b.organization_id,
+           b.old_invoice_number,
+           m.prefix || '-INV-' || pg_catalog.to_char(b.created_at AT TIME ZONE m.zone, 'YYYYMMDD') || '-' AS stem,
+           pg_catalog.to_char(b.created_at AT TIME ZONE m.zone, 'YYYYMMDD') AS ymd,
+           row_number() OVER (
+             PARTITION BY b.organization_id, pg_catalog.to_char(b.created_at AT TIME ZONE m.zone, 'YYYYMMDD')
+             ORDER BY b.created_at ASC, b.id ASC
+           )::integer AS rn
+    FROM blanks b
+    JOIN org_meta m ON m.organization_id IS NOT DISTINCT FROM b.organization_id
+  ),
+  assigned AS (
+    SELECT r.id,
+           r.organization_id,
+           r.old_invoice_number,
+           r.stem,
+           coalesce(x.base_seq, 0) + r.rn AS seq
+    FROM ranked r
+    LEFT JOIN maxes x
+      ON x.organization_id IS NOT DISTINCT FROM r.organization_id
+     AND x.ymd = r.ymd
+  ),
+  updated AS (
+    UPDATE public.service_invoices si
+    SET invoice_number = CASE
+          WHEN a.seq < 100 THEN a.stem || pg_catalog.lpad(a.seq::text, 2, '0')
+          ELSE a.stem || a.seq::text
+        END
+    FROM assigned a
+    WHERE si.id = a.id
+      AND (si.invoice_number IS NULL OR pg_catalog.btrim(si.invoice_number) = '')
+    RETURNING si.id, si.invoice_number AS new_invoice_number
+  )
+  INSERT INTO pg_temp_invoice_number_seq_assign (id, organization_id, old_invoice_number, new_invoice_number)
+  SELECT u.id, a.organization_id, a.old_invoice_number, u.new_invoice_number
+  FROM updated u
+  JOIN assigned a ON a.id = u.id;
+
+  INSERT INTO public.service_invoice_number_backfill_audit
+    (invoice_id, organization_id, old_invoice_number, new_invoice_number, source)
+  SELECT s.id::text,
+         s.organization_id::text,
+         nullif(pg_catalog.btrim(s.old_invoice_number), ''),
+         s.new_invoice_number,
+         'sequence'
+  FROM pg_temp_invoice_number_seq_assign s;
+  GET DIAGNOSTICS v_seq = ROW_COUNT;
+
+  FOR rec IN
+    SELECT s.id, s.organization_id, s.old_invoice_number, s.new_invoice_number
+    FROM pg_temp_invoice_number_seq_assign s
+    ORDER BY s.organization_id ASC NULLS FIRST, s.id ASC
   LOOP
-    v_assigned := public.service_invoice_next_number(rec.organization_id, rec.created_at);
-    UPDATE public.service_invoices
-    SET invoice_number = v_assigned
-    WHERE id = rec.id AND invoice_number IS NULL;
-    IF NOT FOUND THEN
-      RAISE EXCEPTION '000946 lost invoice % during sequence backfill', rec.id;
-    END IF;
-    INSERT INTO public.service_invoice_number_backfill_audit
-      (invoice_id, organization_id, old_invoice_number, new_invoice_number, source)
-    VALUES (rec.id::text, rec.organization_id::text, NULL, v_assigned, 'sequence');
-    v_seq := v_seq + 1;
-    RAISE NOTICE '000946 backfill source=sequence id=% org=% before=<null> after=%', rec.id, rec.organization_id, v_assigned;
+    RAISE NOTICE '000946 backfill source=sequence id=% org=% before=% after=%',
+      rec.id, rec.organization_id, coalesce(rec.old_invoice_number, '<null>'), rec.new_invoice_number;
   END LOOP;
 
-  IF EXISTS (SELECT 1 FROM public.service_invoices WHERE invoice_number IS NULL) THEN
-    RAISE EXCEPTION '000946 backfill left null invoice_number values';
+  IF EXISTS (
+    SELECT 1 FROM public.service_invoices
+    WHERE invoice_number IS NULL OR pg_catalog.btrim(invoice_number) = ''
+  ) THEN
+    RAISE EXCEPTION '000946 backfill left null or blank invoice_number values';
   END IF;
   RAISE NOTICE '000946 backfilled % invoice_number values (json=% sequence=%)', v_json + v_seq, v_json, v_seq;
 END
 $backfill$;
+
+DO $blankchk$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_constraint
+    WHERE conname = 'service_invoices_invoice_number_not_blank'
+      AND conrelid = 'public.service_invoices'::regclass
+  ) THEN
+    ALTER TABLE public.service_invoices
+      ADD CONSTRAINT service_invoices_invoice_number_not_blank
+      CHECK (btrim(invoice_number) <> '') NOT VALID;
+  END IF;
+END
+$blankchk$;
 
 CREATE OR REPLACE FUNCTION public.service_invoices_assign_invoice_number()
 RETURNS trigger
@@ -381,7 +535,7 @@ BEGIN
 END;
 $fn$;
 COMMENT ON FUNCTION public.service_invoices_assign_invoice_number() IS
-  '000946 BEFORE INSERT: assign the next per-org invoice number when the column is null or blank';
+  '000946 BEFORE INSERT: assign the next per-org per-day invoice number when the column is null or whitespace';
 REVOKE ALL ON FUNCTION public.service_invoices_assign_invoice_number() FROM PUBLIC, anon, authenticated;
 
 DROP TRIGGER IF EXISTS service_invoices_assign_invoice_number ON public.service_invoices;

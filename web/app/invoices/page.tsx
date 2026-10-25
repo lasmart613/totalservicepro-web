@@ -24,6 +24,7 @@ import {
 import { toast } from 'sonner';
 import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import {
+  invoiceListReloadSilently,
   invoiceListStatus,
   invoiceMatchesListFilter,
   invoiceStatusBadgeClass,
@@ -78,11 +79,13 @@ export default function InvoicesListPage() {
   const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
   const [loadError, setLoadError] = useState<string | null>(null);
   const initGen = useRef(0);
+  const rowsRef = useRef<InvoiceRow[]>([]);
+  rowsRef.current = rows;
 
   useEffect(() => {
     void init();
     const stopResume = subscribeInvoiceListResume(() => {
-      void init();
+      void init({ silent: invoiceListReloadSilently(rowsRef.current.length) });
     });
     try {
       const sid = new URL(window.location.href).searchParams.get('session_id');
@@ -130,10 +133,13 @@ export default function InvoicesListPage() {
     return true;
   }
 
-  async function init() {
+  async function init(opts?: { silent?: boolean }) {
     const gen = ++initGen.current;
-    setLoading(true);
-    setLoadError(null);
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setLoading(true);
+      setLoadError(null);
+    }
     try {
       const sessionWasStale = await ensureFreshInvoiceSession();
       if (gen !== initGen.current) return;
@@ -168,7 +174,7 @@ export default function InvoicesListPage() {
           setDocZone(zone.timeZone);
         })
         .catch(() => {});
-      await loadInvoices(orgId, user.id, { sessionWasStale, gen });
+      await loadInvoices(orgId, user.id, { sessionWasStale, gen, preserveOnError: silent });
     } catch (e) {
       if (gen !== initGen.current) return;
       if (e instanceof Error && e.message === 'SIGN_IN_REQUIRED') return;
@@ -181,7 +187,7 @@ export default function InvoicesListPage() {
   async function loadInvoices(
     orgId: string | number | null,
     userId: string,
-    opts: { sessionWasStale: boolean; gen: number }
+    opts: { sessionWasStale: boolean; gen: number; preserveOnError?: boolean }
   ) {
     const run = async () => {
       const errors: string[] = [];
@@ -237,6 +243,10 @@ export default function InvoicesListPage() {
       }
     }
 
+    if (opts.preserveOnError && errors.length) {
+      setLoadError(errors.join(' '));
+      return;
+    }
     setRows(rows);
     setLoadError(errors.length ? errors.join(' ') : null);
   }

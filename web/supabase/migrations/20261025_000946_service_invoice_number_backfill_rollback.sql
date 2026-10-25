@@ -1,5 +1,6 @@
--- Rollback for 000946. Drops the assign trigger and NOT NULL, then sets
--- invoice_number back to null on exactly the audited ids whose current number
+-- Rollback for 000946. Drops the assign trigger, the NOT NULL, and the
+-- not-blank check, then sets invoice_number back to the audited previous
+-- value (null for rows that were null or whitespace) when the current number
 -- is still the value 000946 wrote. A number edited after the backfill is left
 -- alone (NOTICE) so a later save is not wiped. Drops the audit table and the
 -- allocator functions, and deletes schema_migrations version 20261025_000946.
@@ -39,6 +40,9 @@ DROP TRIGGER IF EXISTS service_invoices_assign_invoice_number ON public.service_
 
 ALTER TABLE public.service_invoices
   ALTER COLUMN invoice_number DROP NOT NULL;
+
+ALTER TABLE public.service_invoices
+  DROP CONSTRAINT IF EXISTS service_invoices_invoice_number_not_blank;
 
 DO $restore$
 DECLARE
@@ -87,6 +91,9 @@ DROP TABLE IF EXISTS public.service_invoice_number_backfill_audit;
 
 DROP FUNCTION IF EXISTS public.service_invoices_assign_invoice_number();
 DROP FUNCTION IF EXISTS public.service_invoice_next_number(bigint, timestamptz);
+DROP FUNCTION IF EXISTS public.service_invoice_day_seq(text, text);
+DROP FUNCTION IF EXISTS public.service_invoice_org_zone(bigint);
+DROP FUNCTION IF EXISTS public.service_invoice_org_prefix(bigint);
 DROP FUNCTION IF EXISTS public.service_invoice_number_seq(text);
 
 DO $book$

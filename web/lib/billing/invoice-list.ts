@@ -51,11 +51,15 @@ export function sessionNeedsRefresh(expiresAt: unknown, nowMs: number, skewMs = 
   return expiresMs - nowMs <= skewMs;
 }
 
-export function readNativeSessionRestore(
-  win: { __tspRestoreAndroidSession?: unknown } | null | undefined
-): NativeSessionRestore | null {
-  const fn = win?.__tspRestoreAndroidSession;
+export function readNativeSessionRestore(win: object | null | undefined): NativeSessionRestore | null {
+  if (win == null || !('__tspRestoreAndroidSession' in win)) return null;
+  const fn = (win as { __tspRestoreAndroidSession?: unknown }).__tspRestoreAndroidSession;
   return typeof fn === 'function' ? (fn as NativeSessionRestore) : null;
+}
+
+/** A resume/focus reload keeps the list on screen once any rows are already shown. */
+export function invoiceListReloadSilently(existingRowCount: number): boolean {
+  return existingRowCount > 0;
 }
 
 /**
@@ -82,19 +86,19 @@ export async function refreshStaleInvoiceSession(input: {
 }
 
 /**
- * Re-run the invoice list when the tab becomes visible again, and when a
- * native shell fires `resume` (the WebView hook already used for session restore
- * is awaited on that visible transition).
+ * Re-run the invoice list when the tab becomes visible, when the window gains
+ * focus, and when a native shell fires `resume`. The WebView session restore
+ * is awaited on that transition. The page decides whether the reload is silent.
  */
 export function subscribeInvoiceListResume(
   onResume: () => void,
-  target?: { document?: ResumeTarget | null; window?: ResumeWindow | null }
+  target?: { document?: ResumeTarget | null; window?: (ResumeWindow & Partial<ResumeTarget>) | null }
 ): () => void {
   const doc =
     target?.document ??
     (typeof document !== 'undefined' ? (document as unknown as ResumeTarget) : null);
   const win =
-    target?.window ?? (typeof window !== 'undefined' ? (window as unknown as ResumeWindow) : null);
+    target?.window ?? (typeof window !== 'undefined' ? (window as unknown as ResumeWindow & ResumeTarget) : null);
   if (!doc) return () => {};
 
   const fire = () => {
@@ -115,11 +119,20 @@ export function subscribeInvoiceListResume(
   const onNativeResume = () => {
     fire();
   };
+  const onFocus = () => {
+    fire();
+  };
+  const focusTarget: ResumeTarget | null =
+    win && typeof win.addEventListener === 'function' && typeof win.removeEventListener === 'function'
+      ? (win as ResumeTarget)
+      : null;
   doc.addEventListener('visibilitychange', onVis);
   doc.addEventListener('resume', onNativeResume);
+  if (focusTarget) focusTarget.addEventListener('focus', onFocus);
   return () => {
     doc.removeEventListener('visibilitychange', onVis);
     doc.removeEventListener('resume', onNativeResume);
+    if (focusTarget) focusTarget.removeEventListener('focus', onFocus);
   };
 }
 
