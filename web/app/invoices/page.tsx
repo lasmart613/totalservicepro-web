@@ -1,7 +1,7 @@
 'use client';
 import { useFormatDate } from '@/lib/use-format-date';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
@@ -23,6 +23,19 @@ import {
 } from '@/lib/billing/invoice-collectable';
 import { toast } from 'sonner';
 import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
+import {
+  invoiceListReloadSilently,
+  invoiceListStatus,
+  invoiceMatchesListFilter,
+  invoiceStatusBadgeClass,
+  invoiceStatusLabel,
+  mergeInvoiceRows,
+  readNativeSessionRestore,
+  refreshStaleInvoiceSession,
+  sessionNeedsRefresh,
+  shouldRetryEmptyInvoiceList,
+  subscribeInvoiceListResume,
+} from '@/lib/billing/invoice-list';
 
 type InvFilter = 'all' | 'draft' | 'sent' | 'paid' | 'partially_paid' | 'void';
 
@@ -38,20 +51,6 @@ type InvoiceRow = {
   organization_id?: any;
   created_by?: string | null;
 };
-
-function statusBadgeClass(st: string): string {
-  if (st === 'paid') return 'bg-green-900/40 text-green-200 border-green-700';
-  if (st === 'partially_paid') return 'bg-amber-900/40 text-amber-200 border-amber-700';
-  if (st === 'draft') return 'bg-gray-700/40 text-gray-200 border-gray-600';
-  if (st === 'sent') return 'bg-blue-900/40 text-blue-200 border-blue-700';
-  if (st === 'void' || st === 'voided') return 'bg-rose-900/40 text-rose-200 border-rose-700';
-  return 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border2)]';
-}
-
-function statusLabel(st: string): string {
-  if (st === 'partially_paid') return 'Partial';
-  return st ? st.charAt(0).toUpperCase() + st.slice(1) : 'Draft';
-}
 
 function docNumber(inv: InvoiceRow): string {
   const idata = parseJsonField(inv.invoice_data);
@@ -78,9 +77,16 @@ export default function InvoicesListPage() {
   const [voidReason, setVoidReason] = useState('');
   const [voiding, setVoiding] = useState(false);
   const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const initGen = useRef(0);
+  const rowsRef = useRef<InvoiceRow[]>([]);
+  rowsRef.current = rows;
 
   useEffect(() => {
-    init();
+    void init();
+    const stopResume = subscribeInvoiceListResume(() => {
+      void init({ silent: invoiceListReloadSilently(rowsRef.current.length) });
+    });
     try {
       const sid = new URL(window.location.href).searchParams.get('session_id');
       if (sid) {
@@ -97,15 +103,46 @@ export default function InvoicesListPage() {
     } catch {
       /* ignore */
     }
+    return () => {
+      stopResume();
+    };
   }, []);
 
   useEffect(() => {
     applyFilters();
   }, [rows, activeFilter, search]);
 
-  async function init() {
-    setLoading(true);
+  async function ensureFreshInvoiceSession(): Promise<boolean> {
+    const { data } = await supabase.auth.getSession();
+    const session = data.session;
+    if (!session?.access_token) {
+      router.push('/login');
+      throw new Error('SIGN_IN_REQUIRED');
+    }
+    const stale = sessionNeedsRefresh(session.expires_at, Date.now());
+    if (!stale) return false;
+    await refreshStaleInvoiceSession({
+      restoreNative: readNativeSessionRestore(typeof window !== 'undefined' ? window : null),
+      refreshSession: () => supabase.auth.refreshSession(),
+    });
+    const again = await supabase.auth.getSession();
+    if (!again.data.session?.access_token) {
+      router.push('/login');
+      throw new Error('SIGN_IN_REQUIRED');
+    }
+    return true;
+  }
+
+  async function init(opts?: { silent?: boolean }) {
+    const gen = ++initGen.current;
+    const silent = Boolean(opts?.silent);
+    if (!silent) {
+      setLoading(true);
+      setLoadError(null);
+    }
     try {
+      const sessionWasStale = await ensureFreshInvoiceSession();
+      if (gen !== initGen.current) return;
       const {
         data: { user },
       } = await supabase.auth.getUser();
@@ -113,61 +150,89 @@ export default function InvoicesListPage() {
         router.push('/login');
         return;
       }
-      const { data: profile } = await supabase
+      const { data: profile, error: profileError } = await supabase
         .from('user_profiles')
         .select('organization_id, role')
         .eq('id', user.id)
         .maybeSingle();
+      if (profileError) throw new Error(profileError.message || 'Could not load your profile');
       const orgId = coerceOrgId(profile?.organization_id);
-      const looked = await getOrgRole(supabase, user.id, isValidOrgId(orgId) ? orgId : null);
-      setCallerRole(looked.ok ? voidInvoiceRole(looked) : '');
-      const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
-        allowBrowser: false,
-      });
-      setDocZone(zone.timeZone);
-      await loadInvoices(orgId, user.id);
+      const orgForLookups = isValidOrgId(orgId) ? orgId : null;
+      // Role and timezone paint the void button and dates. They must not hold the list query.
+      void getOrgRole(supabase, user.id, orgForLookups)
+        .then((looked) => {
+          if (gen !== initGen.current) return;
+          setCallerRole(looked.ok ? voidInvoiceRole(looked) : '');
+        })
+        .catch(() => {
+          if (gen !== initGen.current) return;
+          setCallerRole('');
+        });
+      void resolveNumberingTimeZone(supabase, orgForLookups, { allowBrowser: false })
+        .then((zone) => {
+          if (gen !== initGen.current) return;
+          setDocZone(zone.timeZone);
+        })
+        .catch(() => {});
+      await loadInvoices(orgId, user.id, { sessionWasStale, gen, preserveOnError: silent });
     } catch (e) {
-      console.error(e);
+      if (gen !== initGen.current) return;
+      if (e instanceof Error && e.message === 'SIGN_IN_REQUIRED') return;
+      setLoadError(e instanceof Error ? e.message : 'Could not load invoices');
     } finally {
-      setLoading(false);
+      if (gen === initGen.current) setLoading(false);
     }
   }
 
-  async function loadInvoices(orgId: string | number | null, userId: string) {
-    const list: InvoiceRow[] = [];
-    const seen: Record<string, boolean> = {};
-    const merge = (batch: any[] | null | undefined) => {
-      (batch || []).forEach((r) => {
-        if (!r || r.id == null) return;
-        const k = String(r.id);
-        if (seen[k]) return;
-        seen[k] = true;
-        list.push(r as InvoiceRow);
-      });
-    };
+  async function loadInvoices(
+    orgId: string | number | null,
+    userId: string,
+    opts: { sessionWasStale: boolean; gen: number; preserveOnError?: boolean }
+  ) {
+    const run = async () => {
+      const errors: string[] = [];
+      const batches: InvoiceRow[][] = [];
+      if (isValidOrgId(orgId)) {
+        const q1 = await supabase
+          .from('service_invoices')
+          .select('*')
+          .eq('organization_id', orgId)
+          .order('created_at', { ascending: false })
+          .limit(150);
+        if (q1.error) errors.push(q1.error.message || 'Could not load company invoices');
+        else batches.push((q1.data || []) as InvoiceRow[]);
+      }
 
-    if (isValidOrgId(orgId)) {
-      const q1 = await supabase
+      const q2 = await supabase
         .from('service_invoices')
         .select('*')
-        .eq('organization_id', orgId)
+        .eq('created_by', userId)
         .order('created_at', { ascending: false })
-        .limit(150);
-      if (q1.error) console.warn('invoices org load', q1.error);
-      merge(q1.data);
-    }
+        .limit(100);
+      if (q2.error) errors.push(q2.error.message || 'Could not load your invoices');
+      else batches.push((q2.data || []) as InvoiceRow[]);
+      return { rows: mergeInvoiceRows(batches), errors };
+    };
 
-    const q2 = await supabase
-      .from('service_invoices')
-      .select('*')
-      .eq('created_by', userId)
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (q2.error) console.warn('invoices mine load', q2.error);
-    merge(q2.data);
+    let { rows, errors } = await run();
+    if (
+      shouldRetryEmptyInvoiceList({
+        sessionWasStale: opts.sessionWasStale,
+        rowCount: rows.length,
+        hadError: errors.length > 0,
+        alreadyRetried: false,
+      })
+    ) {
+      await refreshStaleInvoiceSession({
+        restoreNative: readNativeSessionRestore(typeof window !== 'undefined' ? window : null),
+        refreshSession: () => supabase.auth.refreshSession(),
+      });
+      ({ rows, errors } = await run());
+    }
+    if (opts.gen !== initGen.current) return;
 
     if (isValidOrgId(orgId)) {
-      for (const r of list) {
+      for (const r of rows) {
         if (r.created_by === userId && (r.organization_id == null || r.organization_id === '')) {
           supabase
             .from('service_invoices')
@@ -178,20 +243,16 @@ export default function InvoicesListPage() {
       }
     }
 
-    list.sort(
-      (a, b) =>
-        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
-    );
-    setRows(list);
+    if (opts.preserveOnError && errors.length) {
+      setLoadError(errors.join(' '));
+      return;
+    }
+    setRows(rows);
+    setLoadError(errors.length ? errors.join(' ') : null);
   }
 
   function applyFilters() {
-    let res = [...rows];
-    if (activeFilter === 'void') {
-      res = res.filter((e) => isVoidInvoiceStatus(e.status));
-    } else if (activeFilter !== 'all') {
-      res = res.filter((e) => (e.status || '').toLowerCase() === activeFilter);
-    }
+    let res = rows.filter((e) => invoiceMatchesListFilter(e, activeFilter));
     const q = search.trim().toLowerCase();
     if (q) {
       res = res.filter((e) => {
@@ -299,10 +360,10 @@ export default function InvoicesListPage() {
     }
   }
 
-  const drafts = rows.filter((r) => (r.status || '').toLowerCase() === 'draft').length;
-  const sent = rows.filter((r) => (r.status || '').toLowerCase() === 'sent').length;
-  const partial = rows.filter((r) => (r.status || '').toLowerCase() === 'partially_paid').length;
-  const paid = rows.filter((r) => (r.status || '').toLowerCase() === 'paid').length;
+  const drafts = rows.filter((r) => invoiceListStatus(r) === 'draft').length;
+  const sent = rows.filter((r) => invoiceListStatus(r) === 'sent').length;
+  const partial = rows.filter((r) => invoiceListStatus(r) === 'partially_paid').length;
+  const paid = rows.filter((r) => invoiceListStatus(r) === 'paid').length;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -376,11 +437,21 @@ export default function InvoicesListPage() {
           ))}
         </div>
 
+        {loadError && !loading && (
+          <div className="card p-4 mb-4 border border-rose-700" role="alert">
+            <p className="font-semibold text-rose-200">Could not load invoices</p>
+            <p className="text-sm text-[var(--text3)] mt-1">{loadError}</p>
+            <button type="button" className="btn btn-secondary mt-3" onClick={() => void init()}>
+              Retry
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="empty-state">
             <div className="animate-spin h-6 w-6 border-2 border-[var(--gold)] border-t-transparent rounded-full mx-auto" />
           </div>
-        ) : filtered.length === 0 ? (
+        ) : filtered.length === 0 && !loadError ? (
           <div className="empty-state card p-8 text-center">
             <div className="text-4xl mb-3">🧾</div>
             <div className="font-semibold">{t('No invoices yet')}</div>
@@ -391,10 +462,10 @@ export default function InvoicesListPage() {
               + {t('New Invoice')}
             </Link>
           </div>
-        ) : (
+        ) : filtered.length === 0 ? null : (
           <div className="space-y-3">
             {filtered.map((inv) => {
-              const st = String(inv.status || 'draft').toLowerCase();
+              const st = invoiceListStatus(inv);
               const num = docNumber(inv);
               const dateStr =
                 formatOrgDocumentDate(inv.invoice_date || inv.created_at, docZone, locale) || '—';
@@ -418,11 +489,11 @@ export default function InvoicesListPage() {
                       {num && <span className="text-[var(--gold)] font-bold">{num}</span>}
                       <span>{dateStr}</span>
                       <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadgeClass(
+                        className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${invoiceStatusBadgeClass(
                           st
                         )}`}
                       >
-                        {statusLabel(st)}
+                        {invoiceStatusLabel(st)}
                       </span>
                     </div>
                   </Link>
