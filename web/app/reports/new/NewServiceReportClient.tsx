@@ -74,6 +74,7 @@ import {
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
+  equipmentTypeLabel,
   equipmentTypeOrDefault,
   inferEquipmentType,
   type EquipmentType,
@@ -95,7 +96,9 @@ import {
   isChecklistSection,
   LASER_SECTIONS,
   removeItem,
+  detectTemplateSchema,
   replaceServiceReportItems,
+  sectionsLostWithoutTemplateSchema,
   unusedLibraryElements,
   type SrDraftItem,
   type SrElement,
@@ -105,6 +108,7 @@ import {
   checklistSectionsJson,
   customSectionKey,
   orderedSections,
+  reportHeaderTagline,
 } from '@/lib/service-report-templates';
 
 /** Icons for the legacy section titles (unchanged on laser reports). */
@@ -257,6 +261,8 @@ export default function NewServiceReport() {
   const [srLibrary, setSrLibrary] = useState<SrElement[]>([]);
   const [srTemplateId, setSrTemplateId] = useState<string | null>(null);
   const [srTemplateName, setSrTemplateName] = useState('Laser PM');
+  // Element ids on the resolved template: scopes "+ Add from library".
+  const [srTemplateElementIds, setSrTemplateElementIds] = useState<string[]>([]);
   const [srUsedFallback, setSrUsedFallback] = useState(true);
   const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
   // Template sections in order (incl. safety). Laser = the legacy three + safety.
@@ -540,7 +546,7 @@ export default function NewServiceReport() {
   }
   // Sections to render: template order, then custom / leftover sections on the items.
   const checklistSectionList = orderedSections(srItems, srSections).filter((s) => s.key !== 'safety');
-  const unusedLibrary = unusedLibraryElements(srLibrary, srItems, equipmentType);
+  const unusedLibrary = unusedLibraryElements(srLibrary, srItems, equipmentType, srTemplateElementIds);
   const performanceVisible = equipmentType === DEFAULT_EQUIPMENT_TYPE || showPerformance || powerMeasurements.length > 0;
 
   function syncMapsFromItems(items: SrDraftItem[]) {
@@ -567,6 +573,7 @@ export default function NewServiceReport() {
     setSrUsedFallback(loaded.usedFallback);
     setSrSections(loaded.sections);
     setSrEditable(loaded.editable);
+    setSrTemplateElementIds(loaded.elements.map((e) => e.id).filter(Boolean));
     syncMapsFromItems(next);
   }
 
@@ -727,6 +734,7 @@ export default function NewServiceReport() {
           }
           setSrSections(loaded.sections.map((sec) => ({ ...sec, label: savedTitles.get(sec.key) || sec.label })));
           setSrEditable(loaded.editable);
+    setSrTemplateElementIds(loaded.elements.map((e) => e.id).filter(Boolean));
           if (savedItems && savedItems.length) {
             setSrItems(
               savedItems.map((it) =>
@@ -1432,6 +1440,21 @@ export default function NewServiceReport() {
     }
     setSaving(true);
     try {
+      // 000945 missing: the old schema keeps only electrical / mechanical /
+      // aesthetic / safety, so template and custom sections would be dropped
+      // silently. Block the save instead (laser's default form is unaffected).
+      const lostSections = sectionsLostWithoutTemplateSchema(
+        currentItemsWithAnswers(),
+        orderedSections(currentItemsWithAnswers(), srSections)
+      );
+      if (lostSections.length && (await detectTemplateSchema(supabase)) === false) {
+        toast.error(
+          `Not saved: the ${equipmentTypeLabel(equipmentType)} checklist needs a database update (service report templates) ` +
+            `that isn't applied yet. Saving now would drop: ${lostSections.join(', ')}. ` +
+            'Ask your admin to apply it, then save again.'
+        );
+        return;
+      }
       // Force latest canvas capture for sig (Android parity)
       const canvas = sigCanvasRef.current;
       let latestSig = techSig;
@@ -1817,7 +1840,7 @@ export default function NewServiceReport() {
 
   return (
     <div className="min-h-screen bg-[var(--bg)] pb-24">
-      <Header />
+      <Header tagline={reportHeaderTagline(equipmentType)} />
       <div className="max-w-5xl mx-auto px-6 py-8">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex min-w-0 items-center gap-3">

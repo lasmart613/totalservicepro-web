@@ -12,6 +12,7 @@ import {
   isValidSectionKey,
   LEGACY_SECTION_TITLES,
   orderedSections,
+  reportHeaderTagline,
   resolveTemplate,
   STARTER_TEMPLATES,
   starterSeedValues,
@@ -22,7 +23,12 @@ import {
   addCustomElement,
   fallbackFormForType,
   laserFallbackForm,
+  detectTemplateSchema,
+  LASER_LIBRARY_EXTRAS,
+  laserFallbackElements,
+  replaceServiceReportItems,
   removeItem,
+  sectionsLostWithoutTemplateSchema,
   unusedLibraryElements,
 } from './service-report-elements.ts';
 import { EQUIPMENT_TYPES } from './equipment-types.ts';
@@ -116,11 +122,11 @@ test('custom sections and items; removal rules', () => {
 
 test('library hides other types\' elements', () => {
   const lib = [
-    { id: '1', slug: 'a', label: 'A', section: 'electrical', equipment_type: null },
+    { id: '1', slug: 'display', label: 'A', section: 'electrical', equipment_type: null },
     { id: '2', slug: 'b', label: 'B', section: 'motion', equipment_type: 'beds' },
     { id: '3', slug: 'c', label: 'C', section: 'imaging', equipment_type: 'c_arm' },
   ] as any[];
-  assert.deepEqual(unusedLibraryElements(lib, [], 'beds').map((e) => e.slug), ['a', 'b']);
+  assert.deepEqual(unusedLibraryElements(lib, [], 'beds').map((e) => e.slug), ['display', 'b']);
 });
 
 test('displaySectionsForReport: legacy maps unchanged, checklist_sections when present', () => {
@@ -155,4 +161,113 @@ test('000945 migration seed matches STARTER_TEMPLATES exactly', () => {
   );
   assert.match(rb, /sr_templates_one_default_per_type/);
   assert.match(sql, /lock_timeout = '5s'/);
+});
+
+test('beds "+ Add from library" offers no laser items, even on a pre-000945 library', () => {
+  // Pre-000945 prod library: every element NULL-typed, incl. laser-only lines.
+  const legacyLib = laserFallbackElements().map((e) => ({ ...e, equipment_type: null }));
+  const beds = fallbackFormForType('beds');
+  const offered = unusedLibraryElements(legacyLib, beds.items, 'beds');
+  const laserLabels = new Set([...CL_ELECTRICAL, ...CL_MECHANICAL, ...CL_AESTHETIC, ...LASER_LIBRARY_EXTRAS.map((e) => e.label)]);
+  const sharedLaserLabels = new Set(legacyLib.filter((e) => EXISTING_ELEMENT_SLUGS.has(e.slug)).map((e) => e.label));
+  for (const el of offered) {
+    assert.ok(!laserLabels.has(el.label) || sharedLaserLabels.has(el.label), `laser item offered on beds: ${el.label}`);
+  }
+  for (const slug of ['door-interlock', 'fiber-handpiece']) assert.ok(!offered.some((e) => e.slug === slug), slug);
+  for (const label of ['Optics inspected & cleaned', 'Aiming Beam brightness']) {
+    assert.ok(!offered.some((e) => e.label === label), label);
+  }
+  // Template element ids are always offered (when not already on the form).
+  const pinned = legacyLib.find((e) => e.slug === 'door-interlock')!;
+  assert.ok(unusedLibraryElements(legacyLib, beds.items, 'beds', [pinned.id]).some((e) => e.id === pinned.id));
+  // Laser keeps its full library.
+  const laser = laserFallbackForm('laser');
+  const laserOffered = unusedLibraryElements(legacyLib, laser.items, 'laser');
+  assert.ok(LASER_LIBRARY_EXTRAS.every((e) => laserOffered.some((u) => u.slug === e.slug)));
+});
+
+test('sections lost without 000945: none for laser, template + custom ones otherwise', () => {
+  const laser = laserFallbackForm('laser');
+  assert.deepEqual(sectionsLostWithoutTemplateSchema(laser.items, laser.sections), []);
+  const beds = fallbackFormForType('beds');
+  const lost = sectionsLostWithoutTemplateSchema(beds.items, beds.sections);
+  assert.ok(lost.length > 0);
+  const motion = beds.sections.find((s) => !['electrical', 'mechanical', 'aesthetic', 'safety'].includes(s.key))!;
+  assert.ok(lost.includes(motion.label));
+  const withCustom = addCustomElement(laser.items, 'Boot', 'custom_lift');
+  const lostCustom = sectionsLostWithoutTemplateSchema(
+    withCustom.map((i) => (i.section === 'custom_lift' ? { ...i, section_label: 'Lift' } : i)),
+    laser.sections
+  );
+  assert.deepEqual(lostCustom, ['Lift']);
+});
+
+function mockSupabase(opts: { rpcError?: { code?: string; message: string } | null; probeError?: any }) {
+  const calls: string[] = [];
+  const chain = (table: string) => {
+    const q: any = {
+      delete() { calls.push(`delete:${table}`); return q; },
+      eq() { return Promise.resolve({ error: null }); },
+      insert(rows: unknown[]) { calls.push(`insert:${table}:${rows.length}`); return Promise.resolve({ error: null }); },
+      select() { return q; },
+      limit() { return Promise.resolve({ error: opts.probeError ?? null, data: [] }); },
+    };
+    return q;
+  };
+  return {
+    calls,
+    client: {
+      from: (t: string) => chain(t),
+      rpc: (fn: string, args: any) => {
+        calls.push(`rpc:${fn}:${args.p_items.length}`);
+        return Promise.resolve({ error: opts.rpcError ?? null });
+      },
+    },
+  };
+}
+
+test('report items save through the atomic RPC; legacy path only when the RPC is missing', async () => {
+  const items = fallbackFormForType('beds').items.map((i) => ({ ...i, result: 'pass' }));
+  const ok = mockSupabase({});
+  assert.deepEqual(await replaceServiceReportItems(ok.client, { reportId: 'r1', organizationId: 11, items }), { ok: true });
+  assert.deepEqual(ok.calls, [`rpc:replace_service_report_items:${items.length}`], 'no delete-all when the RPC exists');
+
+  const failed = mockSupabase({ rpcError: { code: 'P0945', message: 'safety rows cannot be deleted' } });
+  const res = await replaceServiceReportItems(failed.client, { reportId: 'r1', organizationId: 11, items });
+  assert.equal(res.ok, false);
+  assert.ok(!failed.calls.some((c) => c.startsWith('delete')), 'RPC failure must not fall back to delete-all');
+
+  const missing = mockSupabase({ rpcError: { code: 'PGRST202', message: 'Could not find the function public.replace_service_report_items' } });
+  await replaceServiceReportItems(missing.client, { reportId: 'r1', organizationId: 11, items });
+  assert.ok(missing.calls.includes('delete:service_report_items'), 'pre-000945 legacy path');
+});
+
+test('detectTemplateSchema: applied, missing, unknown', async () => {
+  assert.equal(await detectTemplateSchema(mockSupabase({}).client), true);
+  assert.equal(
+    await detectTemplateSchema(mockSupabase({ probeError: { code: 'PGRST205', message: "Could not find the table 'public.sr_template_sections' in the schema cache" } }).client),
+    false
+  );
+  assert.equal(await detectTemplateSchema(mockSupabase({ probeError: { message: 'fetch failed' } }).client), null);
+});
+
+test('report header uses the equipment type for non-laser reports', () => {
+  assert.equal(reportHeaderTagline('laser'), undefined);
+  assert.equal(reportHeaderTagline(null), undefined);
+  assert.match(reportHeaderTagline('beds')!, /^Beds.* Service$/);
+  assert.equal(reportHeaderTagline('ventilator'), 'Ventilator Service');
+});
+
+test('000945 safety trigger + RPC are SECURITY DEFINER, search_path \'\', org-checked, client-safe grants', () => {
+  const sql = readFileSync(join(here, '../supabase/migrations/20261025_000945_service_report_type_templates.sql'), 'utf8');
+  const rb = readFileSync(join(here, '../supabase/migrations/20261025_000945_service_report_type_templates_rollback.sql'), 'utf8');
+  for (const fn of ['sr_items_keep_safety()', 'replace_service_report_items(p_report_id uuid, p_items jsonb)']) {
+    const body = sql.slice(sql.indexOf(`CREATE FUNCTION public.${fn}`));
+    assert.match(body.slice(0, 200), /SECURITY DEFINER\s+SET search_path = ''/, fn);
+  }
+  assert.match(sql, /public\.get_my_org_id\(\)/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.replace_service_report_items\(uuid, jsonb\) FROM PUBLIC, anon;/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.replace_service_report_items\(uuid, jsonb\) TO authenticated, service_role;/);
+  assert.match(rb, /DROP TRIGGER sr_items_keep_safety ON public\.service_report_items;/);
+  assert.match(rb, /DROP FUNCTION public\.replace_service_report_items\(uuid, jsonb\);/);
 });

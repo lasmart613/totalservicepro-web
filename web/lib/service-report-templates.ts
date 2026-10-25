@@ -12,7 +12,12 @@
  */
 
 import { manufacturerNamesEqual, modelDedupeKey } from './equipment-dropdown.ts';
-import { DEFAULT_EQUIPMENT_TYPE, equipmentTypeOrDefault, normalizeEquipmentType } from './equipment-types.ts';
+import {
+  DEFAULT_EQUIPMENT_TYPE,
+  equipmentTypeLabel,
+  equipmentTypeOrDefault,
+  normalizeEquipmentType,
+} from './equipment-types.ts';
 
 export const LEGACY_CHECKLIST_SECTIONS = ['electrical', 'mechanical', 'aesthetic'] as const;
 
@@ -720,4 +725,14 @@ export function starterSeedValues(): string[] {
     });
   }
   return rows;
+}
+
+/**
+ * Header line under "Total Service Pro" on a service report. undefined keeps
+ * the default "Laser Equipment Service" (laser and legacy NULL-type reports).
+ */
+export function reportHeaderTagline(equipmentType: unknown): string | undefined {
+  const type = equipmentTypeOrDefault(equipmentType);
+  if (type === DEFAULT_EQUIPMENT_TYPE) return undefined;
+  return `${equipmentTypeLabel(type)} Service`;
 }

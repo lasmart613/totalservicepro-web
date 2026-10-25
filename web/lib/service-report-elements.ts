@@ -18,6 +18,7 @@ import {
   isValidSectionKey,
   LEGACY_SECTION_TITLES,
   resolveTemplate,
+  SHARED_ELEMENT_SLUGS,
   starterTemplateFor,
   titleForSectionKey,
   type StarterTemplate,
@@ -466,18 +467,39 @@ export function itemsFromPersistedRows(
   });
 }
 
+/**
+ * Library elements offered by "+ Add from library" for this report.
+ * Laser: shared + laser elements (unchanged). Other types: only elements of the
+ * report's template (templateElementIds), its own type, or the shared slugs
+ * (power cord, display, ...). Laser-only lines (CL_*, door interlock, fiber...)
+ * are never offered on beds etc., even on a pre-000945 library where they are
+ * NULL-typed.
+ */
 export function unusedLibraryElements(
   library: SrElement[],
   items: SrDraftItem[],
-  equipmentType?: string | null
+  equipmentType?: string | null,
+  templateElementIds?: Iterable<string> | null
 ): SrElement[] {
   const usedIds = new Set(items.map((i) => i.element_id).filter(Boolean) as string[]);
   const usedLabels = new Set(items.map((i) => `${i.section}::${i.label}`));
+  const type = equipmentType ? equipmentTypeOrDefault(equipmentType) : null;
+  const inTemplate = new Set(templateElementIds ? [...templateElementIds] : []);
   return library.filter((el) => {
     if (el.section === 'safety') return false;
     if (el.is_active === false) return false;
-    // Type-specific starter elements only show for their own type.
-    if (equipmentType && el.equipment_type && el.equipment_type !== equipmentType) return false;
+    if (type) {
+      const elType = el.equipment_type || null;
+      if (type === DEFAULT_EQUIPMENT_TYPE) {
+        if (elType && elType !== DEFAULT_EQUIPMENT_TYPE) return false;
+      } else if (!(el.id && inTemplate.has(el.id))) {
+        if (elType) {
+          if (elType !== type) return false;
+        } else if (!SHARED_ELEMENT_SLUGS.has(el.slug)) {
+          return false;
+        }
+      }
+    }
     if (el.id && usedIds.has(el.id)) return false;
     if (usedLabels.has(`${el.section}::${el.label}`)) return false;
     return true;
@@ -640,6 +662,7 @@ export function fallbackFormForType(equipmentType?: string | null): LoadedSrForm
 
 type SrClient = {
   from: (table: string) => any;
+  rpc?: (fn: string, args: Record<string, unknown>) => any;
 };
 
 const ELEMENT_COLS = 'id, slug, label, section, input_kind, unit, spec_hint, is_active, sort_hint';
@@ -804,10 +827,73 @@ export function isPreTemplateSchemaReject(error: { message?: string; code?: stri
   return /23514|service_report_items_section_check|section_label/i.test(m);
 }
 
+/** PostgREST / Postgres "function does not exist" (000945 RPC not applied). */
+export function isMissingSrRpc(error: { message?: string; code?: string } | null | undefined): boolean {
+  const m = `${error?.code || ''} ${error?.message || ''}`;
+  return /PGRST202|42883|Could not find the function|replace_service_report_items.*does not exist/i.test(m);
+}
+
+/**
+ * Is 000945 applied? Probes sr_template_sections (new in 000945).
+ * true = applied, false = missing, null = unknown (network / other error).
+ */
+export async function detectTemplateSchema(supabase: SrClient): Promise<boolean | null> {
+  try {
+    const res = await supabase.from('sr_template_sections').select('id').limit(1);
+    if (!res?.error) return true;
+    const m = `${res.error.code || ''} ${res.error.message || ''}`;
+    if (/PGRST205|42P01|sr_template_sections|schema cache|does not exist/i.test(m)) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Section titles a save would lose on a DB without 000945: the old schema only
+ * stores electrical / mechanical / aesthetic / safety, has no section_label and
+ * no checklist_sections. Empty = safe to save on the legacy schema.
+ */
+export function sectionsLostWithoutTemplateSchema(
+  items: SrDraftItem[],
+  sections: Array<{ key: string; label: string }> = []
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, label: string) => {
+    if (isSrLegacySection(key) || seen.has(key)) return;
+    seen.add(key);
+    out.push(label || titleForSectionKey(key));
+  };
+  for (const sec of sections) push(sec.key, sec.label);
+  for (const it of items) push(it.section, it.section_label || '');
+  return out;
+}
+
+export function rpcItemsFromDraft(items: SrDraftItem[]): Array<Record<string, unknown>> {
+  return persistRowsFromItems(items, { service_report_id: '', organization_id: null }).map(
+    ({ service_report_id: _r, organization_id: _o, ...rest }) => rest
+  );
+}
+
+/**
+ * Save the report's items. With 000945: one atomic RPC
+ * (replace_service_report_items) that keeps the electrical safety rows.
+ * Without it: the legacy delete-then-insert (legacy sections only); callers
+ * block non-laser saves first (sectionsLostWithoutTemplateSchema).
+ */
 export async function replaceServiceReportItems(
   supabase: SrClient,
   opts: { reportId: string; organizationId: number | string | null; items: SrDraftItem[] }
 ): Promise<{ ok: true } | { ok: false; skipped: true } | { ok: false; error: Error }> {
+  if (typeof supabase.rpc === 'function') {
+    const rpc = await supabase.rpc('replace_service_report_items', {
+      p_report_id: opts.reportId,
+      p_items: rpcItemsFromDraft(opts.items),
+    });
+    if (!rpc?.error) return { ok: true };
+    if (!isMissingSrRpc(rpc.error)) return { ok: false, error: new Error(rpc.error.message) };
+  }
   const del = await supabase.from('service_report_items').delete().eq('service_report_id', opts.reportId);
   if (del.error) {
     if (isMissingSrSchema(del.error)) return { ok: false, skipped: true };
@@ -822,7 +908,7 @@ export async function replaceServiceReportItems(
   if (ins.error && isPreTemplateSchemaReject(ins.error)) {
     // 000945 not applied: the old CHECK only allows the four legacy sections and
     // section_label does not exist. Keep the legacy rows; the legacy JSON still
-    // carries those answers. Non-legacy sections are skipped (deploy DB first).
+    // carries those answers. The form blocks non-laser saves before this.
     const legacyRows = rows
       .filter((r) => isSrLegacySection(r.section))
       .map(({ section_label: _drop, ...rest }) => rest);
