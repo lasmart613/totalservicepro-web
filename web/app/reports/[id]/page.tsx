@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
 import { buildServiceReportPrintHTML } from '@/lib/service-report-print';
+import { displaySectionsForReport } from '@/lib/service-report-templates';
 import { viewMeasurement } from '@/lib/fluence-measurement';
 import { systemParameterRows } from '@/lib/models';
 import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/company-theme';
@@ -302,12 +303,7 @@ export default function ReportDetail() {
               </div>
 
               {/* Checklist summaries */}
-              {[
-                ['Electrical', report.checklist_electrical],
-                ['Mechanical & Optical', report.checklist_mechanical],
-                ['Aesthetic', report.checklist_aesthetic],
-              ].map(([title, data]) => {
-                if (!data || typeof data !== 'object' || !Object.keys(data).length) return null;
+              {displaySectionsForReport(report, ['Electrical', 'Mechanical & Optical', 'Aesthetic']).map(({ title, rows: data }) => {
                 return (
                   <div key={String(title)}>
                     <h3 className="font-bold text-[var(--gold)] mb-2">{t(title as string)}</h3>

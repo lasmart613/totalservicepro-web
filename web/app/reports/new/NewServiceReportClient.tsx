@@ -92,13 +92,23 @@ import {
   loadServiceReportItems,
   loadSrTemplateForEquipmentType,
   mergeResultsIntoItems,
-  removeExtraItem,
+  isChecklistSection,
+  LASER_SECTIONS,
+  removeItem,
   replaceServiceReportItems,
   unusedLibraryElements,
-  type SrChecklistSection,
   type SrDraftItem,
   type SrElement,
+  type SrSectionDef,
 } from '@/lib/service-report-elements';
+import {
+  checklistSectionsJson,
+  customSectionKey,
+  orderedSections,
+} from '@/lib/service-report-templates';
+
+/** Icons for the legacy section titles (unchanged on laser reports). */
+const SECTION_ICONS: Record<string, string> = { electrical: '⚡', mechanical: '🔧', aesthetic: '🎨' };
 
 /** Admin / manager roles may edit Service Engineer (Android parity). */
 function canEditServiceEngineer(profile: any): boolean {
@@ -248,11 +258,13 @@ export default function NewServiceReport() {
   const [srTemplateId, setSrTemplateId] = useState<string | null>(null);
   const [srTemplateName, setSrTemplateName] = useState('Laser PM');
   const [srUsedFallback, setSrUsedFallback] = useState(true);
-  const [customLabels, setCustomLabels] = useState<Record<SrChecklistSection, string>>({
-    electrical: '',
-    mechanical: '',
-    aesthetic: '',
-  });
+  const [customLabels, setCustomLabels] = useState<Record<string, string>>({});
+  // Template sections in order (incl. safety). Laser = the legacy three + safety.
+  const [srSections, setSrSections] = useState<SrSectionDef[]>(() => LASER_SECTIONS.map((s) => ({ ...s })));
+  // Starter (editable default) templates let techs remove any line.
+  const [srEditable, setSrEditable] = useState(false);
+  const [newSectionLabel, setNewSectionLabel] = useState('');
+  const [showPerformance, setShowPerformance] = useState(false);
 
   // Performance / params
   const [powerMeasurements, setPowerMeasurements] = useState<any[]>([]);
@@ -517,10 +529,19 @@ export default function NewServiceReport() {
 
   const engineerEditable = useMemo(() => canEditServiceEngineer(currentProfile), [currentProfile]);
 
-  const electricalLabels = srItems.length ? labelsForSection(srItems, 'electrical') : [...CL_ELECTRICAL];
-  const mechanicalLabels = srItems.length ? labelsForSection(srItems, 'mechanical') : [...CL_MECHANICAL];
-  const aestheticLabels = srItems.length ? labelsForSection(srItems, 'aesthetic') : [...CL_AESTHETIC];
-  const unusedLibrary = unusedLibraryElements(srLibrary, srItems);
+  const legacyFallbackLabels: Record<string, string[]> = {
+    electrical: [...CL_ELECTRICAL],
+    mechanical: [...CL_MECHANICAL],
+    aesthetic: [...CL_AESTHETIC],
+  };
+  function sectionLabels(section: string): string[] {
+    if (!srItems.length) return legacyFallbackLabels[section] || [];
+    return labelsForSection(srItems, section);
+  }
+  // Sections to render: template order, then custom / leftover sections on the items.
+  const checklistSectionList = orderedSections(srItems, srSections).filter((s) => s.key !== 'safety');
+  const unusedLibrary = unusedLibraryElements(srLibrary, srItems, equipmentType);
+  const performanceVisible = equipmentType === DEFAULT_EQUIPMENT_TYPE || showPerformance || powerMeasurements.length > 0;
 
   function syncMapsFromItems(items: SrDraftItem[]) {
     const json = itemsToLegacyChecklists(items);
@@ -544,6 +565,8 @@ export default function NewServiceReport() {
     setSrTemplateId(loaded.usedFallback ? null : loaded.template?.id || null);
     setSrTemplateName(loaded.template?.name || 'Laser PM');
     setSrUsedFallback(loaded.usedFallback);
+    setSrSections(loaded.sections);
+    setSrEditable(loaded.editable);
     syncMapsFromItems(next);
   }
 
@@ -687,15 +710,31 @@ export default function NewServiceReport() {
         setEquipmentType(reportType);
         try {
           const [loaded, library, savedItems] = await Promise.all([
-            loadSrTemplateForEquipmentType(supabase, reportType),
+            loadSrTemplateForEquipmentType(supabase, reportType, {
+              manufacturer: r.manufacturer || null,
+              model: r.model_type || null,
+            }),
             loadPublishedLibrary(supabase),
             loadServiceReportItems(supabase, r.id),
           ]);
           if (cancelled) return;
           if (library) setSrLibrary(library);
           else setSrLibrary(loaded.elements);
+          // Saved section titles (checklist_sections) win over the current template's.
+          const savedTitles = new Map<string, string>();
+          if (Array.isArray(r.checklist_sections)) {
+            for (const sec of r.checklist_sections) if (sec?.key && sec?.label) savedTitles.set(sec.key, String(sec.label));
+          }
+          setSrSections(loaded.sections.map((sec) => ({ ...sec, label: savedTitles.get(sec.key) || sec.label })));
+          setSrEditable(loaded.editable);
           if (savedItems && savedItems.length) {
-            setSrItems(savedItems);
+            setSrItems(
+              savedItems.map((it) =>
+                !it.section_label && savedTitles.has(it.section) && !loaded.sections.some((sec) => sec.key === it.section)
+                  ? { ...it, section_label: savedTitles.get(it.section) }
+                  : it
+              )
+            );
             setSrTemplateId(r.sr_template_id || (loaded.usedFallback ? null : loaded.template?.id || null));
             setSrTemplateName(loaded.template?.name || 'Laser PM');
             setSrUsedFallback(loaded.usedFallback);
@@ -740,7 +779,7 @@ export default function NewServiceReport() {
     (async () => {
       try {
         const [loaded, library] = await Promise.all([
-          loadSrTemplateForEquipmentType(supabase, equipmentType),
+          loadSrTemplateForEquipmentType(supabase, equipmentType, currentSelection()),
           loadPublishedLibrary(supabase),
         ]);
         if (cancelled) return;
@@ -758,10 +797,19 @@ export default function NewServiceReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentUser, editReportId, supabase, ticketContextReady]);
 
+  // Manufacturer + model feed the type -> manufacturer -> model template cascade.
+  function currentSelection(): { manufacturer: string | null; model: string | null } {
+    return {
+      manufacturer: (catalogManufacturerName || manufacturerValue || currentModel?.mfg || '') || null,
+      model: (selectedDbModel || currentModel?.label || selectedModelKey || '') || null,
+    };
+  }
+
   async function onEquipmentTypeChange(next: EquipmentType) {
     const previous = currentItemsWithAnswers();
     setEquipmentType(next);
     try {
+      // A type change clears manufacturer / model, so resolve on type only.
       const loaded = await loadSrTemplateForEquipmentType(supabase, next);
       if (!srLibrary.length) {
         const library = await loadPublishedLibrary(supabase);
@@ -773,6 +821,34 @@ export default function NewServiceReport() {
       console.warn('sr template switch', e);
     }
   }
+
+  // New reports: re-resolve when manufacturer / model changes, so a
+  // manufacturer- or model-specific template (most specific wins) applies.
+  const resolvedTemplateRef = useRef<string | null>(null);
+  useEffect(() => {
+    resolvedTemplateRef.current = srTemplateId || `fallback:${srTemplateName}`;
+  }, [srTemplateId, srTemplateName]);
+  const selectionKey = `${currentSelection().manufacturer || ''}|${currentSelection().model || ''}`;
+  useEffect(() => {
+    if (!currentUser || editReportId || !ticketContextReady || isSubmitted) return;
+    if (selectionKey === '|') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const loaded = await loadSrTemplateForEquipmentType(supabase, equipmentType, currentSelection());
+        if (cancelled) return;
+        const key = loaded.usedFallback ? `fallback:${loaded.template?.name}` : loaded.template?.id || null;
+        if (key === resolvedTemplateRef.current) return;
+        applyLoadedTemplate(loaded, currentItemsWithAnswers());
+      } catch (e) {
+        console.warn('sr template cascade', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectionKey]);
 
   // Load manufacturers and laser_models from Supabase for dynamic dropdowns in reports (and tickets)
   useEffect(() => {
@@ -1431,6 +1507,8 @@ export default function NewServiceReport() {
         checklist_electrical: dualChecklists.electrical,
         checklist_mechanical: dualChecklists.mechanical,
         checklist_aesthetic: dualChecklists.aesthetic,
+        // NULL for laser-only reports, so their print / email are unchanged.
+        checklist_sections: checklistSectionsJson(answeredItems, orderedSections(answeredItems, srSections)),
         power_measurements: powerMeasurements,
         model_parameters: mergeModelParamValues(currentModel, modelParams),
         test_equipment: testEquipment
@@ -1524,11 +1602,48 @@ export default function NewServiceReport() {
     }
   }
 
-  function extraMeta(section: SrChecklistSection, label: string) {
+  function extraMeta(section: string, label: string) {
     return srItems.find((i) => i.section === section && i.label === label && i.is_extra);
   }
 
-  function handleAddLibrary(section: SrChecklistSection, elementId: string) {
+  function itemMeta(section: string, label: string) {
+    return srItems.find((i) => i.section === section && i.label === label);
+  }
+
+  // Legacy sections keep answers in the checklist_* maps (dual write); other
+  // sections keep them on the items.
+  function sectionResult(section: string, label: string): string {
+    if (section === 'electrical') return checkElectrical[label] || '';
+    if (section === 'mechanical') return checkMechanical[label] || '';
+    if (section === 'aesthetic') return checkAesthetic[label] || '';
+    return itemMeta(section, label)?.result || '';
+  }
+
+  function legacySetter(section: string): any {
+    if (section === 'electrical') return setCheckElectrical;
+    if (section === 'mechanical') return setCheckMechanical;
+    if (section === 'aesthetic') return setCheckAesthetic;
+    return null;
+  }
+
+  function setSectionResult(section: string, label: string, value: string) {
+    const setter = legacySetter(section);
+    if (setter) return setChecklist(setter, label, value);
+    const v = normalizeChecklistVal(value);
+    setSrItems((prev) => prev.map((i) => (i.section === section && i.label === label ? { ...i, result: v } : i)));
+  }
+
+  function markSectionPass(section: string, labels: string[]) {
+    const setter = legacySetter(section);
+    if (setter) return markAllPass(labels, setter);
+    setSrItems((prev) => prev.map((i) => (i.section === section ? { ...i, result: 'PASS' } : i)));
+  }
+
+  function sectionTitle(section: string): string {
+    return checklistSectionList.find((s) => s.key === section)?.label || section;
+  }
+
+  function handleAddLibrary(section: string, elementId: string) {
     const el = unusedLibrary.find((e) => e.id === elementId) || srLibrary.find((e) => e.id === elementId);
     if (!el || el.section !== section) return;
     const next = addLibraryElement(currentItemsWithAnswers(), el);
@@ -1536,47 +1651,62 @@ export default function NewServiceReport() {
     syncMapsFromItems(next);
   }
 
-  function handleAddCustom(section: SrChecklistSection) {
+  function handleAddCustom(section: string) {
     const label = (customLabels[section] || '').trim();
     if (!label) return;
-    const next = addCustomElement(currentItemsWithAnswers(), label, section);
+    const sectionLabel = isChecklistSection(section) ? null : sectionTitle(section);
+    const next = addCustomElement(currentItemsWithAnswers(), label, section, sectionLabel);
     setSrItems(next);
     syncMapsFromItems(next);
     setCustomLabels((prev) => ({ ...prev, [section]: '' }));
   }
 
-  function handleRemoveExtra(section: SrChecklistSection, label: string) {
-    const extra = extraMeta(section, label);
-    if (!extra) return;
-    const next = removeExtraItem(currentItemsWithAnswers(), extra.key);
+  function handleAddSection() {
+    const label = newSectionLabel.trim();
+    const key = customSectionKey(label);
+    if (!label || !key) return;
+    if (srSections.some((s) => s.key === key)) {
+      toast.error('That section is already on this report');
+      return;
+    }
+    setSrSections((prev) => {
+      const safety = prev.filter((s) => s.key === 'safety');
+      return [...prev.filter((s) => s.key !== 'safety'), { key, label }, ...safety];
+    });
+    setNewSectionLabel('');
+  }
+
+  function handleRemoveItem(section: string, label: string) {
+    const item = itemMeta(section, label);
+    if (!item) return;
+    const next = removeItem(currentItemsWithAnswers(), item.key, { editable: srEditable });
     setSrItems(next);
     syncMapsFromItems(next);
   }
 
-  function renderChecklist(
-    items: string[],
-    state: Record<string, string>,
-    setter: any,
-    title: string,
-    section: SrChecklistSection
-  ) {
+  function renderChecklist(section: string, title: string) {
+    const items = sectionLabels(section);
     const libraryForSection = unusedLibrary.filter((e) => e.section === section);
     return (
-      <div className="section mb-4">
+      <div className="section mb-4" key={section} data-testid={`sr-section-${section}`}>
         <div className="section-hdr flex items-center justify-between gap-2 flex-wrap">
           <h3>{title}</h3>
           <button
             type="button"
-            onClick={() => markAllPass(items, setter)}
+            onClick={() => markSectionPass(section, items)}
             className="text-[11px] font-bold text-[var(--gold)] hover:underline"
           >
             Mark all PASS
           </button>
         </div>
         <div className="section-body">
+          {items.length === 0 && (
+            <div className="text-xs text-[var(--text3)] py-2">No items yet. Add one below.</div>
+          )}
           {items.map((item) => {
-            const active = normalizeChecklistVal(state[item]);
+            const active = normalizeChecklistVal(sectionResult(section, item));
             const extra = extraMeta(section, item);
+            const removable = !!extra || (srEditable && !!itemMeta(section, item));
             return (
               <div key={item} className="checklist-item flex items-center justify-between gap-2 py-2 border-b border-[var(--border)] last:border-0">
                 <div className="checklist-label text-sm text-[var(--text2)] flex-1 pr-2">
@@ -1606,19 +1736,19 @@ export default function NewServiceReport() {
                       <button
                         key={v}
                         type="button"
-                        onClick={() => setChecklist(setter, item, v)}
+                        onClick={() => setSectionResult(section, item, v)}
                         className={`px-2 py-0.5 text-xs rounded border font-semibold ${color}`}
                       >
                         {v}
                       </button>
                     );
                   })}
-                  {extra && (
+                  {removable && (
                     <button
                       type="button"
-                      onClick={() => handleRemoveExtra(section, item)}
+                      onClick={() => handleRemoveItem(section, item)}
                       className="px-1 text-[10px] text-red-400"
-                      title="Remove extra item"
+                      title={extra ? 'Remove extra item' : 'Remove item from this report'}
                     >
                       ×
                     </button>
@@ -1653,7 +1783,7 @@ export default function NewServiceReport() {
               <input
                 className="input text-xs flex-1"
                 placeholder="One-off custom item"
-                value={customLabels[section]}
+                value={customLabels[section] || ''}
                 onChange={(e) => setCustomLabels((prev) => ({ ...prev, [section]: e.target.value }))}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
@@ -1946,9 +2076,9 @@ export default function NewServiceReport() {
             </select>
             <div className="text-[10px] text-[var(--text3)] mt-1">
               Form: {srTemplateName}
-              {equipmentType !== DEFAULT_EQUIPMENT_TYPE ? ' (laser fallback until a type-specific template is published)' : ''}
-              {srUsedFallback ? ' · seeded checklist (apply SR migration on live Supabase if library is empty)' : ''}
-              . Soft beta — extras allowed.
+              {srEditable ? ' (starter checklist: remove lines that do not apply)' : ''}
+              {srUsedFallback ? ' · built-in checklist' : ''}
+              . Add sections or items as needed.
             </div>
           </div>
 
@@ -2010,18 +2140,48 @@ export default function NewServiceReport() {
         </div>
 
         {/* Checklists — template by equipment_type (laser seed = Android CL_*) + extras */}
-        {renderChecklist(electricalLabels, checkElectrical, setCheckElectrical, '⚡ Electrical Checklist', 'electrical')}
-        {renderChecklist(mechanicalLabels, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical', 'mechanical')}
-        {renderChecklist(aestheticLabels, checkAesthetic, setCheckAesthetic, '🎨 Aesthetic Condition', 'aesthetic')}
+        {checklistSectionList.map((sec) =>
+          renderChecklist(sec.key, `${SECTION_ICONS[sec.key] || '📋'} ${sec.label}`)
+        )}
+        <div className="section mb-4">
+          <div className="section-body flex gap-2 items-center">
+            <input
+              className="input text-xs flex-1"
+              placeholder="Add a section to this report (e.g. Accessories)"
+              value={newSectionLabel}
+              data-testid="sr-add-section-input"
+              onChange={(e) => setNewSectionLabel(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  handleAddSection();
+                }
+              }}
+            />
+            <button type="button" onClick={handleAddSection} className="text-[11px] font-bold text-[var(--gold)] shrink-0">
+              + Add section
+            </button>
+          </div>
+        </div>
 
-        <PerformanceMeasurements
-          rows={powerMeasurements}
-          wavelengths={currentModel?.wavelengths}
-          spotSizes={spotSizeChoicesMm(currentModel)}
-          onAdd={addPerfRow}
-          onRemove={removePerf}
-          onChange={updatePerf}
-        />
+        {performanceVisible ? (
+          <PerformanceMeasurements
+            rows={powerMeasurements}
+            wavelengths={currentModel?.wavelengths}
+            spotSizes={spotSizeChoicesMm(currentModel)}
+            onAdd={addPerfRow}
+            onRemove={removePerf}
+            onChange={updatePerf}
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={() => setShowPerformance(true)}
+            className="mb-4 text-[11px] font-bold text-[var(--gold)]"
+          >
+            + Add performance measurements
+          </button>
+        )}
 
         {/* System Parameters — show when model has params OR saved modelParams keys exist */}
         {(currentModel?.params?.length > 0 || Object.keys(modelParams).filter(k => !k.startsWith('__') && !k.startsWith('wlt_') && !k.startsWith('gas_') && !k.startsWith('fiber_')).length > 0) && (

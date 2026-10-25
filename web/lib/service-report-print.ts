@@ -16,6 +16,7 @@ import { translateApp, withDocDirection } from './i18n/translate-app.ts';
 import { viewMeasurement } from './fluence-measurement.ts';
 import { displayModelText } from './model-display.ts';
 import { systemParameterRows } from './models.ts';
+import { displaySectionsForReport } from './service-report-templates.ts';
 
 export type PrintReportInput = {
   report_number?: string | null;
@@ -38,6 +39,8 @@ export type PrintReportInput = {
   checklist_electrical?: Record<string, string> | null;
   checklist_mechanical?: Record<string, string> | null;
   checklist_aesthetic?: Record<string, string> | null;
+  /** Modular sections (000945). NULL on laser reports: legacy tables print. */
+  checklist_sections?: unknown;
   power_measurements?: any[] | null;
   model_parameters?: Record<string, any> | null;
   ground_resistance?: number | null;
@@ -277,9 +280,9 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     `<td style="padding:2px 4px 2px 0">${cap('Engineer (FSE)')}<br><strong>${esc(engineer)}</strong></td>` +
     `<td style="padding:2px 0 2px 4px">${cap('Next PM')}<br><strong>${esc(showDate(r.next_pm_due))}</strong></td>` +
     `</tr></table></div>` +
-    checklistTable(tr('Electrical Checklist'), r.checklist_electrical || undefined, accent, tr) +
-    checklistTable(tr('Mechanical & Optical'), r.checklist_mechanical || undefined, accent, tr) +
-    checklistTable(tr('Aesthetic Condition'), r.checklist_aesthetic || undefined, accent, tr) +
+    displaySectionsForReport(r, ['Electrical Checklist', 'Mechanical & Optical', 'Aesthetic Condition'])
+      .map((sec) => checklistTable(tr(sec.title), sec.rows, accent, tr))
+      .join('') +
     perfTable(r.power_measurements, accent, tr) +
     paramsHTML +
     safetyHTML +
