@@ -2,8 +2,8 @@
 --
 -- Restores the 000002 shape exactly: legacy section CHECKs, one default per
 -- type, published-only policies, the anon SELECT / authenticated
--- SELECT,INSERT,UPDATE,DELETE grants, and drops the 000945 columns, table and
--- starter seed. laser-pm-default and the 27 pre-000945 elements are left untouched.
+-- SELECT,INSERT,UPDATE,DELETE grants, and drops the 000945 columns, table,
+-- safety trigger, replace_service_report_items RPC and starter seed. laser-pm-default and the 27 pre-000945 elements are left untouched.
 --
 -- Refuses (drift guard) rather than lose data when reports already use the
 -- new shape: any service_report_items row with a non-legacy section or a
@@ -44,6 +44,11 @@ BEGIN
     RAISE EXCEPTION '000945 rollback drift: report items reference starter elements; refusing';
   END IF;
 END $$;
+
+-- Safety trigger and atomic-save RPC first (so the deletes below are plain).
+DROP TRIGGER sr_items_keep_safety ON public.service_report_items;
+DROP FUNCTION public.replace_service_report_items(uuid, jsonb);
+DROP FUNCTION public.sr_items_keep_safety();
 
 -- Starter seed (template_elements / sections cascade with the template).
 -- Elements 000945 created: type-scoped ones plus the shared battery-backup.

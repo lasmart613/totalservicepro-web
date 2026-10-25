@@ -64,6 +64,10 @@ UNION ALL SELECT 'grant:' || table_name || ':' || grantee, string_agg(privilege_
   FROM information_schema.role_table_grants WHERE table_schema = 'public' AND grantee IN ('anon', 'authenticated', 'service_role')
   GROUP BY table_name, grantee
 UNION ALL SELECT 'col:' || table_name || '.' || column_name, data_type FROM information_schema.columns WHERE table_schema = 'public'
+UNION ALL SELECT 'fn:' || p.oid::regprocedure::text, coalesce(array_to_string(p.proacl, ','), '') FROM pg_proc p
+  WHERE p.pronamespace = 'public'::regnamespace
+UNION ALL SELECT 'trg:' || tgname::text, pg_get_triggerdef(oid) FROM pg_trigger WHERE NOT tgisinternal
+  AND tgrelid = 'public.service_report_items'::regclass
 $f$;
 CREATE TEMP TABLE before_defs AS SELECT * FROM pg_temp.sr_defs();
 
@@ -187,6 +191,127 @@ BEGIN
 EXCEPTION WHEN insufficient_privilege THEN NULL;
 END $$;
 RESET ROLE;
+
+-- Safety rows are kept and the item save is atomic (QA F1).
+INSERT INTO public.service_reports (id, organization_id, equipment_type) VALUES
+  ('00000000-0000-0000-0000-0000000000a2', 11, 'beds'),
+  ('00000000-0000-0000-0000-0000000000b2', 22, 'beds');
+INSERT INTO public.service_report_items (service_report_id, organization_id, element_id, section, label, value_numeric, sort_order)
+SELECT '00000000-0000-0000-0000-0000000000a2', 11, e.id, 'safety', e.label, 0.1, 900 + row_number() OVER (ORDER BY e.slug)
+FROM public.sr_elements e WHERE e.slug IN ('ground-resistance', 'leakage-current');
+INSERT INTO public.service_report_items (service_report_id, organization_id, section, label, result, sort_order)
+VALUES ('00000000-0000-0000-0000-0000000000a2', 11, 'motion', 'Bed raises and lowers', 'pass', 10);
+DO $$
+BEGIN
+  IF has_function_privilege('anon', 'public.replace_service_report_items(uuid, jsonb)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'anon can execute replace_service_report_items';
+  END IF;
+  IF NOT has_function_privilege('authenticated', 'public.replace_service_report_items(uuid, jsonb)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'authenticated cannot execute replace_service_report_items';
+  END IF;
+  IF (SELECT prosecdef AND proconfig = ARRAY['search_path=""']::text[] FROM pg_proc
+       WHERE oid = 'public.replace_service_report_items(uuid, jsonb)'::regprocedure) IS NOT TRUE
+     OR (SELECT prosecdef AND proconfig = ARRAY['search_path=""']::text[] FROM pg_proc
+       WHERE oid = 'public.sr_items_keep_safety()'::regprocedure) IS NOT TRUE THEN
+    RAISE EXCEPTION '000945 functions must be SECURITY DEFINER with search_path ''''';
+  END IF;
+END $$;
+SET ROLE authenticated;
+SELECT set_config('app.org_id', '11', false);
+DO $$
+DECLARE n integer;
+BEGIN
+  -- Direct DELETE of a safety row is refused; the motion row deletes fine.
+  BEGIN
+    DELETE FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2' AND section = 'safety';
+    RAISE EXCEPTION 'safety row delete accepted';
+  EXCEPTION WHEN SQLSTATE 'P0945' THEN NULL;
+  END;
+  BEGIN
+    DELETE FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2';
+    RAISE EXCEPTION 'delete-all including safety accepted';
+  EXCEPTION WHEN SQLSTATE 'P0945' THEN NULL;
+  END;
+  BEGIN
+    UPDATE public.service_report_items SET section = 'motion'
+    WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2' AND section = 'safety';
+    RAISE EXCEPTION 'safety row moved out of safety';
+  EXCEPTION WHEN SQLSTATE 'P0945' THEN NULL;
+  END;
+  IF (SELECT count(*) FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2') <> 3 THEN
+    RAISE EXCEPTION 'refused deletes still removed rows';
+  END IF;
+
+  -- RPC: payload without safety keeps safety, replaces the rest.
+  n := public.replace_service_report_items('00000000-0000-0000-0000-0000000000a2',
+    '[{"section":"motion","label":"Bed raises and lowers","result":"fail","sort_order":10},
+      {"section":"custom_lift","section_label":"Lift","label":"Hydraulic seal","result":"pass","is_extra":true}]');
+  IF n <> 4 THEN RAISE EXCEPTION 'rpc count % (expected 4)', n; END IF;
+  IF (SELECT count(*) FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2' AND section = 'safety') <> 2 THEN
+    RAISE EXCEPTION 'rpc dropped safety rows';
+  END IF;
+  IF (SELECT result FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2' AND section = 'motion') <> 'fail' THEN
+    RAISE EXCEPTION 'rpc did not replace motion row';
+  END IF;
+
+  -- RPC: safety values update in place, no duplicates.
+  n := public.replace_service_report_items('00000000-0000-0000-0000-0000000000a2',
+    '[{"section":"motion","label":"Bed raises and lowers","result":"pass"},
+      {"section":"safety","label":"Ground Resistance","value_numeric":0.15,"unit":"Ω"}]');
+  IF n <> 3 THEN RAISE EXCEPTION 'rpc safety upsert count % (expected 3)', n; END IF;
+  IF (SELECT value_numeric FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2' AND label = 'Ground Resistance') <> 0.15 THEN
+    RAISE EXCEPTION 'rpc did not update ground resistance';
+  END IF;
+
+  -- RPC: a bad row fails the whole call and nothing is lost (atomic).
+  BEGIN
+    PERFORM public.replace_service_report_items('00000000-0000-0000-0000-0000000000a2',
+      '[{"section":"motion","label":"ok"},{"section":"Bad Key!","label":"x"}]');
+    RAISE EXCEPTION 'rpc accepted a bad section';
+  EXCEPTION WHEN check_violation THEN NULL;
+  END;
+  IF (SELECT count(*) FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2') <> 3
+     OR NOT EXISTS (SELECT 1 FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2'
+                     AND label = 'Bed raises and lowers' AND result = 'pass') THEN
+    RAISE EXCEPTION 'failed rpc lost items';
+  END IF;
+  BEGIN
+    PERFORM public.replace_service_report_items('00000000-0000-0000-0000-0000000000a2', '{"a":1}');
+    RAISE EXCEPTION 'rpc accepted non-array';
+  EXCEPTION WHEN invalid_parameter_value THEN NULL;
+  END;
+
+  -- RPC: another org's report is refused.
+  BEGIN
+    PERFORM public.replace_service_report_items('00000000-0000-0000-0000-0000000000b2', '[]');
+    RAISE EXCEPTION 'rpc wrote another org report';
+  EXCEPTION WHEN insufficient_privilege THEN NULL;
+  END;
+END $$;
+SELECT set_config('app.org_id', '', false);
+DO $$
+BEGIN
+  PERFORM public.replace_service_report_items('00000000-0000-0000-0000-0000000000a2', '[]');
+  RAISE EXCEPTION 'rpc ran without an org';
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+RESET ROLE;
+SET ROLE anon;
+DO $$
+BEGIN
+  PERFORM public.replace_service_report_items('00000000-0000-0000-0000-0000000000a2', '[]');
+  RAISE EXCEPTION 'anon ran rpc';
+EXCEPTION WHEN insufficient_privilege THEN NULL;
+END $$;
+RESET ROLE;
+-- Deleting the report still cascades its safety rows.
+DELETE FROM public.service_reports WHERE id IN ('00000000-0000-0000-0000-0000000000a2', '00000000-0000-0000-0000-0000000000b2');
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.service_report_items WHERE service_report_id = '00000000-0000-0000-0000-0000000000a2') THEN
+    RAISE EXCEPTION 'report delete did not cascade items';
+  END IF;
+END $$;
 
 -- Rollback refuses while new-shape data exists.
 DO $$ BEGIN RAISE NOTICE 'expect rollback refusal next'; END $$;

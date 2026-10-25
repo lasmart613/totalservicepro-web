@@ -35,8 +35,22 @@
 --     from web/lib/service-report-templates.ts (starterSeedValues); the unit
 --     test fails if they differ.
 --
--- No SECURITY DEFINER function is added: policies call the existing
--- public.get_my_org_id() (SECURITY DEFINER, bigint) as the 000002 policies do.
+--   * Safety rows: trigger sr_items_keep_safety blocks DELETE (and moving
+--     out of section 'safety') of the ground resistance / leakage current
+--     rows on service_report_items, for every role. Deleting the parent
+--     service report still cascades.
+--   * Atomic save: NEW public.replace_service_report_items(report, items)
+--     (SECURITY DEFINER, search_path '', checks the report's org =
+--     get_my_org_id()) replaces the non-safety rows and upserts the safety
+--     rows in one transaction, so a failed insert cannot lose items.
+--     EXECUTE: authenticated + service_role only.
+--
+-- Deploy order: ship the web (which detects 000945 and uses the RPC) BEFORE
+-- applying this migration. The pre-PR web deletes all items, safety rows
+-- included, and that DELETE is refused once the trigger exists.
+--
+-- Policies call the existing public.get_my_org_id() (SECURITY DEFINER,
+-- bigint) as the 000002 policies do.
 --
 -- Drift guards: 000002 objects exist with the exact CHECK, index and policy
 -- definitions read from prod on Oct 25 (SELECT-only); new columns, table and
@@ -96,6 +110,12 @@ BEGIN
   END IF;
   IF to_regclass('public.sr_template_sections') IS NOT NULL THEN
     RAISE EXCEPTION '000945 drift: sr_template_sections already exists; refusing';
+  END IF;
+  IF to_regprocedure('public.replace_service_report_items(uuid, jsonb)') IS NOT NULL
+     OR to_regprocedure('public.sr_items_keep_safety()') IS NOT NULL
+     OR EXISTS (SELECT 1 FROM pg_trigger WHERE tgrelid = 'public.service_report_items'::regclass
+                 AND tgname = 'sr_items_keep_safety') THEN
+    RAISE EXCEPTION '000945 drift: service_report_items already has a trigger or the 000945 functions exist; refusing';
   END IF;
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -448,6 +468,117 @@ REVOKE SELECT ON public.sr_elements, public.sr_templates, public.sr_template_ele
 REVOKE INSERT, UPDATE, DELETE ON public.sr_elements, public.sr_templates, public.sr_template_elements FROM authenticated;
 GRANT SELECT ON public.sr_elements, public.sr_templates, public.sr_template_elements, public.sr_template_sections TO authenticated;
 GRANT ALL ON public.sr_template_sections TO service_role;
+
+-- 6b. Safety rows cannot be deleted; report items save atomically.
+CREATE FUNCTION public.sr_items_keep_safety()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+DECLARE
+  protected boolean;
+BEGIN
+  protected := OLD.section = 'safety'
+    OR EXISTS (SELECT 1 FROM public.sr_elements e
+                WHERE e.id = OLD.element_id AND e.slug IN ('ground-resistance', 'leakage-current'));
+  IF NOT protected THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    -- ON DELETE CASCADE from service_reports: the parent is already gone.
+    IF NOT EXISTS (SELECT 1 FROM public.service_reports r WHERE r.id = OLD.service_report_id) THEN
+      RETURN OLD;
+    END IF;
+    RAISE EXCEPTION 'Electrical safety rows (ground resistance, leakage current) cannot be deleted from a service report'
+      USING ERRCODE = 'P0945';
+  END IF;
+  IF NEW.section IS DISTINCT FROM OLD.section OR NEW.service_report_id IS DISTINCT FROM OLD.service_report_id THEN
+    RAISE EXCEPTION 'Electrical safety rows (ground resistance, leakage current) cannot be moved off a service report'
+      USING ERRCODE = 'P0945';
+  END IF;
+  RETURN NEW;
+END
+$fn$;
+
+CREATE TRIGGER sr_items_keep_safety
+  BEFORE DELETE OR UPDATE ON public.service_report_items
+  FOR EACH ROW EXECUTE FUNCTION public.sr_items_keep_safety();
+
+CREATE FUNCTION public.replace_service_report_items(p_report_id uuid, p_items jsonb)
+RETURNS integer
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+DECLARE
+  v_org bigint := public.get_my_org_id();
+  v_report_org bigint;
+  v_count integer;
+BEGIN
+  IF v_org IS NULL THEN
+    RAISE EXCEPTION 'not signed in to an organization' USING ERRCODE = '42501';
+  END IF;
+  SELECT r.organization_id INTO v_report_org
+  FROM public.service_reports r WHERE r.id = p_report_id FOR UPDATE;
+  IF NOT FOUND OR v_report_org IS DISTINCT FROM v_org THEN
+    RAISE EXCEPTION 'service report not found for this organization' USING ERRCODE = '42501';
+  END IF;
+  IF p_items IS NULL OR jsonb_typeof(p_items) <> 'array' THEN
+    RAISE EXCEPTION 'p_items must be a JSON array' USING ERRCODE = '22023';
+  END IF;
+
+  CREATE TEMP TABLE IF NOT EXISTS pg_temp.sr_rpc_items (
+    ord integer, element_id uuid, section text, section_label text, label text, result text,
+    value_numeric numeric, unit text, is_extra boolean, sort_order integer
+  ) ON COMMIT DROP;
+  TRUNCATE pg_temp.sr_rpc_items;
+  INSERT INTO pg_temp.sr_rpc_items
+  SELECT x.ord::integer, (x.j->>'element_id')::uuid, x.j->>'section', nullif(x.j->>'section_label', ''),
+         x.j->>'label', nullif(x.j->>'result', ''), (x.j->>'value_numeric')::numeric, x.j->>'unit',
+         coalesce((x.j->>'is_extra')::boolean, false), coalesce((x.j->>'sort_order')::integer, x.ord::integer * 10)
+  FROM jsonb_array_elements(p_items) WITH ORDINALITY AS x(j, ord);
+  IF EXISTS (SELECT 1 FROM pg_temp.sr_rpc_items WHERE section IS NULL OR coalesce(btrim(label), '') = '') THEN
+    RAISE EXCEPTION 'every item needs a section and a label' USING ERRCODE = '22023';
+  END IF;
+
+  -- Non-safety rows: replace. Safety rows: update in place, insert missing,
+  -- never delete (the trigger refuses anyway).
+  DELETE FROM public.service_report_items i
+  WHERE i.service_report_id = p_report_id
+    AND i.section <> 'safety'
+    AND NOT EXISTS (SELECT 1 FROM public.sr_elements e
+                     WHERE e.id = i.element_id AND e.slug IN ('ground-resistance', 'leakage-current'));
+
+  UPDATE public.service_report_items i
+  SET result = n.result, value_numeric = n.value_numeric, unit = n.unit,
+      label = n.label, sort_order = n.sort_order, element_id = coalesce(i.element_id, n.element_id),
+      updated_at = now()
+  FROM pg_temp.sr_rpc_items n
+  WHERE i.service_report_id = p_report_id AND i.section = 'safety' AND n.section = 'safety'
+    AND (i.element_id = n.element_id OR i.label = n.label);
+
+  INSERT INTO public.service_report_items
+    (service_report_id, organization_id, element_id, section, section_label, label, result,
+     value_numeric, unit, is_extra, sort_order)
+  SELECT p_report_id, v_report_org, n.element_id, n.section, n.section_label, n.label, n.result,
+         n.value_numeric, n.unit, n.is_extra, n.sort_order
+  FROM pg_temp.sr_rpc_items n
+  WHERE n.section <> 'safety'
+     OR NOT EXISTS (SELECT 1 FROM public.service_report_items i
+                     WHERE i.service_report_id = p_report_id AND i.section = 'safety'
+                       AND (i.element_id = n.element_id OR i.label = n.label))
+  ORDER BY n.ord;
+
+  SELECT count(*) INTO v_count FROM public.service_report_items WHERE service_report_id = p_report_id;
+  TRUNCATE pg_temp.sr_rpc_items;
+  RETURN v_count;
+END
+$fn$;
+
+REVOKE ALL ON FUNCTION public.sr_items_keep_safety() FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.replace_service_report_items(uuid, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.replace_service_report_items(uuid, jsonb) TO authenticated, service_role;
 
 -- 7. Laser: same elements, sections with today's titles.
 INSERT INTO public.sr_template_sections (template_id, section_key, label, sort_order)
