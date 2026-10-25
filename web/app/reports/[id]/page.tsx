@@ -9,6 +9,7 @@ import { useParams } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
 import { buildServiceReportPrintHTML } from '@/lib/service-report-print';
+import { displaySectionsForReport, reportHeaderTagline } from '@/lib/service-report-templates';
 import { viewMeasurement } from '@/lib/fluence-measurement';
 import { systemParameterRows } from '@/lib/models';
 import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/company-theme';
@@ -198,7 +199,7 @@ export default function ReportDetail() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header />
+      <Header tagline={report ? reportHeaderTagline(report.equipment_type) : undefined} />
       <div className="max-w-6xl mx-auto p-6 w-full">
         <Link href="/reports" className="text-[var(--gold)]">{t('← Back to list')}</Link>
         <div className="flex flex-wrap items-start justify-between gap-3 mt-4 mb-2">
@@ -302,12 +303,7 @@ export default function ReportDetail() {
               </div>
 
               {/* Checklist summaries */}
-              {[
-                ['Electrical', report.checklist_electrical],
-                ['Mechanical & Optical', report.checklist_mechanical],
-                ['Aesthetic', report.checklist_aesthetic],
-              ].map(([title, data]) => {
-                if (!data || typeof data !== 'object' || !Object.keys(data).length) return null;
+              {displaySectionsForReport(report, ['Electrical', 'Mechanical & Optical', 'Aesthetic']).map(({ title, rows: data }) => {
                 return (
                   <div key={String(title)}>
                     <h3 className="font-bold text-[var(--gold)] mb-2">{t(title as string)}</h3>

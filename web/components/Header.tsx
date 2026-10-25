@@ -114,7 +114,14 @@ function NavDropdown({
   );
 }
 
-export function Header({ authPending = false }: { authPending?: boolean }) {
+export function Header({
+  authPending = false,
+  tagline,
+}: {
+  authPending?: boolean;
+  /** Overrides the "Laser Equipment Service" line (e.g. a bed service report). */
+  tagline?: string;
+}) {
   const localizedPublic = useLocalizedPublic();
   const t = useT();
   const locale = useSiteLocale();
@@ -322,7 +329,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             Total Service Pro
           </span>
           <span className="hidden sm:block text-[10px] font-medium tracking-normal text-[var(--text3)] uppercase -mt-0.5">
-            {t('Laser Equipment Service')}
+            {tagline || t('Laser Equipment Service')}
           </span>
         </Link>
 

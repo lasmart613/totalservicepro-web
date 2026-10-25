@@ -13,9 +13,24 @@ import {
   equipmentTypeOrDefault,
   type EquipmentType,
 } from './equipment-types.ts';
+import {
+  GENERAL_EQUIPMENT_TYPE,
+  isValidSectionKey,
+  LEGACY_SECTION_TITLES,
+  resolveTemplate,
+  SHARED_ELEMENT_SLUGS,
+  starterTemplateFor,
+  titleForSectionKey,
+  type StarterTemplate,
+} from './service-report-templates.ts';
 
 export const SR_SECTIONS = ['electrical', 'mechanical', 'aesthetic', 'safety'] as const;
-export type SrSection = (typeof SR_SECTIONS)[number];
+/**
+ * Section key. The four legacy keys above, any template section key
+ * (e.g. 'motion', 'sterilization') or a per-report custom_<slug> key.
+ * 000945 relaxes the DB CHECK to ^[a-z][a-z0-9_]{1,39}$.
+ */
+export type SrSection = string;
 
 export const SR_CHECKLIST_SECTIONS = ['electrical', 'mechanical', 'aesthetic'] as const;
 export type SrChecklistSection = (typeof SR_CHECKLIST_SECTIONS)[number];
@@ -38,6 +53,8 @@ export type SrElement = {
   spec_hint?: string | null;
   is_active?: boolean;
   sort_hint?: number;
+  /** NULL = shared across types; else the type whose starter uses it (000945). */
+  equipment_type?: string | null;
 };
 
 export type SrTemplate = {
@@ -48,7 +65,13 @@ export type SrTemplate = {
   status: string;
   is_default: boolean;
   notes?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  organization_id?: number | string | null;
+  editable_default?: boolean | null;
 };
+
+export type SrSectionDef = { key: string; label: string };
 
 export type SrDraftItem = {
   /** Local key; persisted id when loaded from service_report_items. */
@@ -65,6 +88,8 @@ export type SrDraftItem = {
   input_kind: SrInputKind;
   is_extra: boolean;
   sort_order: number;
+  /** Title of a section outside the template (custom sections). */
+  section_label?: string | null;
 };
 
 export type LegacyChecklists = {
@@ -87,7 +112,18 @@ export type LoadedSrForm = {
   resolvedType: EquipmentType;
   elements: SrElement[];
   items: SrDraftItem[];
+  /** Ordered sections incl. safety; laser = the legacy titles. */
+  sections: SrSectionDef[];
+  /** Starter checklist: techs may remove any line, not only extras. */
+  editable: boolean;
 };
+
+export const LASER_SECTIONS: SrSectionDef[] = [
+  { key: 'electrical', label: LEGACY_SECTION_TITLES.electrical },
+  { key: 'mechanical', label: LEGACY_SECTION_TITLES.mechanical },
+  { key: 'aesthetic', label: LEGACY_SECTION_TITLES.aesthetic },
+  { key: 'safety', label: LEGACY_SECTION_TITLES.safety },
+];
 
 export const LASER_FALLBACK_TEMPLATE: SrTemplate = {
   id: 'fallback-laser-pm',
@@ -172,7 +208,7 @@ export function laserFallbackElements(): SrElement[] {
 }
 
 export function isSrSection(value: unknown): value is SrSection {
-  return SR_SECTIONS.includes(String(value) as SrSection);
+  return isValidSectionKey(value);
 }
 
 export function isChecklistSection(value: unknown): value is SrChecklistSection {
@@ -190,25 +226,37 @@ export function isMissingSrSchema(error: { message?: string } | null | undefined
   );
 }
 
-export function pickTemplateForEquipmentType<T extends { equipment_type?: string | null; is_default?: boolean; status?: string }>(
+/**
+ * Template for the selected equipment (type -> manufacturer -> model, most
+ * specific wins; see resolveTemplate). Never returns the laser template for a
+ * non-laser type: that was the bed/table-shows-laser-items bug.
+ */
+export function pickTemplateForEquipmentType<
+  T extends {
+    equipment_type?: string | null;
+    is_default?: boolean | null;
+    status?: string | null;
+    manufacturer?: string | null;
+    model?: string | null;
+    organization_id?: number | string | null;
+  },
+>(
   templates: T[],
-  equipmentType: string | null | undefined
+  equipmentType: string | null | undefined,
+  selection?: { manufacturer?: string | null; model?: string | null }
 ): T | null {
-  const requested = equipmentTypeOrDefault(equipmentType);
-  const published = templates.filter((t) => !t.status || t.status === 'published');
-  const exactDefault = published.find((t) => t.equipment_type === requested && t.is_default);
-  if (exactDefault) return exactDefault;
-  const exact = published.find((t) => t.equipment_type === requested);
-  if (exact) return exact;
-  const laserDefault = published.find((t) => t.equipment_type === DEFAULT_EQUIPMENT_TYPE && t.is_default);
-  if (laserDefault) return laserDefault;
-  return published.find((t) => t.equipment_type === DEFAULT_EQUIPMENT_TYPE) || published[0] || null;
+  return resolveTemplate(templates || [], {
+    equipmentType: equipmentTypeOrDefault(equipmentType),
+    manufacturer: selection?.manufacturer ?? null,
+    model: selection?.model ?? null,
+  });
 }
 
 function sortKey(item: { section: SrSection; sort_order?: number; label?: string }): string {
-  const sectionRank = SR_SECTIONS.indexOf(item.section);
+  const legacyRank = SR_SECTIONS.indexOf(item.section as (typeof SR_SECTIONS)[number]);
+  const sectionRank = legacyRank >= 0 ? legacyRank : 50;
   const order = item.sort_order ?? 0;
-  return `${String(sectionRank).padStart(2, '0')}:${String(order).padStart(5, '0')}:${item.label || ''}`;
+  return `${String(sectionRank).padStart(2, '0')}:${item.section}:${String(order).padStart(5, '0')}:${item.label || ''}`;
 }
 
 export function assembleDraftItems(
@@ -228,7 +276,7 @@ export function assembleDraftItems(
       value_numeric: null,
       unit: el.unit ?? null,
       spec_hint: el.spec_hint ?? null,
-      input_kind: el.input_kind === 'numeric' ? 'numeric' : 'pass_fail_na',
+      input_kind: (el.input_kind === 'numeric' ? 'numeric' : 'pass_fail_na') as SrInputKind,
       is_extra: !!opts?.isExtra,
       sort_order: start + (el.sort_hint ?? (i + 1) * 10),
     }))
@@ -277,7 +325,7 @@ export function checklistMapFromItems(items: SrDraftItem[], section: SrChecklist
   return itemsToLegacyChecklists(items)[section];
 }
 
-export function labelsForSection(items: SrDraftItem[], section: SrChecklistSection): string[] {
+export function labelsForSection(items: SrDraftItem[], section: SrSection): string[] {
   return items
     .filter((i) => i.section === section)
     .sort((a, b) => sortKey(a).localeCompare(sortKey(b)))
@@ -399,6 +447,7 @@ export function itemsFromPersistedRows(
   return (rows || []).map((row, i) => {
     const el = row.element_id && libraryById ? libraryById.get(row.element_id) : undefined;
     const section = normalizeSrSection(row.section, el?.section || 'mechanical');
+    const sectionLabel = row.section_label ? String(row.section_label) : null;
     return {
       key: row.id || `row:${i}:${row.label}`,
       id: row.id || null,
@@ -413,16 +462,44 @@ export function itemsFromPersistedRows(
       input_kind: el?.input_kind === 'numeric' || section === 'safety' ? 'numeric' : 'pass_fail_na',
       is_extra: !!row.is_extra,
       sort_order: row.sort_order ?? (i + 1) * 10,
+      ...(sectionLabel ? { section_label: sectionLabel } : {}),
     };
   });
 }
 
-export function unusedLibraryElements(library: SrElement[], items: SrDraftItem[]): SrElement[] {
+/**
+ * Library elements offered by "+ Add from library" for this report.
+ * Laser: shared + laser elements (unchanged). Other types: only elements of the
+ * report's template (templateElementIds), its own type, or the shared slugs
+ * (power cord, display, ...). Laser-only lines (CL_*, door interlock, fiber...)
+ * are never offered on beds etc., even on a pre-000945 library where they are
+ * NULL-typed.
+ */
+export function unusedLibraryElements(
+  library: SrElement[],
+  items: SrDraftItem[],
+  equipmentType?: string | null,
+  templateElementIds?: Iterable<string> | null
+): SrElement[] {
   const usedIds = new Set(items.map((i) => i.element_id).filter(Boolean) as string[]);
   const usedLabels = new Set(items.map((i) => `${i.section}::${i.label}`));
+  const type = equipmentType ? equipmentTypeOrDefault(equipmentType) : null;
+  const inTemplate = new Set(templateElementIds ? [...templateElementIds] : []);
   return library.filter((el) => {
     if (el.section === 'safety') return false;
     if (el.is_active === false) return false;
+    if (type) {
+      const elType = el.equipment_type || null;
+      if (type === DEFAULT_EQUIPMENT_TYPE) {
+        if (elType && elType !== DEFAULT_EQUIPMENT_TYPE) return false;
+      } else if (!(el.id && inTemplate.has(el.id))) {
+        if (elType) {
+          if (elType !== type) return false;
+        } else if (!SHARED_ELEMENT_SLUGS.has(el.slug)) {
+          return false;
+        }
+      }
+    }
     if (el.id && usedIds.has(el.id)) return false;
     if (usedLabels.has(`${el.section}::${el.label}`)) return false;
     return true;
@@ -445,11 +522,12 @@ export function addLibraryElement(
 export function addCustomElement(
   items: SrDraftItem[],
   label: string,
-  section: SrSection
+  section: SrSection,
+  sectionLabel?: string | null
 ): SrDraftItem[] {
   const trimmed = String(label || '').trim();
   if (!trimmed) return items;
-  const sec = isChecklistSection(section) ? section : 'mechanical';
+  const sec = isValidSectionKey(section) && section !== 'safety' ? section : 'mechanical';
   if (items.some((i) => i.section === sec && i.label === trimmed)) return items;
   const item: SrDraftItem = {
     key: `custom:${sec}:${slugFromLabel(trimmed)}:${items.length}`,
@@ -463,12 +541,25 @@ export function addCustomElement(
     input_kind: 'pass_fail_na',
     is_extra: true,
     sort_order: nextSortOrder(items, sec),
+    ...(sectionLabel && !isChecklistSection(sec) ? { section_label: String(sectionLabel).trim() } : {}),
   };
   return [...items, item];
 }
 
 export function removeExtraItem(items: SrDraftItem[], key: string): SrDraftItem[] {
   return items.filter((i) => !(i.is_extra && i.key === key));
+}
+
+/**
+ * Remove a line. Extras can always go; template lines only when the template
+ * is an editable default (starter checklists). Safety rows never.
+ */
+export function removeItem(items: SrDraftItem[], key: string, opts: { editable: boolean }): SrDraftItem[] {
+  return items.filter((i) => {
+    if (i.key !== key) return true;
+    if (i.section === 'safety') return true;
+    return !(i.is_extra || opts.editable);
+  });
 }
 
 function nextSortOrder(items: SrDraftItem[], section: SrSection): number {
@@ -491,6 +582,8 @@ export function persistRowsFromItems(
     unit: item.unit,
     is_extra: !!item.is_extra,
     sort_order: item.sort_order ?? (i + 1) * 10,
+    // Only sent when set, so legacy-section saves work before 000945.
+    ...(item.section_label ? { section_label: item.section_label } : {}),
   }));
 }
 
@@ -504,20 +597,96 @@ export function laserFallbackForm(equipmentType?: string | null): LoadedSrForm {
     resolvedType: DEFAULT_EQUIPMENT_TYPE,
     elements: laserFallbackElements(),
     items: assembleDraftItems(defaults),
+    sections: LASER_SECTIONS.map((s) => ({ ...s })),
+    editable: false,
   };
+}
+
+/** In-memory element list for a starter template (same slugs as 000945). */
+export function starterElements(template: StarterTemplate): SrElement[] {
+  const out: SrElement[] = [];
+  for (const section of template.sections) {
+    section.items.forEach((item, i) => {
+      out.push({
+        id: `fallback:${section.key}:${item.slug}`,
+        slug: item.slug,
+        label: item.label,
+        section: section.key,
+        input_kind: item.input_kind === 'numeric' ? 'numeric' : 'pass_fail_na',
+        unit: item.unit ?? null,
+        spec_hint: item.spec_hint ?? null,
+        is_active: true,
+        sort_hint: (i + 1) * 10,
+      });
+    });
+  }
+  return out;
+}
+
+/**
+ * Starter checklist for a non-laser type, used before 000945 is applied or
+ * when the DB has no template for that type. Never the laser form.
+ */
+export function starterFallbackForm(equipmentType?: string | null): LoadedSrForm {
+  const requested = equipmentTypeOrDefault(equipmentType);
+  if (requested === DEFAULT_EQUIPMENT_TYPE) return laserFallbackForm(requested);
+  const t = starterTemplateFor(requested);
+  const elements = starterElements(t);
+  return {
+    template: {
+      id: `fallback-${t.slug}`,
+      slug: t.slug,
+      name: t.name,
+      equipment_type: t.equipment_type,
+      status: 'published',
+      is_default: true,
+      notes: t.notes,
+      editable_default: t.editable_default,
+    },
+    usedFallback: true,
+    requestedType: requested,
+    resolvedType: t.equipment_type === GENERAL_EQUIPMENT_TYPE ? requested : (t.equipment_type as EquipmentType),
+    elements,
+    items: assembleDraftItems(elements),
+    sections: t.sections.map((s) => ({ key: s.key, label: s.label })),
+    editable: t.editable_default,
+  };
+}
+
+/** Fallback for a type: laser keeps the CL_* form, others get their starter. */
+export function fallbackFormForType(equipmentType?: string | null): LoadedSrForm {
+  return equipmentTypeOrDefault(equipmentType) === DEFAULT_EQUIPMENT_TYPE
+    ? laserFallbackForm(equipmentType)
+    : starterFallbackForm(equipmentType);
 }
 
 type SrClient = {
   from: (table: string) => any;
+  rpc?: (fn: string, args: Record<string, unknown>) => any;
 };
 
+const ELEMENT_COLS = 'id, slug, label, section, input_kind, unit, spec_hint, is_active, sort_hint';
+const TEMPLATE_COLS_LEGACY = 'id, slug, name, equipment_type, status, is_default, notes';
+const TEMPLATE_COLS = `${TEMPLATE_COLS_LEGACY}, manufacturer, model, organization_id, editable_default`;
+
+/** Column missing because 000945 is not applied yet (retry with old columns). */
+export function isMissingSrColumn(error: { message?: string; code?: string } | null | undefined): boolean {
+  const m = `${error?.code || ''} ${error?.message || ''}`;
+  return /42703|PGRST204|column .* does not exist|could not find .* column/i.test(m);
+}
+
+async function selectWithFallback(run: (cols: string) => any, cols: string, legacyCols: string) {
+  const first = await run(cols);
+  if (!first.error || !isMissingSrColumn(first.error)) return first;
+  return run(legacyCols);
+}
+
 export async function loadPublishedLibrary(supabase: SrClient): Promise<SrElement[] | null> {
-  const { data, error } = await supabase
-    .from('sr_elements')
-    .select('id, slug, label, section, input_kind, unit, spec_hint, is_active, sort_hint')
-    .eq('is_active', true)
-    .order('section')
-    .order('sort_hint');
+  const { data, error } = await selectWithFallback(
+    (cols) => supabase.from('sr_elements').select(cols).eq('is_active', true).order('section').order('sort_hint'),
+    `${ELEMENT_COLS}, equipment_type`,
+    ELEMENT_COLS
+  );
   if (error) {
     if (isMissingSrSchema(error)) return null;
     throw error;
@@ -525,23 +694,62 @@ export async function loadPublishedLibrary(supabase: SrClient): Promise<SrElemen
   return (data || []) as SrElement[];
 }
 
+/** Sections for a DB template; derived from its elements when the table is missing. */
+async function loadTemplateSections(
+  supabase: SrClient,
+  template: SrTemplate,
+  elements: SrElement[]
+): Promise<SrSectionDef[]> {
+  const isLaser = template.slug === LASER_PM_TEMPLATE_SLUG;
+  const { data, error } = await supabase
+    .from('sr_template_sections')
+    .select('section_key, label, sort_order')
+    .eq('template_id', template.id)
+    .order('sort_order');
+  let sections: SrSectionDef[] = [];
+  if (!error && Array.isArray(data)) {
+    sections = data
+      .filter((r: any) => isValidSectionKey(r.section_key))
+      .map((r: any) => ({ key: r.section_key, label: r.label || titleForSectionKey(r.section_key) }));
+  } else if (error && !isMissingSrSchema(error)) {
+    throw error;
+  }
+  if (!sections.length && isLaser) sections = LASER_SECTIONS.map((s) => ({ ...s }));
+  const starter = starterTemplateFor(template.equipment_type);
+  const starterLabels: Record<string, string> = {};
+  for (const s of starter.sections) starterLabels[s.key] = s.label;
+  const seen = new Set(sections.map((s) => s.key));
+  for (const el of elements) {
+    if (seen.has(el.section)) continue;
+    seen.add(el.section);
+    sections.push({
+      key: el.section,
+      label: isLaser ? titleForSectionKey(el.section) : titleForSectionKey(el.section, starterLabels),
+    });
+  }
+  // Safety last, as on today's form.
+  return [...sections.filter((s) => s.key !== 'safety'), ...sections.filter((s) => s.key === 'safety')];
+}
+
 export async function loadSrTemplateForEquipmentType(
   supabase: SrClient,
-  equipmentType?: string | null
+  equipmentType?: string | null,
+  selection?: { manufacturer?: string | null; model?: string | null }
 ): Promise<LoadedSrForm> {
   const requested = equipmentTypeOrDefault(equipmentType);
-  const fallback = laserFallbackForm(requested);
+  const fallback = fallbackFormForType(requested);
 
-  const { data: templates, error: tmplErr } = await supabase
-    .from('sr_templates')
-    .select('id, slug, name, equipment_type, status, is_default, notes')
-    .eq('status', 'published');
+  const { data: templates, error: tmplErr } = await selectWithFallback(
+    (cols) => supabase.from('sr_templates').select(cols).eq('status', 'published'),
+    TEMPLATE_COLS,
+    TEMPLATE_COLS_LEGACY
+  );
   if (tmplErr) {
     if (isMissingSrSchema(tmplErr)) return fallback;
     throw tmplErr;
   }
 
-  const picked = pickTemplateForEquipmentType(templates || [], requested);
+  const picked = pickTemplateForEquipmentType((templates || []) as SrTemplate[], requested, selection);
   if (!picked) return fallback;
 
   const { data: links, error: linkErr } = await supabase
@@ -557,15 +765,12 @@ export async function loadSrTemplateForEquipmentType(
   const ids = (links || []).map((r: any) => r.element_id).filter(Boolean);
   let elements: SrElement[] = [];
   if (ids.length) {
-    const { data: els, error: elErr } = await supabase
-      .from('sr_elements')
-      .select('id, slug, label, section, input_kind, unit, spec_hint, is_active, sort_hint')
-      .in('id', ids);
+    const { data: els, error: elErr } = await supabase.from('sr_elements').select(ELEMENT_COLS).in('id', ids);
     if (elErr) {
       if (isMissingSrSchema(elErr)) return fallback;
       throw elErr;
     }
-    const byId = new Map((els || []).map((el: SrElement) => [el.id, el]));
+    const byId = new Map<string, SrElement>((els || []).map((el: SrElement) => [el.id, el]));
     elements = (links || [])
       .map((link: any) => {
         const el = byId.get(link.element_id);
@@ -577,13 +782,18 @@ export async function loadSrTemplateForEquipmentType(
 
   if (!elements.length) return fallback;
 
+  const template = picked as SrTemplate;
+  const sections = await loadTemplateSections(supabase, template, elements);
   return {
-    template: picked as SrTemplate,
+    template,
     usedFallback: false,
     requestedType: requested,
-    resolvedType: equipmentTypeOrDefault(picked.equipment_type),
+    resolvedType:
+      template.equipment_type === GENERAL_EQUIPMENT_TYPE ? requested : equipmentTypeOrDefault(template.equipment_type),
     elements,
     items: assembleDraftItems(elements),
+    sections,
+    editable: !!template.editable_default,
   };
 }
 
@@ -592,11 +802,12 @@ export async function loadServiceReportItems(
   reportId: string,
   library?: SrElement[] | null
 ): Promise<SrDraftItem[] | null> {
-  const { data, error } = await supabase
-    .from('service_report_items')
-    .select('id, element_id, section, label, result, value_numeric, unit, is_extra, sort_order')
-    .eq('service_report_id', reportId)
-    .order('sort_order');
+  const base = 'id, element_id, section, label, result, value_numeric, unit, is_extra, sort_order';
+  const { data, error } = await selectWithFallback(
+    (cols) => supabase.from('service_report_items').select(cols).eq('service_report_id', reportId).order('sort_order'),
+    `${base}, section_label`,
+    base
+  );
   if (error) {
     if (isMissingSrSchema(error)) return null;
     throw error;
@@ -606,10 +817,83 @@ export async function loadServiceReportItems(
   return itemsFromPersistedRows(data, byId);
 }
 
+function isSrLegacySection(v: unknown): boolean {
+  return (SR_SECTIONS as readonly string[]).includes(String(v));
+}
+
+/** Insert rejected by the pre-000945 schema (section CHECK or section_label). */
+export function isPreTemplateSchemaReject(error: { message?: string; code?: string } | null | undefined): boolean {
+  const m = `${error?.code || ''} ${error?.message || ''}`;
+  return /23514|service_report_items_section_check|section_label/i.test(m);
+}
+
+/** PostgREST / Postgres "function does not exist" (000945 RPC not applied). */
+export function isMissingSrRpc(error: { message?: string; code?: string } | null | undefined): boolean {
+  const m = `${error?.code || ''} ${error?.message || ''}`;
+  return /PGRST202|42883|Could not find the function|replace_service_report_items.*does not exist/i.test(m);
+}
+
+/**
+ * Is 000945 applied? Probes sr_template_sections (new in 000945).
+ * true = applied, false = missing, null = unknown (network / other error).
+ */
+export async function detectTemplateSchema(supabase: SrClient): Promise<boolean | null> {
+  try {
+    const res = await supabase.from('sr_template_sections').select('id').limit(1);
+    if (!res?.error) return true;
+    const m = `${res.error.code || ''} ${res.error.message || ''}`;
+    if (/PGRST205|42P01|sr_template_sections|schema cache|does not exist/i.test(m)) return false;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Section titles a save would lose on a DB without 000945: the old schema only
+ * stores electrical / mechanical / aesthetic / safety, has no section_label and
+ * no checklist_sections. Empty = safe to save on the legacy schema.
+ */
+export function sectionsLostWithoutTemplateSchema(
+  items: SrDraftItem[],
+  sections: Array<{ key: string; label: string }> = []
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, label: string) => {
+    if (isSrLegacySection(key) || seen.has(key)) return;
+    seen.add(key);
+    out.push(label || titleForSectionKey(key));
+  };
+  for (const sec of sections) push(sec.key, sec.label);
+  for (const it of items) push(it.section, it.section_label || '');
+  return out;
+}
+
+export function rpcItemsFromDraft(items: SrDraftItem[]): Array<Record<string, unknown>> {
+  return persistRowsFromItems(items, { service_report_id: '', organization_id: null }).map(
+    ({ service_report_id: _r, organization_id: _o, ...rest }) => rest
+  );
+}
+
+/**
+ * Save the report's items. With 000945: one atomic RPC
+ * (replace_service_report_items) that keeps the electrical safety rows.
+ * Without it: the legacy delete-then-insert (legacy sections only); callers
+ * block non-laser saves first (sectionsLostWithoutTemplateSchema).
+ */
 export async function replaceServiceReportItems(
   supabase: SrClient,
   opts: { reportId: string; organizationId: number | string | null; items: SrDraftItem[] }
 ): Promise<{ ok: true } | { ok: false; skipped: true } | { ok: false; error: Error }> {
+  if (typeof supabase.rpc === 'function') {
+    const rpc = await supabase.rpc('replace_service_report_items', {
+      p_report_id: opts.reportId,
+      p_items: rpcItemsFromDraft(opts.items),
+    });
+    if (!rpc?.error) return { ok: true };
+    if (!isMissingSrRpc(rpc.error)) return { ok: false, error: new Error(rpc.error.message) };
+  }
   const del = await supabase.from('service_report_items').delete().eq('service_report_id', opts.reportId);
   if (del.error) {
     if (isMissingSrSchema(del.error)) return { ok: false, skipped: true };
@@ -621,6 +905,16 @@ export async function replaceServiceReportItems(
   });
   if (!rows.length) return { ok: true };
   const ins = await supabase.from('service_report_items').insert(rows);
+  if (ins.error && isPreTemplateSchemaReject(ins.error)) {
+    // 000945 not applied: the old CHECK only allows the four legacy sections and
+    // section_label does not exist. Keep the legacy rows; the legacy JSON still
+    // carries those answers. The form blocks non-laser saves before this.
+    const legacyRows = rows
+      .filter((r) => isSrLegacySection(r.section))
+      .map(({ section_label: _drop, ...rest }) => rest);
+    if (legacyRows.length) await supabase.from('service_report_items').insert(legacyRows);
+    return { ok: false, skipped: true };
+  }
   if (ins.error) {
     if (isMissingSrSchema(ins.error)) return { ok: false, skipped: true };
     return { ok: false, error: new Error(ins.error.message) };
