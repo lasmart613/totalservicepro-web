@@ -57,15 +57,21 @@ test('laser fallback seeds current CL_* plus safety as today', () => {
   assert.equal(safety[1].unit, 'µA');
 });
 
-test('template lookup uses equipment_type and falls back to laser', () => {
+test('template lookup uses equipment_type; non-laser types never get the laser form', () => {
   const templates = [
     { slug: 'laser-pm-default', equipment_type: 'laser', is_default: true, status: 'published' },
     { slug: 'c-arm-draft', equipment_type: 'c_arm', is_default: true, status: 'draft' },
   ];
   assert.equal(pickTemplateForEquipmentType(templates, 'laser')?.slug, 'laser-pm-default');
-  assert.equal(pickTemplateForEquipmentType(templates, 'ventilator')?.slug, 'laser-pm-default');
+  // Unknown types normalize to laser, as before.
   assert.equal(pickTemplateForEquipmentType(templates, 'other')?.slug, 'laser-pm-default');
-  assert.equal(pickTemplateForEquipmentType(templates, 'c_arm')?.slug, 'laser-pm-default');
+  assert.equal(pickTemplateForEquipmentType(templates, 'ventilator'), null);
+  assert.equal(pickTemplateForEquipmentType(templates, 'c_arm'), null);
+  const withGeneral = [
+    ...templates,
+    { slug: 'general-pm-default', equipment_type: 'general', is_default: true, status: 'published' },
+  ];
+  assert.equal(pickTemplateForEquipmentType(withGeneral, 'ventilator')?.slug, 'general-pm-default');
 });
 
 test('dual-write maps extras into the matching checklist_* JSON', () => {
@@ -178,9 +184,12 @@ test('loadSrTemplateForEquipmentType falls back when PostgREST has no tables yet
   };
   const loaded = await loadSrTemplateForEquipmentType(supabase as any, 'ventilator');
   assert.equal(loaded.usedFallback, true);
-  assert.equal(loaded.resolvedType, 'laser');
-  assert.equal(loaded.template?.slug, LASER_PM_TEMPLATE_SLUG);
-  assert.deepEqual(labelsForSection(loaded.items, 'electrical'), [...CL_ELECTRICAL]);
+  assert.equal(loaded.resolvedType, 'ventilator');
+  assert.equal(loaded.template?.slug, 'ventilator-pm-default');
+  assert.notDeepEqual(labelsForSection(loaded.items, 'electrical'), [...CL_ELECTRICAL]);
+  const laser = await loadSrTemplateForEquipmentType(supabase as any, 'laser');
+  assert.equal(laser.template?.slug, LASER_PM_TEMPLATE_SLUG);
+  assert.deepEqual(labelsForSection(laser.items, 'electrical'), [...CL_ELECTRICAL]);
 });
 
 test('replaceServiceReportItems deletes then inserts; skips when table missing', async () => {
