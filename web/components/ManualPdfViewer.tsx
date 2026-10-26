@@ -18,6 +18,7 @@ import {
 } from '@/lib/manuals';
 import {
   chapterCardCopy,
+  chapterCardPageRange,
   chapterHistoryUrl,
   chapterNeighbors,
   chaptersInReadingOrder,
@@ -32,7 +33,6 @@ import {
 import { asPositivePage } from '@/lib/ai/citations';
 import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import {
-  chapterPageRangeLabel,
   fittedPageBoxHeight,
   viewerCitedPageNotice,
   viewerFolderOutOfRangeNotice,
@@ -1508,8 +1508,7 @@ export function ManualPdfViewer({
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
                   {readingChapters.map((ch, i) => {
                     const current = sameStoragePath(ch.storage_path, openStoragePath);
-                    const range =
-                      ch.pageStart && ch.pageCount ? chapterPageRangeLabel(ch.pageStart, ch.pageCount) : null;
+                    const range = chapterCardPageRange(ch);
                     const card = chapterCardCopy(ch);
                     const href = manualChapterHref({
                       id: manualId,

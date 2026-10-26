@@ -21,6 +21,10 @@ export type ManualChapter = {
   pageStart?: number;
   /** Pages in this chapter file. */
   pageCount?: number;
+  /** chapter_metadata page span. The card uses these when the joined map is omitted. */
+  page_start?: number;
+  page_end?: number;
+  page_count?: number;
   /** Scout document number. docNumber and document_number are accepted too. */
   doc_number?: string;
   docNumber?: string;

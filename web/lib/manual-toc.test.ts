@@ -263,6 +263,8 @@ test('Scout section titles show the descriptive name and document number', () =>
   assert.match(viewer, /chapterCardCopy\(ch\)/);
   assert.match(viewer, /data-testid="chapter-doc-number"/);
   assert.match(viewer, /card\.title/);
+  assert.match(viewer, /chapterCardPageRange\(ch\)/);
+  assert.match(viewer, /card\.docNumber \|\| range/);
   assert.doesNotMatch(viewer, /Chapter \{tileNumber\}/);
   assert.doesNotMatch(viewer, /target=["']_blank["']/);
 });

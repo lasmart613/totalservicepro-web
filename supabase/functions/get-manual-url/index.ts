@@ -24,6 +24,7 @@ import {
   chaptersFromMetadata,
   dedupeChapterList,
   readChapterDocNumber,
+  readChapterPageFields,
   indexOrderPdfParts,
   isFolderManual,
   isStoredFilePath,
@@ -1230,10 +1231,21 @@ Deno.serve(async (req) => {
           if (p && parentPath && !isPdfPath(parentPath) && !p.startsWith(parentPath) && !p.startsWith("shared/")) {
             p = cleanPath(parentPath + "/" + p.replace(/^\//, ""));
           }
-          const chapter: { order: number; title: string; storage_path: string; doc_number?: string } = {
+          const chapter: {
+            order: number;
+            title: string;
+            storage_path: string;
+            doc_number?: string;
+            page_start?: number;
+            page_end?: number;
+            page_count?: number;
+            pageStart?: number;
+            pageCount?: number;
+          } = {
             order: ch.order != null ? Number(ch.order) : i + 1,
             title: String(ch.title || p.split("/").pop() || `Chapter ${i + 1}`),
             storage_path: p,
+            ...readChapterPageFields(ch),
           };
           const docNumber = readChapterDocNumber(ch);
           if (docNumber) chapter.doc_number = docNumber;

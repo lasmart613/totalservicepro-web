@@ -7,6 +7,7 @@
  */
 
 import { MANUAL_VIEW_PATH } from './manuals.ts';
+import { chapterPageRangeLabel } from './pdf-viewer-page.ts';
 
 export type TocEntry = {
   title: string;
@@ -110,6 +111,55 @@ export function chapterCardCopy(chapter: {
   return { title: `Section ${section} — ${descriptive}`, docNumber };
 }
 
+/** "Service Manual — Front Matter & Contents" (and a non-section Contents file) opens first. */
+export function isFrontMatterChapter(title: unknown): boolean {
+  const text = String(title || '').replace(/\s+/g, ' ').trim();
+  if (!text) return false;
+  if (/\bfront[\s-]*matter\b/i.test(text)) return true;
+  if (/^section\s+\d+\b/i.test(text)) return false;
+  return /\bcontents\b/i.test(text);
+}
+
+export type ChapterPageFields = {
+  page_start?: number;
+  page_end?: number;
+  page_count?: number;
+  pageStart?: number;
+  pageCount?: number;
+};
+
+/**
+ * Page span stored on a chapter_metadata row.
+ * Accepts page_start/page_end/page_count and the camelCase viewer names.
+ * An end is derived from start + count when the row has no page_end.
+ */
+export function readChapterPageFields(chapter: unknown): ChapterPageFields {
+  if (!chapter || typeof chapter !== 'object') return {};
+  const rec = chapter as Record<string, unknown>;
+  const start = chapterPageOrderKey(rec.page_start ?? rec.pageStart);
+  let end = chapterPageOrderKey(rec.page_end ?? rec.pageEnd);
+  let count = chapterPageOrderKey(rec.page_count ?? rec.pageCount);
+  if (start != null && end == null && count != null) end = start + count - 1;
+  if (start != null && end != null && end >= start) count = end - start + 1;
+  const out: ChapterPageFields = {};
+  if (start == null) return out;
+  out.page_start = start;
+  out.pageStart = start;
+  if (end != null && end >= start) out.page_end = end;
+  if (count != null) {
+    out.page_count = count;
+    out.pageCount = count;
+  }
+  return out;
+}
+
+/** Small page text for a chapter card. Null when the row has no page start. */
+export function chapterCardPageRange(chapter: unknown): string | null {
+  const pages = readChapterPageFields(chapter);
+  if (pages.pageStart == null || pages.pageCount == null) return null;
+  return chapterPageRangeLabel(pages.pageStart, pages.pageCount);
+}
+
 /** Joined page start used for reading order. Missing or non-numeric values sort last. */
 export function chapterPageOrderKey(value: unknown): number | null {
   if (typeof value === 'number') {
@@ -126,24 +176,27 @@ export function chapterPageOrderKey(value: unknown): number | null {
 
 /**
  * Chapter list and Previous/Next order.
- * Joined page start wins, numerically, so 10 follows 9. A chapter with no page
+ * Front matter and contents come first, even with no page start.
+ * Then joined page start, numerically, so 10 follows 9. A chapter with no page
  * sorts after every numbered page. Among those, "Section N" is the numeric key
  * (Section 10 follows Section 9). Equal keys and titles with neither keep
  * arrival order.
  */
-export function chaptersInReadingOrder<T extends { pageStart?: unknown; title?: unknown }>(
-  chapters: readonly T[] | null | undefined,
-): T[] {
+export function chaptersInReadingOrder<
+  T extends { pageStart?: unknown; page_start?: unknown; title?: unknown },
+>(chapters: readonly T[] | null | undefined): T[] {
   if (!Array.isArray(chapters)) return [];
   if (chapters.length < 2) return [...chapters];
   return chapters
     .map((chapter, index) => ({
       chapter,
       index,
-      page: chapterPageOrderKey(chapter?.pageStart),
+      front: isFrontMatterChapter(chapter?.title) ? 0 : 1,
+      page: readChapterPageFields(chapter).pageStart ?? null,
       section: sectionNumberFromTitle(chapter?.title),
     }))
     .sort((a, b) => {
+      if (a.front !== b.front) return a.front - b.front;
       if (a.page != null && b.page != null) {
         if (a.page !== b.page) return a.page - b.page;
         return a.index - b.index;

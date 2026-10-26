@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { showManualChaptersButton } from './manuals.ts';
+import { chapterCardCopy, chapterCardPageRange, chaptersInReadingOrder } from './manual-toc.ts';
 import {
   chaptersFromMetadata,
   resolveManualPdfOpen,
@@ -217,6 +218,93 @@ test('Scout titles keep the descriptive name and pass the document number throug
   assert.equal(byPath.get('shared/candela/vpyag/Sect 4/water.pdf')?.doc_number, '7111-80-2520_03');
   assert.equal(byPath.get('shared/candela/vpyag/svc.pdf')?.doc_number, '8502-00-0001');
   assert.equal(byPath.get('shared/candela/vpyag/Docs/GMAX Troubleshooting Guide.pdf')?.doc_number, undefined);
+});
+
+test('a real chapter_metadata row keeps doc_number and pages, and front matter sorts first', () => {
+  // Same shape the indexer writes (order, language, page_count, page_start) plus Scout's
+  // doc_number and page_end. Front matter has a document number and no page span, which
+  // used to sort it after every numbered chapter.
+  const metadata = [
+    {
+      order: 4,
+      title: 'Section 2 — Installation',
+      language: 'English',
+      page_count: 12,
+      page_start: 29,
+      storage_path: 'Sect 1/8501-00-1795_01.pdf',
+      doc_number: '8501-00-1795_01',
+    },
+    {
+      order: 1,
+      title: 'Section 1 — Safety',
+      language: 'English',
+      page_count: 20,
+      page_start: 9,
+      page_end: 28,
+      storage_path: 'Sect 1/8501-00-1794_04.pdf',
+      doc_number: '8501-00-1794_04',
+    },
+    {
+      order: 101,
+      title: 'Service Manual — Front Matter & Contents',
+      language: 'English',
+      storage_path: 'front/front-matter.pdf',
+      doc_number: '8502-00-0000',
+    },
+    {
+      order: 80,
+      title: 'Section 9 — Calibration',
+      language: 'English',
+      page_count: 14,
+      page_start: 100,
+      page_end: 113,
+      storage_path: 'Sect 3/8503-01-0853_03.pdf',
+      docNumber: '8503-01-0853_03',
+    },
+  ];
+  const chapters = chaptersFromMetadata(metadata, 'shared/candela/VPYAG Mini GentleYAG', { isFolder: true });
+  const byFile = (file: string) => chapters.find((chapter) => chapter.storage_path.endsWith(file));
+
+  const front = byFile('front-matter.pdf');
+  assert.equal(front?.title, 'Service Manual — Front Matter & Contents');
+  assert.equal(front?.doc_number, '8502-00-0000');
+  assert.equal(front?.page_start, undefined);
+  assert.equal(chapterCardPageRange(front), null);
+  assert.equal(chapterCardCopy(front).docNumber, '8502-00-0000');
+
+  const safety = byFile('8501-00-1794_04.pdf');
+  assert.equal(safety?.doc_number, '8501-00-1794_04');
+  assert.equal(safety?.page_start, 9);
+  assert.equal(safety?.page_end, 28);
+  assert.equal(safety?.pageStart, 9);
+  assert.equal(safety?.pageCount, 20);
+  assert.equal(chapterCardCopy(safety).title, 'Section 1 — Safety');
+  assert.equal(chapterCardCopy(safety).docNumber, '8501-00-1794_04');
+  assert.equal(chapterCardPageRange(safety), 'pp. 9–28');
+
+  const install = byFile('8501-00-1795_01.pdf');
+  assert.equal(install?.doc_number, '8501-00-1795_01');
+  assert.equal(install?.page_start, 29);
+  assert.equal(install?.page_end, 40);
+  assert.equal(install?.pageCount, 12);
+  assert.equal(chapterCardPageRange(install), 'pp. 29–40');
+
+  const calibration = byFile('8503-01-0853_03.pdf');
+  assert.equal(calibration?.doc_number, '8503-01-0853_03');
+  assert.equal(chapterCardPageRange(calibration), 'pp. 100–113');
+
+  const ordered = chaptersInReadingOrder(chapters);
+  assert.deepEqual(
+    ordered.map((chapter) => chapter.storage_path.split('/').pop()),
+    ['front-matter.pdf', '8501-00-1794_04.pdf', '8501-00-1795_01.pdf', '8503-01-0853_03.pdf'],
+  );
+
+  const lateFront = chaptersInReadingOrder([
+    { title: 'Section 1 — Safety', page_start: 9, storage_path: 'safety.pdf' },
+    { title: 'Service Manual — Front Matter & Contents', page_start: 900, storage_path: 'front.pdf' },
+  ]);
+  assert.equal(lateFront[0]?.storage_path, 'front.pdf');
+  assert.equal(lateFront[1]?.storage_path, 'safety.pdf');
 });
 
 test('a single-PDF row is unchanged: same file, no chapter list', () => {
