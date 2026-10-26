@@ -37,9 +37,15 @@ function docFill(
 
 function docDate(value: string | undefined | null, locale?: string | null, empty = ''): string {
   if (!value) return empty;
-  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return value;
-  const bcp = locale ? localeToBcp47(locale) : 'en-US';
-  return formatDateInTimeZone(value, DEFAULT_ORG_TIMEZONE, bcp === 'en' ? 'en-US' : bcp) || value;
+  const text = String(value).trim();
+  if (!text) return empty;
+  // A leading YYYY-MM-DD is not enough: `2026-01-01<script>` must not be echoed.
+  if (/^\d{4}-\d{2}-\d{2}/.test(text)) {
+    const bcp = locale ? localeToBcp47(locale) : 'en-US';
+    return formatDateInTimeZone(text, DEFAULT_ORG_TIMEZONE, bcp === 'en' ? 'en-US' : bcp);
+  }
+  if (/[<>"'&]/.test(text) || /[\u0000-\u001F\u007F]/.test(text)) return '';
+  return text;
 }
 
 export type DocThemeScope = ThemeScope;
@@ -110,12 +116,15 @@ function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject'
 }
 
 function estimateActionButtonCell(href: string, bg: string, color: string, label: string): string {
-  if (!href) return '';
+  const safeHref = httpUrl(href);
+  const background = cssHex(bg, '');
+  const ink = cssHex(color, '');
+  if (!safeHref || !background || !ink) return '';
   return (
     `<td align="center" style="padding:6px 4px;" width="33%">\n` +
-    `<a href="${esc(href)}" ` +
-    `style="display:inline-block;background:${bg};color:${esc(color)};padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid ${esc(bg)};min-width:110px;">` +
+    `<a href="${esc(safeHref)}" ` +
+    `style="display:inline-block;background:${background};color:${ink};padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid ${background};min-width:110px;">` +
     `${esc(label)}</a>\n` +
     `</td>\n`
   );
@@ -403,6 +412,18 @@ function docDateLabel(value: string | null | undefined, timeZone: string | null 
   return formatDateInTimeZone(value || new Date(), docZone(timeZone), bcp === 'en' ? 'en-US' : bcp);
 }
 
+/** "on {date}" for a deposit, or nothing when the stored value is not an ISO date. */
+function depositDatePhrase(
+  date: string | null | undefined,
+  timeZone: string | null | undefined,
+  locale?: string | null,
+): string {
+  if (!date || !String(date).trim()) return '';
+  const label = docDateLabel(date, timeZone, locale);
+  if (!label) return '';
+  return ` ${docFill(locale, 'on {date}', { date: esc(label) })}`;
+}
+
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const tr = (text: string) => docT(input.locale, text);
@@ -510,9 +531,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         `<div>${tr('Remaining (due on completion)')}: <strong>${money(deferred)}</strong></div>` +
         (deposit > 0
           ? `<div style="margin-top:8px;">${tr('Deposit received')}: <strong>${money(deposit)}</strong>` +
-            (input.depositDate
-              ? ` ${docFill(input.locale, 'on {date}', { date: docDateLabel(input.depositDate, zone, input.locale) })}`
-              : '') +
+            depositDatePhrase(input.depositDate, zone, input.locale) +
             (input.depositMethod ? ` ${docFill(input.locale, 'via {method}', { method: esc(tr(input.depositMethod)) })}` : '') +
             `</div>` +
             `<div style="font-size:1.1rem;margin-top:4px;">${tr('Still owed')}: <strong>${money(
@@ -523,9 +542,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
       : deposit > 0
         ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
           `<div>${tr('Deposit received')}: <strong>${money(deposit)}</strong>` +
-          (input.depositDate
-            ? ` ${docFill(input.locale, 'on {date}', { date: docDateLabel(input.depositDate, zone, input.locale) })}`
-            : '') +
+          depositDatePhrase(input.depositDate, zone, input.locale) +
           (input.depositMethod ? ` ${docFill(input.locale, 'via {method}', { method: esc(tr(input.depositMethod)) })}` : '') +
           `</div>` +
           `<div style="font-size:1.1rem;margin-top:4px;">${tr('Balance remaining')}: <strong>${money(

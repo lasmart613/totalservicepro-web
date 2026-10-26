@@ -706,9 +706,8 @@ function num(value: unknown): number {
 function formatDocDate(value: unknown, timeZone?: string | null, locale?: string | null): string {
   const zone = String(timeZone || '').trim() || DEFAULT_ORG_TIMEZONE;
   const bcp = locale ? localeToBcp47(locale) : 'en-US';
-  return formatDateInTimeZone(
-    value == null || value === '' ? new Date() : String(value),
-    zone,
-    bcp === 'en' ? 'en-US' : bcp,
-  );
+  const intl = bcp === 'en' ? 'en-US' : bcp;
+  if (value == null || value === '') return formatDateInTimeZone(new Date(), zone, intl);
+  if (value instanceof Date) return formatDateInTimeZone(value, zone, intl);
+  return formatDateInTimeZone(String(value), zone, intl);
 }

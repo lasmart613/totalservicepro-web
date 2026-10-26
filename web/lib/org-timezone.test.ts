@@ -26,6 +26,14 @@ test('5:30pm Pacific is still October 5 when UTC is already October 6', () => {
   assert.equal(isoDateInTimeZone(PT_EVENING, 'UTC'), '2026-10-06');
   assert.equal(formatDateInTimeZone(PT_EVENING, 'America/Los_Angeles', 'en-US'), '10/5/2026');
   assert.equal(formatDateInTimeZone(PT_EVENING, 'UTC', 'en-US'), '10/6/2026');
+  assert.equal(formatDateInTimeZone('2026-10-06T00:52:00.000Z', 'America/Los_Angeles', 'en-US'), '10/5/2026');
+  assert.equal(formatDateInTimeZone('2026-10-05', 'America/Phoenix', 'en-US'), '10/5/2026');
+  assert.equal(formatDateInTimeZone('<script>alert(1)</script>', 'UTC', 'en-US'), '');
+  assert.equal(formatDateInTimeZone('<svg onload="alert(1)"></svg>', 'UTC', 'en-US'), '');
+  assert.equal(formatDateInTimeZone('<img src=x onerror=alert(1)>', 'UTC', 'en-US'), '');
+  assert.equal(formatDateInTimeZone('2026-01-01<script>alert(1)</script>', 'UTC', 'en-US'), '');
+  assert.equal(formatDateInTimeZone(new Date(NaN), 'UTC', 'en-US'), '');
+  assert.match(formatDateInTimeZone(null, 'UTC', 'en-US'), /^\d{1,2}\/\d{1,2}\/\d{4}$/);
   assert.equal(ymdFrom(PT_EVENING, 'America/Los_Angeles'), '20261005');
   assert.equal(ymdFrom('2026-10-05', 'UTC'), '20261005');
 });

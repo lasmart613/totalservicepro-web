@@ -68,12 +68,30 @@ export function pngDataImageUrl(value: unknown): string | null {
   return raw;
 }
 
-/** http(s) URL with no quotes, whitespace, or credentials. Null otherwise. */
+/**
+ * Newline, tab, and CR character references. Browsers decode these inside href
+ * before they check the scheme, so `java&#10;script:` is `javascript:`.
+ * The semicolon is required so a longer reference such as `&#100;` is left alone.
+ */
+const URL_HIDDEN_BREAK = /&(?:newline|tab);|&#0*(?:9|10|13);|&#x0*(?:9|a|d);/gi;
+
+function collapseUrlObfuscation(value: string): string {
+  return value.replace(URL_HIDDEN_BREAK, '').replace(/[\u0000-\u001F\u007F\s]+/g, '');
+}
+
+/**
+ * http(s) URL with no credentials and no hidden scheme.
+ * Uppercase `HTTPS:` is kept. `JAVASCRIPT:`, whitespace or newline inside the
+ * scheme, and the same breaks written as HTML character references are null.
+ * A value that only becomes http(s) after those characters are removed is null
+ * too — the original string is never rewritten into an href.
+ */
 export function httpUrl(value: unknown): string | null {
   if (typeof value !== 'string') return null;
   const raw = value.trim();
   if (!raw || raw.length > HTTP_URL_MAX_LENGTH) return null;
-  if (/[\u0000-\u001F\u007F\s"'<>\\]/.test(raw)) return null;
+  if (/["'<>\\]/.test(raw)) return null;
+  if (collapseUrlObfuscation(raw) !== raw) return null;
   let url: URL;
   try {
     url = new URL(raw);

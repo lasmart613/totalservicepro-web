@@ -11,7 +11,7 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from './company-theme.ts';
-import { formatLocaleDate } from './i18n/format-date.ts';
+import { formatLocaleDate, parseDisplayDate } from './i18n/format-date.ts';
 import { translateApp, withDocDirection } from './i18n/translate-app.ts';
 import { viewMeasurement } from './fluence-measurement.ts';
 import { displayModelText } from './model-display.ts';
@@ -151,7 +151,8 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
   const tr = (text: string) => translateApp(r.locale, text);
   const showDate = (value?: string | null) => {
     if (!value || value === '—') return '—';
-    return formatLocaleDate(value, r.locale) || value;
+    if (!parseDisplayDate(value)) return '—';
+    return formatLocaleDate(value, r.locale) || '—';
   };
   const engineer = r.service_engineer || r.tech_name || '—';
   const reportNum = r.report_number || '—';
