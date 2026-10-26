@@ -33,7 +33,6 @@ import { asPositivePage } from '@/lib/ai/citations';
 import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import {
   chapterPageRangeLabel,
-  chapterTileNumber,
   fittedPageBoxHeight,
   viewerCitedPageNotice,
   viewerFolderOutOfRangeNotice,
@@ -1027,6 +1026,7 @@ export function ManualPdfViewer({
       const next = chapterHistoryUrl(window.location.href, {
         manualId,
         storagePath: ch.storage_path,
+        title: chapterCardCopy(ch).title,
         keepPage: opts?.keepPage,
       });
       if (!next) return;
@@ -1074,7 +1074,7 @@ export function ManualPdfViewer({
       setChapterBrowse(true);
       setShowContents(false);
       setJoinedPageLabel(null);
-      setTitle(ch.title || ch.label || title);
+      setTitle(chapterCardCopy(ch).title || title);
       await openPath(
         {
           manualId,
@@ -1508,25 +1508,19 @@ export function ManualPdfViewer({
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
                   {readingChapters.map((ch, i) => {
                     const current = sameStoragePath(ch.storage_path, openStoragePath);
-                    const tileNumber = chapterTileNumber(readingChapters, i);
                     const range =
                       ch.pageStart && ch.pageCount ? chapterPageRangeLabel(ch.pageStart, ch.pageCount) : null;
                     const card = chapterCardCopy(ch);
                     const href = manualChapterHref({
                       id: manualId,
                       storagePath: ch.storage_path,
-                      title: ch.title || ch.label || title,
+                      title: card.title || title,
                     });
                     const tileClass = `text-left rounded-lg border bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)] ${
                       current ? 'border-[var(--gold,#FBBF24)]' : 'border-[#374151]'
                     }`;
                     const tileBody = (
                       <>
-                        {tileNumber != null ? (
-                          <div className="text-[10px] font-bold text-[var(--gold,#FBBF24)] mb-1">
-                            Chapter {tileNumber}
-                          </div>
-                        ) : null}
                         <div className="text-sm">{card.title}</div>
                         {card.docNumber || range ? (
                           <div className="mt-1 text-[10px] text-[#9CA3AF]">

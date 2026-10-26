@@ -79,15 +79,16 @@ export function readChapterDocNumber(chapter: unknown): string | null {
 }
 
 export type ChapterCardCopy = {
-  /** Main line. The descriptive title, or the original title when that split is not available. */
+  /** Main line. "Section N — <title>" for a Scout title, otherwise the stored title. */
   title: string;
-  /** Small secondary text. Null keeps today's title + page-range card. */
+  /** Small secondary text beside the page range. Null when Scout stored no document number. */
   docNumber: string | null;
 };
 
 /**
- * Chapter card text for a Scout title "Section N — <descriptive title>" plus a
- * document number. Without both pieces, the card keeps the stored title.
+ * Chapter card text. A Scout title "Section N — <descriptive title>" stays in
+ * that form. Any other title is shown as stored. The document number is
+ * separate, and only present when metadata has one.
  */
 export function chapterCardCopy(chapter: {
   title?: unknown;
@@ -101,10 +102,12 @@ export function chapterCardCopy(chapter: {
     .replace(/\s+/g, ' ')
     .trim();
   const docNumber = readChapterDocNumber(chapter);
-  const match = raw.match(/^Section\s+\d+\s*[—–:-]\s+(\S.*)$/i);
-  const descriptive = match?.[1]?.trim() || '';
-  if (!descriptive || !docNumber) return { title: raw, docNumber: null };
-  return { title: descriptive, docNumber };
+  const match = raw.match(/^Section\s+(\d+)\s*[—–:-]\s+(\S.*)$/i);
+  if (!match) return { title: raw, docNumber };
+  const section = Math.floor(Number(match[1]));
+  const descriptive = match[2].trim();
+  if (!Number.isFinite(section) || section < 1 || !descriptive) return { title: raw, docNumber };
+  return { title: `Section ${section} — ${descriptive}`, docNumber };
 }
 
 /** Joined page start used for reading order. Missing or non-numeric values sort last. */
@@ -200,6 +203,8 @@ export function chapterHistoryUrl(
   opts: {
     manualId?: string | number | null;
     storagePath?: string | null;
+    /** New chapter title. Omit to leave the current title= parameter alone. */
+    title?: string | null;
     keepPage?: boolean;
   },
 ): string | null {
@@ -214,6 +219,11 @@ export function chapterHistoryUrl(
   const id = queryId(opts.manualId);
   if (id) url.searchParams.set('id', id);
   url.searchParams.set('storage_path', storagePath);
+  if (opts.title !== undefined) {
+    const title = queryTitle(opts.title);
+    if (title) url.searchParams.set('title', title);
+    else url.searchParams.delete('title');
+  }
   if (!opts.keepPage) {
     url.searchParams.delete('page');
     url.hash = '';

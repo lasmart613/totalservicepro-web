@@ -70,7 +70,8 @@ test('chapter tiles number by page order and a one-page file is p. N', () => {
   const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
   assert.match(viewer, /aria-current=\{current \? 'true' : undefined\}/);
   assert.match(viewer, /scrollIntoView\(\{ block: 'nearest' \}\)/);
-  assert.match(viewer, /chapterTileNumber\(readingChapters, i\)/);
+  assert.doesNotMatch(viewer, /chapterTileNumber\(/);
+  assert.doesNotMatch(viewer, /Chapter \{tileNumber\}/);
   assert.match(viewer, /chapterPageRangeLabel/);
   assert.match(viewer, /viewerFolderOutOfRangeNotice/);
   assert.match(viewer, /Page \{page\} isn't in this manual/);

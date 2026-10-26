@@ -153,6 +153,14 @@ test('manual 9 chapters follow page order for the list and Previous/Next', () =>
     '/manuals/view?id=9&title=Mini+GentleYAG&storage_path=shared%2Fcandela%2Fch-2.pdf',
   );
   assert.equal(
+    chapterHistoryUrl(current, {
+      manualId: 9,
+      storagePath: 'shared/candela/ch-2.pdf',
+      title: 'Section 2 — Setup',
+    }),
+    '/manuals/view?id=9&title=Section+2+%E2%80%94+Setup&storage_path=shared%2Fcandela%2Fch-2.pdf',
+  );
+  assert.equal(
     chapterHistoryUrl(
       'https://repairplanet.net/manuals/view?id=9&title=Mini+GentleYAG&storage_path=shared%2Fcandela%2Fch-2.pdf',
       { manualId: 9, storagePath: 'shared/candela/ch-2.pdf' },
@@ -173,6 +181,7 @@ test('manual 9 chapters follow page order for the list and Previous/Next', () =>
   assert.match(viewer, /openChapterRef\.current\(ch, 'none'\)/);
   assert.match(viewer, /userChapterNav\.current = true/);
   assert.match(viewer, /writeChapterHistory\(ch, 'replace', \{ keepPage: true \}\)/);
+  assert.match(viewer, /title: chapterCardCopy\(ch\)\.title/);
   assert.match(viewer, /chapters\.findIndex\(\(c\) => c\?\.storage_path && c\.storage_path === openStoragePath\)/);
 });
 
@@ -182,25 +191,25 @@ test('Scout section titles show the descriptive name and document number', () =>
       title: 'Section 4 — Water cooling',
       doc_number: '7111-80-2520_03',
     }),
-    { title: 'Water cooling', docNumber: '7111-80-2520_03' },
+    { title: 'Section 4 — Water cooling', docNumber: '7111-80-2520_03' },
   );
   assert.deepEqual(
     chapterCardCopy({
       title: 'Section 12 - Laser calibration',
       docNumber: '  8501-00-0002  ',
     }),
-    { title: 'Laser calibration', docNumber: '8501-00-0002' },
+    { title: 'Section 12 — Laser calibration', docNumber: '8501-00-0002' },
   );
   assert.deepEqual(
     chapterCardCopy({
       title: 'Section 8 – Operator controls',
       document_number: '8501-00-1800',
     }),
-    { title: 'Operator controls', docNumber: '8501-00-1800' },
+    { title: 'Section 8 — Operator controls', docNumber: '8501-00-1800' },
   );
   assert.deepEqual(
     chapterCardCopy({ title: 'Section 4 — Schematic — power board', doc_number: '7122-99-0110_05' }),
-    { title: 'Schematic — power board', docNumber: '7122-99-0110_05' },
+    { title: 'Section 4 — Schematic — power board', docNumber: '7122-99-0110_05' },
   );
 
   assert.deepEqual(chapterCardCopy({ title: 'Section 4 — Water cooling' }), {
@@ -209,11 +218,11 @@ test('Scout section titles show the descriptive name and document number', () =>
   });
   assert.deepEqual(
     chapterCardCopy({ title: 'Operator manual — Mini GentleYAG', doc_number: '8501-00-0002' }),
-    { title: 'Operator manual — Mini GentleYAG', docNumber: null },
+    { title: 'Operator manual — Mini GentleYAG', docNumber: '8501-00-0002' },
   );
   assert.deepEqual(chapterCardCopy({ title: 'Section 4 —', doc_number: '7111-80-2520_03' }), {
     title: 'Section 4 —',
-    docNumber: null,
+    docNumber: '7111-80-2520_03',
   });
   assert.deepEqual(chapterCardCopy({ title: 'Section 4 — Schematic — 7111-80-2520_03' }), {
     title: 'Section 4 — Schematic — 7111-80-2520_03',
@@ -254,6 +263,7 @@ test('Scout section titles show the descriptive name and document number', () =>
   assert.match(viewer, /chapterCardCopy\(ch\)/);
   assert.match(viewer, /data-testid="chapter-doc-number"/);
   assert.match(viewer, /card\.title/);
+  assert.doesNotMatch(viewer, /Chapter \{tileNumber\}/);
   assert.doesNotMatch(viewer, /target=["']_blank["']/);
 });
 
