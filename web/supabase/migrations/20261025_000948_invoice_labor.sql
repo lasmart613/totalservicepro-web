@@ -99,35 +99,35 @@ ALTER TABLE public.service_invoices
 
 ALTER TABLE public.organizations DROP CONSTRAINT IF EXISTS organizations_labor_hourly_rate_check;
 ALTER TABLE public.organizations ADD CONSTRAINT organizations_labor_hourly_rate_check
-  CHECK (labor_hourly_rate IS NULL OR labor_hourly_rate >= 0);
+  CHECK (labor_hourly_rate IS NULL OR (labor_hourly_rate >= 0 AND labor_hourly_rate <> 'NaN'));
 ALTER TABLE public.organizations DROP CONSTRAINT IF EXISTS organizations_labor_half_day_rate_check;
 ALTER TABLE public.organizations ADD CONSTRAINT organizations_labor_half_day_rate_check
-  CHECK (labor_half_day_rate IS NULL OR labor_half_day_rate >= 0);
+  CHECK (labor_half_day_rate IS NULL OR (labor_half_day_rate >= 0 AND labor_half_day_rate <> 'NaN'));
 ALTER TABLE public.organizations DROP CONSTRAINT IF EXISTS organizations_labor_full_day_rate_check;
 ALTER TABLE public.organizations ADD CONSTRAINT organizations_labor_full_day_rate_check
-  CHECK (labor_full_day_rate IS NULL OR labor_full_day_rate >= 0);
+  CHECK (labor_full_day_rate IS NULL OR (labor_full_day_rate >= 0 AND labor_full_day_rate <> 'NaN'));
 
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_hours_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_hours_check
-  CHECK (labor_hours >= 0);
+  CHECK (labor_hours >= 0 AND labor_hours <> 'NaN');
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_half_days_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_half_days_check
-  CHECK (labor_half_days >= 0);
+  CHECK (labor_half_days >= 0 AND labor_half_days <> 'NaN');
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_full_days_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_full_days_check
-  CHECK (labor_full_days >= 0);
+  CHECK (labor_full_days >= 0 AND labor_full_days <> 'NaN');
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_hourly_rate_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_hourly_rate_check
-  CHECK (labor_hourly_rate IS NULL OR labor_hourly_rate >= 0);
+  CHECK (labor_hourly_rate IS NULL OR (labor_hourly_rate >= 0 AND labor_hourly_rate <> 'NaN'));
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_half_day_rate_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_half_day_rate_check
-  CHECK (labor_half_day_rate IS NULL OR labor_half_day_rate >= 0);
+  CHECK (labor_half_day_rate IS NULL OR (labor_half_day_rate >= 0 AND labor_half_day_rate <> 'NaN'));
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_full_day_rate_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_full_day_rate_check
-  CHECK (labor_full_day_rate IS NULL OR labor_full_day_rate >= 0);
+  CHECK (labor_full_day_rate IS NULL OR (labor_full_day_rate >= 0 AND labor_full_day_rate <> 'NaN'));
 ALTER TABLE public.service_invoices DROP CONSTRAINT IF EXISTS service_invoices_labor_subtotal_check;
 ALTER TABLE public.service_invoices ADD CONSTRAINT service_invoices_labor_subtotal_check
-  CHECK (labor_subtotal >= 0);
+  CHECK (labor_subtotal >= 0 AND labor_subtotal <> 'NaN');
 
 COMMENT ON COLUMN public.organizations.labor_hourly_rate IS
   '000948 service-org default hourly labor rate. NULL until set. >= 0.';

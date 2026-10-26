@@ -145,14 +145,20 @@ function listingTitle(listing: ListingInvoiceSource): string {
 
 export function lineItemFromStored(raw: unknown, index = 0): LineItem {
   const li = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const line = recomputeExt({
+  const qtyN = Number(li.qty);
+  const priceN = Number(li.unit_price);
+  const qty = Number.isFinite(qtyN) ? qtyN : 0;
+  const unit = Number.isFinite(priceN) ? priceN : 0;
+  const extRaw = li.ext;
+  const extMissing = extRaw == null || extRaw === '' || !Number.isFinite(Number(extRaw));
+  const line: LineItem = {
     id: li.id != null && String(li.id).trim() ? String(li.id) : `LI${index + 1}`,
     part_number: String(li.part_number || ''),
     description: String(li.description || ''),
-    qty: Number(li.qty) || 0,
-    unit_price: Number(li.unit_price) || 0,
-    ext: Number(li.ext) || 0,
-  });
+    qty,
+    unit_price: unit,
+    ext: extMissing ? Math.round(qty * unit * 100) / 100 : Math.round(Number(extRaw) * 100) / 100,
+  };
   const listingId = li.marketplace_listing_id;
   if (listingId != null && String(listingId).trim()) {
     line.marketplace_listing_id = String(listingId).trim();

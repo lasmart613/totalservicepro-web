@@ -23,11 +23,9 @@ import {
   isEstimateDepositEnabled,
   printableEstimateDeposit,
 } from './estimate-deposit.ts';
-import { resolveInvoiceCollectable } from './invoice-collectable.ts';
+import { invoiceSavedCollectable } from './invoice-collectable.ts';
 import {
-  chargeTotalIncludingLabor,
   laborFromInvoiceRow,
-  laborSubtotalOf,
   partsSubtotalFromLines,
   roundMoney,
 } from './invoice-labor.ts';
@@ -238,7 +236,6 @@ export function buildOwnedInvoiceMessage(input: {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
   const labor = laborFromInvoiceRow(input.row);
-  const laborAmount = laborSubtotalOf(input.row);
   const parts = partsSubtotalFromLines(lines);
   const lineSum = lines.reduce(
     (sum: number, line: { ext?: unknown; qty?: unknown; unit_price?: unknown }) =>
@@ -246,23 +243,32 @@ export function buildOwnedInvoiceMessage(input: {
     0
   );
   const tax = num(input.row.tax ?? data.tax);
-  const storedSubtotal = num(input.row.subtotal ?? data.subtotal);
-  const subtotal =
-    storedSubtotal > 0 && laborAmount > 0.004 && Math.abs(storedSubtotal - parts) <= 0.02
-      ? roundMoney(storedSubtotal + laborAmount)
-      : storedSubtotal || roundMoney((parts || lineSum) + laborAmount);
-  const total =
-    chargeTotalIncludingLabor({
-      storedTotal: input.row.total ?? data.total,
-      partsSubtotal: parts || lineSum,
-      laborSubtotal: laborAmount,
-      tax,
-    }) || roundMoney(subtotal + tax);
-  const collectable = resolveInvoiceCollectable({
-    total,
-    amountPaid: input.row.amount_paid,
+  const storedSubtotalRaw = input.row.subtotal ?? data.subtotal;
+  const storedSubtotal = Number(storedSubtotalRaw);
+  const subtotal = Number.isFinite(storedSubtotal)
+    ? roundMoney(storedSubtotal)
+    : roundMoney(parts || lineSum);
+  const saved = invoiceSavedCollectable({
+    total: input.row.total ?? data.total,
+    amount_paid: input.row.amount_paid,
     invoice_data: input.row.invoice_data,
   });
+  // A missing total is not parts + tax and is not a $0 charge. The pay link
+  // is refused before this HTML is used for checkout.
+  const total = saved ? saved.total : 0;
+  const collectable = saved ?? {
+    total: 0,
+    amountPaid: 0,
+    partsDeposit: 0,
+    dueNowOriginal: 0,
+    deferredOriginal: 0,
+    deferredReleased: false,
+    hasDeferredSplit: false,
+    stripeAmount: 0,
+    remainingOwed: 0,
+    deferredUnpaid: 0,
+    paymentKind: 'full' as const,
+  };
   return buildInvoiceHtml({
     company: input.company,
     customer: {

@@ -112,7 +112,10 @@ export function buildInvoicePaymentPatch(input: {
     throw new Error(VOIDED_INVOICE_MESSAGE);
   }
   const now = input.now || new Date();
-  const total = money2(Number(input.invoice.total) || 0);
+  if (input.invoice.total == null || input.invoice.total === '' || !Number.isFinite(Number(input.invoice.total))) {
+    throw new Error('This invoice has no total, so a payment was not recorded.');
+  }
+  const total = money2(Number(input.invoice.total));
   const prior = existingPaidAmount(input.invoice);
   const add = money2(Math.max(0, Number(input.addAmount) || 0));
   const amount_paid = money2(prior + add);

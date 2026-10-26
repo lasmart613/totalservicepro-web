@@ -3,12 +3,11 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { paymentStatusFromAmounts } from './apply-invoice-payment.ts';
-import { resolveInvoiceCollectable } from './invoice-collectable.ts';
+import { buildInvoicePaymentPatch, paymentStatusFromAmounts } from './apply-invoice-payment.ts';
+import { invoiceSavedCollectable } from './invoice-collectable.ts';
 import { ORG_READABLE_COLUMNS } from '../org-columns.ts';
 import {
   applyLaborRateFields,
-  chargeTotalIncludingLabor,
   emptyLabor,
   invoiceMoney,
   isMissingLaborColumnError,
@@ -20,6 +19,7 @@ import {
   laborLineAmounts,
   laborSubtotalOf,
   ORG_LABOR_RATE_COLUMNS,
+  partsSubtotalFromLines,
   stripMovedEstimateLaborLines,
   withOrgRateDefaults,
 } from './invoice-labor.ts';
@@ -137,6 +137,28 @@ test('an estimate with no labor does not invent a labor section', () => {
   assert.equal(lines.length, 1);
 });
 
+test('a legacy estimate labor amount of zero carries zero hours', () => {
+  const carried = laborFromEstimate(
+    { laborHours: 4, labor: 0, pricing: { laborRate: 185 } },
+    { hourly: 999, halfDay: 500, fullDay: 900 }
+  );
+  assert.ok(carried);
+  assert.equal(carried.hours, 0);
+  assert.equal(carried.subtotal, 0);
+  assert.equal(carried.hourlyRate, 185);
+  const lines = stripMovedEstimateLaborLines(
+    [
+      { id: 'labor', description: 'Labor' },
+      { id: 'p1', description: 'Tip' },
+    ],
+    carried
+  );
+  assert.deepEqual(
+    lines.map((line) => line.id),
+    ['p1']
+  );
+});
+
 test('a stored labor dollar amount snaps the hourly rate when hours times rate disagree', () => {
   const carried = laborFromEstimate({ laborHours: 2, labor: 100, pricing: { laborRate: 40 } });
   assert.ok(carried);
@@ -146,53 +168,58 @@ test('a stored labor dollar amount snaps the hourly rate when hours times rate d
   assert.equal(carried.fullDays, 0);
 });
 
-test('charge total adds labor only when the stored total left it out', () => {
-  assert.equal(
-    chargeTotalIncludingLabor({ storedTotal: 108, partsSubtotal: 100, laborSubtotal: 50, tax: 8 }),
-    158
-  );
-  assert.equal(
-    chargeTotalIncludingLabor({ storedTotal: 158, partsSubtotal: 100, laborSubtotal: 50, tax: 8 }),
-    158
-  );
-  assert.equal(
-    chargeTotalIncludingLabor({ storedTotal: 200, partsSubtotal: 100, laborSubtotal: 50, tax: 8 }),
-    200
-  );
-  assert.equal(
-    chargeTotalIncludingLabor({ storedTotal: 108, partsSubtotal: 100, laborSubtotal: 0, tax: 8 }),
-    108
-  );
-  assert.equal(
-    chargeTotalIncludingLabor({ storedTotal: 108, partsSubtotal: 0, laborSubtotal: 50, tax: 8 }),
-    108
-  );
+test('a manual total of $108 is the amount due even when labor is $100', () => {
+  const row = {
+    total: 108,
+    amount_paid: 0,
+    labor_subtotal: 100,
+    subtotal: 100,
+    tax: 8,
+    invoice_data: {},
+  };
+  const open = invoiceSavedCollectable(row);
+  assert.ok(open);
+  assert.equal(open.total, 108);
+  assert.equal(open.stripeAmount, 108);
+  assert.equal(open.remainingOwed, 108);
+  assert.equal(paymentStatusFromAmounts(open.total, 0), 'sent');
+  const partial = invoiceSavedCollectable({ ...row, amount_paid: 40 });
+  assert.ok(partial);
+  assert.equal(partial.stripeAmount, 68);
+  assert.equal(partial.remainingOwed, 68);
+  assert.equal(paymentStatusFromAmounts(partial.total, 40), 'partially_paid');
+  const recorded = buildInvoicePaymentPatch({
+    invoice: { id: 1, total: 108, amount_paid: 40, invoice_data: {} },
+    addAmount: 20,
+    method: 'Check',
+  });
+  assert.equal(recorded.status, 'partially_paid');
+  assert.equal(recorded.amount_paid, 60);
+  assert.equal(recorded.invoice_data.balanceDue, 48);
+  const settled = buildInvoicePaymentPatch({
+    invoice: { id: 1, total: 108, amount_paid: 40, invoice_data: {} },
+    addAmount: 68,
+    method: 'Stripe',
+  });
+  assert.equal(settled.status, 'paid');
+  assert.equal(settled.amount_paid, 108);
+  assert.equal(settled.invoice_data.balanceDue, 0);
 });
 
-test('partial and paid follow the total that includes labor', () => {
-  const total = chargeTotalIncludingLabor({
-    storedTotal: 108,
-    partsSubtotal: 100,
-    laborSubtotal: 50,
-    tax: 8,
-  });
-  assert.equal(total, 158);
-  const open = resolveInvoiceCollectable({ total, amountPaid: 0, invoice_data: {} });
-  assert.equal(open.stripeAmount, 158);
-  assert.equal(open.remainingOwed, 158);
-  assert.equal(paymentStatusFromAmounts(total, 0), 'sent');
-  const partial = resolveInvoiceCollectable({ total, amountPaid: 50, invoice_data: {} });
-  assert.equal(partial.stripeAmount, 108);
-  assert.equal(partial.remainingOwed, 108);
-  assert.equal(paymentStatusFromAmounts(total, 50), 'partially_paid');
-  assert.equal(paymentStatusFromAmounts(total, 158), 'paid');
-  const deposit = resolveInvoiceCollectable({
-    total,
-    amountPaid: 0,
-    invoice_data: { dueNow: 40, deferred: 118, partsDeposit: 40 },
-  });
-  assert.equal(deposit.stripeAmount, 40);
-  assert.equal(deposit.remainingOwed, 158);
+test('a null total is not a zero charge', () => {
+  assert.equal(invoiceSavedCollectable({ total: null, amount_paid: 0, invoice_data: {} }), null);
+  assert.equal(invoiceSavedCollectable({ total: '', invoice_data: {} }), null);
+  assert.equal(invoiceSavedCollectable({ total: 'NaN', invoice_data: {} }), null);
+  assert.equal(invoiceSavedCollectable({ total: 0, invoice_data: {} })?.stripeAmount, 0);
+  assert.throws(
+    () =>
+      buildInvoicePaymentPatch({
+        invoice: { id: 1, total: null, invoice_data: {} },
+        addAmount: 10,
+        method: 'Cash',
+      }),
+    /no total/
+  );
 });
 
 test('a saved row round-trips and a missing labor column is detected', () => {
@@ -207,7 +234,17 @@ test('a saved row round-trips and a missing labor column is detected', () => {
   });
   assert.equal(labor.hours, 1.5);
   assert.equal(labor.subtotal, 720);
+  const storedWins = laborFromInvoiceRow({
+    labor_hours: 2,
+    labor_hourly_rate: 25,
+    labor_subtotal: 40,
+  });
+  assert.equal(storedWins.subtotal, 40);
+  assert.equal(laborFromInvoiceRow({ labor_hours: 4, labor_hourly_rate: 100, labor_subtotal: 0 }).subtotal, 0);
   assert.equal(laborSubtotalOf({ labor_subtotal: 0, labor_hours: 4, labor_hourly_rate: 100 }), 0);
+  assert.equal(partsSubtotalFromLines([{ qty: 2, unit_price: 10 }]), 20);
+  assert.equal(partsSubtotalFromLines([{ qty: 2, unit_price: 10, ext: 0 }]), 0);
+  assert.equal(partsSubtotalFromLines([{ qty: 3, unit_price: 5, ext: 'NaN' }]), 15);
   assert.deepEqual(laborColumnPayload(labor).labor_subtotal, 720);
   assert.equal(
     isMissingLaborColumnError({
@@ -255,6 +292,9 @@ test('migration 000948 adds only the new labor columns and records its version',
   assert.match(sql, /invoice_labor/);
   assert.match(sql, /numeric\(10,2\)/);
   assert.match(sql, /labor_subtotal numeric\(12,2\) NOT NULL DEFAULT 0/);
+  assert.match(sql, /labor_hours >= 0 AND labor_hours <> 'NaN'/);
+  assert.match(sql, /labor_hourly_rate IS NULL OR \(labor_hourly_rate >= 0 AND labor_hourly_rate <> 'NaN'\)/);
+  assert.match(sql, /labor_subtotal >= 0 AND labor_subtotal <> 'NaN'/);
   assert.match(sql, /GRANT SELECT \(labor_hourly_rate, labor_half_day_rate, labor_full_day_rate\)/);
   assert.doesNotMatch(sql, /CREATE POLICY|DROP POLICY/);
   assert.doesNotMatch(sql, /service_estimates/);
@@ -265,11 +305,14 @@ test('migration 000948 adds only the new labor columns and records its version',
   assert.doesNotMatch(sql + rollback, /\b1005\b/);
 });
 
-test('the app hides labor until the columns exist and checkout uses the labor total', () => {
+test('the app hides labor until the columns exist and every charge uses the saved total', () => {
   const company = readFileSync(join(web, 'app/company/page.tsx'), 'utf8');
   const profile = readFileSync(join(web, 'app/api/org/profile/route.ts'), 'utf8');
   const form = readFileSync(join(web, 'app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
   const send = readFileSync(join(web, 'app/api/billing/send-invoice/route.ts'), 'utf8');
+  const page = readFileSync(join(web, 'app/invoices/page.tsx'), 'utf8');
+  const mail = readFileSync(join(web, 'lib/billing/owned-doc-mail.ts'), 'utf8');
+  const proof = readFileSync(join(web, 'supabase/tests/20261025_invoice_labor.sql'), 'utf8');
   assert.match(company, /select\(ORG_LABOR_RATE_SELECT\)/);
   assert.match(company, /isMissingLaborColumnError/);
   assert.match(company, /setLaborRatesReady\(false\)/);
@@ -280,6 +323,16 @@ test('the app hides labor until the columns exist and checkout uses the labor to
   assert.match(form, /laborColumnPayload\(labor\)/);
   assert.match(form, /laborFromEstimate/);
   assert.match(form, /stripMovedEstimateLaborLines/);
-  assert.match(send, /chargeTotalIncludingLabor/);
+  assert.match(form, /withOrgRateDefaults\(laborFromInvoiceRow/);
+  assert.match(form, /setTotalOverride\(null\);\s*setTax/);
+  assert.match(form, /LABOR_INPUT_MAX/);
+  assert.match(form, /STRIPE_INVOICE_MAX/);
   assert.doesNotMatch(form, /labor_half_days:\s*ed\.|labor_full_days:\s*ed\./);
+  for (const src of [send, page, mail]) {
+    assert.match(src, /invoiceSavedCollectable/);
+    assert.doesNotMatch(src, /chargeTotalIncludingLabor/);
+  }
+  assert.match(send, /This invoice has no total, so a pay link was not created/);
+  assert.match(proof, /\\ir \.\.\/migrations\/20261025_000948_invoice_labor\.sql/);
+  assert.doesNotMatch(proof, /\\i web\//);
 });

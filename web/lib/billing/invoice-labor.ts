@@ -15,8 +15,11 @@
  * Adding one would change invoices that exist today.
  *
  * Estimates have hourly labor only (laborHours × pricing.laborRate). They do
- * not have half-day or full-day quantities, so conversion copies hours and the
- * hourly rate and leaves the other quantities at 0.
+ * not have half-day or full-day quantities. Conversion carries the estimate's
+ * labor dollar amount: a legacy amount of 0 is 0 hours, not hours × rate.
+ *
+ * The saved invoice total is the only amount due. Checkout, email, the list,
+ * and payment recording read that column. They do not add labor_subtotal again.
  *
  * Before migration 000948 the labor columns are absent. Callers detect that
  * and hide the labor UI. Existing invoices then total exactly as they do now.
@@ -164,7 +167,7 @@ export function laborIsZero(labor: InvoiceLabor | null | undefined): boolean {
 
 export function laborFromInvoiceRow(row: Record<string, unknown> | null | undefined): InvoiceLabor {
   if (!row) return emptyLabor();
-  return laborFromQuantities({
+  const labor = laborFromQuantities({
     hours: row.labor_hours,
     halfDays: row.labor_half_days,
     fullDays: row.labor_full_days,
@@ -172,6 +175,13 @@ export function laborFromInvoiceRow(row: Record<string, unknown> | null | undefi
     halfDayRate: row.labor_half_day_rate,
     fullDayRate: row.labor_full_day_rate,
   });
+  // The saved labor_subtotal is the figure the editor put into the invoice
+  // total. The email labor line uses that same number, not a second sum.
+  if (row.labor_subtotal != null && row.labor_subtotal !== '') {
+    const stored = Number(row.labor_subtotal);
+    if (Number.isFinite(stored)) labor.subtotal = roundMoney(Math.max(0, stored));
+  }
+  return labor;
 }
 
 export function laborColumnPayload(labor: InvoiceLabor): Record<string, number | null> {
@@ -253,6 +263,20 @@ export function laborFromEstimate(
   const amount = roundMoney(Math.max(0, Number(ed.labor) || 0));
   if (hoursRaw <= 0 && amount <= 0) return null;
 
+  // The stored labor dollars are the amount to carry. Hours without dollars
+  // (a legacy quote whose labor amount is 0) become 0 hours, not hours × rate.
+  if (amount <= 0) {
+    const rates = orgRates || emptyOrgLaborRates();
+    return laborFromQuantities({
+      hours: 0,
+      halfDays: 0,
+      fullDays: 0,
+      hourlyRate: rateOrNull(pricing.laborRate) ?? rates.hourly,
+      halfDayRate: rates.halfDay,
+      fullDayRate: rates.fullDay,
+    });
+  }
+
   let hourly = rateOrNull(pricing.laborRate);
   let hours = hoursRaw;
   if (hours <= 0 && amount > 0) {
@@ -290,7 +314,7 @@ export function stripMovedEstimateLaborLines<T extends { id?: unknown }>(
   lines: T[],
   carried: InvoiceLabor | null
 ): T[] {
-  if (!carried || laborIsZero(carried)) return lines;
+  if (!carried) return lines;
   return lines.filter((line) => String(line.id || '') !== 'labor');
 }
 
@@ -299,8 +323,9 @@ export function partsSubtotalFromLines(lines: unknown): number {
   const sum = lines.reduce((total, line) => {
     if (!line || typeof line !== 'object') return total;
     const row = line as { ext?: unknown; qty?: unknown; unit_price?: unknown };
-    const ext = Number(row.ext);
-    if (Number.isFinite(ext)) return total + ext;
+    const extRaw = row.ext;
+    const extMissing = extRaw == null || extRaw === '' || !Number.isFinite(Number(extRaw));
+    if (!extMissing) return total + Number(extRaw);
     const qtyN = Number(row.qty);
     const price = Number(row.unit_price);
     return total + (Number.isFinite(qtyN) ? qtyN : 0) * (Number.isFinite(price) ? price : 0);
@@ -328,33 +353,10 @@ export function laborSubtotalOf(
   return laborFromInvoiceRow(row).subtotal;
 }
 
-/**
- * Stripe charges the stored invoice total, which already includes labor when
- * the editor saved it. If that total equals parts + tax and labor_subtotal is
- * positive, labor was left out and is added. A different stored total is a
- * manual override and is kept. Zero labor leaves the stored total unchanged.
- */
-export function chargeTotalIncludingLabor(input: {
-  storedTotal?: unknown;
-  partsSubtotal?: unknown;
-  laborSubtotal?: unknown;
-  tax?: unknown;
-}): number {
-  const storedRaw = Number(input.storedTotal);
-  const stored = Number.isFinite(storedRaw) ? roundMoney(storedRaw) : null;
-  const parts = roundMoney(Math.max(0, Number(input.partsSubtotal) || 0));
-  const labor = roundMoney(Math.max(0, Number(input.laborSubtotal) || 0));
-  const tax = roundMoney(Math.max(0, Number(input.tax) || 0));
-  const computed = roundMoney(parts + labor + tax);
-  if (stored == null) return computed;
-  const withoutLabor = roundMoney(parts + tax);
-  if (labor > 0.004 && Math.abs(stored - withoutLabor) <= 0.02 && computed > stored + 0.02) {
-    return computed;
-  }
-  return stored;
-}
+/** numeric(10,2) ceiling for a labor quantity or rate. */
+export const LABOR_INPUT_MAX = 99_999_999.99;
 
-const RATE_MAX = 99_999_999.99;
+const RATE_MAX = LABOR_INPUT_MAX;
 
 export function parseLaborRateInput(
   value: unknown

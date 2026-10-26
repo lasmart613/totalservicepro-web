@@ -273,7 +273,8 @@ function CompanyProfile() {
             .maybeSingle();
           if (!rates.error && rates.data) {
             setLaborRatesReady(true);
-            nextOrg = { ...nextOrg, ...rates.data };
+            const rateRow = rates.data as unknown as Record<string, unknown>;
+            nextOrg = { ...nextOrg, ...rateRow };
           } else {
             // Pre-migration (and any other probe failure) hides the rates so the
             // rest of the profile still loads. A missing-column error is expected.

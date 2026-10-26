@@ -38,11 +38,13 @@ import {
   collectableInvoiceDataFields,
   estimatePartsDeposit,
   resolveInvoiceCollectable,
+  STRIPE_INVOICE_MAX,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
 import {
   emptyLabor,
   emptyOrgLaborRates,
+  LABOR_INPUT_MAX,
   isMissingLaborColumnError,
   laborColumnPayload,
   laborFromEstimate,
@@ -233,7 +235,7 @@ export default function InvoiceFormClient() {
   };
 
   const loadInvoice = useCallback(
-    async (id: string) => {
+    async (id: string, orgRates?: OrgLaborRates) => {
       const { data, error } = await supabase
         .from('service_invoices')
         .select('*')
@@ -301,7 +303,9 @@ export default function InvoiceFormClient() {
       }
       if ('labor_hours' in data || 'labor_subtotal' in data) {
         setLaborReady(true);
-        setLabor(laborFromInvoiceRow(data));
+        // Migrated invoices have null rate snapshots. Prefill the org rates
+        // without changing a saved rate or a zero quantity.
+        setLabor(withOrgRateDefaults(laborFromInvoiceRow(data), orgRates));
       }
     },
     [supabase]
@@ -524,10 +528,12 @@ export default function InvoiceFormClient() {
             .select(ORG_LABOR_RATE_SELECT)
             .eq('id', orgId)
             .maybeSingle();
-          if (!rates.error && rates.data) orgRates = orgLaborRatesFromRow(rates.data as Record<string, unknown>);
+          if (!rates.error && rates.data) {
+            orgRates = orgLaborRatesFromRow(rates.data as unknown as Record<string, unknown>);
+          }
         }
         if (editIdParam) {
-          await loadInvoice(editIdParam);
+          await loadInvoice(editIdParam, orgRates);
         } else if (fromEstimateParam) {
           await prefillFromEstimate(fromEstimateParam, { laborReady: laborColumns, orgRates });
         } else if (laborColumns) {
@@ -551,6 +557,22 @@ export default function InvoiceFormClient() {
     halfDayRate?: number | null;
     fullDayRate?: number | null;
   }) {
+    const qtyOver =
+      (patch.hours != null && patch.hours > LABOR_INPUT_MAX) ||
+      (patch.halfDays != null && patch.halfDays > LABOR_INPUT_MAX) ||
+      (patch.fullDays != null && patch.fullDays > LABOR_INPUT_MAX);
+    if (qtyOver) {
+      toast.error(t('Enter hours, half days, or full days up to 99,999,999.99.'));
+      return;
+    }
+    const rateOver =
+      (patch.hourlyRate != null && patch.hourlyRate > LABOR_INPUT_MAX) ||
+      (patch.halfDayRate != null && patch.halfDayRate > LABOR_INPUT_MAX) ||
+      (patch.fullDayRate != null && patch.fullDayRate > LABOR_INPUT_MAX);
+    if (rateOver) {
+      toast.error(t('Enter a labor rate up to 99,999,999.99.'));
+      return;
+    }
     setTotalOverride(null);
     setLabor((prev) =>
       laborFromQuantities({
@@ -565,6 +587,14 @@ export default function InvoiceFormClient() {
   }
 
   function updateLine(id: string, patch: Partial<LineItem>) {
+    if (patch.qty != null && Number(patch.qty) > LABOR_INPUT_MAX) {
+      toast.error(t('Enter a quantity up to 99,999,999.99.'));
+      return;
+    }
+    if (patch.unit_price != null && Number(patch.unit_price) > LABOR_INPUT_MAX) {
+      toast.error(t('Enter a price up to 99,999,999.99.'));
+      return;
+    }
     setTotalOverride(null);
     setLineItems((rows) =>
       rows.map((r) => (r.id === id ? recomputeExt({ ...r, ...patch }) : r))
@@ -592,6 +622,10 @@ export default function InvoiceFormClient() {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
       toast.error('Customer name is required');
+      return null;
+    }
+    if (!Number.isFinite(total) || total > STRIPE_INVOICE_MAX) {
+      toast.error(t('Invoice total cannot be more than $999,999.99.'));
       return null;
     }
     setSaving(true);
@@ -1421,7 +1455,10 @@ export default function InvoiceFormClient() {
                 step="0.01"
                 min={0}
                 value={tax}
-                onChange={(e) => setTax(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  setTotalOverride(null);
+                  setTax(parseFloat(e.target.value) || 0);
+                }}
               />
             </div>
           </div>
@@ -1545,7 +1582,18 @@ export default function InvoiceFormClient() {
                 type="number"
                 step="0.01"
                 value={total}
-                onChange={(e) => setTotalOverride(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const next = parseFloat(e.target.value);
+                  if (!Number.isFinite(next)) {
+                    setTotalOverride(0);
+                    return;
+                  }
+                  if (next > STRIPE_INVOICE_MAX) {
+                    toast.error(t('Invoice total cannot be more than $999,999.99.'));
+                    return;
+                  }
+                  setTotalOverride(next);
+                }}
               />
             </div>
             <div>

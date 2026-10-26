@@ -206,10 +206,28 @@ test('server-built invoice email shows a labor block only when the labor subtota
     theme: null,
     paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_labor',
   });
-  assert.match(shown, /Labor subtotal/);
+  assert.match(shown, /Labor subtotal: \$50\.00/);
   assert.match(shown, />Hours</);
-  assert.match(shown, /\$158\.00/);
-  assert.match(shown, /Pay \$158\.00 securely with Stripe/);
+  assert.match(shown, /Invoice Total: \$108\.00/);
+  assert.match(shown, /Pay \$108\.00 securely with Stripe/);
+  assert.doesNotMatch(shown, /\$158\.00/);
+
+  const mismatched = buildOwnedInvoiceMessage({
+    row: {
+      ...base,
+      total: 108,
+      labor_hours: 2,
+      labor_hourly_rate: 25,
+      labor_subtotal: 40,
+    },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_labor',
+  });
+  assert.match(mismatched, /Labor subtotal: \$40\.00/);
+  assert.match(mismatched, /Invoice Total: \$108\.00/);
+  assert.doesNotMatch(mismatched, /\$50\.00/);
+  assert.equal((mismatched.match(/\$40\.00/g) || []).length >= 2, true);
 });
 
 test('server-built estimate and report ignore a stored HTML blob', () => {

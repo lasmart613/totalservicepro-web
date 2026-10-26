@@ -2,9 +2,10 @@
 -- Scratch database only. The migration has its own BEGIN/COMMIT.
 -- org 1005 is a real customer and is never inserted.
 --
+-- Includes are relative to this file (\ir), so the proof runs from any cwd:
 --   createdb invoice_labor_proof
 --   psql "postgresql:///invoice_labor_proof" -v ON_ERROR_STOP=1 \
---     -f web/supabase/tests/20261025_invoice_labor.sql
+--     -f /path/to/web/supabase/tests/20261025_invoice_labor.sql
 --   dropdb invoice_labor_proof
 
 \set ON_ERROR_STOP on
@@ -81,7 +82,7 @@ FROM pg_policy pol
 JOIN pg_class c ON c.oid = pol.polrelid
 WHERE c.relname = 'service_invoices';
 
-\i web/supabase/migrations/20261025_000948_invoice_labor.sql
+\ir ../migrations/20261025_000948_invoice_labor.sql
 
 DO $$
 DECLARE
@@ -199,6 +200,19 @@ BEGIN
   EXCEPTION WHEN check_violation THEN
     NULL;
   END;
+  BEGIN
+    INSERT INTO public.service_invoices (id, organization_id, subtotal, tax, total, labor_hours)
+    VALUES (45, 7001, 0, 0, 0, 'NaN');
+    RAISE EXCEPTION 'NaN hours were accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
+  BEGIN
+    UPDATE public.organizations SET labor_hourly_rate = 'NaN' WHERE id = 7001;
+    RAISE EXCEPTION 'NaN org rate was accepted';
+  EXCEPTION WHEN check_violation THEN
+    NULL;
+  END;
 END $$;
 
 INSERT INTO public.organizations (id, name, labor_hourly_rate, labor_half_day_rate, labor_full_day_rate)
@@ -228,7 +242,7 @@ BEGIN
   END IF;
 END $$;
 
-\i web/supabase/migrations/20261025_000948_invoice_labor_rollback.sql
+\ir ../migrations/20261025_000948_invoice_labor_rollback.sql
 
 DO $$
 DECLARE
@@ -262,7 +276,7 @@ BEGIN
   END IF;
 END $$;
 
-\i web/supabase/migrations/20261025_000948_invoice_labor.sql
+\ir ../migrations/20261025_000948_invoice_labor.sql
 
 DO $$
 DECLARE

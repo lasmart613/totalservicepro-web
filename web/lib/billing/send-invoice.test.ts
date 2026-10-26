@@ -409,24 +409,26 @@ describe('send invoice', { concurrency: false }, () => {
     }
   });
 
-  test('checkout cents include labor that the stored total left out and do not double-count it', async () => {
+  test('checkout cents are the saved total, including an override and a partial payment', async () => {
     resetDocumentSendRateLimit();
-    const leftOut = {
+    const override = {
       ...invoiceRow(),
       total: 108,
       subtotal: 100,
       tax: 8,
-      labor_subtotal: 50,
+      labor_subtotal: 100,
       invoice_data: {
         custEmail: CLINIC,
         line_items: [{ description: 'Handpiece service', qty: 1, unit_price: 100, ext: 100 }],
       },
     };
-    const already = { ...leftOut, total: 158 };
+    const already = { ...override, total: 158, labor_subtotal: 50 };
+    const partial = { ...override, amount_paid: 40 };
     const zeroLabor = invoiceRow();
     const cases = [
-      { row: leftOut, cents: 15800 },
+      { row: override, cents: 10800 },
       { row: already, cents: 15800 },
+      { row: partial, cents: 6800 },
       { row: zeroLabor, cents: 12000 },
     ];
     for (const item of cases) {
@@ -458,5 +460,35 @@ describe('send invoice', { concurrency: false }, () => {
         fetchLog.restore();
       }
     }
+  });
+
+  test('a null total or a total above the Stripe cap does not create a pay link', async () => {
+    const checkout = checkoutSpy();
+    const base = {
+      user_profiles: [profile],
+      organizations: [shopOrg],
+    };
+    const nullTotal = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+      userClient: memoryClient({ ...base, service_invoices: [{ ...invoiceRow(), total: null }] }) as never,
+      adminClient: null,
+      createCheckout: checkout.createCheckout as never,
+    });
+    const nullJson = await nullTotal.json();
+    assert.equal(nullTotal.status, 400);
+    assert.match(String(nullJson.error), /no total/);
+    assert.equal(checkout.calls.length, 0);
+
+    const over = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+      userClient: memoryClient({
+        ...base,
+        service_invoices: [{ ...invoiceRow(), total: 1_000_000 }],
+      }) as never,
+      adminClient: null,
+      createCheckout: checkout.createCheckout as never,
+    });
+    const overJson = await over.json();
+    assert.equal(over.status, 400);
+    assert.match(String(overJson.error), /999,999\.99/);
+    assert.equal(checkout.calls.length, 0);
   });
 });

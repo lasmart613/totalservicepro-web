@@ -78,7 +78,7 @@ test('send-invoice skips a pay link when the invoice is voided', () => {
   assert.ok(checkoutAt > voidAt);
   assert.match(src, /stripeSkippedReason = VOIDED_INVOICE_MESSAGE/);
   const between = src.slice(voidAt, checkoutAt);
-  assert.match(between, /\} else if \(includePay && payAmount >= 0\.5\)/);
+  assert.match(between, /\} else if \(includePay && collectable && payAmount >= 0\.5\)/);
 });
 
 test('Stripe expire treats an open session as expired and a completed session as not voidable', () => {

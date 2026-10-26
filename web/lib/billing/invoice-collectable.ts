@@ -56,6 +56,28 @@ function paidFromInvoiceData(data: Record<string, unknown>, amountPaidCol?: unkn
   return dep > 0 ? dep : 0;
 }
 
+/**
+ * service_invoices.total is the only amount due. A null or non-numeric total
+ * is not $0: callers must refuse a pay link and a payment instead of charging.
+ */
+export function invoiceSavedCollectable(row: {
+  total?: unknown;
+  amount_paid?: unknown;
+  invoice_data?: unknown;
+} | null | undefined): InvoiceCollectableSplit | null {
+  if (!row || row.total == null || row.total === '') return null;
+  const n = typeof row.total === 'number' ? row.total : Number(String(row.total).trim());
+  if (!Number.isFinite(n)) return null;
+  return resolveInvoiceCollectable({
+    total: n,
+    amountPaid: row.amount_paid,
+    invoice_data: row.invoice_data,
+  });
+}
+
+/** Stripe Checkout rejects a charge above this. */
+export const STRIPE_INVOICE_MAX = 999_999.99;
+
 export function resolveInvoiceCollectable(input: {
   total?: unknown;
   amountPaid?: unknown;

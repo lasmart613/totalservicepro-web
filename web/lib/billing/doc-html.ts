@@ -427,7 +427,27 @@ function invoiceLaborHtml(input: InvoiceHtmlInput, rule: string): string {
       ext: (Number(labor.fullDays) || 0) * (Number(labor.fullDayRate) || 0),
     },
   ].filter((row) => row.qty > 0.0001 || row.ext > 0.004);
-  if (!rows.length) return '';
+  // The saved labor subtotal is the only labor amount. Line extensions use it
+  // too, so a qty × rate that disagrees cannot show a second figure.
+  const laborTotal = Math.round((Number(labor.subtotal) || 0) * 100) / 100;
+  if (!rows.length) {
+    rows.push({ label: tr('Labor'), qty: 1, rate: laborTotal, ext: laborTotal });
+  } else {
+    const computed = rows.reduce((sum, row) => sum + row.ext, 0);
+    if (Math.abs(computed - laborTotal) > 0.02) {
+      if (rows.length === 1 || computed <= 0.004) {
+        rows[0].ext = laborTotal;
+        for (let i = 1; i < rows.length; i++) rows[i].ext = 0;
+      } else {
+        let allocated = 0;
+        for (let i = 0; i < rows.length - 1; i++) {
+          rows[i].ext = Math.round((rows[i].ext / computed) * laborTotal * 100) / 100;
+          allocated += rows[i].ext;
+        }
+        rows[rows.length - 1].ext = Math.round((laborTotal - allocated) * 100) / 100;
+      }
+    }
+  }
   let html =
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Labor')}</h3>` +
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
