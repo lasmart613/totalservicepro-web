@@ -39,7 +39,7 @@ test('every invoice fallback select includes invoice_data', () => {
 });
 
 test('column-missing selects fall through and still return invoice_data', async () => {
-  const [full, core, min, last] = INVOICE_ROW_SELECTS;
+  const [withLabor, full, core, min, last] = INVOICE_ROW_SELECTS;
   const stored = {
     id: 41,
     created_by: 'user-1',
@@ -58,6 +58,15 @@ test('column-missing selects fall through and still return invoice_data', async 
             eq() {
               return {
                 maybeSingle: async () => {
+                  if (cols === withLabor) {
+                    return {
+                      data: null,
+                      error: {
+                        message:
+                          "Could not find the 'labor_hours' column of 'service_invoices' in the schema cache",
+                      },
+                    };
+                  }
                   if (cols === full) {
                     return {
                       data: null,

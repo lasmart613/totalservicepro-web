@@ -8,6 +8,7 @@ import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
 import { parseOrgTimeZone } from '@/lib/org-timezone';
 import { normalizeCountryName } from '@/lib/countries';
 import { guardPrivateFieldWipe, ORG_PROFILE_RESPONSE_COLUMNS } from '@/lib/org-columns';
+import { applyLaborRateFields } from '@/lib/billing/invoice-labor';
 
 /**
  * POST /api/org/profile
@@ -40,6 +41,9 @@ const ALLOWED_FIELDS = [
   'number_format',
   'timezone',
   'country',
+  'labor_hourly_rate',
+  'labor_half_day_rate',
+  'labor_full_day_rate',
 ] as const;
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
@@ -197,6 +201,10 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: 'Unknown country' }, { status: 400 });
       }
       payload.country = name;
+    }
+    const laborRates = applyLaborRateFields(payload);
+    if (!laborRates.ok) {
+      return NextResponse.json({ error: laborRates.error }, { status: 400 });
     }
     // QA #325 M-1: never wipe notes with an empty value unless the client asked (clear_notes).
     guardPrivateFieldWipe(payload, body);

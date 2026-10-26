@@ -207,9 +207,12 @@ export function appendListingLine(existing: unknown, line: LineItem): LineItem[]
 
 export function invoiceTotalsFromLines(
   lines: LineItem[],
-  tax: unknown
+  tax: unknown,
+  laborSubtotal: unknown = 0
 ): { subtotal: number; tax: number; total: number } {
-  const subtotal = lineItemsSubtotal(lines);
+  const parts = lineItemsSubtotal(lines);
+  const labor = roundMoney(Math.max(0, Number(laborSubtotal) || 0));
+  const subtotal = roundMoney(parts + labor);
   const taxN = roundMoney(Number(tax) || 0);
   return { subtotal, tax: taxN, total: roundMoney(subtotal + taxN) };
 }
@@ -262,13 +265,13 @@ function applyCollectableAfterAppend(
 }
 
 export function mergeListingOntoDraft(
-  row: { invoice_data?: unknown; tax?: unknown; amount_paid?: unknown; total?: unknown },
+  row: { invoice_data?: unknown; tax?: unknown; amount_paid?: unknown; total?: unknown; labor_subtotal?: unknown },
   line: LineItem
 ): { invoice_data: Record<string, unknown>; subtotal: number; total: number } {
   const stored = parseJsonField(row.invoice_data);
   const oldTotal = previousInvoiceTotal(row, stored, row.tax);
   const lines = appendListingLine(stored.line_items, line);
-  const totals = invoiceTotalsFromLines(lines, row.tax);
+  const totals = invoiceTotalsFromLines(lines, row.tax, row.labor_subtotal);
   const paidRaw = Number(row.amount_paid);
   const received =
     Number.isFinite(paidRaw) && paidRaw > 0

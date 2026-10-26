@@ -24,6 +24,13 @@ import {
   printableEstimateDeposit,
 } from './estimate-deposit.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
+import {
+  chargeTotalIncludingLabor,
+  laborFromInvoiceRow,
+  laborSubtotalOf,
+  partsSubtotalFromLines,
+  roundMoney,
+} from './invoice-labor.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
 
@@ -230,19 +237,32 @@ export function buildOwnedInvoiceMessage(input: {
 }): string {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
-  const collectable = resolveInvoiceCollectable({
-    total: input.row.total,
-    amountPaid: input.row.amount_paid,
-    invoice_data: input.row.invoice_data,
-  });
+  const labor = laborFromInvoiceRow(input.row);
+  const laborAmount = laborSubtotalOf(input.row);
+  const parts = partsSubtotalFromLines(lines);
   const lineSum = lines.reduce(
     (sum: number, line: { ext?: unknown; qty?: unknown; unit_price?: unknown }) =>
       sum + num(line.ext ?? num(line.qty) * num(line.unit_price)),
     0
   );
-  const subtotal = num(input.row.subtotal ?? data.subtotal) || lineSum;
   const tax = num(input.row.tax ?? data.tax);
-  const total = num(input.row.total ?? data.total) || subtotal + tax;
+  const storedSubtotal = num(input.row.subtotal ?? data.subtotal);
+  const subtotal =
+    storedSubtotal > 0 && laborAmount > 0.004 && Math.abs(storedSubtotal - parts) <= 0.02
+      ? roundMoney(storedSubtotal + laborAmount)
+      : storedSubtotal || roundMoney((parts || lineSum) + laborAmount);
+  const total =
+    chargeTotalIncludingLabor({
+      storedTotal: input.row.total ?? data.total,
+      partsSubtotal: parts || lineSum,
+      laborSubtotal: laborAmount,
+      tax,
+    }) || roundMoney(subtotal + tax);
+  const collectable = resolveInvoiceCollectable({
+    total,
+    amountPaid: input.row.amount_paid,
+    invoice_data: input.row.invoice_data,
+  });
   return buildInvoiceHtml({
     company: input.company,
     customer: {
@@ -264,6 +284,7 @@ export function buildOwnedInvoiceMessage(input: {
     subtotal,
     tax,
     total,
+    labor,
     deposit: num(data.deposit ?? input.row.amount_paid),
     depositDate: data.depositDate ? String(data.depositDate) : undefined,
     depositMethod: data.depositMethod ? String(data.depositMethod) : undefined,

@@ -145,6 +145,24 @@ test('append replaces a blank starter line and keeps real lines and Stripe keys'
   assert.equal(patch.invoice_data.status, undefined);
 });
 
+test('appending a listing keeps an existing labor subtotal in the invoice total', () => {
+  const line = listingToInvoiceLine(flashlamp, 1, 'line-new');
+  const patch = mergeListingOntoDraft(
+    {
+      tax: 0,
+      amount_paid: 0,
+      labor_subtotal: 40,
+      invoice_data: {
+        line_items: [{ id: 'old', description: 'Tip', qty: 1, unit_price: 100, ext: 100 }],
+      },
+    },
+    line
+  );
+  assert.deepEqual(Object.keys(patch).sort(), ['invoice_data', 'subtotal', 'total']);
+  assert.equal(patch.subtotal, 390);
+  assert.equal(patch.total, 390);
+});
+
 test('a full-charge draft stays fully due after the listing is added', () => {
   const line = listingToInvoiceLine(flashlamp, 1, 'line-new');
   const patch = mergeListingOntoDraft(

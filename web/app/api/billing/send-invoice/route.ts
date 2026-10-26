@@ -12,6 +12,8 @@ import {
   invoiceCheckoutDescription,
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
+import { chargeTotalIncludingLabor, laborSubtotalOf, partsSubtotalFromLines } from '@/lib/billing/invoice-labor';
+import { parseJsonField } from '@/lib/billing/save-helpers';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
@@ -162,8 +164,16 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         : senderCompanyFromOrg(null, techName);
     const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
 
+    const invoiceData = parseJsonField(inv.invoice_data);
+    const partsSubtotal = partsSubtotalFromLines(invoiceData.line_items);
+    const chargeTotal = chargeTotalIncludingLabor({
+      storedTotal: inv.total,
+      partsSubtotal,
+      laborSubtotal: laborSubtotalOf(inv),
+      tax: inv.tax,
+    });
     const collectable = resolveInvoiceCollectable({
-      total: inv.total,
+      total: chargeTotal,
       amountPaid: inv.amount_paid,
       invoice_data: inv.invoice_data,
     });

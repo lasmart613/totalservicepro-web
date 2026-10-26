@@ -408,4 +408,55 @@ describe('send invoice', { concurrency: false }, () => {
       fetchLog.restore();
     }
   });
+
+  test('checkout cents include labor that the stored total left out and do not double-count it', async () => {
+    resetDocumentSendRateLimit();
+    const leftOut = {
+      ...invoiceRow(),
+      total: 108,
+      subtotal: 100,
+      tax: 8,
+      labor_subtotal: 50,
+      invoice_data: {
+        custEmail: CLINIC,
+        line_items: [{ description: 'Handpiece service', qty: 1, unit_price: 100, ext: 100 }],
+      },
+    };
+    const already = { ...leftOut, total: 158 };
+    const zeroLabor = invoiceRow();
+    const cases = [
+      { row: leftOut, cents: 15800 },
+      { row: already, cents: 15800 },
+      { row: zeroLabor, cents: 12000 },
+    ];
+    for (const item of cases) {
+      resetDocumentSendRateLimit();
+      const db = memoryClient({
+        user_profiles: [profile],
+        organizations: [shopOrg],
+        service_invoices: [item.row],
+      });
+      const checkout = checkoutSpy();
+      const fetchLog = installFetch(() => {
+        return new Response(JSON.stringify({ message: 'provider down' }), {
+          status: 502,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+      try {
+        await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+          const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: checkout.createCheckout as never,
+          });
+          assert.equal(res.status, 502);
+          assert.equal(checkout.calls.length, 1);
+          assert.equal(checkout.calls[0].amountCents, item.cents);
+        });
+      } finally {
+        fetchLog.restore();
+      }
+    }
+  });
 });

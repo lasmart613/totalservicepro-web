@@ -173,6 +173,45 @@ test('server-built invoice ignores caller HTML and escapes document text', () =>
   assert.doesNotMatch(html, /claim=/);
 });
 
+test('server-built invoice email shows a labor block only when the labor subtotal is positive', () => {
+  const base = {
+    organization_id: 7,
+    customer_name: 'Clinic',
+    invoice_number: 'INV-9',
+    subtotal: 100,
+    tax: 8,
+    invoice_data: {
+      line_items: [{ description: 'Flashlamp', qty: 1, unit_price: 100, ext: 100 }],
+      custEmail: 'clinic@owned.test',
+    },
+  };
+  const hidden = buildOwnedInvoiceMessage({
+    row: { ...base, total: 108, labor_subtotal: 0 },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    paymentUrl: null,
+  });
+  assert.doesNotMatch(hidden, /Labor subtotal/);
+  const shown = buildOwnedInvoiceMessage({
+    row: {
+      ...base,
+      total: 108,
+      labor_hours: 2,
+      labor_half_days: 0,
+      labor_full_days: 0,
+      labor_hourly_rate: 25,
+      labor_subtotal: 50,
+    },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_labor',
+  });
+  assert.match(shown, /Labor subtotal/);
+  assert.match(shown, />Hours</);
+  assert.match(shown, /\$158\.00/);
+  assert.match(shown, /Pay \$158\.00 securely with Stripe/);
+});
+
 test('server-built estimate and report ignore a stored HTML blob', () => {
   const estimate = buildOwnedEstimateMessage({
     row: {

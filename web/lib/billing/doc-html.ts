@@ -386,7 +386,71 @@ export type InvoiceHtmlInput = {
   locale?: string | null;
   /** IANA zone for the fallback "today" date. Date-only invoice dates are not shifted. */
   timeZone?: string | null;
+  /**
+   * Dedicated labor section. Omitted from print, email, and the customer
+   * document when the labor subtotal is zero so older invoices look the same.
+   */
+  labor?: {
+    hours: number;
+    halfDays: number;
+    fullDays: number;
+    hourlyRate: number | null;
+    halfDayRate: number | null;
+    fullDayRate: number | null;
+    subtotal: number;
+  } | null;
 };
+
+function invoiceLaborHtml(input: InvoiceHtmlInput, rule: string): string {
+  const labor = input.labor;
+  if (!labor || !(Number(labor.subtotal) > 0.004)) return '';
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const tr = (text: string) => docT(input.locale, text);
+  const qtyText = (n: number) => Number(n || 0).toFixed(2).replace(/\.00$/, '');
+  const rows = [
+    {
+      label: tr('Hours'),
+      qty: Number(labor.hours) || 0,
+      rate: labor.hourlyRate,
+      ext: (Number(labor.hours) || 0) * (Number(labor.hourlyRate) || 0),
+    },
+    {
+      label: tr('Half days'),
+      qty: Number(labor.halfDays) || 0,
+      rate: labor.halfDayRate,
+      ext: (Number(labor.halfDays) || 0) * (Number(labor.halfDayRate) || 0),
+    },
+    {
+      label: tr('Full days'),
+      qty: Number(labor.fullDays) || 0,
+      rate: labor.fullDayRate,
+      ext: (Number(labor.fullDays) || 0) * (Number(labor.fullDayRate) || 0),
+    },
+  ].filter((row) => row.qty > 0.0001 || row.ext > 0.004);
+  if (!rows.length) return '';
+  let html =
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Labor')}</h3>` +
+    `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
+    `<thead><tr style="background:#f5f5f5;border-bottom:2px solid ${rule};">` +
+    `<th style="text-align:left;padding:6px 4px;">${tr('Description')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Qty')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Rate')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Ext')}</th>` +
+    `</tr></thead><tbody>`;
+  for (const row of rows) {
+    html +=
+      `<tr style="border-bottom:1px solid #eee;">` +
+      `<td style="padding:5px 4px;">${esc(row.label)}</td>` +
+      `<td style="padding:5px 4px;text-align:right;">${qtyText(row.qty)}</td>` +
+      `<td style="padding:5px 4px;text-align:right;">${money(row.rate)}</td>` +
+      `<td style="padding:5px 4px;text-align:right;">${money(row.ext)}</td>` +
+      `</tr>`;
+  }
+  html +=
+    `</tbody></table>` +
+    `<div style="font-size:13px;font-weight:700;margin:0 0 12px;">${tr('Labor subtotal')}: ${money(labor.subtotal)}</div>`;
+  return html;
+}
 
 function docZone(timeZone: string | null | undefined): string {
   const zone = String(timeZone || '').trim();
@@ -490,6 +554,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
           displayModelText(input.description)
         )}</bdi></div>`
       : '') +
+    invoiceLaborHtml(input, rule) +
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Amounts')}</h3>` +
     `<div style="font-size:13px;font-weight:600;">` +
     `<div>${tr('Subtotal')}: ${money(input.subtotal)}</div>` +

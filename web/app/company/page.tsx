@@ -39,6 +39,7 @@ import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 import { showCompanyJustSetupBanner } from '@/lib/customer-invite-client';
 import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, privateFieldsPatch, type OrgPrivateFields } from '@/lib/org-columns';
+import { isMissingLaborColumnError, ORG_LABOR_RATE_SELECT } from '@/lib/billing/invoice-labor';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -99,6 +100,7 @@ function CompanyProfile() {
   const [userRole, setUserRole] = useState('');
   const [selfUserId, setSelfUserId] = useState('');
   const [loadingOrg, setLoadingOrg] = useState(true);
+  const [laborRatesReady, setLaborRatesReady] = useState(false);
   const [showTeamPrompt, setShowTeamPrompt] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
   const [linkedOrgId, setLinkedOrgId] = useState<string | number | null>(null);
@@ -263,7 +265,24 @@ function CompanyProfile() {
           // privateBaseline null = not loaded: the editor is read-only and saves never send notes.
           const priv = await loadOrgPrivateFields(supabase, (orgData as any).id);
           setPrivateBaseline(priv);
-          setOrg(priv ? { ...(orgData as any), ...priv } : orgData);
+          let nextOrg = priv ? { ...(orgData as any), ...priv } : orgData;
+          const rates = await supabase
+            .from('organizations')
+            .select(ORG_LABOR_RATE_SELECT)
+            .eq('id', (orgData as any).id)
+            .maybeSingle();
+          if (!rates.error && rates.data) {
+            setLaborRatesReady(true);
+            nextOrg = { ...nextOrg, ...rates.data };
+          } else {
+            // Pre-migration (and any other probe failure) hides the rates so the
+            // rest of the profile still loads. A missing-column error is expected.
+            setLaborRatesReady(false);
+            if (rates.error && !isMissingLaborColumnError(rates.error)) {
+              console.warn('organization labor rates', rates.error.message || rates.error);
+            }
+          }
+          setOrg(nextOrg);
           // No POST /api/org/founder on load. Setup (onboarding, pending signup,
           // and the create-on-save below) already links the founder. On every
           // visit it re-granted the signup trial after expiry and reset the
@@ -510,6 +529,16 @@ function CompanyProfile() {
         updateData.number_format = currentOrg.number_format || 'auto';
       }
       updateData.timezone = currentOrg.timezone || null;
+      if (
+        laborRatesReady &&
+        isServiceCompany(userRole, currentOrg.type) &&
+        !isOwnerish(userRole, currentOrg.type) &&
+        !isSupplier(userRole, currentOrg.type)
+      ) {
+        updateData.labor_hourly_rate = currentOrg.labor_hourly_rate ?? null;
+        updateData.labor_half_day_rate = currentOrg.labor_half_day_rate ?? null;
+        updateData.labor_full_day_rate = currentOrg.labor_full_day_rate ?? null;
+      }
 
       // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
       // Same service-role path as invite/claim — only the caller's linked org.
@@ -535,6 +564,9 @@ function CompanyProfile() {
       }
       if (omitted.includes('timezone')) {
         followUps.push('Timezone will use the address state until the organization timezone column is added.');
+      }
+      if (omitted.some((col) => col.startsWith('labor_'))) {
+        followUps.push('Labor rates will be saved once the organization labor rate columns are added.');
       }
       toast.success(followUps.length ? `Details saved. ${followUps.join(' ')}` : 'Details saved.');
       if (serviceAdminMode) setShowTeamPrompt(true);
@@ -764,6 +796,8 @@ function CompanyProfile() {
     ? ownerDetailsLabel(org?.type, org?.facility_type)
     : supplierMode
       ? t('Supplier Details') : t('Company Details');
+  const showLaborRates =
+    laborRatesReady && isServiceCompany(userRole, org?.type) && !ownerMode && !supplierMode;
 
   if (accessDenied) {
     return (
@@ -997,6 +1031,38 @@ function CompanyProfile() {
               ) : null}
             </div>
 
+            {showLaborRates ? (
+              <div className="md:col-span-2 border-t border-[var(--border)] pt-4">
+                <h3 className="font-semibold mb-1">{t('Labor rates')}</h3>
+                <p className="text-xs text-[var(--text3)] mb-3">
+                  {t('Hourly, half-day, and full-day rates for new invoices. Each invoice can change them.')}
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(
+                    [
+                      ['labor_hourly_rate', t('Hourly rate')],
+                      ['labor_half_day_rate', t('Half-day rate')],
+                      ['labor_full_day_rate', t('Full-day rate')],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <div key={key}>
+                      <label className="label" htmlFor={key}>{label}</label>
+                      <input
+                        id={key}
+                        className="input"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={org[key] ?? ''}
+                        onChange={(e) =>
+                          setOrg({ ...org, [key]: e.target.value === '' ? null : e.target.value })
+                        }
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
             <div className="md:col-span-2 border-t border-[var(--border)] pt-4">
               <OrgMoneySettings
                 currencyCode={org.currency_code || 'USD'}
