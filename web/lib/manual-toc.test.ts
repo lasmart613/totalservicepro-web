@@ -4,8 +4,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { GAP_STRINGS } from './i18n/gap-copy.ts';
+import { chapterTileNumber } from './pdf-viewer-page.ts';
 import {
+  chapterHistoryUrl,
   chapterNeighbors,
+  chaptersInReadingOrder,
   chooseDocumentToc,
   manualChapterHref,
   manualTocPageHref,
@@ -79,6 +82,97 @@ test('VPYAG chapter navigation stops at the ends and links each chapter', () => 
   assert.match(viewer, /data-testid="chapter-link"/);
   assert.match(viewer, /manualChapterHref\(/);
   assert.match(viewer, /showManualChaptersButton\(chapters\) && !showChapters/);
+  assert.doesNotMatch(viewer, /target=["']_blank["']/);
+});
+
+test('manual 9 chapters follow page order for the list and Previous/Next', () => {
+  // Arrival order matches the folder ranks: service 9–30, operator 1–8, then 31–109.
+  // Operator manuals own the earliest joined pages, so their chapter numbers are 1–8.
+  const chapters: { title: string; storage_path: string; pageStart?: number | string | null }[] = [];
+  for (let n = 9; n <= 30; n++) {
+    chapters.push({ title: `Chapter ${n}`, storage_path: `shared/candela/ch-${n}.pdf`, pageStart: 1000 + n });
+  }
+  for (let n = 1; n <= 8; n++) {
+    chapters.push({ title: `Chapter ${n}`, storage_path: `shared/candela/ch-${n}.pdf`, pageStart: n * 10 });
+  }
+  for (let n = 31; n <= 109; n++) {
+    chapters.push({ title: `Chapter ${n}`, storage_path: `shared/candela/ch-${n}.pdf`, pageStart: 3000 + n });
+  }
+  assert.equal(chapters[0]?.title, 'Chapter 9');
+  assert.equal(chapters[22]?.title, 'Chapter 1');
+
+  const ordered = chaptersInReadingOrder(chapters);
+  assert.deepEqual(
+    ordered.map((chapter) => chapter.title),
+    Array.from({ length: 109 }, (_, i) => `Chapter ${i + 1}`),
+  );
+  for (let i = 0; i < ordered.length; i++) {
+    assert.equal(chapterTileNumber(ordered, i), i + 1);
+  }
+
+  const first = chapterNeighbors(ordered, ordered[0]?.storage_path);
+  assert.equal(first.previous, null);
+  assert.equal(first.next?.title, 'Chapter 2');
+
+  const chapter8 = chapterNeighbors(ordered, ordered[7]?.storage_path);
+  assert.equal(chapter8.previous?.title, 'Chapter 7');
+  assert.equal(chapter8.next?.title, 'Chapter 9');
+
+  const last = chapterNeighbors(ordered, ordered[108]?.storage_path);
+  assert.equal(last.previous?.title, 'Chapter 108');
+  assert.equal(last.next, null);
+
+  const numeric = chaptersInReadingOrder([
+    { storage_path: 'ten', pageStart: '10' },
+    { storage_path: 'two', pageStart: 2 },
+    { storage_path: 'nine', pageStart: '9' },
+  ]);
+  assert.deepEqual(
+    numeric.map((chapter) => chapter.storage_path),
+    ['two', 'nine', 'ten'],
+  );
+
+  const stable = chaptersInReadingOrder([
+    { storage_path: 'late', pageStart: 5 },
+    { storage_path: 'first-missing' },
+    { storage_path: 'tie-a', pageStart: 5 },
+    { storage_path: 'early', pageStart: 1 },
+    { storage_path: 'second-missing', pageStart: null },
+  ]);
+  assert.deepEqual(
+    stable.map((chapter) => chapter.storage_path),
+    ['early', 'late', 'tie-a', 'first-missing', 'second-missing'],
+  );
+  assert.deepEqual(chaptersInReadingOrder(undefined), []);
+  assert.deepEqual(chaptersInReadingOrder([]), []);
+
+  const current = 'https://repairplanet.net/manuals/view?id=9&title=Mini+GentleYAG&page=4#page=4';
+  assert.equal(
+    chapterHistoryUrl(current, { manualId: 9, storagePath: 'shared/candela/ch-2.pdf' }),
+    '/manuals/view?id=9&title=Mini+GentleYAG&storage_path=shared%2Fcandela%2Fch-2.pdf',
+  );
+  assert.equal(
+    chapterHistoryUrl(
+      'https://repairplanet.net/manuals/view?id=9&title=Mini+GentleYAG&storage_path=shared%2Fcandela%2Fch-2.pdf',
+      { manualId: 9, storagePath: 'shared/candela/ch-2.pdf' },
+    ),
+    null,
+  );
+  assert.equal(
+    chapterHistoryUrl(current, { manualId: 9, storagePath: 'shared/candela/ch-1.pdf', keepPage: true }),
+    '/manuals/view?id=9&title=Mini+GentleYAG&page=4&storage_path=shared%2Fcandela%2Fch-1.pdf#page=4',
+  );
+  assert.equal(chapterHistoryUrl(current, { manualId: 9, storagePath: '  ' }), null);
+
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(viewer, /chaptersInReadingOrder\(chapters\)/);
+  assert.match(viewer, /chapterNeighbors\(readingChapters, openStoragePath\)/);
+  assert.match(viewer, /window\.history\.pushState/);
+  assert.match(viewer, /addEventListener\('popstate'/);
+  assert.match(viewer, /openChapterRef\.current\(ch, 'none'\)/);
+  assert.match(viewer, /userChapterNav\.current = true/);
+  assert.match(viewer, /writeChapterHistory\(ch, 'replace', \{ keepPage: true \}\)/);
+  assert.match(viewer, /chapters\.findIndex\(\(c\) => c\?\.storage_path && c\.storage_path === openStoragePath\)/);
 });
 
 test('a single-PDF outline or extracted TOC links to that page', () => {

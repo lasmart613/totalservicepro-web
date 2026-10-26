@@ -45,8 +45,52 @@ export function sameManualStoragePath(a?: string | null, b?: string | null): boo
   return left !== '' && left === norm(b);
 }
 
+/** Joined page start used for reading order. Missing or non-numeric values sort last. */
+export function chapterPageOrderKey(value: unknown): number | null {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) return null;
+    const start = Math.floor(value);
+    return start >= 1 ? start : null;
+  }
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const start = Math.floor(Number(trimmed));
+  return Number.isFinite(start) && start >= 1 ? start : null;
+}
+
 /**
- * Previous and next chapter in display order.
+ * Chapter list and Previous/Next order.
+ * Numbered chapters sort by joined page start, numerically, so 10 follows 9.
+ * The same page start keeps arrival order. A chapter with no page sorts after
+ * every numbered chapter, still in arrival order.
+ */
+export function chaptersInReadingOrder<T extends { pageStart?: unknown }>(
+  chapters: readonly T[] | null | undefined,
+): T[] {
+  if (!Array.isArray(chapters)) return [];
+  if (chapters.length < 2) return [...chapters];
+  return chapters
+    .map((chapter, index) => ({
+      chapter,
+      index,
+      start: chapterPageOrderKey(chapter?.pageStart),
+    }))
+    .sort((a, b) => {
+      if (a.start != null && b.start != null) {
+        if (a.start !== b.start) return a.start - b.start;
+        return a.index - b.index;
+      }
+      if (a.start != null) return -1;
+      if (b.start != null) return 1;
+      return a.index - b.index;
+    })
+    .map((row) => row.chapter);
+}
+
+/**
+ * Previous and next chapter in the order given.
+ * Pass chaptersInReadingOrder so the ends follow page order.
  * index is -1 when this file is not in a multi-file list, and the missing
  * end is null so the viewer can hide that control.
  */
@@ -74,6 +118,45 @@ function queryId(id: string | number | null | undefined): string {
 
 function queryTitle(title: string | null | undefined): string {
   return String(title || '').trim().slice(0, 160);
+}
+
+/**
+ * Viewer URL for one open chapter.
+ * Null when the path is empty or the location already names that chapter.
+ * A chapter change drops the previous file's page. The landing entry can keep it.
+ */
+export function chapterHistoryUrl(
+  currentHref: string,
+  opts: {
+    manualId?: string | number | null;
+    storagePath?: string | null;
+    keepPage?: boolean;
+  },
+): string | null {
+  const storagePath = String(opts.storagePath || '').trim();
+  if (!storagePath) return null;
+  let url: URL;
+  try {
+    url = new URL(currentHref, 'http://localhost');
+  } catch {
+    return null;
+  }
+  const id = queryId(opts.manualId);
+  if (id) url.searchParams.set('id', id);
+  url.searchParams.set('storage_path', storagePath);
+  if (!opts.keepPage) {
+    url.searchParams.delete('page');
+    url.hash = '';
+  }
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  let current: URL;
+  try {
+    current = new URL(currentHref, 'http://localhost');
+  } catch {
+    return next;
+  }
+  if (`${current.pathname}${current.search}${current.hash}` === next) return null;
+  return next;
 }
 
 /** Opens one chapter file of a multi-file manual. Null when there is no path. */

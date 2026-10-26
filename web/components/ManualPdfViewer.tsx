@@ -17,7 +17,9 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import {
+  chapterHistoryUrl,
   chapterNeighbors,
+  chaptersInReadingOrder,
   chooseDocumentToc,
   manualChapterHref,
   manualTocPageHref,
@@ -244,6 +246,13 @@ type FileOffer = {
   fileType: string;
 };
 
+type OpenedManualFile = {
+  chapters: ManualChapter[];
+  openedPath: string | null;
+  /** A chapter PDF is on screen, so the landing history entry can name it. */
+  stampHistory: boolean;
+};
+
 type FindBox = { x: number; y: number; w: number; h: number };
 
 function PdfPageCanvas({
@@ -405,6 +414,15 @@ export function ManualPdfViewer({
   /** Chapter grid click. Suppress the citation deep-link jump for that open. */
   const chapterPick = useRef(false);
   const currentChapterRef = useRef<HTMLAnchorElement | null>(null);
+  /** Set before a user chapter change so the landing seed cannot replace that entry. */
+  const userChapterNav = useRef(false);
+  /** Chapter that was open on arrival, when that history entry has no storage_path. */
+  const landedChapterRef = useRef<ManualChapter | null>(null);
+  const chaptersRef = useRef<ManualChapter[]>([]);
+  const openStoragePathRef = useRef<string | null>(storagePathFromQuery || null);
+  const openChapterRef = useRef<(ch: ManualChapter, history?: 'push' | 'none') => Promise<void>>(
+    async () => {}
+  );
   const outlineGen = useRef(0);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
@@ -434,6 +452,8 @@ export function ManualPdfViewer({
   const [pageBoxHeight, setPageBoxHeight] = useState(0);
   const [zoom, setZoom] = useState(1);
   zoomRef.current = zoom;
+  chaptersRef.current = chapters;
+  openStoragePathRef.current = openStoragePath;
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -507,7 +527,7 @@ export function ManualPdfViewer({
       payload: ManualViewPayload,
       storagePath?: string | null,
       opts?: { metadataOnly?: boolean },
-    ): Promise<{ chapters: ManualChapter[]; openedPath: string | null }> => {
+    ): Promise<OpenedManualFile> => {
       setLoading(true);
       setError(null);
       setFileOffer(null);
@@ -528,7 +548,7 @@ export function ManualPdfViewer({
       const openedPath = String(json.storage_path || storagePath || payload.storagePath || '') || null;
       if (openedPath) setOpenStoragePath(openedPath);
       if (opts?.metadataOnly) {
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: false };
       }
       const fileKind = String(json.file_kind || '');
       if (json.render === 'download' || (fileKind && fileKind !== 'pdf')) {
@@ -543,14 +563,14 @@ export function ManualPdfViewer({
         });
         setLoading(false);
         setProgress(100);
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: false };
       }
 
       if (!storagePath && !json.url && !json.data_base64 && showManualChaptersButton(nextChapters)) {
         setChapters(nextChapters);
         setShowChapters(true);
         setLoading(false);
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: false };
       }
 
       const chapterPath =
@@ -569,7 +589,7 @@ export function ManualPdfViewer({
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
         await openSrc({ data: bytes.buffer }, { readOutline });
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: true };
       }
 
       // Prefer the signed URL so pdf.js can stream the whole file (range/progress).
@@ -578,7 +598,7 @@ export function ManualPdfViewer({
       if (signedUrl) {
         try {
           await openSrc({ url: signedUrl }, { readOutline });
-          return { chapters: nextChapters, openedPath };
+          return { chapters: nextChapters, openedPath, stampHistory: true };
         } catch {
           /* fall through to same-origin proxy */
         }
@@ -591,13 +611,15 @@ export function ManualPdfViewer({
       });
       setProgress(85);
       await openSrc({ data: bytes }, { readOutline });
-      return { chapters: nextChapters, openedPath: chapterPath || openedPath };
+      return { chapters: nextChapters, openedPath: chapterPath || openedPath, stampHistory: true };
     },
     [openSrc]
   );
 
   useEffect(() => {
     let cancelled = false;
+    userChapterNav.current = false;
+    landedChapterRef.current = null;
     (async () => {
       try {
         if (sourceUrl) {
@@ -710,6 +732,7 @@ export function ManualPdfViewer({
           setLoading(false);
           return;
         }
+        let opened: OpenedManualFile | null = null;
         if (suppressEntry && joinedRequest) {
           const listed = await openPath(payload, undefined, { metadataOnly: true });
           if (cancelled) return;
@@ -718,22 +741,36 @@ export function ManualPdfViewer({
             setFolderLocalPage(target.localPage);
             setJoinedPageLabel(joinedRequest);
             if (!sameStoragePath(target.storagePath, listed.openedPath)) {
-              await openPath(
+              opened = await openPath(
                 { ...payload, storagePath: target.storagePath, chapters: listed.chapters },
                 target.storagePath,
               );
             } else {
-              await openPath(payload, listed.openedPath);
+              opened = await openPath(payload, listed.openedPath);
             }
           } else {
             setJoinedPageLabel(null);
             setFolderLocalPage(target.kind === 'out-of-range' ? null : undefined);
-            await openPath(payload);
+            opened = await openPath(payload);
           }
         } else {
           setJoinedPageLabel(null);
           setFolderLocalPage(undefined);
-          await openPath(payload, payload.storagePath);
+          opened = await openPath(payload, payload.storagePath);
+        }
+        if (
+          !cancelled &&
+          opened?.stampHistory &&
+          opened.openedPath &&
+          showManualChaptersButton(opened.chapters)
+        ) {
+          const openedPath = opened.openedPath;
+          const match = opened.chapters.find((chapter) => sameStoragePath(chapter.storage_path, openedPath));
+          const ch: ManualChapter = match?.storage_path ? match : { storage_path: openedPath };
+          landedChapterRef.current = ch;
+          // Name the open chapter on the entry that brought us here. Do not push,
+          // and do not replace a chapter change the reader already made.
+          if (!userChapterNav.current) writeChapterHistory(ch, 'replace', { keepPage: true });
         }
         if (!cancelled && typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem(MANUAL_VIEW_STORAGE_KEY);
@@ -814,6 +851,7 @@ export function ManualPdfViewer({
   const pageBatcher = useRef<ReturnType<typeof createPageViewBatcher> | null>(null);
   const pageCountRef = useRef(0);
   pageCountRef.current = pageCount;
+  // Arrival order. Reading order is only the chapter list and Previous/Next.
   const chapterIndex = Math.max(
     0,
     chapters.findIndex((c) => c?.storage_path && c.storage_path === openStoragePath),
@@ -978,15 +1016,21 @@ export function ManualPdfViewer({
     }
   }
 
-  function rememberChapter(ch: ManualChapter) {
+  function writeChapterHistory(
+    ch: ManualChapter,
+    mode: 'push' | 'replace',
+    opts?: { keepPage?: boolean },
+  ) {
     if (typeof window === 'undefined' || !ch.storage_path) return;
     try {
-      const url = new URL(window.location.href);
-      if (manualId) url.searchParams.set('id', String(manualId));
-      url.searchParams.set('storage_path', ch.storage_path);
-      url.searchParams.delete('page');
-      url.hash = '';
-      window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+      const next = chapterHistoryUrl(window.location.href, {
+        manualId,
+        storagePath: ch.storage_path,
+        keepPage: opts?.keepPage,
+      });
+      if (!next) return;
+      if (mode === 'push') window.history.pushState(null, '', next);
+      else window.history.replaceState(null, '', next);
     } catch {
       /* the chapter still opens in the viewer */
     }
@@ -1018,10 +1062,13 @@ export function ManualPdfViewer({
     }
   }
 
-  async function openChapter(ch: ManualChapter) {
+  async function openChapter(ch: ManualChapter, history: 'push' | 'none' = 'push') {
     if (!ch.storage_path) return;
+    if (history === 'push') {
+      userChapterNav.current = true;
+      writeChapterHistory(ch, 'push');
+    }
     try {
-      rememberChapter(ch);
       chapterPick.current = true;
       setChapterBrowse(true);
       setShowContents(false);
@@ -1041,6 +1088,42 @@ export function ManualPdfViewer({
       setLoading(false);
     }
   }
+
+  openChapterRef.current = openChapter;
+
+  useEffect(() => {
+    function onPopState() {
+      if (typeof window === 'undefined') return;
+      let url: URL;
+      try {
+        url = new URL(window.location.href);
+      } catch {
+        return;
+      }
+      if (!url.pathname.includes('/manuals/view')) return;
+      const path = url.searchParams.get('storage_path');
+      if (path) {
+        const ch = chaptersRef.current.find((chapter) => sameStoragePath(chapter.storage_path, path));
+        if (!ch) return;
+        if (sameStoragePath(ch.storage_path, openStoragePathRef.current)) {
+          setShowChapters(false);
+          return;
+        }
+        void openChapterRef.current(ch, 'none');
+        return;
+      }
+      const landed = landedChapterRef.current;
+      if (landed?.storage_path) {
+        if (!sameStoragePath(landed.storage_path, openStoragePathRef.current)) {
+          void openChapterRef.current(landed, 'none');
+        }
+        return;
+      }
+      setShowChapters(true);
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const pdf = pdfRef.current;
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
@@ -1065,7 +1148,8 @@ export function ManualPdfViewer({
     currentChapterRef.current?.scrollIntoView({ block: 'nearest' });
   }, [showChapters, openStoragePath, chapters]);
 
-  const chapterNav = chapterNeighbors(chapters, openStoragePath);
+  const readingChapters = chaptersInReadingOrder(chapters);
+  const chapterNav = chapterNeighbors(readingChapters, openStoragePath);
   const contents = showManualChaptersButton(chapters) ? [] : chooseDocumentToc(storedToc, pdfOutline);
   const chapterNavClass =
     'rounded-md border border-[#FBBF24] bg-[rgba(251,191,36,0.25)] px-2.5 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40';
@@ -1421,9 +1505,9 @@ export function ManualPdfViewer({
               <div className="max-w-4xl mx-auto">
                 <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">📚 Chapters</h2>
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
-                  {chapters.map((ch, i) => {
+                  {readingChapters.map((ch, i) => {
                     const current = sameStoragePath(ch.storage_path, openStoragePath);
-                    const tileNumber = chapterTileNumber(chapters, i);
+                    const tileNumber = chapterTileNumber(readingChapters, i);
                     const range =
                       ch.pageStart && ch.pageCount ? chapterPageRangeLabel(ch.pageStart, ch.pageCount) : null;
                     const href = manualChapterHref({
