@@ -20,6 +20,7 @@ import { localeToBcp47, translateApp, translateAppFill, withDocDirection } from 
 import { displayModelName, displayModelText } from '../model-display.ts';
 import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import { cssHex, escapeHtml, httpUrl, safeDocumentImageUrl } from '../safe-print-html.ts';
 import { estimateEmailActionUrl } from '../share.ts';
 
 function docT(locale: string | null | undefined, text: string): string {
@@ -69,12 +70,8 @@ export type DocCustomer = {
   website?: string;
 };
 
-function esc(s: any) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function esc(s: unknown) {
+  return escapeHtml(s);
 }
 
 /** Strip explicit bidi marks so an LTR isolate keeps CLDR order (630.00 US$, not a visual $US). */
@@ -109,24 +106,25 @@ function money(
 }
 
 function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject' | 'modify'): string {
-  return estimateEmailActionUrl(actionUrl, action);
+  return httpUrl(estimateEmailActionUrl(actionUrl, action)) || '';
 }
 
 function estimateActionButtonCell(href: string, bg: string, color: string, label: string): string {
+  if (!href) return '';
   return (
     `<td align="center" style="padding:6px 4px;" width="33%">\n` +
-    `<a href="${href}" ` +
-    `style="display:inline-block;background:${bg};color:${color};padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid ${bg};min-width:110px;">` +
-    `${label}</a>\n` +
+    `<a href="${esc(href)}" ` +
+    `style="display:inline-block;background:${bg};color:${esc(color)};padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid ${esc(bg)};min-width:110px;">` +
+    `${esc(label)}</a>\n` +
     `</td>\n`
   );
 }
 
 function estimateActionButtonsRow(actionUrl: string, locale?: string | null): string {
-  const approveHref = esc(estimateEmailActionHref(actionUrl, 'approve'));
-  const rejectHref = esc(estimateEmailActionHref(actionUrl, 'reject'));
-  const modifyHref = esc(estimateEmailActionHref(actionUrl, 'modify'));
+  const approveHref = estimateEmailActionHref(actionUrl, 'approve');
+  const rejectHref = estimateEmailActionHref(actionUrl, 'reject');
+  const modifyHref = estimateEmailActionHref(actionUrl, 'modify');
   const tr = (text: string) => docT(locale, text);
   return (
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
@@ -150,15 +148,15 @@ export function buildEstimateActionCtasHtml(
     `<table class="${cls}" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:16px 0;border-collapse:collapse;background:#111827;border-radius:10px;">` +
     `<tr><td align="center" style="padding:16px 12px 8px;font-size:18px;color:#FBBF24;font-weight:800;letter-spacing:0.02em;">` +
-    `${heading}` +
+    `${esc(heading)}` +
     `</td></tr>` +
     `<tr><td align="center" style="padding:0 12px 10px;font-size:13px;color:#F9FAFB;font-weight:600;">` +
-    `${docT(locale, 'Tap Approve, Reject, or Modify — no login required.')}` +
+    `${esc(docT(locale, 'Tap Approve, Reject, or Modify — no login required.'))}` +
     `</td></tr>` +
     `<tr><td style="padding:4px 8px 14px;">${estimateActionButtonsRow(actionUrl, locale)}</td></tr>` +
     (variant === 'banner'
       ? `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
-        `${docT(locale, 'These links are unique to this estimate.')}` +
+        `${esc(docT(locale, 'These links are unique to this estimate.'))}` +
         `</td></tr>`
       : '') +
     `</table>`
@@ -233,7 +231,7 @@ export function documentRuleColor(
 function payButtonStyle(theme: CompanyTheme | null | undefined): string {
   if (theme?.branded) {
     return (
-      `display:inline-block;background:${theme.accent};color:${theme.onAccent};padding:14px 28px;border-radius:8px;` +
+      `display:inline-block;background:${cssHex(theme.accent, '#635BFF')};color:${cssHex(theme.onAccent, '#FFFFFF')};padding:14px 28px;border-radius:8px;` +
       `text-decoration:none;font-weight:700;font-size:14px;letter-spacing:0.02em;`
     );
   }
@@ -259,20 +257,27 @@ export function buildDocTopHeader(
   const cSlogan = company.slogan || '';
 
   const theme = options?.theme?.branded ? options.theme : null;
-  const ink = theme ? theme.onPrimary : '#111';
-  const muted = theme ? theme.onPrimary : '#444';
-  const meta = theme ? theme.onPrimary : '#555';
-  const numberColor = theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#B45309';
-  const linkColor = theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#0a66c2';
-  const rule = theme ? theme.accent : '#FBBF24';
+  const ink = cssHex(theme ? theme.onPrimary : '#111', '#111');
+  const muted = cssHex(theme ? theme.onPrimary : '#444', '#444');
+  const meta = cssHex(theme ? theme.onPrimary : '#555', '#555');
+  const numberColor = cssHex(
+    theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#B45309',
+    '#B45309',
+  );
+  const linkColor = cssHex(
+    theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#0a66c2',
+    '#0a66c2',
+  );
+  const rule = cssHex(theme ? theme.accent : '#FBBF24', '#FBBF24');
   const logoStyle = theme
     ? 'max-width:105px;max-height:55px;object-fit:contain;border-radius:4px;display:block;background:#ffffff;padding:4px;'
     : 'max-width:105px;max-height:55px;object-fit:contain;border-radius:4px;display:block;';
 
   let logoBlock = '';
-  if (company.logo_url) {
+  const logoSrc = safeDocumentImageUrl(company.logo_url);
+  if (logoSrc) {
     logoBlock =
-      `<img src="${esc(company.logo_url)}" style="${logoStyle}" alt="${esc(docT(options?.locale, 'Company Logo'))}" />` +
+      `<img src="${esc(logoSrc)}" style="${logoStyle}" alt="${esc(docT(options?.locale, 'Company Logo'))}" />` +
       (cSlogan
         ? `<div style="font-size:9px;font-style:italic;color:${meta};margin-top:2px;line-height:1.1;max-width:105px;">${esc(cSlogan)}</div>`
         : '');
@@ -291,7 +296,7 @@ export function buildDocTopHeader(
   }
 
   const bar = theme
-    ? `background:${theme.primary};color:${theme.onPrimary};border-bottom:3px solid ${rule};`
+    ? `background:${cssHex(theme.primary, '#111827')};color:${cssHex(theme.onPrimary, '#FFFFFF')};border-bottom:3px solid ${rule};`
     : `border-bottom:3px solid ${rule};`;
   const brandAttr = theme ? ' data-tsp-brand-header="1"' : '';
 
@@ -407,7 +412,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     : docDateLabel(null, zone, input.locale);
   const dueLabel = input.dueDate ? docDateLabel(input.dueDate, zone, input.locale) : '—';
 
-  const rule = documentRuleColor(input.theme, input.themeScope);
+  const rule = cssHex(documentRuleColor(input.theme, input.themeScope), '#FBBF24');
 
   let linesHtml =
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
@@ -455,6 +460,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         : hasSplit
           ? Math.max(0, dueNow - deposit)
           : balance;
+  const payHref = httpUrl(input.paymentUrl);
 
   return withDocDirection(
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
@@ -542,9 +548,9 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     (!hasSplit && deposit > 0
       ? `${tr('Deposit has been applied. Remaining balance is payable upon completion of the service call.')}<br>`
       : '') +
-    (input.paymentUrl && collectable > 0
+    (payHref && collectable > 0
       ? `<div style="margin:18px 0 8px;text-align:center;">` +
-        `<a href="${esc(input.paymentUrl)}" ` +
+        `<a href="${esc(payHref)}" ` +
         `style="${payButtonStyle(input.theme)}">` +
         `${
           hasSplit && !input.deferredReleased && deposit <= 0
@@ -768,7 +774,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     isolateLtr(formatOrgMoney(n, input.moneyPrefs, input.locale));
   const tr = (text: string) => docT(input.locale, text);
   const services = (input.services?.length ? input.services : ['Not specified']).map((item) => tr(item));
-  const rule = documentRuleColor(input.theme, input.themeScope);
+  const rule = cssHex(documentRuleColor(input.theme, input.themeScope), '#FBBF24');
   const deposit = input.depositRequired === false ? 0 : Number(input.deposit) || 0;
   const balance =
     input.balanceDue != null
@@ -951,13 +957,16 @@ export function buildEstimatePlainText(input: EstimateHtmlInput): string {
     `${tr('Tax')}: ${amount(input.tax)}`,
     `${tr('Grand total')}: ${amount(input.total)}`
   );
-  if (input.actionUrl) {
+  const approveHref = input.actionUrl ? estimateEmailActionHref(input.actionUrl, 'approve') : '';
+  const rejectHref = input.actionUrl ? estimateEmailActionHref(input.actionUrl, 'reject') : '';
+  const modifyHref = input.actionUrl ? estimateEmailActionHref(input.actionUrl, 'modify') : '';
+  if (approveHref && rejectHref && modifyHref) {
     lines.push(
       '',
       tr('Respond to this estimate. No login required.'),
-      `${tr('Approve')}: ${estimateEmailActionHref(input.actionUrl, 'approve')}`,
-      `${tr('Reject')}: ${estimateEmailActionHref(input.actionUrl, 'reject')}`,
-      `${tr('Modify')}: ${estimateEmailActionHref(input.actionUrl, 'modify')}`,
+      `${tr('Approve')}: ${approveHref}`,
+      `${tr('Reject')}: ${rejectHref}`,
+      `${tr('Modify')}: ${modifyHref}`,
       '',
       tr('These links are unique to this estimate.')
     );

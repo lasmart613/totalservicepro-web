@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { useT } from '@/lib/fa/locale';
+import { pngDataImageUrl } from '@/lib/safe-print-html';
 
 export default function Profile() {
   const t = useT();
@@ -70,12 +71,13 @@ export default function Profile() {
     ctx.lineJoin = 'round';
     ctx.fillStyle = '#fff';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    if (sigData && String(sigData).startsWith('data:image')) {
+    const safeSig = pngDataImageUrl(sigData);
+    if (safeSig) {
       const img = new Image();
       img.onload = () => {
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
       };
-      img.src = sigData;
+      img.src = safeSig;
     }
   }, [sigData, canvasRef.current]);
 

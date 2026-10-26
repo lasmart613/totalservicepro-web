@@ -5,6 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { CompanyTheme } from './company-theme.ts';
+import { cssHex, escapeHtml, safeDocumentImageUrl } from './safe-print-html.ts';
 import { documentDirection, translateApp, translateAppFill, withDocDirection } from './i18n/translate-app.ts';
 export { publicSiteOrigin } from './site-origin.ts';
 
@@ -188,16 +189,17 @@ export function resolveFreeAccountUrls(opts: {
  */
 function emailBrandHeader(theme: CompanyTheme | null | undefined): string {
   if (!theme?.branded) return '';
-  const logo = theme.logoUrl
-    ? `<img src="${esc(theme.logoUrl)}" alt="" width="120" style="max-width:120px;max-height:48px;object-fit:contain;display:block;background:#ffffff;padding:4px;border-radius:4px;" />`
+  const logoSrc = safeDocumentImageUrl(theme.logoUrl);
+  const logo = logoSrc
+    ? `<img src="${escapeHtml(logoSrc)}" alt="" width="120" style="max-width:120px;max-height:48px;object-fit:contain;display:block;background:#ffffff;padding:4px;border-radius:4px;" />`
     : '';
   return (
     `<table data-tsp-brand-header="1" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
-    `style="border-collapse:collapse;background:${theme.primary};border-bottom:3px solid ${theme.accent};">` +
+    `style="border-collapse:collapse;background:${cssHex(theme.primary, '#111827')};border-bottom:3px solid ${cssHex(theme.accent, '#FBBF24')};">` +
     `<tr>` +
     `<td style="padding:12px 16px;vertical-align:middle;">${logo}</td>` +
     `<td style="padding:12px 16px;text-align:right;vertical-align:middle;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;` +
-    `font-size:16px;font-weight:800;color:${theme.onPrimary};">${esc(theme.companyName)}</td>` +
+    `font-size:16px;font-weight:800;color:${cssHex(theme.onPrimary, '#FFFFFF')};">${esc(theme.companyName)}</td>` +
     `</tr></table>`
   );
 }
@@ -205,8 +207,8 @@ function emailBrandHeader(theme: CompanyTheme | null | undefined): string {
 function emailCtaAnchorStyle(theme: CompanyTheme | null | undefined): string {
   if (theme?.branded) {
     return (
-      `display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:${theme.onAccent};` +
-      `text-decoration:none;border-radius:8px;background:${theme.accent};`
+      `display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:${cssHex(theme.onAccent, '#111827')};` +
+      `text-decoration:none;border-radius:8px;background:${cssHex(theme.accent, '#FBBF24')};`
     );
   }
   return 'display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;';
@@ -222,7 +224,7 @@ export function buildFreeAccountEmailCtaHtml(opts: {
   const company = esc(opts.companyName?.trim() || translateApp(opts.locale, 'your clinic'));
   const tr = (text: string) => translateApp(opts.locale, text);
   const branded = !!opts.theme?.branded;
-  const buttonBg = branded ? opts.theme!.accent : '#d4a017';
+  const buttonBg = cssHex(branded ? opts.theme!.accent : '#d4a017', '#d4a017');
   return (
     `<table class="tsp-free-account-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:20px 0 0;border-collapse:collapse;">` +
@@ -391,23 +393,24 @@ export function buildCustomerInviteHtml(opts: {
     ? `<strong style="color:#f1f3f4;">${esc(opts.serviceCompanyName.trim())}</strong> added`
     : 'Your laser service provider added';
   const branded = !!opts.theme?.branded;
-  const logo = branded && opts.theme?.logoUrl
-    ? `<img src="${esc(opts.theme.logoUrl)}" alt="" style="max-width:120px;max-height:48px;object-fit:contain;display:block;margin:0 auto 10px;background:#ffffff;padding:4px;border-radius:4px;" />`
+  const logoSrc = branded ? safeDocumentImageUrl(opts.theme?.logoUrl) : null;
+  const logo = logoSrc
+    ? `<img src="${escapeHtml(logoSrc)}" alt="" style="max-width:120px;max-height:48px;object-fit:contain;display:block;margin:0 auto 10px;background:#ffffff;padding:4px;border-radius:4px;" />`
     : '';
   const headerCell = branded
-    ? `<td data-tsp-brand-header="1" style="padding:28px 28px 8px;text-align:center;background:${opts.theme!.primary};">` +
+    ? `<td data-tsp-brand-header="1" style="padding:28px 28px 8px;text-align:center;background:${cssHex(opts.theme!.primary, '#111827')};">` +
       `${logo}` +
-      `<div style="font-size:22px;font-weight:800;color:${opts.theme!.onPrimary};letter-spacing:0.02em;">RepairPlanet</div>` +
-      `<div style="font-size:12px;color:${opts.theme!.onPrimary};margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
+      `<div style="font-size:22px;font-weight:800;color:${cssHex(opts.theme!.onPrimary, '#FFFFFF')};letter-spacing:0.02em;">RepairPlanet</div>` +
+      `<div style="font-size:12px;color:${cssHex(opts.theme!.onPrimary, '#FFFFFF')};margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
       `</td>`
     : `<td style="padding:28px 28px 8px;text-align:center;">` +
       `<div style="font-size:22px;font-weight:800;color:#d4a017;letter-spacing:0.02em;">RepairPlanet</div>` +
       `<div style="font-size:12px;color:#9aa0a6;margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
       `</td>`;
   const ctaCell = branded
-    ? `<td align="center" style="border-radius:8px;background:${opts.theme!.accent};">` +
+    ? `<td align="center" style="border-radius:8px;background:${cssHex(opts.theme!.accent, '#FBBF24')};">` +
       `<a href="${esc(opts.signupUrl)}" ` +
-      `style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:${opts.theme!.onAccent};text-decoration:none;border-radius:8px;background:${opts.theme!.accent};">` +
+      `style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:${cssHex(opts.theme!.onAccent, '#111827')};text-decoration:none;border-radius:8px;background:${cssHex(opts.theme!.accent, '#FBBF24')};">` +
       `Create your free account</a></td>`
     : `<td align="center" style="border-radius:8px;background:#d4a017;">` +
       `<a href="${esc(opts.signupUrl)}" ` +

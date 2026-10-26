@@ -16,6 +16,7 @@ import { translateApp, withDocDirection } from './i18n/translate-app.ts';
 import { viewMeasurement } from './fluence-measurement.ts';
 import { displayModelText } from './model-display.ts';
 import { systemParameterRows } from './models.ts';
+import { cssHex, escapeHtml, pngDataImageUrl, safeDocumentImageUrl } from './safe-print-html.ts';
 import { displaySectionsForReport } from './service-report-templates.ts';
 
 export type PrintReportInput = {
@@ -62,12 +63,8 @@ export type PrintReportInput = {
   locale?: string | null;
 };
 
-function esc(s: any): string {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function esc(s: unknown): string {
+  return escapeHtml(s);
 }
 
 function checklistTable(
@@ -161,18 +158,22 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
   const dateOut = showDate(r.date_out);
   const addr = [r.customer_address, r.customer_city, r.customer_state].filter(Boolean).join(', ');
   const theme = r.theme?.branded ? r.theme : null;
-  const accent = themeAccentForScope(r.theme, r.themeScope);
-  const ink = theme ? theme.onPrimary : '#111';
-  const muted = theme ? theme.onPrimary : '#444';
-  const meta = theme ? theme.onPrimary : '#555';
-  const numberColor = theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#B45309';
+  const accent = cssHex(themeAccentForScope(r.theme, r.themeScope), '#FBBF24');
+  const ink = cssHex(theme ? theme.onPrimary : '#111', '#111');
+  const muted = cssHex(theme ? theme.onPrimary : '#444', '#444');
+  const meta = cssHex(theme ? theme.onPrimary : '#555', '#555');
+  const numberColor = cssHex(
+    theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#B45309',
+    '#B45309',
+  );
 
   let logo = '';
-  if (r.tech_company_logo_url) {
+  const logoSrc = safeDocumentImageUrl(r.tech_company_logo_url);
+  if (logoSrc) {
     const logoStyle = theme
       ? 'max-width:105px;max-height:55px;object-fit:contain;background:#ffffff;padding:4px;border-radius:4px;display:block'
       : 'max-width:105px;max-height:55px;object-fit:contain';
-    logo = `<img src="${esc(r.tech_company_logo_url)}" style="${logoStyle}" alt="${esc(tr('Logo'))}" />`;
+    logo = `<img src="${esc(logoSrc)}" style="${logoStyle}" alt="${esc(tr('Logo'))}" />`;
   }
   const company =
     (r.tech_company_name
@@ -190,7 +191,7 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
       : '');
 
   const bar = theme
-    ? `background:${theme.primary};color:${theme.onPrimary};border-bottom:3px solid ${theme.accent};`
+    ? `background:${cssHex(theme.primary, '#111827')};color:${cssHex(theme.onPrimary, '#FFFFFF')};border-bottom:3px solid ${cssHex(theme.accent, '#FBBF24')};`
     : 'border-bottom:3px solid #FBBF24;';
   const brandAttr = theme ? ' data-tsp-brand-header="1"' : '';
   const logoCell = theme ? 'padding:8px 8px 8px 0' : 'padding-right:8px';
@@ -246,12 +247,12 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
 
   let sigImg =
     '<div style="height:48px;border:1px dashed #ccc;margin-top:4px;background:#fafafa"></div>';
-  if (
-    r.tech_signature &&
-    String(r.tech_signature).indexOf('data:image') === 0 &&
-    String(r.tech_signature).length > 64
-  ) {
-    sigImg = `<img src="${r.tech_signature}" width="200" height="48" style="height:48px;max-width:200px;border:1px solid #ccc;background:#fff;display:block;margin-top:4px" alt="${esc(tr('Signature'))}" />`;
+  const signatureSrc = pngDataImageUrl(r.tech_signature);
+  if (signatureSrc) {
+    sigImg =
+      `<img src="${esc(signatureSrc)}" width="200" height="48" ` +
+      `style="height:48px;max-width:200px;border:1px solid #ccc;background:#fff;display:block;margin-top:4px" ` +
+      `alt="${esc(tr('Signature'))}" />`;
   }
 
   const cap = (text: string) =>
