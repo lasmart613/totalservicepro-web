@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { GAP_STRINGS } from './i18n/gap-copy.ts';
 import { chapterTileNumber } from './pdf-viewer-page.ts';
 import {
+  chapterCardCopy,
   chapterHistoryUrl,
   chapterNeighbors,
   chaptersInReadingOrder,
@@ -173,6 +174,87 @@ test('manual 9 chapters follow page order for the list and Previous/Next', () =>
   assert.match(viewer, /userChapterNav\.current = true/);
   assert.match(viewer, /writeChapterHistory\(ch, 'replace', \{ keepPage: true \}\)/);
   assert.match(viewer, /chapters\.findIndex\(\(c\) => c\?\.storage_path && c\.storage_path === openStoragePath\)/);
+});
+
+test('Scout section titles show the descriptive name and document number', () => {
+  assert.deepEqual(
+    chapterCardCopy({
+      title: 'Section 4 — Water cooling',
+      doc_number: '7111-80-2520_03',
+    }),
+    { title: 'Water cooling', docNumber: '7111-80-2520_03' },
+  );
+  assert.deepEqual(
+    chapterCardCopy({
+      title: 'Section 12 - Laser calibration',
+      docNumber: '  8501-00-0002  ',
+    }),
+    { title: 'Laser calibration', docNumber: '8501-00-0002' },
+  );
+  assert.deepEqual(
+    chapterCardCopy({
+      title: 'Section 8 – Operator controls',
+      document_number: '8501-00-1800',
+    }),
+    { title: 'Operator controls', docNumber: '8501-00-1800' },
+  );
+  assert.deepEqual(
+    chapterCardCopy({ title: 'Section 4 — Schematic — power board', doc_number: '7122-99-0110_05' }),
+    { title: 'Schematic — power board', docNumber: '7122-99-0110_05' },
+  );
+
+  assert.deepEqual(chapterCardCopy({ title: 'Section 4 — Water cooling' }), {
+    title: 'Section 4 — Water cooling',
+    docNumber: null,
+  });
+  assert.deepEqual(
+    chapterCardCopy({ title: 'Operator manual — Mini GentleYAG', doc_number: '8501-00-0002' }),
+    { title: 'Operator manual — Mini GentleYAG', docNumber: null },
+  );
+  assert.deepEqual(chapterCardCopy({ title: 'Section 4 —', doc_number: '7111-80-2520_03' }), {
+    title: 'Section 4 —',
+    docNumber: null,
+  });
+  assert.deepEqual(chapterCardCopy({ title: 'Section 4 — Schematic — 7111-80-2520_03' }), {
+    title: 'Section 4 — Schematic — 7111-80-2520_03',
+    docNumber: null,
+  });
+
+  // Arrival order is not section order. The two Section 8 files keep that arrival order.
+  const sections = [
+    { title: 'Section 30 — Drawings', storage_path: 'drawings.pdf' },
+    { title: 'Section 8 — Earlier operator', storage_path: 'op8-early.pdf' },
+    { title: 'Section 1 — Operator', storage_path: 'op.pdf' },
+    { title: 'Section 10 — Next service', storage_path: 'ten.pdf' },
+    { title: 'Section 2 — Setup', storage_path: 'setup.pdf' },
+    { title: 'Section 9 — Service', storage_path: 'svc.pdf' },
+    { title: 'Section 8 — Last operator', storage_path: 'op8.pdf' },
+    { title: 'Notes', storage_path: 'notes.pdf' },
+  ];
+  const bySection = chaptersInReadingOrder(sections);
+  assert.deepEqual(
+    bySection.map((chapter) => chapter.storage_path),
+    ['op.pdf', 'setup.pdf', 'op8-early.pdf', 'op8.pdf', 'svc.pdf', 'ten.pdf', 'drawings.pdf', 'notes.pdf'],
+  );
+  const section8 = chapterNeighbors(bySection, 'op8.pdf');
+  assert.equal(section8.previous?.storage_path, 'op8-early.pdf');
+  assert.equal(section8.next?.storage_path, 'svc.pdf');
+  assert.equal(chapterNeighbors(bySection, 'op.pdf').previous, null);
+
+  const pageWins = chaptersInReadingOrder([
+    { title: 'Section 1 — Early label', pageStart: 50, storage_path: 'late-page.pdf' },
+    { title: 'Section 30 — Late label', pageStart: 1, storage_path: 'early-page.pdf' },
+  ]);
+  assert.deepEqual(
+    pageWins.map((chapter) => chapter.storage_path),
+    ['early-page.pdf', 'late-page.pdf'],
+  );
+
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(viewer, /chapterCardCopy\(ch\)/);
+  assert.match(viewer, /data-testid="chapter-doc-number"/);
+  assert.match(viewer, /card\.title/);
+  assert.doesNotMatch(viewer, /target=["']_blank["']/);
 });
 
 test('a single-PDF outline or extracted TOC links to that page', () => {

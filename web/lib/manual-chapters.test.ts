@@ -182,6 +182,43 @@ test('part-number filenames get a readable label and real titles are kept', () =
   assert.equal(joined[0]?.title, 'Section 4 — Parts list — 7122-00-1131_03');
 });
 
+test('Scout titles keep the descriptive name and pass the document number through', () => {
+  const chapters = chaptersFromMetadata(
+    [
+      {
+        title: 'Section 9 — Operator controls',
+        storage_path: 'operator/8501-00-0002.pdf',
+        docNumber: '8501-00-0002',
+      },
+      {
+        title: 'Section 4 — Water cooling',
+        storage_path: 'Sect 4/water.pdf',
+        document_number: '  7111-80-2520_03  ',
+      },
+      {
+        title: 'Section 1 — Service overview',
+        storage_path: 'svc.pdf',
+        doc_number: '8502-00-0001',
+      },
+      {
+        title: 'GMAX Troubleshooting Guide',
+        storage_path: 'Docs/GMAX Troubleshooting Guide.pdf',
+      },
+    ],
+    'shared/candela/vpyag',
+    { isFolder: true },
+  );
+  const byPath = new Map(chapters.map((chapter) => [chapter.storage_path, chapter]));
+  assert.equal(
+    byPath.get('shared/candela/vpyag/operator/8501-00-0002.pdf')?.title,
+    'Section 9 — Operator controls',
+  );
+  assert.equal(byPath.get('shared/candela/vpyag/operator/8501-00-0002.pdf')?.doc_number, '8501-00-0002');
+  assert.equal(byPath.get('shared/candela/vpyag/Sect 4/water.pdf')?.doc_number, '7111-80-2520_03');
+  assert.equal(byPath.get('shared/candela/vpyag/svc.pdf')?.doc_number, '8502-00-0001');
+  assert.equal(byPath.get('shared/candela/vpyag/Docs/GMAX Troubleshooting Guide.pdf')?.doc_number, undefined);
+});
+
 test('a single-PDF row is unchanged: same file, no chapter list', () => {
   const pdf = 'shared/candela/GentleMAX PRO PLUS Service Manual 8501-00-2410_A_01.pdf';
   const opened = resolveManualPdfOpen({

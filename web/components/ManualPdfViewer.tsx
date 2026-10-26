@@ -17,6 +17,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import {
+  chapterCardCopy,
   chapterHistoryUrl,
   chapterNeighbors,
   chaptersInReadingOrder,
@@ -1510,6 +1511,7 @@ export function ManualPdfViewer({
                     const tileNumber = chapterTileNumber(readingChapters, i);
                     const range =
                       ch.pageStart && ch.pageCount ? chapterPageRangeLabel(ch.pageStart, ch.pageCount) : null;
+                    const card = chapterCardCopy(ch);
                     const href = manualChapterHref({
                       id: manualId,
                       storagePath: ch.storage_path,
@@ -1525,8 +1527,16 @@ export function ManualPdfViewer({
                             Chapter {tileNumber}
                           </div>
                         ) : null}
-                        <div className="text-sm">{ch.title || ch.label || ch.storage_path}</div>
-                        {range ? <div className="text-[10px] text-[#9CA3AF] mt-1">{range}</div> : null}
+                        <div className="text-sm">{card.title}</div>
+                        {card.docNumber || range ? (
+                          <div className="mt-1 text-[10px] text-[#9CA3AF]">
+                            {card.docNumber ? (
+                              <span data-testid="chapter-doc-number">{card.docNumber}</span>
+                            ) : null}
+                            {card.docNumber && range ? <span> · </span> : null}
+                            {range ? <span>{range}</span> : null}
+                          </div>
+                        ) : null}
                       </>
                     );
                     if (!href) {

@@ -7,6 +7,9 @@
 // `order` field — this does not renumber pages or rewrite the database.
 
 import { fileExtension, isStoredFilePath, normalizeStoragePath } from "../../../web/lib/manual-file.ts";
+import { readChapterDocNumber } from "../../../web/lib/manual-toc.ts";
+
+export { readChapterDocNumber };
 
 export type ManualChapterRef = {
   order: number;
@@ -16,6 +19,8 @@ export type ManualChapterRef = {
   pageStart?: number;
   /** pdf.js page count for this file. Omitted when the map cannot be built. */
   pageCount?: number;
+  /** Scout document number. Omitted when the metadata has none. */
+  doc_number?: string;
 };
 
 /** Non-PDF file stored beside the chapter PDFs. Signed on click, not rendered. */
@@ -302,11 +307,14 @@ export function chaptersFromMetadata(
     seen.add(storagePath);
     const order = ch.order != null && ch.order !== "" ? Number(ch.order) : i + 1;
     const rawTitle = String(ch.title || storagePath.split("/").pop() || `Chapter ${i + 1}`);
-    chapters.push({
+    const chapter: ManualChapterRef = {
       order: Number.isFinite(order) ? order : i + 1,
       title: opts?.isFolder ? readableChapterTitle(ch.title, storagePath) : rawTitle,
       storage_path: storagePath,
-    });
+    };
+    const docNumber = readChapterDocNumber(ch);
+    if (docNumber) chapter.doc_number = docNumber;
+    chapters.push(chapter);
   });
   if (!opts?.isFolder) return chapters;
   return chapters

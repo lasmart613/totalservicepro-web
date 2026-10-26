@@ -45,6 +45,68 @@ export function sameManualStoragePath(a?: string | null, b?: string | null): boo
   return left !== '' && left === norm(b);
 }
 
+const DOC_NUMBER_KEYS = ['doc_number', 'docNumber', 'document_number'] as const;
+
+/** "Section 12 — Water cooling" → 12. Other titles have no section number. */
+export function sectionNumberFromTitle(title: unknown): number | null {
+  const match = String(title || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .match(/^Section\s+(\d+)\b/i);
+  if (!match) return null;
+  const section = Math.floor(Number(match[1]));
+  return Number.isFinite(section) && section >= 1 ? section : null;
+}
+
+/**
+ * Document number Scout stores beside the rewritten title.
+ * Accepts doc_number, docNumber, and document_number.
+ */
+export function readChapterDocNumber(chapter: unknown): string | null {
+  if (!chapter || typeof chapter !== 'object') return null;
+  const rec = chapter as Record<string, unknown>;
+  for (const key of DOC_NUMBER_KEYS) {
+    const value = rec[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      const text = String(value).trim();
+      if (text) return text.slice(0, 80);
+    }
+    if (typeof value !== 'string') continue;
+    const text = value.replace(/\s+/g, ' ').trim();
+    if (text) return text.slice(0, 80);
+  }
+  return null;
+}
+
+export type ChapterCardCopy = {
+  /** Main line. The descriptive title, or the original title when that split is not available. */
+  title: string;
+  /** Small secondary text. Null keeps today's title + page-range card. */
+  docNumber: string | null;
+};
+
+/**
+ * Chapter card text for a Scout title "Section N — <descriptive title>" plus a
+ * document number. Without both pieces, the card keeps the stored title.
+ */
+export function chapterCardCopy(chapter: {
+  title?: unknown;
+  label?: unknown;
+  storage_path?: unknown;
+  doc_number?: unknown;
+  docNumber?: unknown;
+  document_number?: unknown;
+} | null | undefined): ChapterCardCopy {
+  const raw = String(chapter?.title || chapter?.label || chapter?.storage_path || '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const docNumber = readChapterDocNumber(chapter);
+  const match = raw.match(/^Section\s+\d+\s*[—–:-]\s+(\S.*)$/i);
+  const descriptive = match?.[1]?.trim() || '';
+  if (!descriptive || !docNumber) return { title: raw, docNumber: null };
+  return { title: descriptive, docNumber };
+}
+
 /** Joined page start used for reading order. Missing or non-numeric values sort last. */
 export function chapterPageOrderKey(value: unknown): number | null {
   if (typeof value === 'number') {
@@ -61,11 +123,12 @@ export function chapterPageOrderKey(value: unknown): number | null {
 
 /**
  * Chapter list and Previous/Next order.
- * Numbered chapters sort by joined page start, numerically, so 10 follows 9.
- * The same page start keeps arrival order. A chapter with no page sorts after
- * every numbered chapter, still in arrival order.
+ * Joined page start wins, numerically, so 10 follows 9. A chapter with no page
+ * sorts after every numbered page. Among those, "Section N" is the numeric key
+ * (Section 10 follows Section 9). Equal keys and titles with neither keep
+ * arrival order.
  */
-export function chaptersInReadingOrder<T extends { pageStart?: unknown }>(
+export function chaptersInReadingOrder<T extends { pageStart?: unknown; title?: unknown }>(
   chapters: readonly T[] | null | undefined,
 ): T[] {
   if (!Array.isArray(chapters)) return [];
@@ -74,15 +137,22 @@ export function chaptersInReadingOrder<T extends { pageStart?: unknown }>(
     .map((chapter, index) => ({
       chapter,
       index,
-      start: chapterPageOrderKey(chapter?.pageStart),
+      page: chapterPageOrderKey(chapter?.pageStart),
+      section: sectionNumberFromTitle(chapter?.title),
     }))
     .sort((a, b) => {
-      if (a.start != null && b.start != null) {
-        if (a.start !== b.start) return a.start - b.start;
+      if (a.page != null && b.page != null) {
+        if (a.page !== b.page) return a.page - b.page;
         return a.index - b.index;
       }
-      if (a.start != null) return -1;
-      if (b.start != null) return 1;
+      if (a.page != null) return -1;
+      if (b.page != null) return 1;
+      if (a.section != null && b.section != null) {
+        if (a.section !== b.section) return a.section - b.section;
+        return a.index - b.index;
+      }
+      if (a.section != null) return -1;
+      if (b.section != null) return 1;
       return a.index - b.index;
     })
     .map((row) => row.chapter);
