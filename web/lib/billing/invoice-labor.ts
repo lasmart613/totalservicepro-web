@@ -25,7 +25,11 @@
  * and hide the labor UI. Existing invoices then total exactly as they do now.
  */
 
+import { STRIPE_INVOICE_MAX } from './apply-invoice-payment.ts';
 import { parseJsonField } from './save-helpers.ts';
+
+/** numeric(10,2) ceiling for a labor quantity or rate. */
+export const LABOR_INPUT_MAX = 99_999_999.99;
 
 export const ORG_LABOR_RATE_COLUMNS = [
   'labor_hourly_rate',
@@ -94,14 +98,18 @@ export function emptyOrgLaborRates(): OrgLaborRates {
 function qty(value: unknown): number {
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return 0;
-  return roundMoney(n);
+  return roundMoney(Math.min(n, LABOR_INPUT_MAX));
 }
 
 function rateOrNull(value: unknown): number | null {
   if (value == null || value === '') return null;
   const n = Number(value);
   if (!Number.isFinite(n) || n < 0) return null;
-  return roundMoney(n);
+  return roundMoney(Math.min(n, LABOR_INPUT_MAX));
+}
+
+function cappedMoney(value: number): number {
+  return roundMoney(Math.min(Math.max(0, value), STRIPE_INVOICE_MAX));
 }
 
 export function laborFromQuantities(input: {
@@ -138,14 +146,14 @@ function lineAmounts(
   halfDayRate: number | null,
   fullDayRate: number | null
 ): LaborLineAmounts {
-  const hourly = roundMoney(hours * (hourlyRate ?? 0));
-  const halfDay = roundMoney(halfDays * (halfDayRate ?? 0));
-  const fullDay = roundMoney(fullDays * (fullDayRate ?? 0));
+  const hourly = cappedMoney(hours * (hourlyRate ?? 0));
+  const halfDay = cappedMoney(halfDays * (halfDayRate ?? 0));
+  const fullDay = cappedMoney(fullDays * (fullDayRate ?? 0));
   return {
     hourly,
     halfDay,
     fullDay,
-    subtotal: roundMoney(hourly + halfDay + fullDay),
+    subtotal: cappedMoney(hourly + halfDay + fullDay),
   };
 }
 
@@ -179,9 +187,33 @@ export function laborFromInvoiceRow(row: Record<string, unknown> | null | undefi
   // total. The email labor line uses that same number, not a second sum.
   if (row.labor_subtotal != null && row.labor_subtotal !== '') {
     const stored = Number(row.labor_subtotal);
-    if (Number.isFinite(stored)) labor.subtotal = roundMoney(Math.max(0, stored));
+    if (Number.isFinite(stored)) labor.subtotal = cappedMoney(stored);
   }
   return labor;
+}
+
+/** A saved invoice has labor when a quantity or the labor subtotal is positive. */
+export function invoiceSavedWithLabor(labor: InvoiceLabor | null | undefined): boolean {
+  if (!labor) return false;
+  return (
+    labor.hours > 0.0001 ||
+    labor.halfDays > 0.0001 ||
+    labor.fullDays > 0.0001 ||
+    labor.subtotal > 0.004
+  );
+}
+
+/**
+ * Org rates prefill a new invoice or one with no labor.
+ * Reopening an invoice that was saved with labor keeps its snapshots and subtotal.
+ */
+export function laborForInvoiceEdit(
+  row: Record<string, unknown> | null | undefined,
+  orgRates?: OrgLaborRates | null
+): InvoiceLabor {
+  const saved = laborFromInvoiceRow(row);
+  if (invoiceSavedWithLabor(saved)) return saved;
+  return withOrgRateDefaults(saved, orgRates);
 }
 
 export function laborColumnPayload(labor: InvoiceLabor): Record<string, number | null> {
@@ -348,13 +380,10 @@ export function laborSubtotalOf(
   if (!row) return 0;
   if (row.labor_subtotal != null && row.labor_subtotal !== '') {
     const stored = Number(row.labor_subtotal);
-    if (Number.isFinite(stored)) return roundMoney(Math.max(0, stored));
+    if (Number.isFinite(stored)) return cappedMoney(stored);
   }
   return laborFromInvoiceRow(row).subtotal;
 }
-
-/** numeric(10,2) ceiling for a labor quantity or rate. */
-export const LABOR_INPUT_MAX = 99_999_999.99;
 
 const RATE_MAX = LABOR_INPUT_MAX;
 

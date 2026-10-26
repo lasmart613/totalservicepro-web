@@ -4,6 +4,9 @@
  */
 import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from './void-invoice.ts';
 
+/** Stripe Checkout rejects a charge above this. Manual amounts use the same cap. */
+export const STRIPE_INVOICE_MAX = 999_999.99;
+
 export type InvoicePaymentRow = {
   id: string | number;
   total?: number | string | null;
@@ -116,8 +119,14 @@ export function buildInvoicePaymentPatch(input: {
     throw new Error('This invoice has no total, so a payment was not recorded.');
   }
   const total = money2(Number(input.invoice.total));
+  if (total > STRIPE_INVOICE_MAX) {
+    throw new Error('Invoice total cannot be more than $999,999.99.');
+  }
   const prior = existingPaidAmount(input.invoice);
   const add = money2(Math.max(0, Number(input.addAmount) || 0));
+  if (add > STRIPE_INVOICE_MAX) {
+    throw new Error('Enter an amount up to $999,999.99.');
+  }
   const amount_paid = money2(prior + add);
   const status = paymentStatusFromAmounts(total, amount_paid);
   const data = parseInvoiceData(input.invoice.invoice_data);

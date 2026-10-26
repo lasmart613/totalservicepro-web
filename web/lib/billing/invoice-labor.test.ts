@@ -4,7 +4,7 @@ import test from 'node:test';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInvoicePaymentPatch, paymentStatusFromAmounts } from './apply-invoice-payment.ts';
-import { invoiceSavedCollectable } from './invoice-collectable.ts';
+import { invoiceSavedCollectable, STRIPE_INVOICE_MAX } from './invoice-collectable.ts';
 import { ORG_READABLE_COLUMNS } from '../org-columns.ts';
 import {
   applyLaborRateFields,
@@ -12,9 +12,11 @@ import {
   invoiceMoney,
   isMissingLaborColumnError,
   laborColumnPayload,
+  laborForInvoiceEdit,
   laborFromEstimate,
   laborFromInvoiceRow,
   laborFromQuantities,
+  LABOR_INPUT_MAX,
   laborIsZero,
   laborLineAmounts,
   laborSubtotalOf,
@@ -206,9 +208,71 @@ test('a manual total of $108 is the amount due even when labor is $100', () => {
   assert.equal(settled.invoice_data.balanceDue, 0);
 });
 
+test('labor quantities, rates, and the subtotal cannot grow without a cap', () => {
+  const huge = laborFromQuantities({
+    hours: 1e15,
+    halfDays: 1e15,
+    fullDays: 1e15,
+    hourlyRate: 1e15,
+    halfDayRate: 1e15,
+    fullDayRate: 1e15,
+  });
+  assert.equal(huge.hours, LABOR_INPUT_MAX);
+  assert.equal(huge.halfDays, LABOR_INPUT_MAX);
+  assert.equal(huge.fullDays, LABOR_INPUT_MAX);
+  assert.equal(huge.hourlyRate, LABOR_INPUT_MAX);
+  assert.equal(huge.halfDayRate, LABOR_INPUT_MAX);
+  assert.equal(huge.fullDayRate, LABOR_INPUT_MAX);
+  assert.equal(huge.subtotal, STRIPE_INVOICE_MAX);
+  assert.equal(laborSubtotalOf({ labor_subtotal: 1e15, labor_hours: 1, labor_hourly_rate: 1 }), STRIPE_INVOICE_MAX);
+});
+
+test('reopening a saved labor invoice leaves its totals unchanged', () => {
+  const org = { hourly: 150, halfDay: 500, fullDay: 900 };
+  const saved = {
+    labor_hours: 2,
+    labor_half_days: 0,
+    labor_full_days: 1,
+    labor_hourly_rate: null,
+    labor_half_day_rate: null,
+    labor_full_day_rate: 400,
+    labor_subtotal: 100,
+    tax: 8,
+  };
+  const opened = laborForInvoiceEdit(saved, org);
+  assert.equal(opened.hours, 2);
+  assert.equal(opened.fullDays, 1);
+  assert.equal(opened.hourlyRate, null);
+  assert.equal(opened.halfDayRate, null);
+  assert.equal(opened.fullDayRate, 400);
+  assert.equal(opened.subtotal, 100);
+  assert.equal(invoiceMoney(0, opened, 8).total, 108);
+  const filled = withOrgRateDefaults(laborFromInvoiceRow(saved), org);
+  assert.notEqual(filled.subtotal, opened.subtotal);
+
+  const hoursOnly = laborForInvoiceEdit(
+    { labor_hours: 4, labor_hourly_rate: null, labor_subtotal: 0 },
+    org
+  );
+  assert.equal(hoursOnly.hourlyRate, null);
+  assert.equal(hoursOnly.subtotal, 0);
+  assert.equal(invoiceMoney(100, hoursOnly, 8).total, 108);
+
+  const blank = laborForInvoiceEdit(
+    { labor_hours: 0, labor_half_days: 0, labor_full_days: 0, labor_hourly_rate: null, labor_subtotal: 0 },
+    org
+  );
+  assert.equal(blank.hourlyRate, 150);
+  assert.equal(blank.halfDayRate, 500);
+  assert.equal(blank.fullDayRate, 900);
+  assert.equal(blank.subtotal, 0);
+  assert.equal(invoiceMoney(100, blank, 8).total, 108);
+});
+
 test('a null total is not a zero charge', () => {
   assert.equal(invoiceSavedCollectable({ total: null, amount_paid: 0, invoice_data: {} }), null);
   assert.equal(invoiceSavedCollectable({ total: '', invoice_data: {} }), null);
+  assert.equal(invoiceSavedCollectable({ total: '   ', invoice_data: {} }), null);
   assert.equal(invoiceSavedCollectable({ total: 'NaN', invoice_data: {} }), null);
   assert.equal(invoiceSavedCollectable({ total: 0, invoice_data: {} })?.stripeAmount, 0);
   assert.throws(
@@ -323,7 +387,8 @@ test('the app hides labor until the columns exist and every charge uses the save
   assert.match(form, /laborColumnPayload\(labor\)/);
   assert.match(form, /laborFromEstimate/);
   assert.match(form, /stripMovedEstimateLaborLines/);
-  assert.match(form, /withOrgRateDefaults\(laborFromInvoiceRow/);
+  assert.match(form, /laborForInvoiceEdit\(data, orgRates\)/);
+  assert.doesNotMatch(form, /withOrgRateDefaults\(laborFromInvoiceRow/);
   assert.match(form, /setTotalOverride\(null\);\s*setTax/);
   assert.match(form, /LABOR_INPUT_MAX/);
   assert.match(form, /STRIPE_INVOICE_MAX/);
@@ -332,7 +397,11 @@ test('the app hides labor until the columns exist and every charge uses the save
     assert.match(src, /invoiceSavedCollectable/);
     assert.doesNotMatch(src, /chargeTotalIncludingLabor/);
   }
-  assert.match(send, /This invoice has no total, so a pay link was not created/);
+  assert.match(send, /This invoice has no total, so it was not sent/);
+  assert.match(send, /if \(!collectable\)/);
+  const payments = readFileSync(join(web, 'lib/billing/apply-invoice-payment.ts'), 'utf8');
+  assert.match(payments, /STRIPE_INVOICE_MAX/);
+  assert.match(page, /buildInvoicePaymentPatch/);
   assert.match(proof, /\\ir \.\.\/migrations\/20261025_000948_invoice_labor\.sql/);
   assert.doesNotMatch(proof, /\\i web\//);
 });

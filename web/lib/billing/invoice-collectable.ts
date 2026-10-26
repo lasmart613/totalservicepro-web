@@ -65,7 +65,8 @@ export function invoiceSavedCollectable(row: {
   amount_paid?: unknown;
   invoice_data?: unknown;
 } | null | undefined): InvoiceCollectableSplit | null {
-  if (!row || row.total == null || row.total === '') return null;
+  if (!row || row.total == null) return null;
+  if (typeof row.total === 'string' && row.total.trim() === '') return null;
   const n = typeof row.total === 'number' ? row.total : Number(String(row.total).trim());
   if (!Number.isFinite(n)) return null;
   return resolveInvoiceCollectable({
@@ -75,8 +76,7 @@ export function invoiceSavedCollectable(row: {
   });
 }
 
-/** Stripe Checkout rejects a charge above this. */
-export const STRIPE_INVOICE_MAX = 999_999.99;
+export { STRIPE_INVOICE_MAX } from './apply-invoice-payment.ts';
 
 export function resolveInvoiceCollectable(input: {
   total?: unknown;

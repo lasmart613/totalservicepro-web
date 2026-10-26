@@ -165,12 +165,12 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
 
     const includePay = request.includePaymentLink;
     const collectable = invoiceSavedCollectable(inv);
-    if (includePay && !collectable) {
+    if (!collectable) {
       return respond(
         {
           ok: false,
           emailSent: false,
-          error: 'This invoice has no total, so a pay link was not created.',
+          error: 'This invoice has no total, so it was not sent.',
         },
         400,
         [recipient.email]

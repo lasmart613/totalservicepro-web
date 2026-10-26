@@ -227,7 +227,9 @@ test('server-built invoice email shows a labor block only when the labor subtota
   assert.match(mismatched, /Labor subtotal: \$40\.00/);
   assert.match(mismatched, /Invoice Total: \$108\.00/);
   assert.doesNotMatch(mismatched, /\$50\.00/);
-  assert.equal((mismatched.match(/\$40\.00/g) || []).length >= 2, true);
+  assert.doesNotMatch(mismatched, />Hours</);
+  assert.doesNotMatch(mismatched, /\$25\.00/);
+  assert.equal((mismatched.match(/\$40\.00/g) || []).length, 1);
 });
 
 test('server-built estimate and report ignore a stored HTML blob', () => {

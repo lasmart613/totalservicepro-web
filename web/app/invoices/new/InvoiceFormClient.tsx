@@ -48,7 +48,7 @@ import {
   isMissingLaborColumnError,
   laborColumnPayload,
   laborFromEstimate,
-  laborFromInvoiceRow,
+  laborForInvoiceEdit,
   laborFromQuantities,
   laborLineAmounts,
   ORG_LABOR_RATE_SELECT,
@@ -303,9 +303,9 @@ export default function InvoiceFormClient() {
       }
       if ('labor_hours' in data || 'labor_subtotal' in data) {
         setLaborReady(true);
-        // Migrated invoices have null rate snapshots. Prefill the org rates
-        // without changing a saved rate or a zero quantity.
-        setLabor(withOrgRateDefaults(laborFromInvoiceRow(data), orgRates));
+        // Org rates prefill only when this invoice has no labor. A saved labor
+        // section keeps its rate snapshots, including nulls, and its subtotal.
+        setLabor(laborForInvoiceEdit(data, orgRates));
       }
     },
     [supabase]

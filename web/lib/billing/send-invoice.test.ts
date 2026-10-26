@@ -462,21 +462,45 @@ describe('send invoice', { concurrency: false }, () => {
     }
   });
 
-  test('a null total or a total above the Stripe cap does not create a pay link', async () => {
-    const checkout = checkoutSpy();
+  test('a null or empty total is not emailed, and a total above the Stripe cap does not create a pay link', async () => {
     const base = {
       user_profiles: [profile],
       organizations: [shopOrg],
     };
-    const nullTotal = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
-      userClient: memoryClient({ ...base, service_invoices: [{ ...invoiceRow(), total: null }] }) as never,
-      adminClient: null,
-      createCheckout: checkout.createCheckout as never,
-    });
-    const nullJson = await nullTotal.json();
-    assert.equal(nullTotal.status, 400);
-    assert.match(String(nullJson.error), /no total/);
-    assert.equal(checkout.calls.length, 0);
+    for (const total of [null, '', '   ']) {
+      for (const includePaymentLink of [true, false]) {
+        const checkout = checkoutSpy();
+        const fetchLog = installFetch(() => {
+          throw new Error('resend should not be called');
+        });
+        try {
+          await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+            const res = await runSendInvoice(
+              request({ invoice_id: 42, include_payment_link: includePaymentLink }),
+              {
+                userClient: memoryClient({
+                  ...base,
+                  service_invoices: [{ ...invoiceRow(), total }],
+                }) as never,
+                adminClient: null,
+                createCheckout: checkout.createCheckout as never,
+              }
+            );
+            const json = await res.json();
+            assert.equal(res.status, 400, `total ${JSON.stringify(total)} pay ${includePaymentLink}`);
+            assert.equal(json.emailSent, false);
+            assert.match(String(json.error), /no total/);
+            assert.match(String(json.error), /not sent/);
+            assert.equal(checkout.calls.length, 0);
+            assert.equal(fetchLog.calls, 0);
+          });
+        } finally {
+          fetchLog.restore();
+        }
+      }
+    }
+
+    const checkout = checkoutSpy();
 
     const over = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
       userClient: memoryClient({
