@@ -23,6 +23,8 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   chaptersFromMetadata,
   dedupeChapterList,
+  readChapterDocNumber,
+  readChapterPageFields,
   indexOrderPdfParts,
   isFolderManual,
   isStoredFilePath,
@@ -1229,11 +1231,25 @@ Deno.serve(async (req) => {
           if (p && parentPath && !isPdfPath(parentPath) && !p.startsWith(parentPath) && !p.startsWith("shared/")) {
             p = cleanPath(parentPath + "/" + p.replace(/^\//, ""));
           }
-          return {
+          const chapter: {
+            order: number;
+            title: string;
+            storage_path: string;
+            doc_number?: string;
+            page_start?: number;
+            page_end?: number;
+            page_count?: number;
+            pageStart?: number;
+            pageCount?: number;
+          } = {
             order: ch.order != null ? Number(ch.order) : i + 1,
             title: String(ch.title || p.split("/").pop() || `Chapter ${i + 1}`),
             storage_path: p,
+            ...readChapterPageFields(ch),
           };
+          const docNumber = readChapterDocNumber(ch);
+          if (docNumber) chapter.doc_number = docNumber;
+          return chapter;
         }).filter((c: { storage_path: string }) => isPdfPath(c.storage_path));
         chapters = dedupeChapterList(chapters);
       }

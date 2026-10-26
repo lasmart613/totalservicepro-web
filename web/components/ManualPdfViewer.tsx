@@ -16,11 +16,24 @@ import {
   type ManualChapter,
   type ManualViewPayload,
 } from '@/lib/manuals';
+import {
+  applyStoredChapterMetadata,
+  chapterCardCopy,
+  chapterCardPageRange,
+  chapterHistoryUrl,
+  chapterNeighbors,
+  chaptersInReadingOrder,
+  chooseDocumentToc,
+  manualChapterHref,
+  manualTocPageHref,
+  tocEntriesFromMetadata,
+  tocFromPdfOutline,
+  type PdfOutlineItem,
+  type TocEntry,
+} from '@/lib/manual-toc';
 import { asPositivePage } from '@/lib/ai/citations';
 import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import {
-  chapterPageRangeLabel,
-  chapterTileNumber,
   fittedPageBoxHeight,
   viewerCitedPageNotice,
   viewerFolderOutOfRangeNotice,
@@ -75,6 +88,9 @@ type PdfPageProxy = {
 type PdfDoc = {
   numPages: number;
   getPage: (n: number) => Promise<PdfPageProxy>;
+  getOutline?: () => Promise<PdfOutlineItem[] | null>;
+  getDestination?: (name: string) => Promise<unknown>;
+  getPageIndex?: (ref: unknown) => Promise<number>;
   destroy?: () => void;
 };
 
@@ -201,6 +217,22 @@ async function fetchPdfBytes(opts: {
   throw new Error(json.error || 'Could not load the manual in the app viewer');
 }
 
+/**
+ * Raw manuals.chapter_metadata. The chapter grid is filled from get-manual-url,
+ * and the deployed function returns only order, title, and storage_path.
+ * doc_number, page_start, and page_count stay on this column.
+ */
+async function readStoredChapterMetadata(manualId: string): Promise<unknown> {
+  try {
+    const supabase = getSupabaseClient();
+    const row = await supabase.from('manuals').select('chapter_metadata').eq('id', manualId).maybeSingle();
+    if (row.error || !row.data) return null;
+    return (row.data as { chapter_metadata?: unknown }).chapter_metadata ?? null;
+  } catch {
+    return null;
+  }
+}
+
 function fileNameFromPath(path: string): string {
   const base = String(path || '').split('?')[0].split('/').pop() || 'manual';
   return base.replace(/[?#].*$/, '') || 'manual';
@@ -217,6 +249,13 @@ type FileOffer = {
   fileName: string;
   message: string;
   fileType: string;
+};
+
+type OpenedManualFile = {
+  chapters: ManualChapter[];
+  openedPath: string | null;
+  /** A chapter PDF is on screen, so the landing history entry can name it. */
+  stampHistory: boolean;
 };
 
 type FindBox = { x: number; y: number; w: number; h: number };
@@ -379,7 +418,19 @@ export function ManualPdfViewer({
   const jumpLockUntil = useRef(0);
   /** Chapter grid click. Suppress the citation deep-link jump for that open. */
   const chapterPick = useRef(false);
-  const currentChapterRef = useRef<HTMLButtonElement | null>(null);
+  const currentChapterRef = useRef<HTMLAnchorElement | null>(null);
+  /** Set before a user chapter change so the landing seed cannot replace that entry. */
+  const userChapterNav = useRef(false);
+  /** Chapter that was open on arrival, when that history entry has no storage_path. */
+  const landedChapterRef = useRef<ManualChapter | null>(null);
+  const chaptersRef = useRef<ManualChapter[]>([]);
+  const openStoragePathRef = useRef<string | null>(storagePathFromQuery || null);
+  const openChapterRef = useRef<(ch: ManualChapter, history?: 'push' | 'none') => Promise<void>>(
+    async () => {}
+  );
+  const outlineGen = useRef(0);
+  /** In-flight manuals.chapter_metadata read. Cleared when the manual id changes. */
+  const chapterMetadataRef = useRef<Promise<unknown> | undefined>(undefined);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
   const [catalogPath, setCatalogPath] = useState(storagePathFromQuery || '');
@@ -391,6 +442,9 @@ export function ManualPdfViewer({
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
   const [downloads, setDownloads] = useState<ManualDownload[]>([]);
   const [showChapters, setShowChapters] = useState(false);
+  const [storedToc, setStoredToc] = useState<TocEntry[]>([]);
+  const [pdfOutline, setPdfOutline] = useState<TocEntry[]>([]);
+  const [showContents, setShowContents] = useState(false);
   const [showDownloads, setShowDownloads] = useState(false);
   const [fileOffer, setFileOffer] = useState<FileOffer | null>(null);
   /** Local page inside the opened chapter. undefined keeps initialPage as-is. null: joined page is past the folder. */
@@ -405,6 +459,8 @@ export function ManualPdfViewer({
   const [pageBoxHeight, setPageBoxHeight] = useState(0);
   const [zoom, setZoom] = useState(1);
   zoomRef.current = zoom;
+  chaptersRef.current = chapters;
+  openStoragePathRef.current = openStoragePath;
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -437,7 +493,7 @@ export function ManualPdfViewer({
   }, []);
 
   const openSrc = useCallback(
-    async (src: { url?: string; data?: ArrayBuffer }) => {
+    async (src: { url?: string; data?: ArrayBuffer }, opts?: { readOutline?: boolean }) => {
       const pdfjs = await loadPdfJs();
       const doc = await openPdfDocument(pdfjs, src, (loaded, total) => {
         if (total > 0) setProgress(Math.min(95, Math.round((loaded / total) * 100)));
@@ -454,20 +510,46 @@ export function ManualPdfViewer({
       }
       setPageBoxHeight(height);
       attachDoc(doc);
+      if (opts?.readOutline) {
+        const gen = ++outlineGen.current;
+        void (async () => {
+          try {
+            const outline = doc.getOutline ? await doc.getOutline() : null;
+            const entries = await tocFromPdfOutline(outline, doc);
+            if (outlineGen.current === gen) setPdfOutline(entries);
+          } catch {
+            if (outlineGen.current === gen) setPdfOutline([]);
+          }
+        })();
+      } else {
+        outlineGen.current += 1;
+        setPdfOutline([]);
+      }
     },
     [attachDoc]
   );
+
+  const loadChapterMetadata = useCallback(async (manualId: string | number | null | undefined) => {
+    if (chapterMetadataRef.current) return chapterMetadataRef.current;
+    if (manualId == null || String(manualId) === '') return null;
+    const pending = readStoredChapterMetadata(String(manualId));
+    chapterMetadataRef.current = pending;
+    const meta = await pending;
+    if (meta == null) chapterMetadataRef.current = undefined;
+    return meta;
+  }, []);
 
   const openPath = useCallback(
     async (
       payload: ManualViewPayload,
       storagePath?: string | null,
       opts?: { metadataOnly?: boolean },
-    ): Promise<{ chapters: ManualChapter[]; openedPath: string | null }> => {
+    ): Promise<OpenedManualFile> => {
       setLoading(true);
       setError(null);
       setFileOffer(null);
       setProgress(10);
+      const metadataPromise = loadChapterMetadata(payload.manualId);
       const { ok, json, token } = await fetchManualUrl({
         manual_id: payload.manualId,
         storage_path: storagePath || payload.storagePath,
@@ -478,13 +560,15 @@ export function ManualPdfViewer({
         if (openError) throw new Error(openError);
         throw new Error(String(json?.error || 'Could not open manual'));
       }
-      const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
+      const metadata = await metadataPromise;
+      const listed = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
+      const nextChapters = applyStoredChapterMetadata(listed, metadata);
       if (showManualChaptersButton(nextChapters)) setChapters(nextChapters);
       if (Array.isArray(json.downloads)) setDownloads(json.downloads as ManualDownload[]);
       const openedPath = String(json.storage_path || storagePath || payload.storagePath || '') || null;
       if (openedPath) setOpenStoragePath(openedPath);
       if (opts?.metadataOnly) {
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: false };
       }
       const fileKind = String(json.file_kind || '');
       if (json.render === 'download' || (fileKind && fileKind !== 'pdf')) {
@@ -499,14 +583,14 @@ export function ManualPdfViewer({
         });
         setLoading(false);
         setProgress(100);
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: false };
       }
 
       if (!storagePath && !json.url && !json.data_base64 && showManualChaptersButton(nextChapters)) {
         setChapters(nextChapters);
         setShowChapters(true);
         setLoading(false);
-        return { chapters: nextChapters, openedPath };
+        return { chapters: nextChapters, openedPath, stampHistory: false };
       }
 
       const chapterPath =
@@ -519,12 +603,13 @@ export function ManualPdfViewer({
       const signedUrl = json.url || payload.url || null;
       const dataBase64 = json.data_base64 || payload.dataBase64 || null;
 
+      const readOutline = !showManualChaptersButton(nextChapters);
       if (dataBase64) {
         const bin = atob(dataBase64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        await openSrc({ data: bytes.buffer });
-        return { chapters: nextChapters, openedPath };
+        await openSrc({ data: bytes.buffer }, { readOutline });
+        return { chapters: nextChapters, openedPath, stampHistory: true };
       }
 
       // Prefer the signed URL so pdf.js can stream the whole file (range/progress).
@@ -532,8 +617,8 @@ export function ManualPdfViewer({
       // on Netlify function limits and leave only page 1 parseable.
       if (signedUrl) {
         try {
-          await openSrc({ url: signedUrl });
-          return { chapters: nextChapters, openedPath };
+          await openSrc({ url: signedUrl }, { readOutline });
+          return { chapters: nextChapters, openedPath, stampHistory: true };
         } catch {
           /* fall through to same-origin proxy */
         }
@@ -545,22 +630,27 @@ export function ManualPdfViewer({
         storagePath: chapterPath,
       });
       setProgress(85);
-      await openSrc({ data: bytes });
-      return { chapters: nextChapters, openedPath: chapterPath || openedPath };
+      await openSrc({ data: bytes }, { readOutline });
+      return { chapters: nextChapters, openedPath: chapterPath || openedPath, stampHistory: true };
     },
-    [openSrc]
+    [loadChapterMetadata, openSrc]
   );
 
   useEffect(() => {
     let cancelled = false;
+    chapterMetadataRef.current = undefined;
+    userChapterNav.current = false;
+    landedChapterRef.current = null;
     (async () => {
       try {
         if (sourceUrl) {
           setLoading(true);
           setError(null);
-          await openSrc({ url: sourceUrl });
+          await openSrc({ url: sourceUrl }, { readOutline: true });
           return;
         }
+        setStoredToc([]);
+        setShowContents(false);
         const stashed = readManualView();
         chapterPick.current = false;
         setChapterBrowse(false);
@@ -650,6 +740,11 @@ export function ManualPdfViewer({
           }
         }
         if (!cancelled) setIsIncomplete(incomplete);
+        if (payload.manualId) {
+          void loadChapterMetadata(payload.manualId).then((metadata) => {
+            if (!cancelled) setStoredToc(tocEntriesFromMetadata(metadata));
+          });
+        }
         if (showManualChaptersButton(payload.chapters)) {
           setChapters(payload.chapters);
         }
@@ -658,6 +753,7 @@ export function ManualPdfViewer({
           setLoading(false);
           return;
         }
+        let opened: OpenedManualFile | null = null;
         if (suppressEntry && joinedRequest) {
           const listed = await openPath(payload, undefined, { metadataOnly: true });
           if (cancelled) return;
@@ -666,22 +762,36 @@ export function ManualPdfViewer({
             setFolderLocalPage(target.localPage);
             setJoinedPageLabel(joinedRequest);
             if (!sameStoragePath(target.storagePath, listed.openedPath)) {
-              await openPath(
+              opened = await openPath(
                 { ...payload, storagePath: target.storagePath, chapters: listed.chapters },
                 target.storagePath,
               );
             } else {
-              await openPath(payload, listed.openedPath);
+              opened = await openPath(payload, listed.openedPath);
             }
           } else {
             setJoinedPageLabel(null);
             setFolderLocalPage(target.kind === 'out-of-range' ? null : undefined);
-            await openPath(payload);
+            opened = await openPath(payload);
           }
         } else {
           setJoinedPageLabel(null);
           setFolderLocalPage(undefined);
-          await openPath(payload, payload.storagePath);
+          opened = await openPath(payload, payload.storagePath);
+        }
+        if (
+          !cancelled &&
+          opened?.stampHistory &&
+          opened.openedPath &&
+          showManualChaptersButton(opened.chapters)
+        ) {
+          const openedPath = opened.openedPath;
+          const match = opened.chapters.find((chapter) => sameStoragePath(chapter.storage_path, openedPath));
+          const ch: ManualChapter = match?.storage_path ? match : { storage_path: openedPath };
+          landedChapterRef.current = ch;
+          // Name the open chapter on the entry that brought us here. Do not push,
+          // and do not replace a chapter change the reader already made.
+          if (!userChapterNav.current) writeChapterHistory(ch, 'replace', { keepPage: true });
         }
         if (!cancelled && typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem(MANUAL_VIEW_STORAGE_KEY);
@@ -762,6 +872,7 @@ export function ManualPdfViewer({
   const pageBatcher = useRef<ReturnType<typeof createPageViewBatcher> | null>(null);
   const pageCountRef = useRef(0);
   pageCountRef.current = pageCount;
+  // Arrival order. Reading order is only the chapter list and Previous/Next.
   const chapterIndex = Math.max(
     0,
     chapters.findIndex((c) => c?.storage_path && c.storage_path === openStoragePath),
@@ -926,13 +1037,65 @@ export function ManualPdfViewer({
     }
   }
 
-  async function openChapter(ch: ManualChapter) {
+  function writeChapterHistory(
+    ch: ManualChapter,
+    mode: 'push' | 'replace',
+    opts?: { keepPage?: boolean },
+  ) {
+    if (typeof window === 'undefined' || !ch.storage_path) return;
+    try {
+      const next = chapterHistoryUrl(window.location.href, {
+        manualId,
+        storagePath: ch.storage_path,
+        title: chapterCardCopy(ch).title,
+        keepPage: opts?.keepPage,
+      });
+      if (!next) return;
+      if (mode === 'push') window.history.pushState(null, '', next);
+      else window.history.replaceState(null, '', next);
+    } catch {
+      /* the chapter still opens in the viewer */
+    }
+  }
+
+  function openChapterFromLink(event: React.MouseEvent<HTMLAnchorElement>, ch: ManualChapter) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    event.preventDefault();
+    void openChapter(ch);
+  }
+
+  function openContentsPage(event: React.MouseEvent<HTMLAnchorElement>, pageNumber: number) {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    const target = viewerPhysicalPage(pageNumber, pageCount);
+    if (!target) return;
+    event.preventDefault();
+    chapterPick.current = false;
+    setShowContents(false);
+    jumpToPhysicalPage(target);
+    if (typeof window === 'undefined') return;
+    try {
+      const url = new URL(window.location.href);
+      if (manualId) url.searchParams.set('id', String(manualId));
+      url.searchParams.set('page', String(target));
+      url.hash = `page=${target}`;
+      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+    } catch {
+      /* the page still scrolled */
+    }
+  }
+
+  async function openChapter(ch: ManualChapter, history: 'push' | 'none' = 'push') {
     if (!ch.storage_path) return;
+    if (history === 'push') {
+      userChapterNav.current = true;
+      writeChapterHistory(ch, 'push');
+    }
     try {
       chapterPick.current = true;
       setChapterBrowse(true);
+      setShowContents(false);
       setJoinedPageLabel(null);
-      setTitle(ch.title || ch.label || title);
+      setTitle(chapterCardCopy(ch).title || title);
       await openPath(
         {
           manualId,
@@ -947,6 +1110,42 @@ export function ManualPdfViewer({
       setLoading(false);
     }
   }
+
+  openChapterRef.current = openChapter;
+
+  useEffect(() => {
+    function onPopState() {
+      if (typeof window === 'undefined') return;
+      let url: URL;
+      try {
+        url = new URL(window.location.href);
+      } catch {
+        return;
+      }
+      if (!url.pathname.includes('/manuals/view')) return;
+      const path = url.searchParams.get('storage_path');
+      if (path) {
+        const ch = chaptersRef.current.find((chapter) => sameStoragePath(chapter.storage_path, path));
+        if (!ch) return;
+        if (sameStoragePath(ch.storage_path, openStoragePathRef.current)) {
+          setShowChapters(false);
+          return;
+        }
+        void openChapterRef.current(ch, 'none');
+        return;
+      }
+      const landed = landedChapterRef.current;
+      if (landed?.storage_path) {
+        if (!sameStoragePath(landed.storage_path, openStoragePathRef.current)) {
+          void openChapterRef.current(landed, 'none');
+        }
+        return;
+      }
+      setShowChapters(true);
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const pdf = pdfRef.current;
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
@@ -971,6 +1170,12 @@ export function ManualPdfViewer({
     currentChapterRef.current?.scrollIntoView({ block: 'nearest' });
   }, [showChapters, openStoragePath, chapters]);
 
+  const readingChapters = chaptersInReadingOrder(chapters);
+  const chapterNav = chapterNeighbors(readingChapters, openStoragePath);
+  const contents = showManualChaptersButton(chapters) ? [] : chooseDocumentToc(storedToc, pdfOutline);
+  const chapterNavClass =
+    'rounded-md border border-[#FBBF24] bg-[rgba(251,191,36,0.25)] px-2.5 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40';
+
   return (
     <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-[#1F2937] border-b border-[#374151] shrink-0">
@@ -981,6 +1186,48 @@ export function ManualPdfViewer({
           >
             {sourceUrl ? '← Home' : '← Library'}
           </Link>
+        )}
+        {showManualChaptersButton(chapters) && !showChapters && (
+          <button
+            type="button"
+            data-testid="back-to-chapters"
+            className={chapterNavClass}
+            onClick={() => {
+              setShowDownloads(false);
+              setShowContents(false);
+              setShowChapters(true);
+            }}
+          >
+            ← {t('Back to chapters')}
+          </button>
+        )}
+        {showManualChaptersButton(chapters) && !showChapters && (
+          <button
+            type="button"
+            data-testid="previous-chapter"
+            className={chapterNavClass}
+            hidden={chapterNav.previous == null}
+            disabled={chapterNav.previous == null || loading}
+            onClick={() => {
+              if (chapterNav.previous) void openChapter(chapterNav.previous);
+            }}
+          >
+            ◄ {t('Previous chapter')}
+          </button>
+        )}
+        {showManualChaptersButton(chapters) && !showChapters && (
+          <button
+            type="button"
+            data-testid="next-chapter"
+            className={chapterNavClass}
+            hidden={chapterNav.next == null}
+            disabled={chapterNav.next == null || loading}
+            onClick={() => {
+              if (chapterNav.next) void openChapter(chapterNav.next);
+            }}
+          >
+            {t('Next chapter')} ►
+          </button>
         )}
         <div className="flex-1 min-w-[8rem] font-semibold text-[var(--gold,#FBBF24)] truncate">{title}</div>
         {isIncomplete && (
@@ -1066,9 +1313,28 @@ export function ManualPdfViewer({
               type="button"
               aria-label="Chapters"
               className="rounded-md border border-[#FBBF24] bg-[rgba(251,191,36,0.25)] px-2.5 py-1.5 text-[13px] text-[#fbbf24]"
-              onClick={() => setShowChapters((v) => !v)}
+              onClick={() => {
+                setShowDownloads(false);
+                setShowContents(false);
+                setShowChapters((v) => !v);
+              }}
             >
               📚 Chapters
+            </button>
+          )}
+          {contents.length > 0 && (
+            <button
+              type="button"
+              aria-label={t('Contents')}
+              aria-expanded={showContents}
+              className="rounded-md border border-[#FBBF24] bg-[rgba(251,191,36,0.25)] px-2.5 py-1.5 text-[13px] text-[#fbbf24]"
+              onClick={() => {
+                setShowDownloads(false);
+                setShowChapters(false);
+                setShowContents((v) => !v);
+              }}
+            >
+              {t('Contents')}
             </button>
           )}
           {downloads.length > 0 && (
@@ -1261,33 +1527,80 @@ export function ManualPdfViewer({
               <div className="max-w-4xl mx-auto">
                 <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">📚 Chapters</h2>
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
-                  {chapters.map((ch, i) => {
+                  {readingChapters.map((ch, i) => {
                     const current = sameStoragePath(ch.storage_path, openStoragePath);
-                    const tileNumber = chapterTileNumber(chapters, i);
-                    const range =
-                      ch.pageStart && ch.pageCount ? chapterPageRangeLabel(ch.pageStart, ch.pageCount) : null;
-                    return (
-                      <button
-                        key={`${ch.storage_path || i}`}
-                        ref={current ? currentChapterRef : undefined}
-                        type="button"
-                        aria-current={current ? 'true' : undefined}
-                        onClick={() => openChapter(ch)}
-                        className={`text-left rounded-lg border bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)] ${
-                          current ? 'border-[var(--gold,#FBBF24)]' : 'border-[#374151]'
-                        }`}
-                      >
-                        {tileNumber != null ? (
-                          <div className="text-[10px] font-bold text-[var(--gold,#FBBF24)] mb-1">
-                            Chapter {tileNumber}
+                    const range = chapterCardPageRange(ch);
+                    const card = chapterCardCopy(ch);
+                    const href = manualChapterHref({
+                      id: manualId,
+                      storagePath: ch.storage_path,
+                      title: card.title || title,
+                    });
+                    const tileClass = `text-left rounded-lg border bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)] ${
+                      current ? 'border-[var(--gold,#FBBF24)]' : 'border-[#374151]'
+                    }`;
+                    const tileBody = (
+                      <>
+                        <div className="text-sm">{card.title}</div>
+                        {card.docNumber || range ? (
+                          <div className="mt-1 text-[10px] text-[#9CA3AF]">
+                            {card.docNumber ? (
+                              <span data-testid="chapter-doc-number">{card.docNumber}</span>
+                            ) : null}
+                            {card.docNumber && range ? <span> · </span> : null}
+                            {range ? <span>{range}</span> : null}
                           </div>
                         ) : null}
-                        <div className="text-sm">{ch.title || ch.label || ch.storage_path}</div>
-                        {range ? <div className="text-[10px] text-[#9CA3AF] mt-1">{range}</div> : null}
-                      </button>
+                      </>
+                    );
+                    if (!href) {
+                      return (
+                        <div key={`${ch.storage_path || i}`} className={tileClass}>
+                          {tileBody}
+                        </div>
+                      );
+                    }
+                    return (
+                      <a
+                        key={`${ch.storage_path || i}`}
+                        href={href}
+                        ref={current ? currentChapterRef : undefined}
+                        data-testid="chapter-link"
+                        aria-current={current ? 'true' : undefined}
+                        onClick={(event) => openChapterFromLink(event, ch)}
+                        className={tileClass}
+                      >
+                        {tileBody}
+                      </a>
                     );
                   })}
                 </div>
+              </div>
+            </div>
+          )}
+          {showContents && contents.length > 0 && (
+            <div className="absolute inset-0 z-10 bg-[#0f172a] p-6 overflow-auto" data-testid="manual-toc">
+              <div className="max-w-xl mx-auto">
+                <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">{t('Contents')}</h2>
+                <nav aria-label={t('Contents')} className="grid gap-1">
+                  {contents.map((entry, i) => {
+                    const href = manualTocPageHref({ id: manualId, page: entry.page, title });
+                    if (!href) return null;
+                    return (
+                      <a
+                        key={`${entry.depth}-${entry.page}-${i}`}
+                        href={href}
+                        data-testid="toc-link"
+                        onClick={(event) => openContentsPage(event, entry.page)}
+                        className="flex items-baseline justify-between gap-3 rounded-md px-3 py-2 text-sm text-[#E5E7EB] hover:bg-[#1F2937] hover:text-[var(--gold,#FBBF24)]"
+                        style={{ paddingInlineStart: 12 + entry.depth * 16 }}
+                      >
+                        <span className="min-w-0">{entry.title}</span>
+                        <span className="shrink-0 text-[11px] text-[#9CA3AF] tabular-nums">{entry.page}</span>
+                      </a>
+                    );
+                  })}
+                </nav>
               </div>
             </div>
           )}
