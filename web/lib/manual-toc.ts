@@ -160,6 +160,74 @@ export function chapterCardPageRange(chapter: unknown): string | null {
   return chapterPageRangeLabel(pages.pageStart, pages.pageCount);
 }
 
+function chapterStorageKey(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/[?#].*$/, '');
+}
+
+/** chapter_metadata is a JSON array. A `{ chapters: [...] }` wrapper is unwrapped. */
+export function chapterMetadataRows(metadata: unknown): Record<string, unknown>[] {
+  let value = metadata;
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown;
+    } catch {
+      return [];
+    }
+  }
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const nested = (value as { chapters?: unknown }).chapters;
+    if (Array.isArray(nested)) value = nested;
+  }
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+}
+
+/**
+ * The live get-manual-url response lists `{ order, title, storage_path }` and
+ * drops doc_number, page_start, and page_count. Those fields are on
+ * manuals.chapter_metadata. Copy them onto the matching chapter by storage
+ * path. A page span or document number already on the chapter is left as-is.
+ */
+export function applyStoredChapterMetadata<T extends { storage_path?: unknown }>(
+  chapters: readonly T[] | null | undefined,
+  metadata: unknown,
+): T[] {
+  if (!Array.isArray(chapters)) return [];
+  const rows = chapterMetadataRows(metadata);
+  if (!rows.length) return chapters.slice();
+  const byPath = new Map<string, Record<string, unknown>>();
+  for (const row of rows) {
+    const key = chapterStorageKey(row.storage_path ?? row.path);
+    if (!key || byPath.has(key)) continue;
+    byPath.set(key, row);
+  }
+  if (!byPath.size) return chapters.slice();
+  return chapters.map((chapter) => {
+    if (!chapter || typeof chapter !== 'object') return chapter;
+    const stored = byPath.get(chapterStorageKey(chapter.storage_path));
+    if (!stored) return chapter;
+    const docNumber = readChapterDocNumber(chapter) || readChapterDocNumber(stored);
+    const ownPages = readChapterPageFields(chapter);
+    const pages = ownPages.pageStart != null ? ownPages : readChapterPageFields(stored);
+    if (!docNumber && pages.pageStart == null) return chapter;
+    const next = { ...chapter } as T & Record<string, unknown>;
+    if (docNumber && !readChapterDocNumber(chapter)) next.doc_number = docNumber;
+    if (ownPages.pageStart == null && pages.pageStart != null) {
+      next.page_start = pages.page_start;
+      next.pageStart = pages.pageStart;
+      if (pages.page_end != null) next.page_end = pages.page_end;
+      if (pages.page_count != null) next.page_count = pages.page_count;
+      if (pages.pageCount != null) next.pageCount = pages.pageCount;
+    }
+    return next as T;
+  });
+}
+
 /** Joined page start used for reading order. Missing or non-numeric values sort last. */
 export function chapterPageOrderKey(value: unknown): number | null {
   if (typeof value === 'number') {

@@ -17,6 +17,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import {
+  applyStoredChapterMetadata,
   chapterCardCopy,
   chapterCardPageRange,
   chapterHistoryUrl,
@@ -216,15 +217,19 @@ async function fetchPdfBytes(opts: {
   throw new Error(json.error || 'Could not load the manual in the app viewer');
 }
 
-/** Page targets already stored on the manual. A missing column or bad value is no TOC. */
-async function readStoredToc(manualId: string): Promise<TocEntry[]> {
+/**
+ * Raw manuals.chapter_metadata. The chapter grid is filled from get-manual-url,
+ * and the deployed function returns only order, title, and storage_path.
+ * doc_number, page_start, and page_count stay on this column.
+ */
+async function readStoredChapterMetadata(manualId: string): Promise<unknown> {
   try {
     const supabase = getSupabaseClient();
     const row = await supabase.from('manuals').select('chapter_metadata').eq('id', manualId).maybeSingle();
-    if (row.error || !row.data) return [];
-    return tocEntriesFromMetadata((row.data as { chapter_metadata?: unknown }).chapter_metadata);
+    if (row.error || !row.data) return null;
+    return (row.data as { chapter_metadata?: unknown }).chapter_metadata ?? null;
   } catch {
-    return [];
+    return null;
   }
 }
 
@@ -424,6 +429,8 @@ export function ManualPdfViewer({
     async () => {}
   );
   const outlineGen = useRef(0);
+  /** In-flight manuals.chapter_metadata read. Cleared when the manual id changes. */
+  const chapterMetadataRef = useRef<Promise<unknown> | undefined>(undefined);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
   const [catalogPath, setCatalogPath] = useState(storagePathFromQuery || '');
@@ -522,6 +529,16 @@ export function ManualPdfViewer({
     [attachDoc]
   );
 
+  const loadChapterMetadata = useCallback(async (manualId: string | number | null | undefined) => {
+    if (chapterMetadataRef.current) return chapterMetadataRef.current;
+    if (manualId == null || String(manualId) === '') return null;
+    const pending = readStoredChapterMetadata(String(manualId));
+    chapterMetadataRef.current = pending;
+    const meta = await pending;
+    if (meta == null) chapterMetadataRef.current = undefined;
+    return meta;
+  }, []);
+
   const openPath = useCallback(
     async (
       payload: ManualViewPayload,
@@ -532,6 +549,7 @@ export function ManualPdfViewer({
       setError(null);
       setFileOffer(null);
       setProgress(10);
+      const metadataPromise = loadChapterMetadata(payload.manualId);
       const { ok, json, token } = await fetchManualUrl({
         manual_id: payload.manualId,
         storage_path: storagePath || payload.storagePath,
@@ -542,7 +560,9 @@ export function ManualPdfViewer({
         if (openError) throw new Error(openError);
         throw new Error(String(json?.error || 'Could not open manual'));
       }
-      const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
+      const metadata = await metadataPromise;
+      const listed = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
+      const nextChapters = applyStoredChapterMetadata(listed, metadata);
       if (showManualChaptersButton(nextChapters)) setChapters(nextChapters);
       if (Array.isArray(json.downloads)) setDownloads(json.downloads as ManualDownload[]);
       const openedPath = String(json.storage_path || storagePath || payload.storagePath || '') || null;
@@ -613,11 +633,12 @@ export function ManualPdfViewer({
       await openSrc({ data: bytes }, { readOutline });
       return { chapters: nextChapters, openedPath: chapterPath || openedPath, stampHistory: true };
     },
-    [openSrc]
+    [loadChapterMetadata, openSrc]
   );
 
   useEffect(() => {
     let cancelled = false;
+    chapterMetadataRef.current = undefined;
     userChapterNav.current = false;
     landedChapterRef.current = null;
     (async () => {
@@ -720,8 +741,8 @@ export function ManualPdfViewer({
         }
         if (!cancelled) setIsIncomplete(incomplete);
         if (payload.manualId) {
-          void readStoredToc(String(payload.manualId)).then((entries) => {
-            if (!cancelled) setStoredToc(entries);
+          void loadChapterMetadata(payload.manualId).then((metadata) => {
+            if (!cancelled) setStoredToc(tocEntriesFromMetadata(metadata));
           });
         }
         if (showManualChaptersButton(payload.chapters)) {
