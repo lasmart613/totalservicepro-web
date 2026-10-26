@@ -16,6 +16,7 @@ import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/c
 import { resolveCustomerEmailOnFile, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { toast } from 'sonner';
 import { displayModelText } from '@/lib/model-display';
+import { pngDataImageUrl } from '@/lib/safe-print-html';
 
 function parseMaybeJson(val: any): any {
   if (val == null) return val;
@@ -195,6 +196,7 @@ export default function ReportDetail() {
   }
 
   const engineer = report?.service_engineer || report?.tech_name || '—';
+  const signatureSrc = pngDataImageUrl(report?.tech_signature);
   const isComplete = String(report?.status || '').toLowerCase() === 'complete';
 
   return (
@@ -397,11 +399,11 @@ export default function ReportDetail() {
                 </div>
               )}
 
-              {report.tech_signature && String(report.tech_signature).startsWith('data:image') && (
+              {signatureSrc && (
                 <div className="pt-3 border-t border-[var(--border)]">
                   <div className="text-[var(--text3)] mb-1">{t('Technician signature')}</div>
                   <img
-                    src={report.tech_signature}
+                    src={signatureSrc}
                     alt={t('Signature')}
                     className="h-12 max-w-[200px] bg-white border border-[var(--border)] rounded"
                   />

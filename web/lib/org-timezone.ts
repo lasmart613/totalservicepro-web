@@ -260,21 +260,31 @@ export function orgTodayIso(input?: {
   return isoDateInTimeZone(input?.now ?? new Date(), zone);
 }
 
-/** Locale calendar date in an IANA zone. Date-only strings are not shifted. */
+const ISO_CALENDAR_DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
+/** Full ISO-8601 instant. Anything else (markup, a prefix, a display label) is not a timestamp. */
+const ISO_DATE_TIME =
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/i;
+
+/**
+ * Locale calendar date in an IANA zone. Date-only strings are not shifted.
+ * A missing value is today. A Date or an ISO date/timestamp is formatted.
+ * Any other string is dropped (`''`) so a stored payload cannot be echoed.
+ */
 export function formatDateInTimeZone(value: Date | string | null | undefined, timeZone: string, locale = 'en-US'): string {
   const zone = isValidTimeZone(timeZone) ? timeZone : DEFAULT_ORG_TIMEZONE;
-  const raw = value == null || value === '' ? null : value;
   let date: Date;
-  if (raw == null) date = new Date();
-  else if (raw instanceof Date) date = raw;
-  else {
-    const text = String(raw).trim();
-    const day = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (value == null || value === '') date = new Date();
+  else if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return '';
+    date = value;
+  } else {
+    const text = String(value).trim();
+    const day = text.match(ISO_CALENDAR_DAY);
     if (day) date = new Date(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3]), 12));
-    else {
+    else if (ISO_DATE_TIME.test(text)) {
       date = new Date(text);
-      if (Number.isNaN(date.getTime())) return text;
-    }
+      if (Number.isNaN(date.getTime())) return '';
+    } else return '';
   }
   return new Intl.DateTimeFormat(locale, {
     timeZone: zone,

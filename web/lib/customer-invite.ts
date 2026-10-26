@@ -5,6 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { CompanyTheme } from './company-theme.ts';
+import { cssHex, escapeHtml, httpUrl, safeDocumentImageUrl } from './safe-print-html.ts';
 import { documentDirection, translateApp, translateAppFill, withDocDirection } from './i18n/translate-app.ts';
 export { publicSiteOrigin } from './site-origin.ts';
 
@@ -188,25 +189,33 @@ export function resolveFreeAccountUrls(opts: {
  */
 function emailBrandHeader(theme: CompanyTheme | null | undefined): string {
   if (!theme?.branded) return '';
-  const logo = theme.logoUrl
-    ? `<img src="${esc(theme.logoUrl)}" alt="" width="120" style="max-width:120px;max-height:48px;object-fit:contain;display:block;background:#ffffff;padding:4px;border-radius:4px;" />`
+  const logoSrc = safeDocumentImageUrl(theme.logoUrl);
+  const logo = logoSrc
+    ? `<img src="${escapeHtml(logoSrc)}" alt="" width="120" style="max-width:120px;max-height:48px;object-fit:contain;display:block;background:#ffffff;padding:4px;border-radius:4px;" />`
     : '';
   return (
     `<table data-tsp-brand-header="1" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
-    `style="border-collapse:collapse;background:${theme.primary};border-bottom:3px solid ${theme.accent};">` +
+    `style="border-collapse:collapse;background:${cssHex(theme.primary, '#111827')};border-bottom:3px solid ${cssHex(theme.accent, '#FBBF24')};">` +
     `<tr>` +
     `<td style="padding:12px 16px;vertical-align:middle;">${logo}</td>` +
     `<td style="padding:12px 16px;text-align:right;vertical-align:middle;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;` +
-    `font-size:16px;font-weight:800;color:${theme.onPrimary};">${esc(theme.companyName)}</td>` +
+    `font-size:16px;font-weight:800;color:${cssHex(theme.onPrimary, '#FFFFFF')};">${esc(theme.companyName)}</td>` +
     `</tr></table>`
   );
+}
+
+/** An http(s) anchor, or nothing. Never `href=""`. */
+function safeHttpAnchor(href: unknown, label: string, style: string): string {
+  const url = httpUrl(href);
+  if (!url) return '';
+  return `<a href="${escapeHtml(url)}" style="${style}">${label}</a>`;
 }
 
 function emailCtaAnchorStyle(theme: CompanyTheme | null | undefined): string {
   if (theme?.branded) {
     return (
-      `display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:${theme.onAccent};` +
-      `text-decoration:none;border-radius:8px;background:${theme.accent};`
+      `display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:${cssHex(theme.onAccent, '#111827')};` +
+      `text-decoration:none;border-radius:8px;background:${cssHex(theme.accent, '#FBBF24')};`
     );
   }
   return 'display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;';
@@ -222,7 +231,17 @@ export function buildFreeAccountEmailCtaHtml(opts: {
   const company = esc(opts.companyName?.trim() || translateApp(opts.locale, 'your clinic'));
   const tr = (text: string) => translateApp(opts.locale, text);
   const branded = !!opts.theme?.branded;
-  const buttonBg = branded ? opts.theme!.accent : '#d4a017';
+  const buttonBg = cssHex(branded ? opts.theme!.accent : '#d4a017', '#d4a017');
+  const signupAnchor = safeHttpAnchor(
+    opts.signupUrl,
+    tr('Create your free account'),
+    emailCtaAnchorStyle(opts.theme),
+  );
+  const loginAnchor = safeHttpAnchor(
+    opts.loginUrl,
+    tr('Sign in'),
+    'color:#d4a017;text-decoration:none;',
+  );
   return (
     `<table class="tsp-free-account-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:20px 0 0;border-collapse:collapse;">` +
@@ -232,14 +251,14 @@ export function buildFreeAccountEmailCtaHtml(opts: {
     `<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#c4c7cc;">` +
     `${translateAppFill(opts.locale, 'Create a free account to view laser service history and upcoming service, request service / RFQs, review estimates, open manuals for your equipment, shop the parts marketplace, and keep {company} equipment list in My Lasers.', { company })}` +
     `</p>` +
-    `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
-    `<td style="border-radius:8px;background:${buttonBg};">` +
-    `<a href="${esc(opts.signupUrl)}" ` +
-    `style="${emailCtaAnchorStyle(opts.theme)}">` +
-    `${tr('Create your free account')}</a>` +
-    `</td></tr></table>` +
+    (signupAnchor
+      ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
+        `<td style="border-radius:8px;background:${buttonBg};">` +
+        signupAnchor +
+        `</td></tr></table>`
+      : '') +
     `<p style="margin:0;font-size:12px;line-height:1.5;color:#9aa0a6;">` +
-    `${tr('Already on RepairPlanet?')} <a href="${esc(opts.loginUrl)}" style="color:#d4a017;text-decoration:none;">${tr('Sign in')}</a>.` +
+    `${tr('Already on RepairPlanet?')}${loginAnchor ? ` ${loginAnchor}.` : ''}` +
     `</p>` +
     `</td></tr></table>`
   );
@@ -269,6 +288,16 @@ export function buildSupplierPoEmailCtaHtml(opts: {
   locale?: string | null;
 }): string {
   const tr = (text: string) => translateApp(opts.locale, text);
+  const signupAnchor = safeHttpAnchor(
+    opts.signupUrl,
+    tr('Create a free account'),
+    'display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;',
+  );
+  const loginAnchor = safeHttpAnchor(
+    opts.loginUrl,
+    tr('Sign in'),
+    'display:inline-block;padding:12px 18px;font-size:14px;font-weight:700;color:#d4a017;text-decoration:none;border-radius:8px;',
+  );
   return (
     `<table class="tsp-supplier-po-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:20px 0 0;border-collapse:collapse;">` +
@@ -279,17 +308,14 @@ export function buildSupplierPoEmailCtaHtml(opts: {
     `${tr('Register free. Connect with laser service companies, receive purchase orders in one inbox, and list parts on the marketplace.')}` +
     `</p>` +
     `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
-    `<td style="border-radius:8px;background:#d4a017;">` +
-    `<a href="${esc(opts.signupUrl)}" ` +
-    `style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">` +
-    `${tr('Create a free account')}</a>` +
-    `</td>` +
-    `<td width="10"></td>` +
-    `<td style="border-radius:8px;border:1px solid #d4a017;">` +
-    `<a href="${esc(opts.loginUrl)}" ` +
-    `style="display:inline-block;padding:12px 18px;font-size:14px;font-weight:700;color:#d4a017;text-decoration:none;border-radius:8px;">` +
-    `${tr('Sign in')}</a>` +
-    `</td></tr></table>` +
+    (signupAnchor
+      ? `<td style="border-radius:8px;background:#d4a017;">${signupAnchor}</td>`
+      : '') +
+    (signupAnchor && loginAnchor ? `<td width="10"></td>` : '') +
+    (loginAnchor
+      ? `<td style="border-radius:8px;border:1px solid #d4a017;">${loginAnchor}</td>`
+      : '') +
+    `</tr></table>` +
     `</td></tr></table>`
   );
 }
@@ -391,28 +417,41 @@ export function buildCustomerInviteHtml(opts: {
     ? `<strong style="color:#f1f3f4;">${esc(opts.serviceCompanyName.trim())}</strong> added`
     : 'Your laser service provider added';
   const branded = !!opts.theme?.branded;
-  const logo = branded && opts.theme?.logoUrl
-    ? `<img src="${esc(opts.theme.logoUrl)}" alt="" style="max-width:120px;max-height:48px;object-fit:contain;display:block;margin:0 auto 10px;background:#ffffff;padding:4px;border-radius:4px;" />`
+  const logoSrc = branded ? safeDocumentImageUrl(opts.theme?.logoUrl) : null;
+  const logo = logoSrc
+    ? `<img src="${escapeHtml(logoSrc)}" alt="" style="max-width:120px;max-height:48px;object-fit:contain;display:block;margin:0 auto 10px;background:#ffffff;padding:4px;border-radius:4px;" />`
     : '';
   const headerCell = branded
-    ? `<td data-tsp-brand-header="1" style="padding:28px 28px 8px;text-align:center;background:${opts.theme!.primary};">` +
+    ? `<td data-tsp-brand-header="1" style="padding:28px 28px 8px;text-align:center;background:${cssHex(opts.theme!.primary, '#111827')};">` +
       `${logo}` +
-      `<div style="font-size:22px;font-weight:800;color:${opts.theme!.onPrimary};letter-spacing:0.02em;">RepairPlanet</div>` +
-      `<div style="font-size:12px;color:${opts.theme!.onPrimary};margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
+      `<div style="font-size:22px;font-weight:800;color:${cssHex(opts.theme!.onPrimary, '#FFFFFF')};letter-spacing:0.02em;">RepairPlanet</div>` +
+      `<div style="font-size:12px;color:${cssHex(opts.theme!.onPrimary, '#FFFFFF')};margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
       `</td>`
     : `<td style="padding:28px 28px 8px;text-align:center;">` +
       `<div style="font-size:22px;font-weight:800;color:#d4a017;letter-spacing:0.02em;">RepairPlanet</div>` +
       `<div style="font-size:12px;color:#9aa0a6;margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
       `</td>`;
+  const signupAnchor = branded
+    ? safeHttpAnchor(
+        opts.signupUrl,
+        'Create your free account',
+        `display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:${cssHex(opts.theme!.onAccent, '#111827')};text-decoration:none;border-radius:8px;background:${cssHex(opts.theme!.accent, '#FBBF24')};`,
+      )
+    : safeHttpAnchor(
+        opts.signupUrl,
+        'Create your free account',
+        'display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;',
+      );
   const ctaCell = branded
-    ? `<td align="center" style="border-radius:8px;background:${opts.theme!.accent};">` +
-      `<a href="${esc(opts.signupUrl)}" ` +
-      `style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:${opts.theme!.onAccent};text-decoration:none;border-radius:8px;background:${opts.theme!.accent};">` +
-      `Create your free account</a></td>`
+    ? `<td align="center" style="border-radius:8px;background:${cssHex(opts.theme!.accent, '#FBBF24')};">` +
+      `${signupAnchor}</td>`
     : `<td align="center" style="border-radius:8px;background:#d4a017;">` +
-      `<a href="${esc(opts.signupUrl)}" ` +
-      `style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">` +
-      `Create your free account</a></td>`;
+      `${signupAnchor}</td>`;
+  const loginAnchor = safeHttpAnchor(
+    opts.loginUrl,
+    'Sign in to claim this profile',
+    'color:#d4a017;text-decoration:none;',
+  );
 
   return `<!DOCTYPE html>
 <html>
@@ -462,8 +501,7 @@ export function buildCustomerInviteHtml(opts: {
                 </tr>
               </table>
               <p style="margin:0 0 14px;font-size:13px;line-height:1.5;color:#9aa0a6;">
-                Already on RepairPlanet?
-                <a href="${esc(opts.loginUrl)}" style="color:#d4a017;text-decoration:none;">Sign in to claim this profile</a>.
+                Already on RepairPlanet?${loginAnchor ? ` ${loginAnchor}.` : ''}
               </p>
               <p style="margin:0;font-size:13px;line-height:1.5;color:#9aa0a6;">
                 If you were not expecting this, you can ignore the email. Nobody else on the directory was copied.
