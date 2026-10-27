@@ -38,6 +38,7 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
+import { manualSlotLimit } from "../../../web/lib/org-plan.ts";
 import { libraryRowIsFree, manualIsIncomplete, slotCountedManuals } from "./incomplete.ts";
 import { indexWriteInProgress } from "../_shared/index-pending.ts";
 import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
@@ -875,25 +876,29 @@ Deno.serve(async (req) => {
     const access = await loadCallerAccess(admin, user.id);
     let orgId = access.orgId;
 
-    // Org manual slot limit (default 5 free)
-    let slotLimit = 5;
+    // Same plan cap as POST /api/manuals/library (manualSlotLimit). A stale
+    // manual_slots of 5 does not shrink Premium to 5, and "pro" is not unlimited.
+    let slotLimit = manualSlotLimit(null);
     if (orgId != null) {
       try {
-        const { data: orgRow } = await admin
+        let orgRes = await admin
           .from("organizations")
-          .select("manual_slots, subscription_tier")
+          .select("is_premium, subscription_tier, plan, manual_slots, premium_until")
           .eq("id", orgId)
           .maybeSingle();
-        if (orgRow?.manual_slots != null) {
-          slotLimit = parseInt(String(orgRow.manual_slots), 10) || 5;
-        } else if (
-          orgRow?.subscription_tier &&
-          /premium|team|enterprise|pro/i.test(String(orgRow.subscription_tier))
-        ) {
-          slotLimit = 999;
+        if (orgRes.error && /subscription_tier|plan|manual_slots|premium_until|column/i.test(orgRes.error.message || "")) {
+          orgRes = await admin
+            .from("organizations")
+            .select("is_premium, subscription_tier, plan")
+            .eq("id", orgId)
+            .maybeSingle();
         }
+        if (orgRes.error && /subscription_tier|plan|column/i.test(orgRes.error.message || "")) {
+          orgRes = await admin.from("organizations").select("is_premium").eq("id", orgId).maybeSingle();
+        }
+        slotLimit = manualSlotLimit(orgRes.error ? null : orgRes.data);
       } catch {
-        /* keep default */
+        slotLimit = manualSlotLimit(null);
       }
     }
 

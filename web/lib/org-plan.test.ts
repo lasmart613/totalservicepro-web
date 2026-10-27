@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
@@ -148,4 +151,29 @@ test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => 
   assert.equal(manualSlotLimit({ plan: 'team' }), UNLIMITED_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ is_premium: false }), FREE_MANUAL_SLOTS);
+});
+
+test('a Premium org whose stored manual_slots is 5 still gets 15, including from get-manual-url', () => {
+  // Org 2655 shape: paid Premium, stale manual_slots left at the free default.
+  const premiumStale = {
+    is_premium: true,
+    subscription_tier: 'premium',
+    plan: 'premium',
+    manual_slots: 5,
+  };
+  assert.equal(manualSlotLimit(premiumStale), PREMIUM_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ subscription_tier: 'premium', manual_slots: 5 }), 15);
+  assert.equal(manualSlotLimit({ subscription_tier: 'pro' }), FREE_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ subscription_tier: 'Pro', manual_slots: null }), FREE_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team', manual_slots: 5 }), UNLIMITED_MANUAL_SLOTS);
+
+  const edge = readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), '../../supabase/functions/get-manual-url/index.ts'),
+    'utf8',
+  );
+  assert.match(edge, /import \{ manualSlotLimit \} from "\.\.\/\.\.\/\.\.\/web\/lib\/org-plan\.ts"/);
+  assert.match(edge, /manualSlotLimit\(orgRes\.error \? null : orgRes\.data\)/);
+  assert.match(edge, /is_premium, subscription_tier, plan, manual_slots, premium_until/);
+  assert.doesNotMatch(edge, /let slotLimit = 5/);
+  assert.doesNotMatch(edge, /premium\|team\|enterprise\|pro/);
 });
