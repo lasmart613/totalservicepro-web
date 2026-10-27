@@ -1,6 +1,6 @@
 /**
- * Incomplete manuals are free to view and never use a company-library slot.
- * Shared with get-manual-url so the web app and the edge function agree.
+ * Incomplete manuals never use a company-library slot. They still have to be
+ * added before they can be opened. Shared with get-manual-url.
  */
 export {
   isIncompleteFlag,
@@ -14,4 +14,4 @@ export {
 /** Badge text on shelves and in the viewer. */
 export const INCOMPLETE_FREE_BADGE = 'Incomplete – free';
 export const INCOMPLETE_FREE_TITLE =
-  'This document is incomplete. It is free to view and does not use a library slot.';
+  'This document is incomplete. Adding it is free and does not use a library slot.';

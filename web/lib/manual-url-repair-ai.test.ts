@@ -15,12 +15,12 @@ import { loadAiCaller, repairAiDecision } from '../../supabase/functions/_shared
 const here = dirname(fileURLToPath(import.meta.url));
 const src = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
 
-test('get-manual-url uses loadAiCaller + repairAiDecision, not the profile role', () => {
+test('get-manual-url uses loadAiCaller for the org library, not a profile-role catalog grant', () => {
   assert.match(src, /import \{ loadAiCaller, repairAiDecision \} from "\.\.\/_shared\/repair-ai\.ts";/);
   assert.match(src, /await loadAiCaller\(/);
   assert.match(src, /repairAiAllowed: repairAiDecision\(caller\)\.ok/);
   assert.match(src, /orgId: caller\.member \? caller\.orgId : null/);
-  assert.match(src, /mayViewAiCatalog\(access\.repairAiAllowed,/);
+  assert.doesNotMatch(src, /mayViewAiCatalog\(/);
   assert.doesNotMatch(src, /function isRepairAiCaller\(/);
   assert.doesNotMatch(src, /from\("user_profiles"\)\s*\.select\("organization_id, role/);
 });

@@ -1,6 +1,11 @@
 'use client';
 
 import { INCOMPLETE_FREE_BADGE, INCOMPLETE_FREE_TITLE } from '@/lib/manual-incomplete';
+import {
+  ADD_TO_LIBRARY_TO_OPEN,
+  LibraryAddRequiredError,
+  viewerBlockedUntilLibraryAdd,
+} from '@/lib/manuals-access';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient, getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
@@ -167,13 +172,13 @@ async function fetchManualUrl(payload: Record<string, unknown>) {
     },
     body: JSON.stringify({
       ...payload,
-      // Cite / deep-link reader. Library shelf opens never set this, so an
-      // unowned shared catalog manual stays requires_add there.
-      ai_context: true,
       access_token: session.access_token,
     }),
   });
   const json = (await resp.json().catch(() => ({}))) as Record<string, any>;
+  if (viewerBlockedUntilLibraryAdd(json)) {
+    throw new LibraryAddRequiredError(json?.free_incomplete === true);
+  }
   return { ok: resp.ok, status: resp.status, json, token: session.access_token };
 }
 
@@ -191,7 +196,6 @@ async function fetchPdfBytes(opts: {
     body: JSON.stringify({
       manual_id: opts.manualId,
       storage_path: opts.storagePath,
-      ai_context: true,
     }),
   });
   if (res.ok) return await res.arrayBuffer();
@@ -386,6 +390,10 @@ export function ManualPdfViewer({
   const [catalogBrand, setCatalogBrand] = useState<string | null>(null);
   const [catalogModel, setCatalogModel] = useState<string | null>(null);
   const [isIncomplete, setIsIncomplete] = useState(false);
+  const [libraryAddFree, setLibraryAddFree] = useState(false);
+  const [addingLibrary, setAddingLibrary] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+  const openManualIdRef = useRef<string | number | null>(manualId ?? null);
   const [languageCode, setLanguageCode] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(!embedded);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
@@ -554,6 +562,7 @@ export function ManualPdfViewer({
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      let incomplete = false;
       try {
         if (sourceUrl) {
           setLoading(true);
@@ -581,9 +590,10 @@ export function ManualPdfViewer({
           isIncomplete: stashed?.isIncomplete,
           language: stashed?.language,
         };
+        if (payload.manualId) openManualIdRef.current = payload.manualId;
         if (payload.title) setTitle(payload.title);
         if (!cancelled) setLanguageCode(resolveManualLanguage(payload));
-        let incomplete = payload.isIncomplete === true;
+        incomplete = payload.isIncomplete === true;
         if (payload.manualId) {
           try {
             const supabase = getSupabaseClient();
@@ -688,7 +698,12 @@ export function ManualPdfViewer({
         }
       } catch (e: unknown) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Could not open manual');
+          if (e instanceof LibraryAddRequiredError) {
+            setLibraryAddFree(e.freeIncomplete || incomplete);
+            setError(ADD_TO_LIBRARY_TO_OPEN);
+          } else {
+            setError(e instanceof Error ? e.message : 'Could not open manual');
+          }
           setLoading(false);
         }
       }
@@ -921,8 +936,64 @@ export function ManualPdfViewer({
       setShowDownloads(false);
       setLoading(false);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Could not open manual');
+      if (e instanceof LibraryAddRequiredError) {
+        setLibraryAddFree(e.freeIncomplete || isIncomplete);
+        setError(ADD_TO_LIBRARY_TO_OPEN);
+      } else {
+        setError(e instanceof Error ? e.message : 'Could not open manual');
+      }
       setLoading(false);
+    }
+  }
+
+  async function addLibraryAndOpen() {
+    const id = openManualIdRef.current;
+    if (id == null || String(id).trim() === '') return;
+    setAddingLibrary(true);
+    setAddError(null);
+    let added = false;
+    try {
+      const supabase = getSupabaseClient();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Please log in first');
+      const res = await fetch('/api/manuals/library', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          manual_id: id,
+          source: librarySource(typeof navigator !== 'undefined' ? navigator.userAgent : ''),
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || json?.ok !== true) {
+        throw new Error(json?.error || 'Could not add to company library');
+      }
+      added = true;
+      setError(null);
+      setLibraryAddFree(false);
+      await openPath({
+        manualId: id,
+        title,
+        storagePath: openStoragePath || catalogPath || storagePathFromQuery,
+        isIncomplete,
+      });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : 'Could not add to company library';
+      if (!added || e instanceof LibraryAddRequiredError) {
+        if (e instanceof LibraryAddRequiredError) setLibraryAddFree(e.freeIncomplete || isIncomplete);
+        setAddError(added ? null : message);
+        setError(ADD_TO_LIBRARY_TO_OPEN);
+      } else {
+        setError(message);
+      }
+      setLoading(false);
+    } finally {
+      setAddingLibrary(false);
     }
   }
 
@@ -943,7 +1014,12 @@ export function ManualPdfViewer({
         ch.storage_path
       );
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Could not open chapter');
+      if (e instanceof LibraryAddRequiredError) {
+        setLibraryAddFree(e.freeIncomplete || isIncomplete);
+        setError(ADD_TO_LIBRARY_TO_OPEN);
+      } else {
+        setError(e instanceof Error ? e.message : 'Could not open chapter');
+      }
       setLoading(false);
     }
   }
@@ -1174,6 +1250,34 @@ export function ManualPdfViewer({
               )}
             </div>
           )}
+          {error === ADD_TO_LIBRARY_TO_OPEN && !loading && (
+            <div
+              role="status"
+              data-testid="add-to-library-to-open"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10"
+            >
+              <div className="text-lg font-bold text-[#E5E7EB] max-w-md">{t(ADD_TO_LIBRARY_TO_OPEN)}</div>
+              {libraryAddFree && (
+                <div className="text-sm text-[#9CA3AF] max-w-md">
+                  {t('Incomplete document: free, it does not use a library slot.')}
+                </div>
+              )}
+              {addError && <div className="text-sm text-red-400 max-w-md">{addError}</div>}
+              <button
+                type="button"
+                className="btn btn-primary text-sm px-4 py-2"
+                disabled={addingLibrary || openManualIdRef.current == null}
+                onClick={() => void addLibraryAndOpen()}
+              >
+                {addingLibrary ? t('Adding…') : t('Add & open')}
+              </button>
+              {!embedded && (
+                <Link href={sourceUrl ? '/' : '/manuals'} className="text-sm text-[#fbbf24] underline">
+                  {sourceUrl ? 'Back home' : 'Back to library'}
+                </Link>
+              )}
+            </div>
+          )}
           {error === MANUAL_NOT_AVAILABLE && !loading && (
             <div
               role="alert"
@@ -1188,7 +1292,7 @@ export function ManualPdfViewer({
               )}
             </div>
           )}
-          {error && error !== MANUAL_FILE_MISSING && error !== MANUAL_NOT_AVAILABLE && !loading && (
+          {error && error !== MANUAL_FILE_MISSING && error !== MANUAL_NOT_AVAILABLE && error !== ADD_TO_LIBRARY_TO_OPEN && !loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
               <div className="text-lg font-bold text-red-400">Could not open manual</div>
               <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>

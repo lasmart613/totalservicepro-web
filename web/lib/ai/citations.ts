@@ -109,10 +109,9 @@ export function attachProsePages(citations: ManualCitation[], text: string): Man
 }
 
 /**
- * In-app viewer deep link. ManualPdfViewer sends `ai_context: true` on
- * get-manual-url so service-company users can read shared catalog manuals
- * from these links without a company-library slot. The manuals shelf does
- * not send that flag and prompts Add to library when the org does not own it.
+ * In-app viewer deep link. The viewer and get-manual-url require a library
+ * row before opening, including for these links. The shelf prompts Add to
+ * library when the org does not own the manual.
  */
 export function citationViewerHref(c: ManualCitation): string {
   const qs = new URLSearchParams();

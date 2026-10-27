@@ -470,14 +470,14 @@ test('file_missing bodies carry no path, and uncovered keys are refused before s
     assert.equal(body.includes('prefix'), false);
   }
 
-  const grant = edge.indexOf('if (!allowed && aiContext)');
+  const libraryDenied = edge.indexOf('error: "Add to library to open"');
   const openedAt = edge.indexOf('const opened = resolveManualPdfOpen');
   const coverAt = edge.indexOf('if ((sentPath && !pathCovered(requestedNorm)) || !pathCovered(sp))');
   const folderAt = edge.indexOf('if (sp && !isStoredFilePath(sp))', openedAt);
   const probeAt = edge.indexOf('await probeStorageObject(', openedAt);
   const signAt = edge.indexOf('.createSignedUrl(', openedAt);
   const ticketAt = edge.indexOf('mintStreamTicket(', openedAt);
-  assert.ok(grant > 0 && openedAt > grant && coverAt > openedAt);
+  assert.ok(libraryDenied > 0 && openedAt > libraryDenied && coverAt > openedAt);
   assert.ok(coverAt < folderAt && coverAt < probeAt && coverAt < signAt && coverAt < ticketAt);
   const gate = edge.slice(edge.indexOf('Chapter under owned folder'), edge.indexOf('const inLibrary'));
   assert.doesNotMatch(gate, /isPdfPath/);
@@ -492,9 +492,11 @@ test('file_missing bodies carry no path, and uncovered keys are refused before s
   const route = readFileSync(join(here, '../app/api/manuals/file/route.ts'), 'utf8');
   const preSign = route.indexOf('if (scoped && !catalogCoversPath(scoped, storagePath))');
   const signed = route.indexOf('const resolved = await resolveSignedUrl');
+  const blocked = route.indexOf('viewerBlockedUntilLibraryAdd(resolved.json)');
   const uncovered = route.indexOf('resolved.json?.error === MANUAL_PATH_NOT_COVERED');
-  const fallback = route.indexOf('await streamAiCatalogPdf');
-  assert.ok(preSign > 0 && preSign < signed && uncovered > signed && uncovered < fallback);
+  const bytes = route.indexOf('fetch(resolved.url)');
+  assert.ok(preSign > 0 && preSign < signed && blocked > signed && uncovered > blocked && bytes > uncovered);
+  assert.doesNotMatch(route, /streamAiCatalogPdf/);
   assert.match(route, /!catalogCoversPath\(catalog, asked\)/);
   assert.doesNotMatch(route, /if \(isPdfPath\(asked\)\) return asked/);
 });

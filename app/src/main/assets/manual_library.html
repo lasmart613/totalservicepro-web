@@ -268,38 +268,6 @@
         const v = m && (m.is_incomplete != null ? m.is_incomplete : m.isIncomplete);
         return v === true || v === 1 || v === '1' || v === 'true' || v === 't';
     }
-    /**
-     * Mirror of get-manual-url mayViewIncompleteFree: only then skip the Add
-     * prompt. Needs a company (org), and owner-side orgs only get operator/user
-     * docs (doc_kind). The server still decides; a refusal falls back to Add.
-     */
-    function mayViewIncompleteFreeClient(m) {
-        if (!isManualIncomplete(m)) return false;
-        if (currentOrgId == null || String(currentOrgId).trim() === '') return false;
-        if (!String(m.storage_path || '').trim()) return false;
-        if (isServiceCompany) return true;
-        const kind = String(m.doc_kind || '').trim().toLowerCase();
-        return kind === 'operator' || kind === 'user';
-    }
-    /** Ask get-manual-url (shelf open, no ai_context) whether it serves the free view. */
-    async function probeFreeView(manual) {
-        try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            const res = await fetch(EDGE_FN_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + (session?.access_token || ''),
-                    'apikey': SUPABASE_ANON_KEY
-                },
-                body: JSON.stringify({ manual_id: manual.id, storage_path: manual.storage_path })
-            });
-            const data = await res.json().catch(() => ({}));
-            return res.ok && !data.error && data.requires_add !== true && data.free_incomplete === true;
-        } catch (e) {
-            return false;
-        }
-    }
     function manualRoom(m) {
         const hay = [m && m.title, m && m.brand, m && m.model, m && m.storage_path].join(' ').toLowerCase();
         if (isDornierHolmium(hay)) return 'laser';
@@ -538,26 +506,15 @@
 
         if (alreadyOwns) {
             await openManual(manual);
-        } else if (isManualIncomplete(manual)) {
-            // Free: open without adding only when the server serves the free view;
-            // otherwise (or on requires_add / denied) show the free Add prompt.
-            if (mayViewIncompleteFreeClient(manual) && await probeFreeView(manual)) {
-                await openManual(manual);
-            } else {
-                currentManual = manual;
-                showAddModal(manual);
-            }
         } else {
-            if (currentTab === 'browse') {
-                currentManual = manual;
-                showAddModal(manual);
-            } else {
-                await openManual(manual);
-            }
+            // Incomplete manuals are free to add (no slot) but still require a
+            // library row before they open. Same for complete manuals.
+            currentManual = manual;
+            showAddModal(manual);
         }
     }
 
-    /** pdf_viewer sends ?add=<id> back here when the free view was refused. */
+    /** pdf_viewer sends ?add=<id> back here when the manual is not in the library. */
     function openPendingAdd() {
         const id = new URLSearchParams(window.location.search).get('add');
         if (!id) return;
