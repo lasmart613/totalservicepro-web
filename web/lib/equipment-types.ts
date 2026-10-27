@@ -17,6 +17,7 @@ export const EQUIPMENT_TYPE_VALUES = [
   'sterile_processing',
   'ultrasound',
   'ventilator',
+  'hv_power_supply',
 ] as const;
 
 export type EquipmentType = (typeof EQUIPMENT_TYPE_VALUES)[number];
@@ -119,6 +120,14 @@ export const EQUIPMENT_TYPES: readonly EquipmentTypeMeta[] = [
     blurb: 'Critical-care ventilators and respirators.',
     icon: '🌬️',
   },
+  {
+    value: 'hv_power_supply',
+    label: 'High Voltage Power Supply',
+    roomLabel: 'High voltage power supply room',
+    blurb:
+      'Capacitor chargers and high-voltage power supplies (HVPS, CCPS) for medical lasers — not the laser itself.',
+    icon: '🔌',
+  },
 ] as const;
 
 const ALIASES: Record<string, EquipmentType> = {
@@ -155,6 +164,14 @@ const ALIASES: Record<string, EquipmentType> = {
   sonograph: 'ultrasound',
   ventilator: 'ventilator',
   respirator: 'ventilator',
+  hv_power_supply: 'hv_power_supply',
+  hvps: 'hv_power_supply',
+  ccps: 'hv_power_supply',
+  'high voltage power supply': 'hv_power_supply',
+  'capacitor charger': 'hv_power_supply',
+  'capacitor chargers': 'hv_power_supply',
+  'cap charger': 'hv_power_supply',
+  'laser power supply charger': 'hv_power_supply',
 };
 
 export function isEquipmentType(value: unknown): value is EquipmentType {
@@ -227,8 +244,27 @@ export function isHolmiumLithoLaserFamily(hay: string): boolean {
 }
 
 /**
- * Room for a catalog row. Holmium Litho / Cyber Ho / Dornier H20/H30 always
- * Laser, even if a row was saved as lithotriptor. True ESWL stays Lithotriptor.
+ * Capacitor chargers and HV laser supplies (HVPS / CCPS).
+ * Matched before any laser keyword so "capacitor charger" and
+ * "laser power supply charger" do not fall through to the Laser room.
+ */
+export function isHvPowerSupply(hay: string): boolean {
+  const t = String(hay || '').toLowerCase();
+  return (
+    /capacitor[\s-]*charg/.test(t) ||
+    /\bcap[\s-]*charg/.test(t) ||
+    /\bhvps\b/.test(t) ||
+    /\bccps\b/.test(t) ||
+    /high[\s-]*voltage\s+power\s+suppl/.test(t) ||
+    /laser\s+power\s+supply\s+charg/.test(t)
+  );
+}
+
+/**
+ * Room for a catalog row. Capacitor chargers / HVPS stay in their own room
+ * even when the title also says laser. Holmium Litho / Cyber Ho / Dornier
+ * H20/H30 are Laser, even if a row was saved as lithotriptor. True ESWL stays
+ * Lithotriptor.
  */
 export function inferEquipmentType(fields: {
   equipment_type?: string | null;
@@ -242,6 +278,7 @@ export function inferEquipmentType(fields: {
     .join(' ')
     .toLowerCase();
 
+  if (isHvPowerSupply(hay)) return 'hv_power_supply';
   if (isDornierHolmiumLaser(hay)) return DEFAULT_EQUIPMENT_TYPE;
   if (isHolmiumLithoLaserFamily(hay)) return DEFAULT_EQUIPMENT_TYPE;
   if (isShockwaveLithotriptor(hay)) return 'lithotriptor';

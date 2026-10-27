@@ -2837,6 +2837,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Ventilador',
     'جهاز التنفس',
   ),
+  'High Voltage Power Supply': row(
+    'منبع تغذیه ولتاژ بالا',
+    'Fuente de alimentación de alto voltaje',
+    'Alimentation haute tension',
+    'ספק כוח מתח גבוה',
+    'Alimentatore ad alta tensione',
+    'Hochspannungsnetzteil',
+    'Fonte de alimentação de alta tensão',
+    'مزود طاقة عالي الجهد',
+  ),
   'Power Meter': row(
     'توان‌سنج',
     'Medidor de potencia',
