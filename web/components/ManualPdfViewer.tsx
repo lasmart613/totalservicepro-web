@@ -22,7 +22,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import { asPositivePage } from '@/lib/ai/citations';
-import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
+import { chaptersForVolumePage, viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import {
   chapterPageRangeLabel,
   chapterTileNumber,
@@ -587,7 +587,27 @@ export function ManualPdfViewer({
       }
       const listed = await openPath(openPayload, undefined, { metadataOnly: true });
       if (isCancelled?.()) return;
-      const target = viewerTargetForJoinedPage(listed.chapters, volumePage);
+      let volumeChapters = listed.chapters;
+      if (payload.manualId != null && String(payload.manualId).trim() !== '') {
+        try {
+          const row = await getSupabaseClient()
+            .from('manuals')
+            .select('chapter_metadata, storage_path')
+            .eq('id', payload.manualId)
+            .maybeSingle();
+          if (!row.error && row.data) {
+            const data = row.data as { chapter_metadata?: unknown; storage_path?: string | null };
+            volumeChapters = chaptersForVolumePage(
+              listed.chapters,
+              data.chapter_metadata,
+              String(data.storage_path || ''),
+            );
+          }
+        } catch {
+          /* edge chapter list still resolves when it already carries pageStart */
+        }
+      }
+      const target = viewerTargetForJoinedPage(volumeChapters, volumePage);
       if (target.kind === 'hit') {
         setFolderLocalPage(target.localPage);
         setJoinedPageLabel(volumePage);

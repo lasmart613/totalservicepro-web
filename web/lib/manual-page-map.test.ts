@@ -10,6 +10,7 @@ import {
   applyStoredVolumePageSpans,
   buildJoinedPageMap,
   chapterMetadataWithPageCounts,
+  chaptersForVolumePage,
   gateJoinedPageMap,
   joinedPageMapAllowed,
   resolveJoinedPage,
@@ -439,4 +440,24 @@ test('manual 9 volume page 1329 opens 8501-00-1770 at local page 19', () => {
   assert.match(android, /page - spans\[i\]\.pageStart \+ 1/);
   assert.match(android, /citeLocalPage = hit\.localPage/);
   assert.match(android, /pdfChapters\.length > 1/);
+
+  // The viewer reads chapter_metadata itself, so a deployed edge list that
+  // omitted page_start still opens the chapter. A packed edge offset loses.
+  const relative = [
+    { doc_number: '8501-01-1769', storage_path: '8501-01-1769_B.pdf', page_start: 1, page_count: 40 },
+    { doc_number: '8501-00-1770', storage_path: '8501-00-1770.pdf', page_start: 1311, page_count: 41 },
+  ];
+  const edgeList = [
+    { storage_path: entry, title: 'entry' },
+    { storage_path: service, title: 'service', pageStart: 200, pageCount: 41 },
+  ];
+  const fromMetadata = chaptersForVolumePage(edgeList, relative, folder);
+  const metaHit = viewerTargetForJoinedPage(fromMetadata, 1329);
+  assert.equal(metaHit.kind, 'hit');
+  if (metaHit.kind === 'hit') {
+    assert.equal(metaHit.storagePath, service);
+    assert.equal(metaHit.localPage, 19);
+    assert.equal(metaHit.pageStart, 1311);
+  }
+  assert.match(viewer, /chaptersForVolumePage/);
 });

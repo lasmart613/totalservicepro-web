@@ -220,6 +220,70 @@ export function joinedMapFromChapters(
   return spans.length ? spans : null;
 }
 
+function joinMetadataPath(parentPath: string, raw: unknown): string {
+  let path = indexPathKey(raw);
+  if (!path) return '';
+  const folder = indexPathKey(parentPath);
+  const lower = path.toLowerCase();
+  const folderLower = folder.toLowerCase();
+  if (
+    folder &&
+    !lower.startsWith('shared/') &&
+    !lower.startsWith('http://') &&
+    !lower.startsWith('https://') &&
+    lower !== folderLower &&
+    !lower.startsWith(`${folderLower}/`)
+  ) {
+    path = indexPathKey(`${folder}/${path.replace(/^\/+/, '')}`);
+  }
+  return path;
+}
+
+function storedSpanNumber(value: unknown, min: number, max: number): number | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return Math.floor(n);
+}
+
+/** PDF rows in chapter_metadata order, with stored volume page_start/page_count. */
+export function volumePartsFromMetadata(
+  metadata: unknown,
+  parentPath = '',
+): { storagePath: string; pageStart: number | null; pageCount: number | null }[] {
+  if (!Array.isArray(metadata) || !metadata.length) return [];
+  const out: { storagePath: string; pageStart: number | null; pageCount: number | null }[] = [];
+  const seen = new Set<string>();
+  for (const item of metadata) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { storage_path?: unknown; path?: unknown; page_start?: unknown; page_count?: unknown };
+    const storagePath = joinMetadataPath(parentPath, row.storage_path ?? row.path);
+    if (!storagePath || !storagePath.toLowerCase().endsWith('.pdf') || seen.has(storagePath)) continue;
+    seen.add(storagePath);
+    out.push({
+      storagePath,
+      pageStart: storedSpanNumber(row.page_start, 1, 999999),
+      pageCount: storedSpanNumber(row.page_count, 0, 9999),
+    });
+  }
+  return out;
+}
+
+/**
+ * Chapter list for a volume-page deep link. Stored page_start wins over a
+ * packed offset the edge function may have attached, and fills spans in when
+ * that list omitted them.
+ */
+export function chaptersForVolumePage<
+  T extends { storage_path?: string; pageStart?: number; pageCount?: number },
+>(chapters: readonly T[] | null | undefined, metadata: unknown, parentPath = ''): T[] {
+  const parts = volumePartsFromMetadata(metadata, parentPath);
+  const base = chapters?.length
+    ? chapters
+    : parts.map((part) => ({ storage_path: part.storagePath }) as T);
+  return applyStoredVolumePageSpans(base, parts);
+}
+
 /**
  * Prefer chapter_metadata page_start/page_count over a recomputed joined
  * offset. A citation page is the volume page those fields describe. Chapters
