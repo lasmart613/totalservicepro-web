@@ -212,6 +212,7 @@ export const FA_COPY: Record<string, string> = {
   'Sterile processing': 'استریل‌سازی',
   Ultrasound: 'سونوگرافی',
   Ventilator: 'ونتیلاتور',
+  'High Voltage Power Supply': 'منبع تغذیه ولتاژ بالا',
   'Emergency Repair': 'تعمیر اضطراری',
   PM: 'سرویس دوره‌ای',
   'Install / Commission': 'نصب و راه‌اندازی',

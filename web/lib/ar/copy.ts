@@ -209,6 +209,7 @@ export const AR_COPY: Record<string, string> = {
   'Sterile processing': 'التعقيم',
   Ultrasound: 'الموجات فوق الصوتية',
   Ventilator: 'جهاز التنفس',
+  'High Voltage Power Supply': 'مزود طاقة عالي الجهد',
   'Emergency Repair': 'إصلاح طارئ',
   PM: 'الصيانة الوقائية',
   'Install / Commission': 'التركيب والتشغيل',

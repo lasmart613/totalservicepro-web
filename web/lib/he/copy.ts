@@ -208,6 +208,7 @@ export const HE_COPY: Record<string, string> = {
   'Sterile processing': 'עיבוד סטרילי',
   Ultrasound: 'אולטרסאונד',
   Ventilator: 'מכונת הנשמה',
+  'High Voltage Power Supply': 'ספק כוח מתח גבוה',
   'Emergency Repair': 'תיקון דחוף',
   PM: 'אחזקה מונעת',
   'Install / Commission': 'התקנה והפעלה',
