@@ -1081,7 +1081,10 @@ export function ManualPdfViewer({
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
   const languageBadge = manualLanguageBadge(languageCode);
   const requestedPage = asPositivePage(initialPage);
-  const deepLinkPage = folderLocalPage === undefined ? requestedPage : folderLocalPage;
+  // Page inside the opened file. A chapter cite uses the local page; a single
+  // PDF uses ?page= or the #page= state. Not the volume-page state of the same name.
+  const resolvedDeepLinkPage =
+    folderLocalPage === undefined ? requestedPage ?? deepLinkPage : folderLocalPage;
   const folderPastEnd = folderLocalPage === null;
   const pageNotice =
     joinedPageLabel != null || chapterBrowse
@@ -1457,7 +1460,7 @@ export function ManualPdfViewer({
                   pageNumber={n}
                   zoom={zoom}
                   boxHeight={pageBoxHeight}
-                  eager={n <= 2 || n === viewerPhysicalPage(deepLinkPage || 0, pageCount)}
+                  eager={n <= 2 || n === viewerPhysicalPage(resolvedDeepLinkPage || 0, pageCount)}
                   highlightQuery={hits.includes(n) ? query : ''}
                   onReady={(readyPage) => {
                     if (pendingJump.current === readyPage) jumpToPhysicalPage(readyPage);
