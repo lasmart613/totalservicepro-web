@@ -1,5 +1,6 @@
 export {
   annotateChaptersWithPageMap,
+  applyStoredVolumePageSpans,
   buildJoinedPageMap,
   gateJoinedPageMap,
   indexPathKey,

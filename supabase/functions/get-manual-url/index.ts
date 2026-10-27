@@ -37,7 +37,7 @@ import {
   storageResponseIsMissing,
   type StorageProbe,
 } from "./files.ts";
-import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
+import { annotateChaptersWithPageMap, applyStoredVolumePageSpans, gateJoinedPageMap } from "./page-map.ts";
 import { manualSlotLimit } from "../../../web/lib/org-plan.ts";
 import { libraryRowIsFree, manualIsIncomplete, slotCountedManuals } from "./incomplete.ts";
 import { indexWriteInProgress } from "../_shared/index-pending.ts";
@@ -591,17 +591,23 @@ async function annotateFolderChapters<T extends { storage_path: string }>(
   metadata: unknown,
   parentPath: string,
 ): Promise<{ chapters: T[]; joinedPageCount: number | null }> {
-  if (chapters.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  // Stored page_start is the volume page a citation uses. Keep it even when
+  // the packed pdf.js map is omitted (index mismatch, missing count).
   const parts = indexOrderPdfParts(metadata, parentPath);
-  if (parts.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  const keepStored = (rows: readonly T[]) => applyStoredVolumePageSpans(rows, parts);
+  if (chapters.length < 2) return { chapters: keepStored(chapters), joinedPageCount: null };
+  if (parts.length < 2) return { chapters: keepStored(chapters), joinedPageCount: null };
   const mapped = annotateChaptersWithPageMap(chapters, parts);
-  if (!mapped.joinedPageCount) return mapped;
+  if (!mapped.joinedPageCount) {
+    return { chapters: keepStored(mapped.chapters), joinedPageCount: null };
+  }
   const index = await loadIndexPageBound(admin, manualId);
-  return gateJoinedPageMap(
+  const gated = gateJoinedPageMap(
     mapped,
     { indexMax: index.indexedPageMax, clipped: index.clipped },
     chapters,
   );
+  return { chapters: keepStored(gated.chapters), joinedPageCount: gated.joinedPageCount };
 }
 
 async function downloadStorageObject(

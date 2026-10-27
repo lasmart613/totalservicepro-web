@@ -221,12 +221,22 @@ export type IndexOrderPart = {
   storagePath: string;
   /** Stored pdf.js page count. null when the entry has no usable page_count. */
   pageCount: number | null;
+  /** Absolute volume page (chapter_metadata.page_start). null when absent. */
+  pageStart: number | null;
 };
 
 function storedPageCount(value: unknown): number | null {
   if (value == null || value === "") return null;
   const n = typeof value === "number" ? value : Number(String(value).trim());
   if (!Number.isFinite(n) || n < 0 || n > 9999) return null;
+  return Math.floor(n);
+}
+
+/** Volume page_start. 0 and blanks are not a span. */
+function storedPageStart(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || n < 1 || n > 999999) return null;
   return Math.floor(n);
 }
 
@@ -250,6 +260,7 @@ export function indexOrderPdfParts(metadata: unknown, parentPath: string): Index
     out.push({
       storagePath,
       pageCount: storedPageCount((item as { page_count?: unknown }).page_count),
+      pageStart: storedPageStart((item as { page_start?: unknown }).page_start),
     });
   }
   return out;
@@ -302,10 +313,13 @@ export function chaptersFromMetadata(
     seen.add(storagePath);
     const order = ch.order != null && ch.order !== "" ? Number(ch.order) : i + 1;
     const rawTitle = String(ch.title || storagePath.split("/").pop() || `Chapter ${i + 1}`);
+    const pageCount = storedPageCount(ch.page_count);
+    const pageStart = storedPageStart(ch.page_start);
     chapters.push({
       order: Number.isFinite(order) ? order : i + 1,
       title: opts?.isFolder ? readableChapterTitle(ch.title, storagePath) : rawTitle,
       storage_path: storagePath,
+      ...(pageStart != null && pageCount != null && pageCount >= 1 ? { pageStart, pageCount } : {}),
     });
   });
   if (!opts?.isFolder) return chapters;

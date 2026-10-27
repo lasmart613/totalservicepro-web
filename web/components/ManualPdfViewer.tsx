@@ -26,6 +26,7 @@ import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import {
   chapterPageRangeLabel,
   chapterTileNumber,
+  citedPageFromHash,
   fittedPageBoxHeight,
   viewerCitedPageNotice,
   viewerFolderOutOfRangeNotice,
@@ -403,6 +404,8 @@ export function ManualPdfViewer({
   const [fileOffer, setFileOffer] = useState<FileOffer | null>(null);
   /** Local page inside the opened chapter. undefined keeps initialPage as-is. null: joined page is past the folder. */
   const [folderLocalPage, setFolderLocalPage] = useState<number | null | undefined>(undefined);
+  /** Volume page from ?page= or #page=, including when the prop arrives after the hash. */
+  const [deepLinkPage, setDeepLinkPage] = useState<number | undefined>(undefined);
   /** Joined index page when the open file is the chapter that contains it. */
   const [joinedPageLabel, setJoinedPageLabel] = useState<number | null>(null);
   /** User picked a chapter. The citation page belongs to a different file. */
@@ -559,6 +562,50 @@ export function ManualPdfViewer({
     [openSrc]
   );
 
+  /**
+   * Citation page= is a volume page. For a chaptered manual, open the file
+   * whose chapter_metadata span contains it, at local page
+   * (volume − page_start + 1). A single PDF keeps the page as a local page.
+   * Add & open uses this same path so the second load does not stay on page 1.
+   */
+  const openAtCitedPage = useCallback(
+    async (
+      payload: ManualViewPayload,
+      volumePage: number | undefined,
+      isCancelled?: () => boolean,
+    ) => {
+      const pinnedPdf = isLikelyPdfPath(payload.storagePath);
+      const suppressEntry = !pinnedPdf && volumePage != null && !pageOutOfRange;
+      const openPayload: ManualViewPayload = suppressEntry
+        ? { ...payload, storagePath: undefined, url: undefined, dataBase64: undefined }
+        : payload;
+      if (!(suppressEntry && volumePage)) {
+        setJoinedPageLabel(null);
+        setFolderLocalPage(undefined);
+        await openPath(openPayload, openPayload.storagePath);
+        return;
+      }
+      const listed = await openPath(openPayload, undefined, { metadataOnly: true });
+      if (isCancelled?.()) return;
+      const target = viewerTargetForJoinedPage(listed.chapters, volumePage);
+      if (target.kind === 'hit') {
+        setFolderLocalPage(target.localPage);
+        setJoinedPageLabel(volumePage);
+        const chapterPayload = { ...openPayload, storagePath: target.storagePath, chapters: listed.chapters };
+        if (!sameStoragePath(target.storagePath, listed.openedPath)) {
+          await openPath(chapterPayload, target.storagePath);
+        } else {
+          await openPath(chapterPayload, listed.openedPath);
+        }
+        return;
+      }
+      setJoinedPageLabel(null);
+      setFolderLocalPage(target.kind === 'out-of-range' ? null : undefined);
+      await openPath(openPayload);
+    },
+    [openPath, pageOutOfRange],
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -574,7 +621,10 @@ export function ManualPdfViewer({
         chapterPick.current = false;
         setChapterBrowse(false);
         const pinnedPdf = isLikelyPdfPath(storagePathFromQuery);
-        const joinedRequest = asPositivePage(initialPage);
+        const fromHash =
+          typeof window !== 'undefined' ? asPositivePage(citedPageFromHash(window.location.hash)) : undefined;
+        const joinedRequest = asPositivePage(initialPage) ?? fromHash;
+        if (joinedRequest) setDeepLinkPage(joinedRequest);
         const suppressEntry = !pinnedPdf && joinedRequest != null && !pageOutOfRange;
         const payload: ManualViewPayload = {
           manualId: manualId || stashed?.manualId,
@@ -668,31 +718,7 @@ export function ManualPdfViewer({
           setLoading(false);
           return;
         }
-        if (suppressEntry && joinedRequest) {
-          const listed = await openPath(payload, undefined, { metadataOnly: true });
-          if (cancelled) return;
-          const target = viewerTargetForJoinedPage(listed.chapters, joinedRequest);
-          if (target.kind === 'hit') {
-            setFolderLocalPage(target.localPage);
-            setJoinedPageLabel(joinedRequest);
-            if (!sameStoragePath(target.storagePath, listed.openedPath)) {
-              await openPath(
-                { ...payload, storagePath: target.storagePath, chapters: listed.chapters },
-                target.storagePath,
-              );
-            } else {
-              await openPath(payload, listed.openedPath);
-            }
-          } else {
-            setJoinedPageLabel(null);
-            setFolderLocalPage(target.kind === 'out-of-range' ? null : undefined);
-            await openPath(payload);
-          }
-        } else {
-          setJoinedPageLabel(null);
-          setFolderLocalPage(undefined);
-          await openPath(payload, payload.storagePath);
-        }
+        await openAtCitedPage(payload, joinedRequest, () => cancelled);
         if (!cancelled && typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem(MANUAL_VIEW_STORAGE_KEY);
         }
@@ -867,7 +893,8 @@ export function ManualPdfViewer({
   useEffect(() => {
     if (loading || !pageCount || !pageBoxHeight) return;
     if (chapterPick.current) return;
-    const requested = folderLocalPage === undefined ? asPositivePage(initialPage) : folderLocalPage;
+    const requested =
+      folderLocalPage === undefined ? asPositivePage(initialPage) ?? deepLinkPage : folderLocalPage;
     if (requested) {
       // Flagged past the PDF, or past the loaded page count: leave the document
       // where it is and show the notice. Do not clamp the deep link onto page 1.
@@ -892,7 +919,7 @@ export function ManualPdfViewer({
     void runSearch(0, find);
     // Deep-link jump after the fitted page height is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, pageOutOfRange, jumpToPhysicalPage, folderLocalPage]);
+  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, deepLinkPage, pageOutOfRange, jumpToPhysicalPage, folderLocalPage]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -976,12 +1003,18 @@ export function ManualPdfViewer({
       added = true;
       setError(null);
       setLibraryAddFree(false);
-      await openPath({
-        manualId: id,
-        title,
-        storagePath: openStoragePath || catalogPath || storagePathFromQuery,
-        isIncomplete,
-      });
+      const volumePage =
+        asPositivePage(initialPage) ??
+        deepLinkPage ??
+        (typeof window !== 'undefined' ? asPositivePage(citedPageFromHash(window.location.hash)) : undefined);
+      await openAtCitedPage(
+        {
+          manualId: id,
+          title,
+          isIncomplete,
+        },
+        volumePage,
+      );
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Could not add to company library';
       if (!added || e instanceof LibraryAddRequiredError) {
