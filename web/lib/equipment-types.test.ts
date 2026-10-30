@@ -269,12 +269,12 @@ test('incomplete badge is a stored flag, not a hardcoded H20 title', () => {
   assert.equal(isManualIncomplete({ title: 'Other', is_incomplete: false }), false);
 });
 
-test('library rooms default to Laser and keep access + bookshelf', () => {
+test('library opens on all rooms with the cascade and keeps access + bookshelf', () => {
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
   const css = readFileSync(join(here, '../app/globals.css'), 'utf8');
-  assert.match(page, /equipmentTypeOrDefault|DEFAULT_EQUIPMENT_TYPE|room=/);
-  assert.match(page, /Laser room|Lithotriptor|C-arm/);
-  assert.match(page, /EQUIPMENT_TYPE_VALUES/);
+  assert.match(page, /parseManualCascadeParams/);
+  assert.match(page, /computeManualCascade/);
+  assert.match(page, /lasersOnly/);
   assert.doesNotMatch(page, /other:\s*0/);
   assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /ShelfScroller/);

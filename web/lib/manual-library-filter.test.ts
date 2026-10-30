@@ -589,10 +589,10 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /\/api\/manuals\/search/);
   assert.match(page, /manuals-search/);
   assert.match(page, /manuals-rail/);
-  assert.match(page, /All manufacturers|All makes/i);
+  assert.match(page, /t\('Brand'\)/);
   assert.match(page, /manuals-language/);
   assert.match(page, /manualLanguageOptionsForView\(sourceManuals, \{ room, library \}\)/);
-  assert.match(page, /manualRoomsForView\(\s*sourceManuals/);
+  assert.match(page, /computeManualCascade\(cascadeBase, cascade\)/);
   assert.doesNotMatch(page, /EQUIPMENT_TYPES\.map/);
   assert.match(page, /manualLanguageBadge/);
   assert.match(page, /manualSearchBodyQuery/);

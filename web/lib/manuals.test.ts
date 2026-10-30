@@ -78,8 +78,8 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.match(page, /\/api\/manuals\/library/);
   assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /manualSlotLimit/);
-  assert.match(page, /DEFAULT_EQUIPMENT_TYPE|equipmentTypeOrDefault/);
-  assert.match(page, /manual-rooms/);
+  assert.match(page, /parseManualCascadeParams/);
+  assert.match(page, /manual-cascade/);
   assert.match(page, /manuals-rail/);
   assert.match(page, /manuals-search|Search manuals/);
   assert.match(page, /filterManualLibrary/);
