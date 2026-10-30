@@ -508,7 +508,7 @@ export const FA_COPY: Record<string, string> = {
   'Everything in Premium': 'همه چیز Premium',
   '250 text + 250 voice AI queries per member per day':
     'روزانه 250 پرسش متنی و 250 پرسش صوتی هوش مصنوعی برای هر عضو',
-  'Unlimited service manuals': 'دفترچه‌های سرویس نامحدود',
+  '50 service manuals': '۵۰ دفترچه سرویس',
   'Up to 10 user seats': 'تا 10 کاربر',
   'Find rated repair and maintenance pros': 'تعمیرکار و سرویس‌کار امتیازدار پیدا کنید',
   'Request service and order consumables': 'سرویس بخواهید و مصرفی سفارش دهید',

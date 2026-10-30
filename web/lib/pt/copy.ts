@@ -495,7 +495,7 @@ export const PT_COPY: Record<string, string> = {
   'Everything in Premium': 'Tudo o que está no Premium',
   '250 text + 250 voice AI queries per member per day':
     '250 perguntas de texto e 250 de voz para a IA por membro ao dia',
-  'Unlimited service manuals': 'Manuais de serviço ilimitados',
+  '50 service manuals': '50 manuais de serviço',
   'Up to 10 user seats': 'Até 10 usuários',
   'Find rated repair and maintenance pros': 'Encontre profissionais de reparo e manutenção com avaliação',
   'Request service and order consumables': 'Peça serviço e encomende consumíveis',

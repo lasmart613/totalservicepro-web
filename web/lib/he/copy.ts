@@ -495,7 +495,7 @@ export const HE_COPY: Record<string, string> = {
   'Everything in Premium': 'כל מה שיש ב-Premium',
   '250 text + 250 voice AI queries per member per day':
     '250 שאלות טקסט ו-250 שאלות קול לבינה המלאכותית לכל חבר ביום',
-  'Unlimited service manuals': 'ספרי שירות ללא הגבלה',
+  '50 service manuals': '50 ספרי שירות',
   'Up to 10 user seats': 'עד 10 משתמשים',
   'Find rated repair and maintenance pros': 'מוצאים אנשי תיקון ואחזקה עם דירוג',
   'Request service and order consumables': 'מבקשים שירות ומזמינים מתכלים',

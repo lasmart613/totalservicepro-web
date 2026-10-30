@@ -7,6 +7,7 @@ import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
   UNLIMITED_MANUAL_SLOTS,
+  TEAM_MANUAL_SLOTS,
   complimentaryPremiumExpired,
   currentOrgPlan,
   currentOrgPlanLabel,
@@ -154,7 +155,7 @@ test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => 
   assert.equal(manualSlotLimit({ is_premium: true }), 15);
   assert.equal(manualSlotLimit({ is_premium: true, manual_slots: 999 }), 15);
   assert.equal(manualSlotLimit({ plan: 'pro', manual_slots: null }), FREE_MANUAL_SLOTS);
-  assert.equal(manualSlotLimit({ plan: 'team' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team' }), TEAM_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ is_premium: false }), FREE_MANUAL_SLOTS);
 });
@@ -171,7 +172,7 @@ test('a Premium org whose stored manual_slots is 5 still gets 15, including from
   assert.equal(manualSlotLimit({ subscription_tier: 'premium', manual_slots: 5 }), 15);
   assert.equal(manualSlotLimit({ subscription_tier: 'pro' }), FREE_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ subscription_tier: 'Pro', manual_slots: null }), FREE_MANUAL_SLOTS);
-  assert.equal(manualSlotLimit({ plan: 'team', manual_slots: 5 }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team', manual_slots: 5 }), TEAM_MANUAL_SLOTS);
 
   const edge = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), '../../supabase/functions/get-manual-url/index.ts'),
@@ -230,4 +231,13 @@ test('downgrade paths never delete library rows', () => {
     try { text = __src(rel); } catch { continue; }
     assert.doesNotMatch(text, /from\(['"]organization_manuals['"]\)\s*\.delete|manual_library_remove/, rel);
   }
+});
+
+test('Team is capped at 50 manuals; over-cap Team orgs keep manuals but block new adds', () => {
+  assert.equal(TEAM_MANUAL_SLOTS, 50);
+  assert.equal(manualSlotLimit({ subscription_tier: 'team', is_premium: true }), 50);
+  assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(libraryAddBlocked(49, 50), false);
+  assert.equal(libraryAddBlocked(50, 50), true);
+  assert.equal(libraryAddBlocked(73, 50), true);
 });

@@ -496,7 +496,7 @@ export const AR_COPY: Record<string, string> = {
   'Everything in Premium': 'كل ما في Premium',
   '250 text + 250 voice AI queries per member per day':
     '250 سؤالًا نصيًا و250 سؤالًا صوتيًا للذكاء الاصطناعي لكل عضو في اليوم',
-  'Unlimited service manuals': 'كتيبات خدمة غير محدودة',
+  '50 service manuals': '50 كتيب خدمة',
   'Up to 10 user seats': 'حتى 10 مستخدمين',
   'Find rated repair and maintenance pros': 'اعثروا على محترفي الإصلاح والصيانة ذوي التقييم',
   'Request service and order consumables': 'اطلبوا خدمة واطلبوا المستهلكات',

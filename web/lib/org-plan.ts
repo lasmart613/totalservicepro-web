@@ -14,9 +14,10 @@ export type OrgPlanFields = {
   premium_grant?: string | null;
 };
 
-/** Free is 10. Premium is 15. Team/Enterprise is unlimited. */
+/** Free is 10. Premium is 15. Team is 50. Enterprise stays unlimited (999). */
 export const FREE_MANUAL_SLOTS = 10;
 export const PREMIUM_MANUAL_SLOTS = 15;
+export const TEAM_MANUAL_SLOTS = 50;
 export const UNLIMITED_MANUAL_SLOTS = 999;
 
 /**
@@ -131,7 +132,10 @@ export function isUnlimitedManualSlots(limit: number): boolean {
  * manual_slots row says 999. "pro" is not paid and stays on the free default.
  */
 export function manualSlotLimit(org: OrgPlanFields | null | undefined): number {
-  if (orgIsTopPaid(org)) return UNLIMITED_MANUAL_SLOTS;
+  // Team is capped at 50; orgs already over keep every manual (only new adds block).
+  if (orgIsTopPaid(org)) {
+    return currentOrgPlan(org) === 'team' ? TEAM_MANUAL_SLOTS : UNLIMITED_MANUAL_SLOTS;
+  }
   if (orgIsPaid(org)) return PREMIUM_MANUAL_SLOTS;
   // Free orgs get at least FREE_MANUAL_SLOTS. A stored manual_slots row that
   // is higher (a grant, e.g. 7) is kept; a stale lower one (old default 5)

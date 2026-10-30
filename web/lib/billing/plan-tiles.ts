@@ -35,8 +35,8 @@ export const FIND_WORK_BID_LINE = 'Find work and bid on open service requests';
 
 /** Premium/Team manual counts are Service Company tiles only. Laser Owner and Parts Supplier omit repair AI. */
 export const PREMIUM_MANUALS_LINE = '15 service manuals';
-/** Team manual slots are 999 in code (UNLIMITED_MANUAL_SLOTS); the tile says Unlimited. */
-export const TEAM_MANUALS_LINE = 'Unlimited service manuals';
+/** Team manual slots are 50 in code (TEAM_MANUAL_SLOTS). */
+export const TEAM_MANUALS_LINE = '50 service manuals';
 
 /** Per member per day — not a shared org bucket. */
 export const FREE_AI_LINE = '5 text + 5 voice AI queries per member per day';

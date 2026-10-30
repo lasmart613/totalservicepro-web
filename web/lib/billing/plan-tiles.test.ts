@@ -20,7 +20,7 @@ import {
   planTileLines,
   plansHrefForAudience,
 } from './plan-tiles.ts';
-import { UNLIMITED_MANUAL_SLOTS } from '../org-plan.ts';
+import { TEAM_MANUAL_SLOTS, UNLIMITED_MANUAL_SLOTS } from '../org-plan.ts';
 
 const TILES = ['free', 'premium', 'team'] as const;
 
@@ -28,10 +28,11 @@ test('weekly updates perk is one shared phrase', () => {
   assert.equal(WEEKLY_UPDATES_LINE, 'New features added weekly');
 });
 
-test('manual entitlements: Premium 15, Team unlimited (999 in code)', () => {
+test('manual entitlements: Premium 15, Team 50, Enterprise unlimited (999 in code)', () => {
   assert.equal(PREMIUM_MANUALS_LINE, '15 service manuals');
-  assert.equal(TEAM_MANUALS_LINE, 'Unlimited service manuals');
+  assert.equal(TEAM_MANUALS_LINE, '50 service manuals');
   assert.equal(UNLIMITED_MANUAL_SLOTS, 999);
+  assert.equal(TEAM_MANUAL_SLOTS, 50);
 });
 
 test('audience pills are Service Company, Laser Owner, Parts Supplier', () => {
@@ -105,7 +106,7 @@ test('service manuals appear on Service Company tiles only', () => {
   assert.ok(planTileLines('company', 'premium').includes(PREMIUM_MANUALS_LINE));
   assert.ok(planTileLines('company', 'team').includes(TEAM_MANUALS_LINE));
   assert.equal(PREMIUM_MANUALS_LINE, '15 service manuals');
-  assert.equal(TEAM_MANUALS_LINE, 'Unlimited service manuals');
+  assert.equal(TEAM_MANUALS_LINE, '50 service manuals');
 
   for (const audience of ['owner', 'supplier'] as const) {
     for (const tile of TILES) {

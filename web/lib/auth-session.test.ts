@@ -265,10 +265,10 @@ test('manuals page does not treat Premium or pro as unlimited slots', () => {
   assert.doesNotMatch(source, /premium\|team\|enterprise\|pro/);
 });
 
-test('/plans tiles: Premium 15, Team unlimited manuals, Free does not claim a full library', () => {
+test('/plans tiles: Premium 15, Team 50 manuals, Free does not claim a full library', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const tiles = readFileSync(join(here, './billing/plan-tiles.ts'), 'utf8');
-  assert.match(tiles, /export const TEAM_MANUALS_LINE = 'Unlimited service manuals'/);
+  assert.match(tiles, /export const TEAM_MANUALS_LINE = '50 service manuals'/);
   const companyBlock = tiles.split('const COMPANY_TILES')[1].split('const OWNER_TILES')[0];
   const ownerBlock = tiles.split('const OWNER_TILES')[1].split('const SUPPLIER_TILES')[0];
   const supplierBlock = tiles.split('const SUPPLIER_TILES')[1].split('export const PLAN_TILE_COPY')[0];
@@ -301,8 +301,8 @@ test('/plans tiles list the same weekly-updates perk on every tier', () => {
   const paywall = readFileSync(join(here, '../../app/src/main/assets/paywall.html'), 'utf8');
   const paywallWeekly = paywall.match(/New features added weekly/g) || [];
   assert.ok(paywallWeekly.length >= 2, 'Android paywall Premium and Team use the same weekly line');
-  assert.match(paywall, /Unlimited service manuals/);
-  assert.doesNotMatch(paywall, /50 service manuals/);
+  assert.match(paywall, /50 service manuals/);
+  assert.doesNotMatch(paywall, /Unlimited service manuals/);
 });
 
 test('/plans does not claim success after checkout', () => {
