@@ -8,6 +8,16 @@ import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/fa/locale';
+import { manualRoomMeta } from '@/lib/manual-rooms';
+import {
+  EMPTY_CASCADE,
+  cascadeActive,
+  computeManualCascade,
+  parseManualCascadeParams,
+  toggleCascade,
+  writeManualCascadeParams,
+  type ManualCascadeState,
+} from '@/lib/manual-cascade';
 import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
 import {
   catalogManualKind,
@@ -47,27 +57,17 @@ import {
   manualIsIncomplete,
 } from '@/lib/manual-incomplete';
 import {
-  DEFAULT_EQUIPMENT_TYPE,
-  EQUIPMENT_TYPE_VALUES,
-  equipmentTypeMeta,
-  equipmentTypeOrDefault,
-  inferEquipmentType,
-  type EquipmentType,
-} from '@/lib/equipment-types';
-import {
   ALL_MANUAL_ROOMS,
   DEFAULT_MANUAL_LIBRARY,
   filterManualLibrary,
   fetchManualLibraryRows,
   manufacturerShelves,
   manualLanguageOptionsForView,
-  manualRoomsForView,
   manualLibraryFiltersActive,
   manualCatalogLanguage,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
   manualSearchBodyQuery,
-  uniqueManualBrands,
   type ManualLibraryRoom,
 } from '@/lib/manual-library-filter';
 import {
@@ -105,10 +105,15 @@ export default function ManualsLibrary() {
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
   const [library, setLibrary] = useState<ManualLibraryShelf>(DEFAULT_MANUAL_LIBRARY);
-  const [room, setRoom] = useState<ManualLibraryRoom>(DEFAULT_EQUIPMENT_TYPE);
+  /** Cascade (room → type → brand → model, doc type at every level) replaces the single room + make picker. */
+  const [cascade, setCascade] = useState<ManualCascadeState>(EMPTY_CASCADE);
+  const [showAllBrands, setShowAllBrands] = useState(false);
+  const [brandFilter, setBrandFilter] = useState('');
+  /** Upstream filters always see every room / make; the cascade narrows after. */
+  const room: ManualLibraryRoom = ALL_MANUAL_ROOMS;
+  const selectedBrand = '';
   const [selectedWavelength, setSelectedWavelength] = useState('');
   const [query, setQuery] = useState('');
-  const [selectedBrand, setSelectedBrand] = useState('');
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [bodyMatchIds, setBodyMatchIds] = useState<Set<string> | null>(null);
@@ -151,10 +156,8 @@ export default function ManualsLibrary() {
   useEffect(() => {
     const parsed = parseManualLibrarySearchParams(window.location.search);
     if (parsed.library === 'operators') setLibrary('operators');
-    if (parsed.room === 'all') setRoom('all');
-    else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
+    setCascade(parseManualCascadeParams(window.location.search));
     if (parsed.query) setQuery(parsed.query);
-    if (parsed.brand) setSelectedBrand(parsed.brand);
     const catalogLanguage = manualCatalogLanguage(window.location.pathname, window.location.search);
     if (catalogLanguage) setSelectedLanguage(catalogLanguage);
     if (parsed.incompleteOnly) setIncompleteOnly(true);
@@ -162,29 +165,32 @@ export default function ManualsLibrary() {
   }, []);
 
   function syncFilterUrl(next: {
-    room?: ManualLibraryRoom;
+    cascade?: ManualCascadeState;
     query?: string;
-    brand?: string;
     language?: string;
     incompleteOnly?: boolean;
     library?: ManualLibraryShelf;
   }) {
-    const qs = manualLibrarySearchParams({
-      room: next.room ?? room,
+    const base = manualLibrarySearchParams({
+      room: ALL_MANUAL_ROOMS,
       query: next.query ?? query,
-      brand: next.brand ?? selectedBrand,
       language: next.language ?? selectedLanguage,
       incompleteOnly: next.incompleteOnly ?? incompleteOnly,
       library: next.library ?? library,
     });
+    const qs = writeManualCascadeParams(new URLSearchParams(base), next.cascade ?? cascade).toString();
     const path = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
     window.history.replaceState(null, '', path);
   }
 
-  function selectRoom(next: ManualLibraryRoom) {
-    setRoom(next);
-    if (next !== 'laser') setSelectedWavelength('');
-    syncFilterUrl({ room: next });
+  function updateCascade(next: ManualCascadeState) {
+    setCascade(next);
+    if (next.rooms.length !== 1 || next.rooms[0] !== 'lasers') setSelectedWavelength('');
+    syncFilterUrl({ cascade: next });
+  }
+
+  function toggleFilter(level: 'room' | 'subtype' | 'brand' | 'doc', id: string) {
+    updateCascade(toggleCascade(cascade, level, id));
   }
 
   function selectLibrary(next: ManualLibraryShelf) {
@@ -195,22 +201,13 @@ export default function ManualsLibrary() {
 
   function clearLibraryFilters() {
     setQuery('');
-    setSelectedBrand('');
+    setCascade(EMPTY_CASCADE);
+    setBrandFilter('');
     setSelectedLanguage('');
     setIncompleteOnly(false);
     setSelectedWavelength('');
     setBodyMatchIds(null);
-    syncFilterUrl({ query: '', brand: '', language: '', incompleteOnly: false });
-  }
-
-  function manualRoom(m: any): EquipmentType {
-    return inferEquipmentType({
-      equipment_type: m?.equipment_type,
-      title: m?.title,
-      brand: m?.brand,
-      model: m?.model,
-      storage_path: m?.storage_path,
-    });
+    syncFilterUrl({ cascade: EMPTY_CASCADE, query: '', language: '', incompleteOnly: false });
   }
 
   async function loadData() {
@@ -655,7 +652,7 @@ export default function ManualsLibrary() {
     language: selectedLanguage,
     incompleteOnly,
     wavelength: selectedWavelength,
-  });
+  }) || cascadeActive(cascade);
 
   useEffect(() => {
     const q = manualSearchBodyQuery(query);
@@ -709,40 +706,50 @@ export default function ManualsLibrary() {
     return myLibrary;
   }, [tab, discoveryActive, manuals, myLibrary]);
 
-  const filteredManuals = useMemo(
+  const lasersOnly = cascade.rooms.length === 1 && cascade.rooms[0] === 'lasers';
+  const wavelengthFilter = lasersOnly ? selectedWavelength : '';
+  /** Search / language / incomplete / shelf (and laser wavelength) before the cascade. */
+  const cascadeBase = useMemo(
     () =>
       filterManualLibrary(
         sourceManuals,
-        {
-          query,
-          brand: selectedBrand,
-          language: selectedLanguage,
-          room,
-          wavelength: selectedWavelength,
-          incompleteOnly,
-          library,
-        },
+        { query, language: selectedLanguage, room: ALL_MANUAL_ROOMS, wavelength: wavelengthFilter, incompleteOnly, library },
         bodyMatchIds
       ),
-    [sourceManuals, query, selectedBrand, selectedLanguage, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+    [sourceManuals, query, selectedLanguage, wavelengthFilter, incompleteOnly, library, bodyMatchIds]
   );
+  const cascadeView = useMemo(() => computeManualCascade(cascadeBase, cascade), [cascadeBase, cascade]);
+  const filteredManuals = cascadeView.results;
+  /** Write back selections pruned because they no longer match anything. */
+  useEffect(() => {
+    if (loading) return;
+    const a = cascadeView.state;
+    const same =
+      a.rooms.length === cascade.rooms.length &&
+      a.subtypes.length === cascade.subtypes.length &&
+      a.brands.length === cascade.brands.length &&
+      a.docs.length === cascade.docs.length;
+    if (!same) updateCascade(a);
+  }, [loading, cascadeView.state]);
 
   const otherLibraryHits = useMemo(
     () =>
-      filterManualLibrary(
-        sourceManuals,
-        {
-          query,
-          brand: selectedBrand,
-          language: selectedLanguage,
-          room,
-          wavelength: selectedWavelength,
-          incompleteOnly,
-          library: library === 'operators' ? 'service' : 'operators',
-        },
-        bodyMatchIds
-      ),
-    [sourceManuals, query, selectedBrand, selectedLanguage, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+      computeManualCascade(
+        filterManualLibrary(
+          sourceManuals,
+          {
+            query,
+            language: selectedLanguage,
+            room: ALL_MANUAL_ROOMS,
+            wavelength: wavelengthFilter,
+            incompleteOnly,
+            library: library === 'operators' ? 'service' : 'operators',
+          },
+          bodyMatchIds
+        ),
+        cascade
+      ).results,
+    [sourceManuals, query, selectedLanguage, wavelengthFilter, incompleteOnly, library, bodyMatchIds, cascade]
   );
 
   const libraryCounts = useMemo(() => {
@@ -757,50 +764,7 @@ export default function ManualsLibrary() {
 
   const catalogInLibrary = library === 'operators' ? libraryCounts.operators : libraryCounts.service;
 
-  const roomCounts = useMemo(() => {
-    const preRoom = filterManualLibrary(
-      sourceManuals,
-      {
-        query,
-        brand: selectedBrand,
-        language: selectedLanguage,
-        room: ALL_MANUAL_ROOMS,
-        incompleteOnly,
-        library,
-      },
-      bodyMatchIds
-    );
-    const counts = Object.fromEntries(EQUIPMENT_TYPE_VALUES.map((value) => [value, 0])) as Record<
-      EquipmentType,
-      number
-    >;
-    preRoom.forEach((m) => {
-      counts[manualRoom(m)] += 1;
-    });
-    return counts;
-  }, [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]);
-
-  const shelfRooms = useMemo(
-    () =>
-      manualRoomsForView(
-        sourceManuals,
-        {
-          query,
-          brand: selectedBrand,
-          language: selectedLanguage,
-          incompleteOnly,
-          library,
-        },
-        bodyMatchIds
-      ),
-    [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]
-  );
-
   const brandShelves = useMemo(() => manufacturerShelves(filteredManuals), [filteredManuals]);
-  const makeOptions = useMemo(
-    () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
-    [manuals, library]
-  );
   const languageOptions = useMemo(
     () => manualLanguageOptionsForView(sourceManuals, { room, library }),
     [sourceManuals, room, library]
@@ -812,10 +776,21 @@ export default function ManualsLibrary() {
     syncFilterUrl({ language: '' });
   }, [loading, languageOptions, selectedLanguage]);
   const filtersOn = discoveryActive || selectedWavelength !== '';
-  const activeRoom =
-    room === ALL_MANUAL_ROOMS
-      ? { roomLabel: 'All rooms', label: 'All equipment', blurb: 'Every catalog room.' }
-      : equipmentTypeMeta(room);
+  const activeRoom = {
+    roomLabel:
+      cascadeView.state.rooms.length === 0
+        ? t('All rooms')
+        : cascadeView.state.rooms.map((id) => t(manualRoomMeta(id).label)).join(', '),
+  };
+  const BRAND_CAP = 30;
+  const brandOptionsShown = (() => {
+    const needle = brandFilter.trim().toLowerCase();
+    const list = needle ? cascadeView.brands.filter((b) => b.label.toLowerCase().includes(needle)) : cascadeView.brands;
+    if (showAllBrands || needle) return list;
+    const top = list.slice(0, BRAND_CAP);
+    for (const b of list.slice(BRAND_CAP)) if (cascadeView.state.brands.some((x) => x.toLowerCase() === b.id.toLowerCase())) top.push(b);
+    return top;
+  })();
 
   /** Light spines so books contrast with the wood shelf; dark text on top */
   const getBookColor = (manual: any) => {
@@ -1013,26 +988,6 @@ export default function ManualsLibrary() {
             }}
             autoComplete="off"
           />
-          <label className="label" htmlFor="manuals-make">
-            {t('Manufacturer')}
-          </label>
-          <select
-            id="manuals-make"
-            className="input"
-            value={selectedBrand}
-            onChange={(e) => {
-              const next = e.target.value;
-              setSelectedBrand(next);
-              syncFilterUrl({ brand: next });
-            }}
-          >
-            <option value="">{t('All manufacturers')}</option>
-            {makeOptions.map((brand) => (
-              <option key={brand} value={brand}>
-                {brand}
-              </option>
-            ))}
-          </select>
           <label className="label" htmlFor="manuals-language">
             {t('Language')}
           </label>
@@ -1064,71 +1019,138 @@ export default function ManualsLibrary() {
             />
             Incomplete PDFs only
           </label>
-          <div className="manuals-rail-label">Room</div>
-          <div className="manual-rooms" role="tablist" aria-label="Equipment rooms">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={room === ALL_MANUAL_ROOMS}
-              onClick={() => selectRoom(ALL_MANUAL_ROOMS)}
-              className={`manual-room ${room === ALL_MANUAL_ROOMS ? 'is-selected' : ''}`}
-              title="Search every equipment room"
-            >
-              <span className="manual-room-icon" aria-hidden>
-                📚
-              </span>
-              <span className="manual-room-copy">
-                <span className="manual-room-label">All</span>
-                <span className="manual-room-meta">
-                  {loading
-                    ? '…'
-                    : `${Object.values(roomCounts).reduce((n, c) => n + c, 0)} ${
-                        Object.values(roomCounts).reduce((n, c) => n + c, 0) === 1 ? 'manual' : 'manuals'
-                      }`}
-                </span>
-              </span>
-            </button>
-            {shelfRooms.map((shelf) => {
-              const selected = room === shelf.value;
-              const count = roomCounts[shelf.value];
-              return (
-                <button
-                  key={shelf.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  onClick={() => selectRoom(shelf.value)}
-                  className={`manual-room ${selected ? 'is-selected' : ''}`}
-                  title={shelf.blurb}
-                >
-                  <span className="manual-room-icon" aria-hidden>
-                    {shelf.icon}
-                  </span>
-                  <span className="manual-room-copy">
-                    <span className="manual-room-label">{shelf.label}</span>
-                    <span className="manual-room-meta">
-                      {loading ? '…' : `${count} ${count === 1 ? 'manual' : 'manuals'}`}
-                    </span>
-                  </span>
+          <div className="manual-cascade" aria-label={t('Filters')}>
+            <fieldset className="manual-facet">
+              <legend className="manuals-rail-label">{t('Room')}</legend>
+              <div className="manual-chips">
+                {cascadeView.rooms.map((opt) => {
+                  const on = cascadeView.state.rooms.includes(opt.id);
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleFilter('room', opt.id)}
+                      className={`manual-chip ${on ? 'is-selected' : ''}`}
+                    >
+                      <span aria-hidden>{manualRoomMeta(opt.id).icon}</span> {t(opt.label)}
+                      <span className="manual-chip-count">{loading ? '…' : opt.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <fieldset className="manual-facet">
+              <legend className="manuals-rail-label">{t('Type')}</legend>
+              {cascadeView.subtypes.length === 0 ? (
+                <p className="manual-facet-hint">{t('Pick a room to see equipment types.')}</p>
+              ) : (
+                <div className="manual-chips">
+                  {cascadeView.subtypes.map((opt) => {
+                    const on = cascadeView.state.subtypes.includes(opt.id);
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => toggleFilter('subtype', opt.id)}
+                        className={`manual-chip ${on ? 'is-selected' : ''}`}
+                        title={opt.room ? t(manualRoomMeta(opt.room).label) : undefined}
+                      >
+                        {opt.label}
+                        <span className="manual-chip-count">{opt.count}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </fieldset>
+            {lasersOnly && (
+              <div className="manuals-rail-wavelengths">
+                <div className="manuals-rail-label">Wavelength</div>
+                {WAVELENGTH_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setSelectedWavelength(option.value)}
+                    className={`manuals-rail-chip ${selectedWavelength === option.value ? 'is-selected' : ''}`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            <fieldset className="manual-facet">
+              <legend className="manuals-rail-label">{t('Brand')}</legend>
+              {cascadeView.brands.length > BRAND_CAP && (
+                <input
+                  className="input manual-facet-search"
+                  type="search"
+                  placeholder={t('Filter brands')}
+                  aria-label={t('Filter brands')}
+                  value={brandFilter}
+                  onChange={(e) => setBrandFilter(e.target.value)}
+                  autoComplete="off"
+                />
+              )}
+              <div className="manual-chips manual-chips--scroll">
+                {brandOptionsShown.map((opt) => {
+                  const on = cascadeView.state.brands.some((b) => b.toLowerCase() === opt.id.toLowerCase());
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleFilter('brand', opt.id)}
+                      className={`manual-chip ${on ? 'is-selected' : ''}`}
+                    >
+                      {opt.label}
+                      <span className="manual-chip-count">{opt.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              {!brandFilter.trim() && cascadeView.brands.length > BRAND_CAP && (
+                <button type="button" className="manual-facet-more" onClick={() => setShowAllBrands((v) => !v)}>
+                  {showAllBrands
+                    ? t('Show fewer')
+                    : t('Show all {n} brands').replace('{n}', String(cascadeView.brands.length))}
                 </button>
-              );
-            })}
+              )}
+            </fieldset>
+            <label className="manuals-rail-label" htmlFor="manuals-model">
+              {t('Model')}
+            </label>
+            <input
+              id="manuals-model"
+              className="input"
+              type="search"
+              placeholder={t('Model number or name')}
+              value={cascade.model}
+              onChange={(e) => updateCascade({ ...cascade, model: e.target.value })}
+              autoComplete="off"
+            />
+            <fieldset className="manual-facet">
+              <legend className="manuals-rail-label">{t('Document type')}</legend>
+              <div className="manual-chips">
+                {cascadeView.docs.map((opt) => {
+                  const on = cascadeView.state.docs.includes(opt.id);
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => toggleFilter('doc', opt.id)}
+                      className={`manual-chip ${on ? 'is-selected' : ''}`}
+                    >
+                      {t(opt.label)}
+                      <span className="manual-chip-count">{opt.count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
           </div>
-          {room === 'laser' && (
-            <div className="manuals-rail-wavelengths">
-              <div className="manuals-rail-label">Wavelength</div>
-              {WAVELENGTH_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setSelectedWavelength(option.value)}
-                  className={`manuals-rail-chip ${selectedWavelength === option.value ? 'is-selected' : ''}`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          )}
           <p className="manuals-rail-count">
             {loading
               ? t('Loading catalog…')
@@ -1222,7 +1244,7 @@ export default function ManualsLibrary() {
                       {t('Clear filters')}
                     </button>
                   </>
-                ) : selectedWavelength && room === 'laser' ? (
+                ) : selectedWavelength && lasersOnly ? (
                   <p>No manuals found for this wavelength in the Laser room.</p>
                 ) : (
                   <>

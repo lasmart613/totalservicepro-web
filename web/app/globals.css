@@ -1355,3 +1355,24 @@ html {
   display: block;
   padding-left: 0;
 }
+
+/* /manuals cascading filters (room → type → brand → model, doc type) */
+.manual-cascade { display: flex; flex-direction: column; gap: 10px; }
+.manual-facet { border: 0; margin: 0; padding: 0; min-width: 0; }
+.manual-facet-hint { margin: 2px 0 0; font-size: 12px; opacity: 0.7; }
+.manual-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.manual-chips--scroll { max-height: 220px; overflow-y: auto; }
+.manual-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 32px;
+  padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(127, 127, 127, 0.35);
+  background: transparent; color: inherit; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.manual-chip.is-selected { background: var(--accent, #2563eb); border-color: transparent; color: #fff; }
+.manual-chip-count { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
+.manual-facet-search { margin-bottom: 6px; }
+.manual-facet-more { margin-top: 6px; background: none; border: 0; padding: 0; color: var(--accent, #2563eb); cursor: pointer; font-size: 12px; }
+@media (max-width: 768px) {
+  .manual-chips { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 4px; }
+  .manual-chips--scroll { max-height: none; }
+  .manual-chip { min-height: 40px; }
+}
