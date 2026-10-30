@@ -322,7 +322,7 @@ export default function ReportDetail() {
               {Array.isArray(report.power_measurements) && report.power_measurements.length > 0 && (
                 <div>
                   <h3 className="font-bold text-[var(--gold)] mb-2">{t('Performance Testing')}</h3>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto table-scroll">
                     <table className="w-full text-xs border-collapse">
                       <thead>
                         <tr className="text-left text-[var(--text3)]">

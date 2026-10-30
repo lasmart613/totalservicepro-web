@@ -122,7 +122,7 @@ export function JobCostingView({ report }: { report: JobCostReport }) {
             {t('No repair orders were read for this organization.')}
           </div>
         ) : (
-          <div className="card overflow-x-auto">
+          <div className="card overflow-x-auto table-scroll">
             <table className="w-full text-sm min-w-[960px]">
               <thead className="text-start text-[var(--text3)]">
                 <tr>

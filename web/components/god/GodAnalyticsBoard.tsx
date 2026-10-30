@@ -52,7 +52,7 @@ function RankedTable({
         <h3 className="text-lg font-bold">{title}</h3>
         <p className="text-xs text-[var(--text3)]">Last 30 days</p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto table-scroll">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
@@ -90,7 +90,7 @@ function TspTable({ events }: { events: TspEventRow[] }) {
           Shown when gtag fires them. Untagged events stay empty — do not invent counts.
         </p>
       </div>
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto table-scroll">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
@@ -363,7 +363,7 @@ export function GodAnalyticsBoard({ variant = 'full' }: { variant?: 'full' | 'te
               <h3 className="text-lg font-bold">All events</h3>
               <p className="text-xs text-[var(--text3)]">Top event names from GA4 for the last 30 days.</p>
             </div>
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto table-scroll">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">

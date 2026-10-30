@@ -366,7 +366,7 @@ export default function TeamManagement() {
       {pendingInvites.length > 0 && (
         <div className="card p-6 mb-10">
           <h2 className="font-bold text-xl mb-4">{t('Pending Invites ({count})').replace('{count}', String(pendingInvites.length))}</h2>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto table-scroll">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text3)]">
@@ -417,7 +417,7 @@ export default function TeamManagement() {
         ) : teamMembers.length === 0 ? (
           <div className="text-center py-8 text-[var(--text3)]">{t('No team members yet.')}</div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto table-scroll">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text3)]">

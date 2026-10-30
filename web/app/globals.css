@@ -1355,3 +1355,37 @@ html {
   display: block;
   padding-left: 0;
 }
+
+/*
+ * Shared horizontal scroll for data tables (God + every user dashboard).
+ * Keeps columns from squashing and keeps the scrollbar visible on
+ * macOS/iOS (incl. WKWebView), where overlay scrollbars otherwise hide.
+ */
+.table-scroll {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: visible;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) var(--surface3);
+  padding-bottom: 2px;
+}
+.table-scroll::-webkit-scrollbar {
+  -webkit-appearance: none;
+  height: 8px;
+}
+.table-scroll::-webkit-scrollbar-track {
+  background: var(--surface3);
+  border-radius: 4px;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 4px;
+}
+.table-scroll > table {
+  min-width: max(100%, 640px);
+}

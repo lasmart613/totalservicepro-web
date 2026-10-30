@@ -641,113 +641,115 @@ export default function PurchaseOrderFormClient() {
           <p className="text-[11px] text-[var(--text3)] mb-2">
             {t('Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.')}
           </p>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-[11px] text-[var(--text3)]">
-                <th className="pb-2">{t('Part #')}</th>
-                <th className="pb-2">{t('Description')}</th>
-                <th className="pb-2 w-16">{t('Qty')}</th>
-                <th className="pb-2 w-24">{t('Price')}</th>
-                <th className="pb-2 w-24">{t('Ext')}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {lineItems.map((li) => (
-                <tr key={li.id}>
-                  <td className="pr-1 pb-2 relative">
-                    <input
-                      className="input"
-                      list={`po-parts-${li.id}`}
-                      value={li.part_number}
-                      autoComplete="off"
-                      placeholder={t('Start typing a part #…')}
-                      onFocus={() => setSuggestLineId(li.id)}
-                      onBlur={() => setTimeout(() => setSuggestLineId((cur) => (cur === li.id ? null : cur)), 180)}
-                      onChange={(e) => {
-                        const pn = e.target.value;
-                        updateLine(li.id, { part_number: pn });
-                        setSuggestLineId(li.id);
-                        const hit = exactPartSuggest(partHits, pn);
-                        if (hit) applyPartHit(li.id, hit);
-                      }}
-                    />
-                    <datalist id={`po-parts-${li.id}`}>
-                      {filterPartSuggests(partHits, li.part_number).map((p) => (
-                        <option key={p.key} value={p.part_number}>
-                          {p.description} · {sourceLabel(p.source)}
-                        </option>
-                      ))}
-                    </datalist>
-                    {suggestLineId === li.id && filterPartSuggests(partHits, li.part_number).length > 0 && (
-                      <div className="absolute left-0 right-0 top-full z-30 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] shadow-lg">
-                        {filterPartSuggests(partHits, li.part_number).map((p) => (
-                          <button
-                            key={p.key}
-                            type="button"
-                            className="block w-full text-left px-2 py-1.5 text-xs hover:bg-[var(--surface2)]"
-                            onMouseDown={(e) => {
-                              e.preventDefault();
-                              applyPartHit(li.id, p);
-                            }}
-                          >
-                            <span className="font-semibold text-[var(--gold)]">{p.part_number}</span>
-                            <span className="text-[var(--text3)]"> · {sourceLabel(p.source)}</span>
-                            <div className="text-[var(--text2)] truncate">{p.description}</div>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-                  <td className="pr-1 pb-2">
-                    <input
-                      className="input"
-                      value={li.description}
-                      onChange={(e) => updateLine(li.id, { description: e.target.value })}
-                    />
-                  </td>
-                  <td className="pr-1 pb-2">
-                    <input
-                      className="input"
-                      type="number"
-                      min={0}
-                      step="1"
-                      value={li.qty}
-                      onChange={(e) => updateLine(li.id, { qty: parseFloat(e.target.value) || 0 })}
-                    />
-                  </td>
-                  <td className="pr-1 pb-2">
-                    <input
-                      className="input"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={li.unit_price}
-                      onChange={(e) =>
-                        updateLine(li.id, { unit_price: parseFloat(e.target.value) || 0 })
-                      }
-                    />
-                  </td>
-                  <td className="pr-1 pb-2">
-                    <input className="input opacity-90" readOnly value={money(li.ext)} />
-                  </td>
-                  <td className="pb-2">
-                    <button
-                      type="button"
-                      className="text-red-400 text-lg px-1"
-                      onClick={() =>
-                        setLineItems((rows) =>
-                          rows.length <= 1 ? [emptyLineItem('LI')] : rows.filter((r) => r.id !== li.id)
-                        )
-                      }
-                    >
-                      ×
-                    </button>
-                  </td>
+          <div className="overflow-x-auto table-scroll">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] text-[var(--text3)]">
+                  <th className="pb-2">{t('Part #')}</th>
+                  <th className="pb-2">{t('Description')}</th>
+                  <th className="pb-2 w-16">{t('Qty')}</th>
+                  <th className="pb-2 w-24">{t('Price')}</th>
+                  <th className="pb-2 w-24">{t('Ext')}</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {lineItems.map((li) => (
+                  <tr key={li.id}>
+                    <td className="pr-1 pb-2 relative">
+                      <input
+                        className="input"
+                        list={`po-parts-${li.id}`}
+                        value={li.part_number}
+                        autoComplete="off"
+                        placeholder={t('Start typing a part #…')}
+                        onFocus={() => setSuggestLineId(li.id)}
+                        onBlur={() => setTimeout(() => setSuggestLineId((cur) => (cur === li.id ? null : cur)), 180)}
+                        onChange={(e) => {
+                          const pn = e.target.value;
+                          updateLine(li.id, { part_number: pn });
+                          setSuggestLineId(li.id);
+                          const hit = exactPartSuggest(partHits, pn);
+                          if (hit) applyPartHit(li.id, hit);
+                        }}
+                      />
+                      <datalist id={`po-parts-${li.id}`}>
+                        {filterPartSuggests(partHits, li.part_number).map((p) => (
+                          <option key={p.key} value={p.part_number}>
+                            {p.description} · {sourceLabel(p.source)}
+                          </option>
+                        ))}
+                      </datalist>
+                      {suggestLineId === li.id && filterPartSuggests(partHits, li.part_number).length > 0 && (
+                        <div className="absolute left-0 right-0 top-full z-30 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] shadow-lg">
+                          {filterPartSuggests(partHits, li.part_number).map((p) => (
+                            <button
+                              key={p.key}
+                              type="button"
+                              className="block w-full text-left px-2 py-1.5 text-xs hover:bg-[var(--surface2)]"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                applyPartHit(li.id, p);
+                              }}
+                            >
+                              <span className="font-semibold text-[var(--gold)]">{p.part_number}</span>
+                              <span className="text-[var(--text3)]"> · {sourceLabel(p.source)}</span>
+                              <div className="text-[var(--text2)] truncate">{p.description}</div>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="pr-1 pb-2">
+                      <input
+                        className="input"
+                        value={li.description}
+                        onChange={(e) => updateLine(li.id, { description: e.target.value })}
+                      />
+                    </td>
+                    <td className="pr-1 pb-2">
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        step="1"
+                        value={li.qty}
+                        onChange={(e) => updateLine(li.id, { qty: parseFloat(e.target.value) || 0 })}
+                      />
+                    </td>
+                    <td className="pr-1 pb-2">
+                      <input
+                        className="input"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={li.unit_price}
+                        onChange={(e) =>
+                          updateLine(li.id, { unit_price: parseFloat(e.target.value) || 0 })
+                        }
+                      />
+                    </td>
+                    <td className="pr-1 pb-2">
+                      <input className="input opacity-90" readOnly value={money(li.ext)} />
+                    </td>
+                    <td className="pb-2">
+                      <button
+                        type="button"
+                        className="text-red-400 text-lg px-1"
+                        onClick={() =>
+                          setLineItems((rows) =>
+                            rows.length <= 1 ? [emptyLineItem('LI')] : rows.filter((r) => r.id !== li.id)
+                          )
+                        }
+                      >
+                        ×
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <button
             type="button"
             className="btn btn-secondary text-sm mt-2"

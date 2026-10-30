@@ -586,7 +586,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
         </span>
       </div>
 
-      <div className="overflow-x-auto card mb-8">
+      <div className="overflow-x-auto table-scroll card mb-8">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
@@ -833,7 +833,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
       <section>
         <h3 className="text-xl font-bold mb-2">Send log</h3>
         <p className="text-[var(--text3)] mb-3">Who already got a God blast or shop invite. Manual sends only.</p>
-        <div className="overflow-x-auto card">
+        <div className="overflow-x-auto table-scroll card">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
