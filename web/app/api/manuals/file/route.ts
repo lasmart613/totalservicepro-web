@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { MANUAL_PATH_NOT_COVERED, manualPathCovered, normalizeStoragePath, storageResponseIsMissing } from '@/lib/manual-file';
 import { pdfInlineHeaders } from '@/lib/manuals';
-import { mayOpenManual, mayViewAiScopedManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
+import { ADD_TO_LIBRARY_TO_OPEN, mayOpenManual, manualsAccess, manualsForbiddenMessage, viewerBlockedUntilLibraryAdd } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
 import { isPublishedColumnMissing, isUnpublishedManual } from '@/lib/manual-published';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
@@ -54,9 +54,6 @@ async function resolveSignedUrl(opts: {
       manual_id: opts.manualId,
       storage_path: opts.storagePath,
       access_token: opts.token,
-      // Viewer byte proxy, not the library shelf. Keeps shared-catalog
-      // cite reads working when the direct signed URL has to be re-fetched.
-      ai_context: true,
     }),
   });
   const json = (await resp.json().catch(() => ({}))) as Record<string, any>;
@@ -184,55 +181,6 @@ function resolveCatalogPdfPath(
 }
 
 /**
- * When live get-manual-url still gates on company-library ownership, stream a
- * shared catalog PDF for signed-in Repair-AI members via service role. Bytes
- * stay inline — never return a Storage URL to the browser.
- */
-async function streamAiCatalogPdf(opts: {
-  role?: string | null;
-  orgType?: string | null;
-  manualId?: string | number | null;
-  storagePath?: string | null;
-  userClient: ReturnType<typeof createClient>;
-}): Promise<NextResponse | null> {
-  if (!hasServiceRole()) return null;
-  const admin = getSupabaseAdmin();
-  const primary = await loadCatalogRow(admin, opts.manualId, opts.storagePath);
-  if (primary.unpublished) {
-    return NextResponse.json({ error: 'not_found' }, { status: 404 });
-  }
-  const secondary = primary.row
-    ? primary
-    : await loadCatalogRow(opts.userClient, opts.manualId, opts.storagePath);
-  if (secondary.unpublished) {
-    return NextResponse.json({ error: 'not_found' }, { status: 404 });
-  }
-  const catalog = secondary.row;
-  const storagePath = cleanStoragePath(catalog?.storage_path || opts.storagePath);
-  if (
-    !mayViewAiScopedManual({
-      role: opts.role,
-      orgType: opts.orgType,
-      storagePath,
-      inLibrary: false,
-    })
-  ) {
-    return null;
-  }
-  const pdfPath = resolveCatalogPdfPath(catalog, opts.storagePath || storagePath);
-  if (!pdfPath) return null;
-  const { data: signed, error } = await admin.storage.from('manuals').createSignedUrl(pdfPath, 60 * 10);
-  if (error || !signed?.signedUrl) return null;
-  const pdfRes = await fetch(signed.signedUrl);
-  if (!pdfRes.ok || !pdfRes.body) return null;
-  const nameFromPath = pdfPath.split('/').pop()?.replace(/[?#].*$/, '') || 'service-manual.pdf';
-  return new NextResponse(pdfRes.body, {
-    status: 200,
-    headers: pdfInlineHeaders(nameFromPath),
-  });
-}
-
-/**
  * Stream a library PDF with Content-Disposition: inline so the browser
  * does not treat it as a download/attachment. Bytes are then rendered
  * by the in-app viewer (no Adobe / OS PDF app).
@@ -317,6 +265,18 @@ export async function POST(req: NextRequest) {
       manualId,
       storagePath,
     });
+    // Library membership is required for every manual, including incomplete
+    // ones and responses that still carry a signed URL with in_library false.
+    if (viewerBlockedUntilLibraryAdd(resolved.json)) {
+      return NextResponse.json(
+        {
+          error: ADD_TO_LIBRARY_TO_OPEN,
+          requires_add: true,
+          ...(resolved.json?.free_incomplete === true ? { free_incomplete: true } : {}),
+        },
+        { status: 403 },
+      );
+    }
     if (!resolved.url) {
       if (resolved.json?.error === 'not_found') {
         return NextResponse.json({ error: 'not_found' }, { status: 404 });
@@ -327,14 +287,6 @@ export async function POST(req: NextRequest) {
       if (resolved.json?.error === MANUAL_PATH_NOT_COVERED) {
         return NextResponse.json({ error: MANUAL_PATH_NOT_COVERED }, { status: 403 });
       }
-      const catalogStream = await streamAiCatalogPdf({
-        role: profile?.role,
-        orgType,
-        manualId,
-        storagePath,
-        userClient: caller.supabase,
-      });
-      if (catalogStream) return catalogStream;
       return NextResponse.json(
         { error: resolved.error || 'Could not open manual', ...resolved.json },
         { status: resolved.status >= 400 ? resolved.status : 403 }

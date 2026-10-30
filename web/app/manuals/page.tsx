@@ -45,7 +45,6 @@ import {
   INCOMPLETE_FREE_TITLE,
   libraryRowIsFree,
   manualIsIncomplete,
-  mayViewIncompleteFree,
 } from '@/lib/manual-incomplete';
 import {
   DEFAULT_EQUIPMENT_TYPE,
@@ -583,16 +582,10 @@ export default function ManualsLibrary() {
         storage_path: m.storage_path,
       };
 
-      // Shelf / Browse clicks are not AI cite reads. Do not stream a shared
-      // catalog PDF until this company owns the manual — even if get-manual-url
-      // would return a URL for an ai_context reader.
-      // Incomplete manuals are free: open directly only when get-manual-url
-      // would serve the free view (same org / doc_kind rule). Otherwise prompt
-      // the (free) add. A requires_add / denied reply below also falls back.
-      const freeView =
-        manualIsIncomplete(m) &&
-        mayViewIncompleteFree({ manual: m, orgId, serviceCompany: canService === true, requestedPath: m.storage_path });
-      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m), incomplete: freeView })) {
+      // Every manual must be in the company library before it opens, including
+      // incomplete ones. Incomplete adds do not use a slot. A requires_add /
+      // in_library false reply below is the same gate if this check is skipped.
+      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m) })) {
         const added = await confirmAddManual(m, shownTitle);
         if (!added) return;
         await openAddedManual(m, shownTitle, payload);

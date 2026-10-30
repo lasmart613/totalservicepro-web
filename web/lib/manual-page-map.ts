@@ -192,7 +192,12 @@ export function annotateChaptersWithPageMap<T extends { storage_path: string }>(
   return { chapters: annotated, joinedPageCount: joinedPageCount || null };
 }
 
-/** Spans from chapter rows. Null unless they cover joined pages 1..N with no gaps. */
+/**
+ * Spans from chapter rows. pageStart is the absolute volume page
+ * (chapter_metadata.page_start), not a packed offset, so gaps between
+ * chapters stay gaps. Null when no chapter has both a start and a count.
+ * The first stored copy of a path owns that span.
+ */
 export function joinedMapFromChapters(
   chapters: readonly { storage_path?: string; pageStart?: number; pageCount?: number }[],
 ): JoinedPageSpan[] | null {
@@ -202,9 +207,8 @@ export function joinedMapFromChapters(
     const storagePath = indexPathKey(chapter.storage_path);
     if (!storagePath || seen.has(storagePath)) continue;
     if (chapter.pageStart == null || chapter.pageCount == null) continue;
-    if (!Number.isFinite(chapter.pageStart) || !Number.isFinite(chapter.pageCount) || chapter.pageCount < 1) {
-      continue;
-    }
+    if (!Number.isFinite(chapter.pageStart) || chapter.pageStart < 1) continue;
+    if (!Number.isFinite(chapter.pageCount) || chapter.pageCount < 1) continue;
     seen.add(storagePath);
     spans.push({
       storagePath,
@@ -213,13 +217,99 @@ export function joinedMapFromChapters(
     });
   }
   spans.sort((a, b) => a.pageStart - b.pageStart || a.storagePath.localeCompare(b.storagePath));
-  if (!spans.length) return null;
-  let expect = 1;
-  for (const span of spans) {
-    if (span.pageStart !== expect) return null;
-    expect += span.pageCount;
+  return spans.length ? spans : null;
+}
+
+function joinMetadataPath(parentPath: string, raw: unknown): string {
+  let path = indexPathKey(raw);
+  if (!path) return '';
+  const folder = indexPathKey(parentPath);
+  const lower = path.toLowerCase();
+  const folderLower = folder.toLowerCase();
+  if (
+    folder &&
+    !lower.startsWith('shared/') &&
+    !lower.startsWith('http://') &&
+    !lower.startsWith('https://') &&
+    lower !== folderLower &&
+    !lower.startsWith(`${folderLower}/`)
+  ) {
+    path = indexPathKey(`${folder}/${path.replace(/^\/+/, '')}`);
   }
-  return spans;
+  return path;
+}
+
+function storedSpanNumber(value: unknown, min: number, max: number): number | null {
+  if (value == null || value === '') return null;
+  const n = typeof value === 'number' ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || n < min || n > max) return null;
+  return Math.floor(n);
+}
+
+/** PDF rows in chapter_metadata order, with stored volume page_start/page_count. */
+export function volumePartsFromMetadata(
+  metadata: unknown,
+  parentPath = '',
+): { storagePath: string; pageStart: number | null; pageCount: number | null }[] {
+  if (!Array.isArray(metadata) || !metadata.length) return [];
+  const out: { storagePath: string; pageStart: number | null; pageCount: number | null }[] = [];
+  const seen = new Set<string>();
+  for (const item of metadata) {
+    if (!item || typeof item !== 'object') continue;
+    const row = item as { storage_path?: unknown; path?: unknown; page_start?: unknown; page_count?: unknown };
+    const storagePath = joinMetadataPath(parentPath, row.storage_path ?? row.path);
+    if (!storagePath || !storagePath.toLowerCase().endsWith('.pdf') || seen.has(storagePath)) continue;
+    seen.add(storagePath);
+    out.push({
+      storagePath,
+      pageStart: storedSpanNumber(row.page_start, 1, 999999),
+      pageCount: storedSpanNumber(row.page_count, 0, 9999),
+    });
+  }
+  return out;
+}
+
+/**
+ * Chapter list for a volume-page deep link. Stored page_start wins over a
+ * packed offset the edge function may have attached, and fills spans in when
+ * that list omitted them.
+ */
+export function chaptersForVolumePage<
+  T extends { storage_path?: string; pageStart?: number; pageCount?: number },
+>(chapters: readonly T[] | null | undefined, metadata: unknown, parentPath = ''): T[] {
+  const parts = volumePartsFromMetadata(metadata, parentPath);
+  const base = chapters?.length
+    ? chapters
+    : parts.map((part) => ({ storage_path: part.storagePath }) as T);
+  return applyStoredVolumePageSpans(base, parts);
+}
+
+/**
+ * Prefer chapter_metadata page_start/page_count over a recomputed joined
+ * offset. A citation page is the volume page those fields describe. Chapters
+ * with no stored span keep whatever start they already have.
+ */
+export function applyStoredVolumePageSpans<T extends { storage_path?: string; pageStart?: number; pageCount?: number }>(
+  chapters: readonly T[],
+  parts: readonly { storagePath: string; pageStart?: number | null; pageCount?: number | null }[],
+): T[] {
+  const byPath = new Map<string, { pageStart: number; pageCount: number }>();
+  for (const part of parts) {
+    const key = indexPathKey(part.storagePath);
+    if (!key || byPath.has(key)) continue;
+    const pageStart = part.pageStart;
+    const pageCount = part.pageCount;
+    if (pageStart == null || pageCount == null) continue;
+    if (!Number.isFinite(pageStart) || pageStart < 1) continue;
+    if (!Number.isFinite(pageCount) || pageCount < 1) continue;
+    byPath.set(key, { pageStart: Math.floor(pageStart), pageCount: Math.floor(pageCount) });
+  }
+  if (!byPath.size) return chapters.map((chapter) => ({ ...chapter }));
+  return chapters.map((chapter) => {
+    const span = byPath.get(indexPathKey(chapter.storage_path));
+    if (!span) return { ...chapter };
+    return { ...chapter, pageStart: span.pageStart, pageCount: span.pageCount };
+  });
 }
 
 export type ViewerJoinedTarget =
@@ -243,10 +333,9 @@ export function viewerTargetForJoinedPage(
   const hit = resolveJoinedPage(map, page);
   if (!hit) {
     if (!Number.isFinite(page) || page < 1) return { kind: 'unmapped' };
-    const last = map[map.length - 1];
-    const end = last.pageStart + last.pageCount - 1;
-    if (Math.floor(page) > end) return { kind: 'out-of-range' };
-    return { kind: 'unmapped' };
+    // Inside a gap, before the first chapter, or past the last: do not open
+    // the entry file and pretend this volume page is local page 1.
+    return { kind: 'out-of-range' };
   }
   return { kind: 'hit', ...hit };
 }

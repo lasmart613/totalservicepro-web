@@ -1,9 +1,10 @@
-// Incomplete manuals are free (Larry, 2026-10-22).
+// Incomplete manuals are free to add (Larry, 2026-10-22; view rule tightened later).
 //
 // A manual with manuals.is_incomplete = true (a truncated or partial PDF, the
-// only copy we have) is free to view and never counts against a company's
-// manual-library slots. Pure helpers shared by get-manual-url and the web app
-// (web/lib/manual-incomplete.ts re-exports them) so both sides agree.
+// only copy we have) never counts against a company's manual-library slots.
+// It still has to be in the library before it can be opened. Pure helpers
+// shared by get-manual-url and the web app (web/lib/manual-incomplete.ts
+// re-exports them) so both sides agree.
 
 /** Same truthy set the web catalog and the Android asset accept. */
 export function isIncompleteFlag(value: unknown): boolean {
@@ -57,30 +58,17 @@ export function pathWithinManual(manualPath: unknown, requested: unknown): boole
   return r === m || r.startsWith(m + "/");
 }
 
-const OPERATOR_KINDS = new Set(["operator", "user"]);
-
 /**
- * May this caller open an incomplete manual they do not own, for free?
- * Fails closed:
- *  - the manual must be flagged is_incomplete (published is checked earlier);
- *  - the caller must be an active member of a company (orgId set);
- *  - service manuals need a service company (Repair AI access); owner-side
- *    orgs get the free view only for rows explicitly stored as operator/user
- *    manuals (doc_kind). Anything else still goes through Add to library,
- *    which is also free for incomplete manuals;
- *  - the requested storage path must be this manual's path or under it, so
- *    an incomplete manual id cannot unlock some other file.
+ * Opening requires a library row for every manual, including incomplete ones.
+ * Incomplete manuals are free to add and do not use a slot; they are not free
+ * to open. Always false so a caller cannot treat the old free-view rule as a grant.
  */
-export function mayViewIncompleteFree(opts: {
-  manual: { is_incomplete?: unknown; doc_kind?: unknown; storage_path?: unknown } | null | undefined;
-  orgId: unknown;
-  serviceCompany: boolean;
+export function mayViewIncompleteFree(_opts?: {
+  manual?: { is_incomplete?: unknown; doc_kind?: unknown; storage_path?: unknown } | null;
+  orgId?: unknown;
+  serviceCompany?: boolean;
   requestedPath?: unknown;
 }): boolean {
-  const m = opts.manual;
-  if (!m || !manualIsIncomplete(m)) return false;
-  if (opts.orgId == null || String(opts.orgId).trim() === "") return false;
-  if (!pathWithinManual(m.storage_path, opts.requestedPath)) return false;
-  if (opts.serviceCompany) return true;
-  return OPERATOR_KINDS.has(String(m.doc_kind ?? "").trim().toLowerCase());
+  void _opts;
+  return false;
 }

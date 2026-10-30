@@ -47,49 +47,43 @@ test('path must be within the manual', () => {
   assert.equal(pathWithinManual('', 'x'), false);
 });
 
-test('free view fails closed', () => {
+test('incomplete never authorizes a view without a library row', () => {
   const svc = { is_incomplete: true, doc_kind: 'service', storage_path: 'shared/x.pdf' };
-  assert.equal(mayViewIncompleteFree({ manual: svc, orgId: 4, serviceCompany: true, requestedPath: 'shared/x.pdf' }), true);
-  assert.equal(mayViewIncompleteFree({ manual: svc, orgId: null, serviceCompany: true }), false, 'no org');
-  assert.equal(mayViewIncompleteFree({ manual: svc, orgId: 4, serviceCompany: false }), false, 'service shelf');
+  assert.equal(mayViewIncompleteFree({ manual: svc, orgId: 4, serviceCompany: true, requestedPath: 'shared/x.pdf' }), false);
+  assert.equal(mayViewIncompleteFree({ manual: svc, orgId: null, serviceCompany: true }), false);
   assert.equal(
     mayViewIncompleteFree({ manual: { ...svc, doc_kind: 'operator' }, orgId: 4, serviceCompany: false }),
-    true,
-    'operator manual for owner org',
+    false,
   );
   assert.equal(
     mayViewIncompleteFree({ manual: { ...svc, is_incomplete: false }, orgId: 4, serviceCompany: true }),
     false,
-    'complete manual is not free',
   );
-  assert.equal(
-    mayViewIncompleteFree({ manual: svc, orgId: 4, serviceCompany: true, requestedPath: 'shared/secret.pdf' }),
-    false,
-    'other file',
-  );
-  assert.equal(mayViewIncompleteFree({ manual: null, orgId: 4, serviceCompany: true }), false);
+  assert.equal(mayViewIncompleteFree(), false);
 });
 
-test('open flow: unowned incomplete opens directly, server can still ask to add', () => {
-  assert.equal(companyLibraryOpenNeedsAdd({ owned: false, incomplete: true }), false);
+test('open flow: unowned manuals, including incomplete, prompt add', () => {
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: false, incomplete: true }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: false }), true);
-  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, freeIncomplete: true, inLibrary: false }), false);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, freeIncomplete: true, inLibrary: false }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, requiresAdd: true, freeIncomplete: true }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, inLibrary: false }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, freeIncomplete: true, inLibrary: true }), false);
 });
 
 test('refund copy for incomplete_free', () => {
   assert.match(refundReasonMessage('incomplete_free'), /free/i);
 });
 
-test('get-manual-url: incomplete manuals skip the cap and are viewable free', () => {
+test('get-manual-url: incomplete manuals skip the cap and still require a library row', () => {
   const src = read('supabase/functions/get-manual-url/index.ts');
   assert.match(src, /from "\.\/incomplete\.ts"/);
   assert.match(src, /!targetIncomplete && usedSlots \+ slotsHeld >= slotLimit/);
-  assert.match(src, /mayViewIncompleteFree\(/);
+  assert.doesNotMatch(src, /mayViewIncompleteFree\(/);
   assert.match(src, /free_incomplete: true/);
+  assert.match(src, /Add to library to open/);
   assert.match(src, /manuals\(id, storage_path, is_incomplete\)/);
-  // free views are not library reads: url_issued stays gated on inLibrary
+  // url_issued stays gated on a real library row
   assert.match(src, /if \(inLibrary && !wantList && manualId && orgId != null\) \{\s*try \{\s*await admin\.rpc\("manual_record_url_issued"/);
 });
 
@@ -107,7 +101,7 @@ test('Android parity: incomplete manuals do not use a slot', () => {
   const html = read('app/src/main/assets/manual_library.html');
   assert.match(html, /function slotsUsed\(\)/);
   assert.match(html, /const used = slotsUsed\(\)/);
-  assert.match(html, /else if \(isManualIncomplete\(manual\)\)/);
+  assert.match(html, /used >= FREE_LIMIT && !isManualIncomplete\(manual\)/);
   assert.match(html, /Incomplete – free/);
 });
 
@@ -139,31 +133,27 @@ test('sticky free hold: added free stays free after incomplete -> complete', () 
   assert.equal(slotCountedManuals([{ free_at_add: true, is_incomplete: false }, { is_incomplete: false }]), 1);
 });
 
-test('shelf skips Add only when the server would serve the free view; refusals fall back', () => {
-  const owner = { orgId: 5, serviceCompany: false };
+test('shelf prompts add for every unowned manual, including incomplete', () => {
   const m = { is_incomplete: true, doc_kind: null, storage_path: 'shared/x' };
-  // Owner-side org, doc_kind NULL: server refuses -> page prompts the (free) add.
-  assert.equal(mayViewIncompleteFree({ manual: m, ...owner, requestedPath: m.storage_path }), false);
-  assert.equal(
-    companyLibraryOpenNeedsAdd({ owned: false, incomplete: mayViewIncompleteFree({ manual: m, ...owner }) }),
-    true,
-  );
-  // Undeployed edge / denied reply after a direct open -> prompt add.
+  assert.equal(mayViewIncompleteFree({ manual: m, orgId: 5, serviceCompany: true, requestedPath: m.storage_path }), false);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: false, incomplete: true }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, requiresAdd: true }), true);
-  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, error: 'Access denied — manual not in company library' }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, error: 'Add to library to open' }), true);
 });
 
-test('Android: incomplete open mirrors the server rule and falls back to Add', () => {
+test('Android prompts add before opening, including incomplete manuals', () => {
   const lib = read('app/src/main/assets/manual_library.html');
   const viewer = read('app/src/main/assets/pdf_viewer.html');
-  assert.match(lib, /function mayViewIncompleteFreeClient\(m\)/);
-  assert.match(lib, /kind === 'operator' \|\| kind === 'user'/);
-  assert.match(lib, /mayViewIncompleteFreeClient\(manual\) && await probeFreeView\(manual\)/);
-  assert.doesNotMatch(lib, /alreadyOwns \|\| isManualIncomplete\(manual\)/);
+  assert.doesNotMatch(lib, /mayViewIncompleteFreeClient/);
+  assert.doesNotMatch(lib, /probeFreeView/);
   assert.match(lib, /function openPendingAdd\(\)/);
   assert.match(lib, /r\.free_at_add === true/);
+  assert.match(lib, /showAddModal\(manual\)/);
   assert.match(viewer, /manual_library\.html\?add=/);
   assert.match(viewer, /data\.requires_add === true/);
+  assert.match(viewer, /data\.in_library === false/);
+  assert.match(viewer, /Add to library to open/);
+  assert.doesNotMatch(viewer, /ai_context:\s*true/);
 });
 
 test('000942 keeps a sticky, trigger-set free_at_add', () => {

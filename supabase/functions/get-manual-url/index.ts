@@ -2,16 +2,13 @@
 //
 // Org ownership → streamable PDF URL (no base64 by default).
 // Multi-chapter (Candela MGL etc.): own the folder row → stream any PDF under that prefix.
-// Repair-AI (service-company) members may view shared/ catalog books they can
-// already chat about in AI Assistant — without consuming a company-library slot —
-// only when the caller explicitly signals a cite/reader context:
-//   ai_context: true | from_cite: true | cite: true | source: "ai_cite"|"ai"|"cite"|"ai_assistant"
-// Interactive library / Browse All opens omit that flag. If the org does not own
-// the manual (organization_manuals / user_manuals), the response is
-// 403 { requires_add: true } so the shelf shows Add to library.
-// The web in-app viewer (AI citation deep-links to /manuals/view) and the Android
-// pdf viewer send ai_context. Catalog-only successes also include
-// in_library: false and suggest_add: true.
+// Every manual, including incomplete/free ones, must already be in the caller's
+// library (organization_manuals or user_manuals) before a URL or byte stream is
+// issued. Incomplete manuals do not count toward the slot cap, but they still
+// require that row. ai_context / cite flags do not bypass it.
+// If the org does not own the manual, the response is
+// 403 { requires_add: true, error: "Add to library to open" } so the shelf and
+// the viewer show Add to library instead of opening.
 //
 // Auth: Authorization = anon key (short). body.access_token = user JWT (may be huge).
 // Stream: compact HMAC ticket carries user + manual_id + exact storage_path.
@@ -40,8 +37,9 @@ import {
   storageResponseIsMissing,
   type StorageProbe,
 } from "./files.ts";
-import { annotateChaptersWithPageMap, gateJoinedPageMap } from "./page-map.ts";
-import { libraryRowIsFree, manualIsIncomplete, mayViewIncompleteFree, slotCountedManuals } from "./incomplete.ts";
+import { annotateChaptersWithPageMap, applyStoredVolumePageSpans, gateJoinedPageMap } from "./page-map.ts";
+import { manualSlotLimit } from "../../../web/lib/org-plan.ts";
+import { libraryRowIsFree, manualIsIncomplete, slotCountedManuals } from "./incomplete.ts";
 import { indexWriteInProgress } from "../_shared/index-pending.ts";
 import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
 import {
@@ -140,35 +138,6 @@ function pathAllowed(owned: string, requested: string): boolean {
   if (o === r) return true;
   if (r.startsWith(o.endsWith("/") ? o : o + "/")) return true;
   return false;
-}
-
-function isSharedCatalogPath(path: unknown): boolean {
-  return cleanPath(path).toLowerCase().startsWith("shared/");
-}
-
-/**
- * Shared catalog read for an AI cite: same Repair AI rule as grok-assistant and
- * grok-tts (../_shared/repair-ai.ts). The caller comes from loadAiCaller, which
- * checks the organization_memberships row for the profile org, so a removed
- * owner/admin whose user_profiles row still says role/org is refused.
- */
-function mayViewAiCatalog(repairAiAllowed: boolean, ...paths: unknown[]): boolean {
-  if (!repairAiAllowed) return false;
-  return paths.some((p) => isSharedCatalogPath(p));
-}
-
-/**
- * Library shelf clicks must not set this. Only AI cite / in-app readers do.
- * Without it, shared catalog paths stay ownership-gated (requires_add).
- */
-function wantsAiCatalogRead(body: Record<string, unknown>): boolean {
-  if (body.ai_context === true || body.aiContext === true) return true;
-  if (body.from_cite === true || body.fromCite === true || body.cite === true) return true;
-  const source = String(body.source || body.context || "")
-    .trim()
-    .toLowerCase()
-    .replace(/[\s-]+/g, "_");
-  return source === "ai" || source === "ai_cite" || source === "ai_assistant" || source === "cite";
 }
 
 function catalogReadMeta(inLibrary: boolean): Record<string, unknown> {
@@ -364,6 +333,8 @@ async function loadCallerAccess(
     orgId: caller.member ? caller.orgId : null,
     role: caller.role,
     orgType: caller.orgType,
+    // Kept so the caller stays membership-checked. Not a view grant:
+    // opening still requires a library row.
     repairAiAllowed: repairAiDecision(caller).ok,
   };
 }
@@ -620,17 +591,23 @@ async function annotateFolderChapters<T extends { storage_path: string }>(
   metadata: unknown,
   parentPath: string,
 ): Promise<{ chapters: T[]; joinedPageCount: number | null }> {
-  if (chapters.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  // Stored page_start is the volume page a citation uses. Keep it even when
+  // the packed pdf.js map is omitted (index mismatch, missing count).
   const parts = indexOrderPdfParts(metadata, parentPath);
-  if (parts.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  const keepStored = (rows: readonly T[]) => applyStoredVolumePageSpans(rows, parts);
+  if (chapters.length < 2) return { chapters: keepStored(chapters), joinedPageCount: null };
+  if (parts.length < 2) return { chapters: keepStored(chapters), joinedPageCount: null };
   const mapped = annotateChaptersWithPageMap(chapters, parts);
-  if (!mapped.joinedPageCount) return mapped;
+  if (!mapped.joinedPageCount) {
+    return { chapters: keepStored(mapped.chapters), joinedPageCount: null };
+  }
   const index = await loadIndexPageBound(admin, manualId);
-  return gateJoinedPageMap(
+  const gated = gateJoinedPageMap(
     mapped,
     { indexMax: index.indexedPageMax, clipped: index.clipped },
     chapters,
   );
+  return { chapters: keepStored(gated.chapters), joinedPageCount: gated.joinedPageCount };
 }
 
 async function downloadStorageObject(
@@ -781,8 +758,8 @@ Deno.serve(async (req) => {
 
       const row = owned.get(manualId);
       const libraryOk = owned.has(manualId) || !!(ticketPath && pathIsOwned(owned, ticketPath));
-      // Ticket is minted only after POST authorization (library ownership or an
-      // explicit ai_context catalog read). GET does not reopen the catalog.
+      // Ticket is minted only after POST authorization (library ownership).
+      // GET does not grant a read the library row does not cover.
       if (!libraryOk && !ticketTrusted) {
         return json(403, { error: "Access denied", manual_id: manualId });
       }
@@ -905,25 +882,29 @@ Deno.serve(async (req) => {
     const access = await loadCallerAccess(admin, user.id);
     let orgId = access.orgId;
 
-    // Org manual slot limit (default 5 free)
-    let slotLimit = 5;
+    // Same plan cap as POST /api/manuals/library (manualSlotLimit). A stale
+    // manual_slots of 5 does not shrink Premium to 5, and "pro" is not unlimited.
+    let slotLimit = manualSlotLimit(null);
     if (orgId != null) {
       try {
-        const { data: orgRow } = await admin
+        let orgRes = await admin
           .from("organizations")
-          .select("manual_slots, subscription_tier")
+          .select("is_premium, subscription_tier, plan, manual_slots, premium_until")
           .eq("id", orgId)
           .maybeSingle();
-        if (orgRow?.manual_slots != null) {
-          slotLimit = parseInt(String(orgRow.manual_slots), 10) || 5;
-        } else if (
-          orgRow?.subscription_tier &&
-          /premium|team|enterprise|pro/i.test(String(orgRow.subscription_tier))
-        ) {
-          slotLimit = 999;
+        if (orgRes.error && /subscription_tier|plan|manual_slots|premium_until|column/i.test(orgRes.error.message || "")) {
+          orgRes = await admin
+            .from("organizations")
+            .select("is_premium, subscription_tier, plan")
+            .eq("id", orgId)
+            .maybeSingle();
         }
+        if (orgRes.error && /subscription_tier|plan|column/i.test(orgRes.error.message || "")) {
+          orgRes = await admin.from("organizations").select("is_premium").eq("id", orgId).maybeSingle();
+        }
+        slotLimit = manualSlotLimit(orgRes.error ? null : orgRes.data);
       } catch {
-        /* keep default */
+        slotLimit = manualSlotLimit(null);
       }
     }
 
@@ -1009,8 +990,9 @@ Deno.serve(async (req) => {
     const hidden = unpublishedManualResponse(man);
     if (hidden) return hidden;
 
-    // Incomplete manuals are free: no slot, and members may open them without
-    // adding. Read separately so a missing column only turns the feature off.
+    // Incomplete manuals are free to add (no slot). They still need a library
+    // row before open. Read separately so a missing column only turns the
+    // slot exemption off.
     let incompleteRow: { is_incomplete?: unknown; doc_kind?: unknown; storage_path?: unknown } | null = null;
     if (manualId) {
       try {
@@ -1140,27 +1122,12 @@ Deno.serve(async (req) => {
     }
 
     // True only when organization_manuals / user_manuals covers this open.
-    // Computed before the cite bypass so catalog reads stay in_library: false.
+    // Incomplete and ai_context do not set this.
     const inLibrary = allowed;
-    // Incomplete manuals are free to view for company members (shelf-checked,
-    // path-checked). Not counted as a library read (no url_issued event).
-    const freeIncomplete =
-      !allowed &&
-      mayViewIncompleteFree({
-        manual: incompleteRow,
-        orgId,
-        serviceCompany: access.repairAiAllowed,
-        requestedPath: storagePath,
-      });
-    if (freeIncomplete) allowed = true;
-    const aiContext = wantsAiCatalogRead(body);
-    // Shared catalog without a library slot — AI cite / in-app reader only.
-    if (!allowed && aiContext) {
-      allowed = mayViewAiCatalog(access.repairAiAllowed, storagePath, man?.storage_path);
-    }
-    const readMeta = freeIncomplete
-      ? { in_library: false, free_incomplete: true }
-      : { ...catalogReadMeta(inLibrary), ...(targetIncomplete ? { free_incomplete: true } : {}) };
+    const readMeta = {
+      ...catalogReadMeta(inLibrary),
+      ...(targetIncomplete ? { free_incomplete: true } : {}),
+    };
 
     console.log(JSON.stringify({
       uid: user.id,
@@ -1170,9 +1137,6 @@ Deno.serve(async (req) => {
       storagePath,
       allowed,
       inLibrary,
-      aiContext,
-      catalogView: !inLibrary && allowed,
-      freeIncomplete,
       wantList,
       wantAdd,
       preferBase64,
@@ -1180,7 +1144,7 @@ Deno.serve(async (req) => {
 
     if (!allowed) {
       return json(403, {
-        error: "Access denied — manual not in company library",
+        error: "Add to library to open",
         // Client uses this to show "Add to library?" instead of a dead-end error
         requires_add: true,
         organization_id: orgId,
@@ -1331,7 +1295,7 @@ Deno.serve(async (req) => {
         isFolder: man?.is_folder,
         parentPath,
       });
-    // Owned and ai_context reads both stop here. No probe, list, or signed URL
+    // Library reads stop here. No probe, list, or signed URL
     // until the key is this manual's file, entry, chapter, download, or — for a
     // folder row — a child of its prefix.
     if ((sentPath && !pathCovered(requestedNorm)) || !pathCovered(sp)) {

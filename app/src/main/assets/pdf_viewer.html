@@ -209,7 +209,44 @@
     const params = new URLSearchParams(window.location.search);
     const storagePath = params.get('storage_path') || '';
     const title = params.get('title') || 'Service Manual';
-    const deepLinkPage = parseInt(params.get('page') || params.get('p') || '', 10);
+    function pageFromLocation() {
+        const search = new URLSearchParams(window.location.search);
+        const fromSearch = parseInt(search.get('page') || search.get('p') || '', 10);
+        if (Number.isFinite(fromSearch) && fromSearch >= 1) return fromSearch;
+        const hash = new URLSearchParams(String(window.location.hash || '').replace(/^#/, ''));
+        const fromHash = parseInt(hash.get('page') || hash.get('p') || '', 10);
+        return Number.isFinite(fromHash) && fromHash >= 1 ? fromHash : NaN;
+    }
+    const deepLinkPage = pageFromLocation();
+    // Local page inside the chapter file a volume citation resolved to.
+    let citeLocalPage = 0;
+
+    /**
+     * Absolute volume page → chapter file + local page.
+     * local = volume − page_start + 1. Gaps between chapters are not packed.
+     * Single-file manuals (no span, or one PDF) keep the page as a local page.
+     */
+    function chapterFileForVolumePage(chapters, page) {
+        const spans = [];
+        (chapters || []).forEach(function (ch) {
+            const start = Math.floor(Number(ch.page_start != null ? ch.page_start : ch.pageStart));
+            const count = Math.floor(Number(ch.page_count != null ? ch.page_count : ch.pageCount));
+            const path = ch.storage_path || ch.path || '';
+            if (!path || !/\.pdf$/i.test(path)) return;
+            if (!Number.isFinite(start) || !Number.isFinite(count) || start < 1 || count < 1) return;
+            spans.push({ storagePath: path, pageStart: start, pageCount: count });
+        });
+        spans.sort(function (a, b) {
+            return a.pageStart - b.pageStart || String(a.storagePath).localeCompare(String(b.storagePath));
+        });
+        for (let i = 0; i < spans.length; i++) {
+            const end = spans[i].pageStart + spans[i].pageCount - 1;
+            if (page >= spans[i].pageStart && page <= end) {
+                return { storagePath: spans[i].storagePath, localPage: page - spans[i].pageStart + 1 };
+            }
+        }
+        return null;
+    }
     const openedFromAssistant = params.get('from') === 'assistant';
 
     let pdfDoc = null;
@@ -297,30 +334,28 @@
             },
             body: JSON.stringify({
                 storage_path: path,
-                // Reader / cite context. The manuals shelf prompts Add to library
-                // and does not send this, so unowned books stay requires_add there.
-                ai_context: true
+                manual_id: new URLSearchParams(window.location.search).get('manual_id') || undefined
             })
         });
 
         const data = await res.json();
+
+        const mustAdd = data.requires_add === true || data.in_library === false || data.suggest_add === true;
+        if (mustAdd) {
+            const vp = new URLSearchParams(window.location.search);
+            const id = vp.get('manual_id');
+            if (id) {
+                window.location.replace('manual_library.html?add=' + encodeURIComponent(id));
+                return new Promise(() => {});
+            }
+            throw new Error('Add to library to open');
+        }
 
         if (!res.ok || data.error) {
             console.error('[PDF Viewer] Edge Function error for path', path, {
                 status: res.status,
                 response: data
             });
-            // Free incomplete manual opened from the shelf without a library row,
-            // but the server refused the free view (edge not deployed yet, no org,
-            // or an owner-side org on a non-operator doc): go back to the shelf's
-            // Add prompt (adding an incomplete manual is free) instead of a dead end.
-            const vp = new URLSearchParams(window.location.search);
-            if ((data.requires_add === true || res.status === 403) &&
-                vp.get('incomplete') === '1' && vp.get('owned') === '0' && vp.get('manual_id') &&
-                vp.get('from') !== 'assistant' && path === (vp.get('storage_path') || '')) {
-                window.location.replace('manual_library.html?add=' + encodeURIComponent(vp.get('manual_id')));
-                return new Promise(() => {});
-            }
             const message = data.error || `Access denied or file not found (status ${res.status})`;
             throw new Error(message);
         }
@@ -356,6 +391,12 @@
             pdfDoc = await loadingTask.promise;
             totalPages = pdfDoc.numPages;
             currentPage = 1;
+            if (citeLocalPage >= 1) {
+                currentPage = Math.min(citeLocalPage, totalPages);
+                citeLocalPage = 0;
+            } else if (Number.isFinite(deepLinkPage) && deepLinkPage > 1 && !(currentChapters && currentChapters.length > 1)) {
+                currentPage = Math.min(deepLinkPage, totalPages);
+            }
             pageTextCache = [];
             findMatches = [];
             findIndex = -1;
@@ -363,9 +404,6 @@
             if (findInfo) findInfo.textContent = '';
 
             hideLoading();
-            if (Number.isFinite(deepLinkPage) && deepLinkPage > 1) {
-                currentPage = Math.min(deepLinkPage, totalPages);
-            }
             await renderPage(currentPage);
             updateToolbar();
             updateZoomInfo();
@@ -744,10 +782,26 @@
                     const hasGoodChapters = Array.isArray(manual.chapter_metadata) && manual.chapter_metadata.length > 0;
 
                     if (hasGoodChapters) {
-                        // Real folder with data → show nice grid
                         currentChapters = manual.chapter_metadata;
                         currentFolderTitle = manual.title || title;
                         baseStoragePrefix = manual.storage_path || (sp.includes('/') ? sp.substring(0, sp.lastIndexOf('/')) : '');
+                        const pdfChapters = currentChapters.filter(function (ch) {
+                            return /\.pdf$/i.test(ch.storage_path || ch.path || '');
+                        });
+                        const volume = Number.isFinite(deepLinkPage) && deepLinkPage >= 1 ? deepLinkPage : 0;
+                        const hit = volume && pdfChapters.length > 1 ? chapterFileForVolumePage(currentChapters, volume) : null;
+                        if (hit) {
+                            citeLocalPage = hit.localPage;
+                            const canvasWrap = document.querySelector('.canvas-wrapper');
+                            if (canvasWrap) canvasWrap.style.display = '';
+                            const sel = document.getElementById('chapterSelector');
+                            if (sel) sel.style.display = 'none';
+                            await loadPDF(hit.storagePath);
+                            const btn = document.getElementById('chaptersBtn');
+                            if (btn) btn.style.display = 'inline-block';
+                            return true;
+                        }
+                        // No volume hit: keep the chapter grid. A single PDF is not remapped.
                         renderChapterGrid(currentChapters, currentFolderTitle);
                         return true;
                     }

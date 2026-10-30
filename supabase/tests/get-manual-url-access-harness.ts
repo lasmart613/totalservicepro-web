@@ -1,8 +1,9 @@
 /**
- * End-to-end proof for get-manual-url's AI catalog gate (not part of npm test;
+ * End-to-end proof for get-manual-url's library gate (not part of npm test;
  * needs Deno). Boots the real supabase/functions/get-manual-url/index.ts with
  * fetch stubbed: Supabase auth/REST/storage answer from the fixture below.
- * Nothing leaves the machine.
+ * Nothing leaves the machine. A shared catalog manual, complete or incomplete,
+ * is refused until it is in the caller's library. ai_context does not bypass that.
  *
  *   deno run -A supabase/tests/get-manual-url-access-harness.ts
  *
@@ -37,9 +38,10 @@ const tables: Record<string, Row[]> = {
     { id: 20, type: 'customer' },
   ],
   manuals: [
-    { id: 1086, title: 'GentleMAX Pro Service Manual', storage_path: SHARED, published: true, is_folder: false },
+    { id: 1086, title: 'GentleMAX Pro Service Manual', storage_path: SHARED, published: true, is_folder: false, is_incomplete: false },
+    { id: 3048, title: 'Incomplete excerpt', storage_path: 'shared/incomplete/excerpt.pdf', published: true, is_folder: false, is_incomplete: true, doc_kind: 'service' },
   ],
-  organization_manuals: [],
+  organization_manuals: [] as Row[],
   user_manuals: [],
 }
 const tokens: Record<string, string> = Object.fromEntries(
@@ -119,13 +121,21 @@ async function expectCase(name: string, user: string, body: Record<string, unkno
 }
 
 const cite = { manual_id: 1086, ai_context: true }
-await expectCase('service-company fse opens shared PDF from an AI cite', 'tech', cite, 200, (d) => /sign/.test(String(d?.url || '')))
-await expectCase('service-company owner opens shared PDF from an AI cite', 'svcowner', cite, 200)
+await expectCase('complete shared PDF with ai_context still needs the library', 'tech', cite, 403, (d) => d?.requires_add === true && !d?.url)
+await expectCase('service-company owner AI cite still needs the library', 'svcowner', cite, 403, (d) => d?.requires_add === true && !d?.url)
+await expectCase('incomplete manual without a library row is refused and does not count as a view', 'tech', { manual_id: 3048 }, 403, (d) => d?.requires_add === true && d?.free_incomplete === true && !d?.url)
 await expectCase('removed owner (profile still owner/org 10) refused', 'removedowner', cite, 403, (d) => d?.organization_id == null)
 await expectCase('removed company_admin (profile still company_admin/org 10) refused', 'removedadmin', cite, 403)
 await expectCase('clinic owner refused', 'clinic', cite, 403)
 await expectCase('no-org caller refused', 'noorg', cite, 403)
 await expectCase('service member without ai_context still needs the library', 'tech', { manual_id: 1086 }, 403, (d) => d?.requires_add === true)
+tables.organization_manuals.push({
+  organization_id: 10,
+  manual_id: 1086,
+  free_at_add: false,
+  manuals: { id: 1086, storage_path: SHARED, is_incomplete: false },
+})
+await expectCase('service member opens a complete manual that is in the library', 'tech', { manual_id: 1086 }, 200, (d) => /sign/.test(String(d?.url || '')) && d?.in_library === true)
 await expectCase('bad token 401', 'nobody', cite, 401)
 
 if (unexpected.length) console.log('unexpected fetches:', unexpected.slice(0, 5))

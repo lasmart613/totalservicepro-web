@@ -1,4 +1,22 @@
 /**
+ * Page from a cite fragment: `#page=1329` or `#p=1329`.
+ * Query `page=` wins when the caller already has it; this is only the hash.
+ */
+export function citedPageFromHash(hash: string | null | undefined): string | undefined {
+  const raw = String(hash || '').replace(/^#/, '').trim();
+  if (!raw) return undefined;
+  try {
+    const qs = new URLSearchParams(raw);
+    const page = qs.get('page') || qs.get('p');
+    if (page && page.trim()) return page.trim();
+  } catch {
+    /* fragment was not a query string */
+  }
+  const match = raw.match(/(?:^|[?&])(?:page|p)=(\d+)/i);
+  return match?.[1];
+}
+
+/**
  * Deep-link target for /manuals/view?page=N.
  * N is the physical PDF page. Do not clamp to a shorter loaded range:
  * wait until the document reports at least N pages.

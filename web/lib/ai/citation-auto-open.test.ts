@@ -173,12 +173,22 @@ test('auto-open runs once for a fresh settled answer', () => {
   assert.deepEqual(planCitationAutoOpen({ ...openBase, canView: false }), { action: 'skip' });
 });
 
-test('auto-open access follows the AI catalog viewer rule', () => {
+test('auto-open requires the manual to already be in the library', () => {
   assert.equal(
     citationAutoOpenAllowed({
       role: 'fse',
       orgType: 'service_company',
       storagePath: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+      catalogKnown: true,
+    }),
+    false
+  );
+  assert.equal(
+    citationAutoOpenAllowed({
+      role: 'fse',
+      orgType: 'service_company',
+      storagePath: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+      inLibrary: true,
       catalogKnown: true,
     }),
     true

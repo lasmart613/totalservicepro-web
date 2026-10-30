@@ -6,7 +6,6 @@ import { manualLibraryShelf, type ManualCatalogFields, type ManualLibraryShelf }
 import {
   canAccessManualsPage,
   canAccessOperatorsManuals,
-  canAccessRepairAi,
   canAccessServiceManuals,
   type OrgTypeLike,
   type RoleLike,
@@ -44,27 +43,66 @@ export function mayOpenManual(
   return canAccessManualLibraryShelf(role, orgType, manualLibraryShelf(manual));
 }
 
+/** Viewer state when the manual is not in the company library. */
+export const ADD_TO_LIBRARY_TO_OPEN = 'Add to library to open';
+
+/** Thrown when a URL response must not be rendered because the manual is not in the library. */
+export class LibraryAddRequiredError extends Error {
+  freeIncomplete: boolean;
+
+  constructor(freeIncomplete = false) {
+    super(ADD_TO_LIBRARY_TO_OPEN);
+    this.name = 'LibraryAddRequiredError';
+    this.freeIncomplete = freeIncomplete;
+  }
+}
+
 /**
- * Interactive library / Browse All opens must claim a company-library slot
- * before streaming. A URL from get-manual-url is not enough: an AI cite reader
- * can receive one with in_library false. Unowned shelf clicks always prompt.
+ * Every manual, including incomplete ones, must be in the company library
+ * before it can be opened. Incomplete manuals are free to add and do not use
+ * a slot; that does not skip this prompt. A URL with in_library false is not
+ * a grant.
  */
 export function companyLibraryOpenNeedsAdd(opts: {
   owned: boolean;
-  /** manuals.is_incomplete: free to view, so try opening before prompting an add. */
+  /** Ignored. Incomplete manuals no longer open without a library row. */
   incomplete?: boolean;
-  /** get-manual-url free_incomplete: served for free without a library row. */
+  /** Ignored. free_incomplete describes the slot, not permission to open. */
   freeIncomplete?: unknown;
   requiresAdd?: unknown;
   suggestAdd?: unknown;
   inLibrary?: unknown;
   error?: unknown;
 }): boolean {
-  if (!opts.owned) return opts.incomplete !== true;
+  if (!opts.owned) return true;
   if (opts.requiresAdd === true) return true;
-  if (opts.freeIncomplete === true && opts.inLibrary === false) return false;
   if (opts.suggestAdd === true || opts.inLibrary === false) return true;
-  return /not in company library|access denied/i.test(String(opts.error || ''));
+  return /not in company library|access denied|add to library to open/i.test(String(opts.error || ''));
+}
+
+/**
+ * True when get-manual-url (or the file proxy) must not be shown.
+ * Covers 403 requires_add and a 200 that still says the manual is not in the library.
+ */
+export function viewerBlockedUntilLibraryAdd(
+  body:
+    | {
+        requires_add?: unknown;
+        requiresAdd?: unknown;
+        in_library?: unknown;
+        inLibrary?: unknown;
+        suggest_add?: unknown;
+        suggestAdd?: unknown;
+        free_incomplete?: unknown;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!body || typeof body !== 'object') return false;
+  if (body.requires_add === true || body.requiresAdd === true) return true;
+  if (body.suggest_add === true || body.suggestAdd === true) return true;
+  if (body.in_library === false || body.inLibrary === false) return true;
+  return false;
 }
 
 /** Shared catalog books (AI Assistant dropdown), not private org uploads. */
@@ -77,9 +115,8 @@ export function isSharedCatalogPath(path: unknown): boolean {
 }
 
 /**
- * Signed-in Repair-AI (service-company) members may open a shared/catalog
- * manual in the in-app viewer without a company-library slot — same books
- * they can already scope in AI Assistant. Still never a public PDF.
+ * A manual can be opened only when it is already in the caller's library.
+ * Repair AI access and a shared/ catalog path do not replace that row.
  */
 export function mayViewAiScopedManual(opts: {
   role?: RoleLike;
@@ -87,9 +124,10 @@ export function mayViewAiScopedManual(opts: {
   storagePath?: string | null;
   inLibrary?: boolean;
 }): boolean {
-  if (opts.inLibrary) return true;
-  if (!canAccessRepairAi(opts.role, opts.orgType)) return false;
-  return isSharedCatalogPath(opts.storagePath);
+  void opts.role;
+  void opts.orgType;
+  void opts.storagePath;
+  return opts.inLibrary === true;
 }
 
 export function manualsForbiddenMessage(role?: RoleLike, orgType?: OrgTypeLike): string {

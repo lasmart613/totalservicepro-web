@@ -108,7 +108,7 @@ test('owners get Operators Manuals only — never repair Service Manuals', () =>
   );
 });
 
-test('service-company AI users may view shared catalog manuals without a library slot', () => {
+test('viewing a manual requires a library row, including shared catalog books', () => {
   assert.equal(isSharedCatalogPath('shared/cutera/xeo/Xeo Service Manual RevB.pdf'), true);
   assert.equal(isSharedCatalogPath('orgs/acme/private.pdf'), false);
   assert.equal(
@@ -117,7 +117,7 @@ test('service-company AI users may view shared catalog manuals without a library
       orgType: 'service_company',
       storagePath: 'shared/cutera/xeo',
     }),
-    true
+    false
   );
   assert.equal(
     mayViewAiScopedManual({
@@ -126,7 +126,7 @@ test('service-company AI users may view shared catalog manuals without a library
       storagePath: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
       inLibrary: false,
     }),
-    true
+    false
   );
   assert.equal(
     mayViewAiScopedManual({

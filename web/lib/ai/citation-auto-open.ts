@@ -215,10 +215,9 @@ export function planCitationAutoOpen(input: {
 }
 
 /**
- * Client-side gate before the viewer is mounted. Unknown manuals and
- * non-catalog paths the user does not already have in their library are
- * refused so auto-open never requests restricted bytes. The chip link
- * stays as it is today; the viewer page enforces the same rule server-side.
+ * Client-side gate before the viewer is mounted. Manuals that are not already
+ * in the library are refused so auto-open never requests their bytes. The
+ * chip link still opens the viewer, which shows Add to library to open.
  */
 export function citationAutoOpenAllowed(opts: {
   role?: string | null;

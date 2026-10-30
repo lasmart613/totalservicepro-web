@@ -7,15 +7,21 @@ import { citationViewerHref } from './ai/citations.ts';
 import { chapterPathsFromMetadata, pdfPathsForManual } from './manual-search-index.ts';
 import {
   annotateChaptersWithPageMap,
+  applyStoredVolumePageSpans,
   buildJoinedPageMap,
   chapterMetadataWithPageCounts,
+  chaptersForVolumePage,
   gateJoinedPageMap,
   joinedPageMapAllowed,
   resolveJoinedPage,
   viewerTargetForJoinedPage,
   type JoinedPagePart,
 } from './manual-page-map.ts';
-import { indexOrderPdfParts, indexOrderPdfPaths } from '../../supabase/functions/get-manual-url/chapters.ts';
+import {
+  chaptersFromMetadata,
+  indexOrderPdfParts,
+  indexOrderPdfPaths,
+} from '../../supabase/functions/get-manual-url/chapters.ts';
 import { backfillStatus, backfillWrites, indexRowClipped } from '../scripts/backfill-chapter-page-counts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -365,4 +371,93 @@ test('a stored sum smaller than the index max omits the page map', () => {
   assert.equal(omitted.chapters.some((chapter) => chapter.pageStart != null), false);
   assert.equal(joinedPageMapAllowed({ pageSum: 100, indexMax: 120, clipped: true }), false);
   assert.equal(joinedPageMapAllowed({ pageSum: 100, indexMax: 120, clipped: false }), false);
+});
+
+test('manual 9 volume page 1329 opens 8501-00-1770 at local page 19', () => {
+  const folder = 'shared/candela/manual-9';
+  const entry = `${folder}/8501-01-1769_B.pdf`;
+  const service = `${folder}/8501-00-1770.pdf`;
+  const metadata = [
+    {
+      doc_number: '8501-01-1769',
+      storage_path: entry,
+      page_start: 1,
+      page_count: 40,
+      title: '8501-01-1769_B',
+    },
+    {
+      doc_number: '8501-00-1770',
+      storage_path: service,
+      page_start: 1311,
+      page_count: 41,
+      title: '8501-00-1770',
+    },
+  ];
+  const parts = indexOrderPdfParts(metadata, folder);
+  assert.equal(parts[1]?.pageStart, 1311);
+  assert.equal(parts[1]?.pageCount, 41);
+  // The packed-index gate can strip pageStart. Stored volume spans still resolve.
+  const stripped = metadata.map((row) => ({ storage_path: row.storage_path }));
+  const chapters = applyStoredVolumePageSpans(stripped, parts);
+  const hit = viewerTargetForJoinedPage(chapters, 1329);
+  assert.equal(hit.kind, 'hit');
+  if (hit.kind !== 'hit') return;
+  assert.equal(hit.storagePath, service);
+  assert.equal(hit.localPage, 19);
+  assert.equal(hit.pageStart, 1311);
+  assert.equal(1329 - 1311 + 1, 19);
+  const entryPage = viewerTargetForJoinedPage(chapters, 1);
+  assert.equal(entryPage.kind, 'hit');
+  if (entryPage.kind === 'hit') {
+    assert.equal(entryPage.storagePath, entry);
+    assert.equal(entryPage.localPage, 1);
+  }
+  // The gap between p. 40 and p. 1311 is not packed onto the entry file.
+  assert.equal(viewerTargetForJoinedPage(chapters, 41).kind, 'out-of-range');
+  assert.equal(viewerTargetForJoinedPage(chapters, 1351).kind, 'hit');
+  assert.equal(viewerTargetForJoinedPage(chapters, 1352).kind, 'out-of-range');
+
+  const listed = chaptersFromMetadata(metadata, folder, { isFolder: true });
+  const fromList = viewerTargetForJoinedPage(listed, 1329);
+  assert.equal(fromList.kind, 'hit');
+  if (fromList.kind === 'hit') {
+    assert.match(fromList.storagePath, /8501-00-1770\.pdf$/);
+    assert.equal(fromList.localPage, 19);
+  }
+
+  // A single PDF has no chapter spans, so page= stays a page of that file.
+  assert.equal(viewerTargetForJoinedPage([], 1329).kind, 'unmapped');
+  assert.equal(viewerTargetForJoinedPage([{ storage_path: 'shared/one.pdf' }], 1329).kind, 'unmapped');
+
+  const edge = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
+  assert.match(edge, /applyStoredVolumePageSpans/);
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  const addFn = viewer.slice(viewer.indexOf('async function addLibraryAndOpen'), viewer.indexOf('async function openChapter'));
+  assert.match(addFn, /openAtCitedPage/);
+  assert.match(viewer, /citedPageFromHash\(window\.location\.hash\)/);
+  const android = readFileSync(join(here, '../../app/src/main/assets/pdf_viewer.html'), 'utf8');
+  assert.match(android, /function chapterFileForVolumePage/);
+  assert.match(android, /page - spans\[i\]\.pageStart \+ 1/);
+  assert.match(android, /citeLocalPage = hit\.localPage/);
+  assert.match(android, /pdfChapters\.length > 1/);
+
+  // The viewer reads chapter_metadata itself, so a deployed edge list that
+  // omitted page_start still opens the chapter. A packed edge offset loses.
+  const relative = [
+    { doc_number: '8501-01-1769', storage_path: '8501-01-1769_B.pdf', page_start: 1, page_count: 40 },
+    { doc_number: '8501-00-1770', storage_path: '8501-00-1770.pdf', page_start: 1311, page_count: 41 },
+  ];
+  const edgeList = [
+    { storage_path: entry, title: 'entry' },
+    { storage_path: service, title: 'service', pageStart: 200, pageCount: 41 },
+  ];
+  const fromMetadata = chaptersForVolumePage(edgeList, relative, folder);
+  const metaHit = viewerTargetForJoinedPage(fromMetadata, 1329);
+  assert.equal(metaHit.kind, 'hit');
+  if (metaHit.kind === 'hit') {
+    assert.equal(metaHit.storagePath, service);
+    assert.equal(metaHit.localPage, 19);
+    assert.equal(metaHit.pageStart, 1311);
+  }
+  assert.match(viewer, /chaptersForVolumePage/);
 });

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   chapterPageRangeLabel,
   chapterTileNumber,
+  citedPageFromHash,
   fittedPageBoxHeight,
   viewerCitedPageNotice,
   viewerFolderOutOfRangeNotice,
@@ -49,6 +50,12 @@ test('viewer deep link uses the physical page and does not clamp early', () => {
   assert.match(viewPage, /params\.get\('page'\)/);
   assert.match(viewPage, /initialPage=\{page\}/);
   assert.match(viewPage, /params\.get\('oor'\) === '1'/);
+  assert.match(viewPage, /citedPageFromHash/);
+  assert.equal(citedPageFromHash('#page=1329'), '1329');
+  assert.equal(citedPageFromHash('#p=19'), '19');
+  assert.equal(citedPageFromHash('page=1329'), '1329');
+  assert.equal(citedPageFromHash(''), undefined);
+  assert.equal(citedPageFromHash('#section'), undefined);
 });
 
 test('chapter tiles number by page order and a one-page file is p. N', () => {

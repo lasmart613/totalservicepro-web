@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { companyLibraryOpenNeedsAdd } from './manuals-access.ts';
+import { companyLibraryOpenNeedsAdd, viewerBlockedUntilLibraryAdd } from './manuals-access.ts';
 import {
   MANUAL_FIXTURE_PAGE_COUNT,
   MANUAL_FIXTURE_PATH,
@@ -88,45 +88,63 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.doesNotMatch(viewer, /window\.open|Open in (Acrobat|Adobe)|Save as/i);
   assert.match(fileRoute, /pdfInlineHeaders/);
   assert.match(fileRoute, /Content-Disposition/);
-  assert.match(fileRoute, /mayViewAiScopedManual|streamAiCatalogPdf/);
+  assert.match(fileRoute, /viewerBlockedUntilLibraryAdd/);
+});
+
+test('viewer refuses a URL when the manual is not in the library', () => {
+  assert.equal(viewerBlockedUntilLibraryAdd({ requires_add: true }), true);
+  assert.equal(viewerBlockedUntilLibraryAdd({ in_library: false, url: 'https://example.test/a.pdf' }), true);
+  assert.equal(viewerBlockedUntilLibraryAdd({ in_library: false, free_incomplete: true }), true);
+  assert.equal(viewerBlockedUntilLibraryAdd({ suggest_add: true, in_library: false }), true);
+  assert.equal(viewerBlockedUntilLibraryAdd({ in_library: true, free_incomplete: true, url: 'https://example.test/a.pdf' }), false);
+  assert.equal(viewerBlockedUntilLibraryAdd({ url: 'https://example.test/a.pdf' }), false);
+  assert.equal(viewerBlockedUntilLibraryAdd(null), false);
 });
 
 test('library shelf prompts add when the company does not own the manual', () => {
   assert.equal(companyLibraryOpenNeedsAdd({ owned: false }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: false, incomplete: true }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: false, inLibrary: true }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true }), false);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, suggestAdd: true }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, inLibrary: false }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, freeIncomplete: true, inLibrary: false }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, requiresAdd: true }), true);
   assert.equal(
     companyLibraryOpenNeedsAdd({ owned: true, error: 'Access denied — manual not in company library' }),
     true
   );
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, error: 'Add to library to open' }), true);
   assert.equal(companyLibraryOpenNeedsAdd({ owned: true, error: 'No PDF files found' }), false);
 });
 
-test('get-manual-url catalog bypass is only an explicit AI cite read', () => {
+test('get-manual-url and the viewer require a library row for every manual', () => {
   const edge = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
   const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
   const fileRoute = readFileSync(join(here, '../app/api/manuals/file/route.ts'), 'utf8');
-  assert.match(edge, /function wantsAiCatalogRead/);
-  assert.match(edge, /function mayViewAiCatalog/);
-  assert.match(edge, /if \(!allowed && aiContext\)/);
-  assert.match(edge, /wantsAiCatalogRead\(body\)/);
+  const copy = readFileSync(join(here, 'i18n/gap-copy.ts'), 'utf8');
+  assert.doesNotMatch(edge, /function wantsAiCatalogRead/);
+  assert.doesNotMatch(edge, /function mayViewAiCatalog/);
+  assert.doesNotMatch(edge, /if \(!allowed && aiContext\)/);
+  assert.doesNotMatch(edge, /mayViewIncompleteFree\(/);
   assert.match(edge, /in_library: false/);
   assert.match(edge, /suggest_add: true/);
-  assert.match(edge, /Access denied — manual not in company library/);
+  assert.match(edge, /Add to library to open/);
   assert.match(edge, /requires_add: true/);
-  assert.match(edge, /shared\//);
-  assert.doesNotMatch(edge, /storage_path is required/);
-  // Unconditional catalog grant (no cite signal) must not remain.
-  assert.doesNotMatch(edge, /if \(!allowed\) \{\s*allowed = mayViewAiCatalog/);
-  assert.match(viewer, /ai_context:\s*true/);
-  assert.match(fileRoute, /ai_context:\s*true/);
+  assert.match(edge, /!targetIncomplete && usedSlots \+ slotsHeld >= slotLimit/);
+  assert.doesNotMatch(viewer, /ai_context:\s*true/);
+  assert.match(viewer, /viewerBlockedUntilLibraryAdd/);
+  assert.match(viewer, /data-testid="add-to-library-to-open"/);
+  assert.match(viewer, /ADD_TO_LIBRARY_TO_OPEN/);
+  assert.doesNotMatch(fileRoute, /ai_context:\s*true/);
+  assert.doesNotMatch(fileRoute, /streamAiCatalogPdf/);
+  assert.match(fileRoute, /viewerBlockedUntilLibraryAdd/);
+  assert.match(copy, /'Add to library to open'/);
   const openFn = page.slice(page.indexOf('async function openManual'), page.indexOf('const discoveryActive'));
   assert.match(openFn, /companyLibraryOpenNeedsAdd/);
   assert.doesNotMatch(openFn, /ai_context:\s*true/);
+  assert.doesNotMatch(openFn, /mayViewIncompleteFree/);
   const gate = openFn.indexOf('companyLibraryOpenNeedsAdd');
   const stream = openFn.indexOf('openPayloadUrl');
   assert.ok(gate !== -1 && stream !== -1 && gate < stream);
