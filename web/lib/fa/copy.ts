@@ -499,6 +499,8 @@ export const FA_COPY: Record<string, string> = {
     'طرح پولی برای تعمیرگاه‌هایی که بخش بیشتری از برنامه را می‌خواهند',
   '50 text + 50 voice AI queries per member per day':
     'روزانه 50 پرسش متنی و 50 پرسش صوتی هوش مصنوعی برای هر عضو',
+  '10 service manuals in your library': '10 دفترچه سرویس در کتابخانه شما',
+  'New service companies get a 60-day free Premium trial': 'شرکت‌های سرویس جدید ۶۰ روز Premium رایگان آزمایشی دریافت می‌کنند',
   '15 service manuals': '15 دفترچه سرویس',
   'Find work and bid on open service requests': 'کار پیدا کنید و روی درخواست سرویس باز پیشنهاد بدهید',
   'More access to nearby clinics over time': 'به‌تدریج دسترسی بیشتر به درمانگاه‌های نزدیک',
@@ -506,7 +508,7 @@ export const FA_COPY: Record<string, string> = {
   'Everything in Premium': 'همه چیز Premium',
   '250 text + 250 voice AI queries per member per day':
     'روزانه 250 پرسش متنی و 250 پرسش صوتی هوش مصنوعی برای هر عضو',
-  '50 service manuals': '50 دفترچه سرویس',
+  'Unlimited service manuals': 'دفترچه‌های سرویس نامحدود',
   'Up to 10 user seats': 'تا 10 کاربر',
   'Find rated repair and maintenance pros': 'تعمیرکار و سرویس‌کار امتیازدار پیدا کنید',
   'Request service and order consumables': 'سرویس بخواهید و مصرفی سفارش دهید',

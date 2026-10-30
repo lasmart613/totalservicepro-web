@@ -486,6 +486,8 @@ export const PT_COPY: Record<string, string> = {
     'Plano pago para oficinas que precisam de mais do aplicativo',
   '50 text + 50 voice AI queries per member per day':
     '50 perguntas de texto e 50 de voz para a IA por membro ao dia',
+  '10 service manuals in your library': '10 manuais de serviço na sua biblioteca',
+  'New service companies get a 60-day free Premium trial': 'Novas empresas de serviço ganham 60 dias de teste grátis do Premium',
   '15 service manuals': '15 manuais de serviço',
   'Find work and bid on open service requests': 'Encontre trabalho e envie proposta em solicitações abertas',
   'More access to nearby clinics over time': 'Com o tempo, mais acesso a clínicas próximas',
@@ -493,7 +495,7 @@ export const PT_COPY: Record<string, string> = {
   'Everything in Premium': 'Tudo o que está no Premium',
   '250 text + 250 voice AI queries per member per day':
     '250 perguntas de texto e 250 de voz para a IA por membro ao dia',
-  '50 service manuals': '50 manuais de serviço',
+  'Unlimited service manuals': 'Manuais de serviço ilimitados',
   'Up to 10 user seats': 'Até 10 usuários',
   'Find rated repair and maintenance pros': 'Encontre profissionais de reparo e manutenção com avaliação',
   'Request service and order consumables': 'Peça serviço e encomende consumíveis',

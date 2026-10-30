@@ -487,6 +487,8 @@ export const AR_COPY: Record<string, string> = {
     'خطة مدفوعة للورش التي تحتاج إلى المزيد من التطبيق',
   '50 text + 50 voice AI queries per member per day':
     '50 سؤالًا نصيًا و50 سؤالًا صوتيًا للذكاء الاصطناعي لكل عضو في اليوم',
+  '10 service manuals in your library': '10 كتيبات خدمة في مكتبتكم',
+  'New service companies get a 60-day free Premium trial': 'تحصل شركات الخدمة الجديدة على تجربة Premium مجانية لمدة 60 يومًا',
   '15 service manuals': '15 كتيب خدمة',
   'Find work and bid on open service requests': 'اعثروا على عمل وقدّموا عرضًا على الطلبات المفتوحة',
   'More access to nearby clinics over time': 'مع الوقت، وصول أوسع إلى العيادات القريبة',
@@ -494,7 +496,7 @@ export const AR_COPY: Record<string, string> = {
   'Everything in Premium': 'كل ما في Premium',
   '250 text + 250 voice AI queries per member per day':
     '250 سؤالًا نصيًا و250 سؤالًا صوتيًا للذكاء الاصطناعي لكل عضو في اليوم',
-  '50 service manuals': '50 كتيب خدمة',
+  'Unlimited service manuals': 'كتيبات خدمة غير محدودة',
   'Up to 10 user seats': 'حتى 10 مستخدمين',
   'Find rated repair and maintenance pros': 'اعثروا على محترفي الإصلاح والصيانة ذوي التقييم',
   'Request service and order consumables': 'اطلبوا خدمة واطلبوا المستهلكات',

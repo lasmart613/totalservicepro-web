@@ -172,8 +172,21 @@ export async function POST(req: NextRequest) {
         if (!/subscription_tier|premium_until|premium_grant|\bplan\b|column/i.test(error.message || '')) break;
       }
       if (!companyBrandingEnabled(plan)) {
-        delete payload.brand_primary_color;
-        delete payload.brand_accent_color;
+        // Free orgs may clear colors but never save custom ones (000948 enforces in the DB too).
+        const setsColor = ['brand_primary_color', 'brand_accent_color'].some(
+          (k) => k in payload && normalizeHex(payload[k]) != null
+        );
+        if (setsColor) {
+          return NextResponse.json(
+            {
+              error: 'Custom colors are a paid feature. Upgrade to save them.',
+              branding_locked: true,
+              upgrade_url: '/plans',
+            },
+            { status: 403 }
+          );
+        }
+        // Only clears (null) reach here; they are saved as-is.
       } else {
         if ('brand_primary_color' in payload) {
           payload.brand_primary_color = normalizeHex(payload.brand_primary_color);

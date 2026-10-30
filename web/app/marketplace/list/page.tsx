@@ -12,6 +12,7 @@ import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
 import { rememberManufacturerName } from '@/lib/remember-manufacturer';
+import { FREE_LISTING_PHOTO_LIMIT, listingPhotoLimit } from '@/lib/marketplace/storefront';
 
 type ListingType = 'part' | 'consumable' | 'used' | 'request';
 
@@ -28,6 +29,8 @@ function MarketplaceListContent() {
   const [listingType, setListingType] = useState<ListingType>('part');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
+  // Free 1 photo, paid 8 (server and DB trigger enforce the same).
+  const [photoLimit, setPhotoLimit] = useState(FREE_LISTING_PHOTO_LIMIT);
   const [previews, setPreviews] = useState<string[]>([]);
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [userRole, setUserRole] = useState('');
@@ -114,7 +117,7 @@ function MarketplaceListContent() {
       if (!user) return;
       const { data: profile } = await getSupabaseClient()
         .from('user_profiles')
-        .select('organization_id, role, organizations(type, name, city, state)')
+        .select('organization_id, role, organizations(type, name, city, state, is_premium, subscription_tier, plan, premium_until, premium_grant)')
         .eq('id', user.id)
         .maybeSingle();
       setUserRole(profile?.role || '');
@@ -122,6 +125,7 @@ function MarketplaceListContent() {
       const org = (profile as any)?.organizations;
       setOrgType(org?.type || null);
       setOrgName(org?.name || '');
+      setPhotoLimit(listingPhotoLimit(org));
       if (org?.city) set('city', org.city);
       if (org?.state) set('state', org.state);
 
@@ -177,7 +181,7 @@ function MarketplaceListContent() {
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
-    const left = 8 - images.length;
+    const left = Math.max(0, photoLimit - images.length);
     const slice = files.slice(0, left);
     if (!slice.length) return;
     setImages((prev) => [...prev, ...slice]);
@@ -628,7 +632,16 @@ function MarketplaceListContent() {
           {!isRequest && (
             <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-3">
               <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Photos')}</h3>
-              <p className="text-xs text-[var(--text3)]">{t('Up to 8 photos. First / starred photo is the cover.')}</p>
+              {photoLimit > FREE_LISTING_PHOTO_LIMIT ? (
+                <p className="text-xs text-[var(--text3)]">{t('Up to 8 photos. First / starred photo is the cover.')}</p>
+              ) : (
+                <p className="text-xs text-[var(--text3)]" data-testid="listing-photo-free-limit">
+                  {t('Free plan: 1 photo.')}{' '}
+                  <Link href="/plans" className="text-[var(--gold)] underline">
+                    {t('Upgrade for up to 8 photos')}
+                  </Link>
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {previews.map((src, i) => (
                   <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)]">
@@ -644,10 +657,10 @@ function MarketplaceListContent() {
                     </button>
                   </div>
                 ))}
-                {images.length < 8 && (
+                {images.length < photoLimit && (
                   <label className="w-20 h-20 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-2xl text-[var(--text3)] cursor-pointer hover:border-[var(--gold)]">
                     +
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageSelect} />
+                    <input type="file" accept="image/*" multiple={photoLimit > 1} className="hidden" onChange={handleImageSelect} />
                   </label>
                 )}
               </div>

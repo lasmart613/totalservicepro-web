@@ -215,3 +215,17 @@ export function sortFeaturedSellersFirst<T extends { featured?: boolean; name?: 
 export function namedPlanForCopy(org?: OrgPlanFields | null): 'free' | 'premium' | 'team' | 'enterprise' {
   return currentOrgPlan(org);
 }
+
+/** Photos on a listing payload: the larger of images[] / photos[] (non-empty strings). */
+export function listingPhotoCount(payload: { images?: unknown; photos?: unknown } | null | undefined): number {
+  const n = (v: unknown) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x.trim()).length : 0);
+  return Math.max(n(payload?.images), n(payload?.photos));
+}
+
+/** Null when the count fits. English only for now. */
+export function listingPhotoLimitError(count: number, limit: number): string | null {
+  if (count <= limit) return null;
+  return limit <= FREE_LISTING_PHOTO_LIMIT
+    ? `Free plan listings can have ${limit} photo. Upgrade to add up to ${PAID_LISTING_PHOTO_LIMIT}.`
+    : `Listings can have up to ${limit} photos.`;
+}

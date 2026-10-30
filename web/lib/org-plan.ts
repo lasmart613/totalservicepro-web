@@ -14,8 +14,8 @@ export type OrgPlanFields = {
   premium_grant?: string | null;
 };
 
-/** Free default already in /manuals. Premium is 15. Team/Enterprise is unlimited. */
-export const FREE_MANUAL_SLOTS = 5;
+/** Free is 10. Premium is 15. Team/Enterprise is unlimited. */
+export const FREE_MANUAL_SLOTS = 10;
 export const PREMIUM_MANUAL_SLOTS = 15;
 export const UNLIMITED_MANUAL_SLOTS = 999;
 
@@ -133,10 +133,13 @@ export function isUnlimitedManualSlots(limit: number): boolean {
 export function manualSlotLimit(org: OrgPlanFields | null | undefined): number {
   if (orgIsTopPaid(org)) return UNLIMITED_MANUAL_SLOTS;
   if (orgIsPaid(org)) return PREMIUM_MANUAL_SLOTS;
+  // Free orgs get at least FREE_MANUAL_SLOTS. A stored manual_slots row that
+  // is higher (a grant, e.g. 7) is kept; a stale lower one (old default 5)
+  // is raised. Nothing is ever revoked: the cap only blocks new adds.
   const stored = org?.manual_slots;
   if (stored != null) {
     const n = parseInt(String(stored), 10);
-    if (Number.isFinite(n) && n > 0) return n;
+    if (Number.isFinite(n) && n > FREE_MANUAL_SLOTS) return n;
   }
   return FREE_MANUAL_SLOTS;
 }
@@ -162,4 +165,47 @@ export function shouldPreserveSessionForExistingOrg(
 ): boolean {
   if (organizationId == null) return false;
   return String(organizationId).trim() !== '';
+}
+
+/** Where library-full and seat-limit nudges send people. */
+export const MANUAL_UPGRADE_PATH = '/plans';
+
+/**
+ * True when a NEW library add must be refused. Over-cap libraries (e.g. 12 of
+ * 10 after a downgrade) keep every saved manual and can still open them; the
+ * cap only blocks the next add.
+ */
+export function libraryAddBlocked(used: number, cap: number): boolean {
+  if (isUnlimitedManualSlots(cap)) return false;
+  return Math.max(0, Number(used) || 0) >= cap;
+}
+
+/** "You're using 12 of 10 free slots — upgrade to add more." (English only for now.) */
+export function libraryFullMessage(used: number, cap: number, freePlan: boolean): string {
+  const n = Math.max(0, Number(used) || 0);
+  return `You're using ${n} of ${cap} ${freePlan ? 'free ' : ''}slots — upgrade to add more.`;
+}
+
+/** Seats: Free and Premium are single-user; Team (and Enterprise) get 10. */
+export const SOLO_SEAT_LIMIT = 1;
+export const TEAM_SEAT_LIMIT = 10;
+
+export function orgSeatLimit(org: OrgPlanFields | null | undefined, now: Date = new Date()): number {
+  // An expired complimentary window drops to 1 even if the tier name says team.
+  return orgIsPaid(org, now) && orgIsTopPaid(org) && !complimentaryPremiumExpired(org, now)
+    ? TEAM_SEAT_LIMIT
+    : SOLO_SEAT_LIMIT;
+}
+
+/** New members are refused at or over the cap. Existing members are never removed. */
+export function seatAddBlocked(used: number, limit: number): boolean {
+  return Math.max(0, Number(used) || 0) >= limit;
+}
+
+export function seatLimitMessage(used: number, limit: number): string {
+  const n = Math.max(0, Number(used) || 0);
+  const word = limit === 1 ? 'seat' : 'seats';
+  return limit >= TEAM_SEAT_LIMIT
+    ? `You're using ${n} of ${limit} ${word} — contact us for more.`
+    : `You're using ${n} of ${limit} ${word} — upgrade to Team to add more people.`;
 }
