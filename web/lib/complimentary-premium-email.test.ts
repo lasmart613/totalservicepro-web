@@ -89,7 +89,8 @@ test('benefits match live company Premium tiles plus shop tools actually offered
   assert.ok(benefits.includes(PREMIUM_MANUALS_LINE));
   assert.equal(PREMIUM_MANUALS_LINE, '15 service manuals');
   assert.ok(benefits.includes(SHARED_SERVICE_HISTORY_LINE));
-  assert.ok(benefits.includes('Find work and bid on open service requests'));
+  // Bidding is on Free too, so the trial email does not sell it as a Premium perk.
+  assert.ok(!benefits.includes('Find work and bid on open service requests'));
   assert.ok(benefits.includes('Write estimates and invoices on the same job'));
   assert.ok(benefits.includes('Schedule service calls on the calendar'));
   assert.ok(benefits.includes('No advertisements'));

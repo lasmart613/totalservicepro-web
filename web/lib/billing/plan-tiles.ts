@@ -26,9 +26,16 @@ export const WEEKLY_UPDATES_LINE = 'New features added weekly';
 /** History lives with the laser on Free, Premium, and Team. */
 export const SHARED_SERVICE_HISTORY_LINE = 'Shared service history lives with the laser';
 
-/** Service Company tiles only. Laser Owner and Parts Supplier omit manuals and repair AI. */
+/** Free tile on every audience: matches FREE_MANUAL_SLOTS in lib/org-plan.ts. */
+export const FREE_MANUALS_LINE = '10 service manuals in your library';
+/** Free Service Company tile: signup trial (COMPLIMENTARY_PREMIUM_DAYS = 60). */
+export const FREE_TRIAL_LINE = 'New service companies get a 60-day free Premium trial';
+/** Free users can bid. Listed on the Free Service Company tile, never as Premium-only. */
+export const FIND_WORK_BID_LINE = 'Find work and bid on open service requests';
+
+/** Premium/Team manual counts are Service Company tiles only. Laser Owner and Parts Supplier omit repair AI. */
 export const PREMIUM_MANUALS_LINE = '15 service manuals';
-/** Team is 50. Do not advertise unlimited — that is reserved for Enterprise. */
+/** Team manual slots are 50 in code (TEAM_MANUAL_SLOTS). */
 export const TEAM_MANUALS_LINE = '50 service manuals';
 
 /** Per member per day — not a shared org bucket. */
@@ -81,8 +88,11 @@ const COMPANY_TILES: Record<PlanTileId, readonly string[]> = {
   free: [
     'Register and use Total Service Pro at no charge',
     'Schedule service calls, post service requests, and list parts',
+    FIND_WORK_BID_LINE,
+    FREE_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
     FREE_AI_LINE,
+    FREE_TRIAL_LINE,
     'Ads may appear on the Free Plan',
     WEEKLY_UPDATES_LINE,
   ],
@@ -91,7 +101,6 @@ const COMPANY_TILES: Record<PlanTileId, readonly string[]> = {
     PREMIUM_AI_LINE,
     PREMIUM_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
-    'Find work and bid on open service requests',
     'More access to nearby clinics over time',
     'No advertisements',
     WEEKLY_UPDATES_LINE,
@@ -112,6 +121,7 @@ const OWNER_TILES: Record<PlanTileId, readonly string[]> = {
     'Find rated repair and maintenance pros',
     'Request service and order consumables',
     'Keep FDA-style service records with the machine',
+    FREE_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
     'Ads may appear on the Free Plan',
     WEEKLY_UPDATES_LINE,
@@ -138,6 +148,7 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
   free: [
     'List parts with one smaller, low-res photo',
     'Appear in the marketplace',
+    FREE_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
     'Ads may appear on the Free Plan',
     WEEKLY_UPDATES_LINE,

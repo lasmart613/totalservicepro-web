@@ -38,7 +38,13 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap, applyStoredVolumePageSpans, gateJoinedPageMap } from "./page-map.ts";
-import { manualSlotLimit } from "../../../web/lib/org-plan.ts";
+import {
+  libraryAddBlocked,
+  libraryFullMessage,
+  MANUAL_UPGRADE_PATH,
+  manualSlotLimit,
+  orgIsPaid,
+} from "../../../web/lib/org-plan.ts";
 import { libraryRowIsFree, manualIsIncomplete, slotCountedManuals } from "./incomplete.ts";
 import { indexWriteInProgress } from "../_shared/index-pending.ts";
 import { loadAiCaller, repairAiDecision } from "../_shared/repair-ai.ts";
@@ -885,6 +891,7 @@ Deno.serve(async (req) => {
     // Same plan cap as POST /api/manuals/library (manualSlotLimit). A stale
     // manual_slots of 5 does not shrink Premium to 5, and "pro" is not unlimited.
     let slotLimit = manualSlotLimit(null);
+    let slotOrgPaid = false;
     if (orgId != null) {
       try {
         let orgRes = await admin
@@ -903,6 +910,7 @@ Deno.serve(async (req) => {
           orgRes = await admin.from("organizations").select("is_premium").eq("id", orgId).maybeSingle();
         }
         slotLimit = manualSlotLimit(orgRes.error ? null : orgRes.data);
+        slotOrgPaid = orgIsPaid(orgRes.error ? null : orgRes.data);
       } catch {
         slotLimit = manualSlotLimit(null);
       }
@@ -1041,9 +1049,12 @@ Deno.serve(async (req) => {
         }
         // Incomplete manuals never use a slot, so they can be added when full.
         const usedSlots = slotsUsedBy();
-        if (!targetIncomplete && usedSlots + slotsHeld >= slotLimit && !reAddHeld) {
+        // Over-cap (e.g. 12 of 10 after a downgrade) keeps every saved manual;
+        // only this NEW add is refused.
+        if (!targetIncomplete && libraryAddBlocked(usedSlots + slotsHeld, slotLimit) && !reAddHeld) {
           return json(403, {
-            error: `Library full (${usedSlots + slotsHeld}/${slotLimit}). Upgrade for more slots or remove a manual.`,
+            error: libraryFullMessage(usedSlots + slotsHeld, slotLimit, !slotOrgPaid),
+            upgrade_url: MANUAL_UPGRADE_PATH,
             requires_add: true,
             library_full: true,
             owned_count: usedSlots,

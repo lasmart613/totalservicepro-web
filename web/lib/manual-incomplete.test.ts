@@ -78,7 +78,7 @@ test('refund copy for incomplete_free', () => {
 test('get-manual-url: incomplete manuals skip the cap and still require a library row', () => {
   const src = read('supabase/functions/get-manual-url/index.ts');
   assert.match(src, /from "\.\/incomplete\.ts"/);
-  assert.match(src, /!targetIncomplete && usedSlots \+ slotsHeld >= slotLimit/);
+  assert.match(src, /!targetIncomplete && libraryAddBlocked\(usedSlots \+ slotsHeld, slotLimit\)/);
   assert.doesNotMatch(src, /mayViewIncompleteFree\(/);
   assert.match(src, /free_incomplete: true/);
   assert.match(src, /Add to library to open/);
@@ -90,7 +90,7 @@ test('get-manual-url: incomplete manuals skip the cap and still require a librar
 test('library route and page exclude incomplete manuals from slot use', () => {
   const route = read('web/app/api/manuals/library/route.ts');
   assert.match(route, /slotCountedManuals/);
-  assert.match(route, /!free && !isUnlimitedManualSlots\(limit\) && usedNow >= limit/);
+  assert.match(route, /!free && libraryAddBlocked\(usedNow, limit\)/);
   const page = read('web/app/manuals/page.tsx');
   assert.match(page, /ownedIds\.size - ownedFreeIds\.size/);
   assert.match(page, /INCOMPLETE_FREE_BADGE/);

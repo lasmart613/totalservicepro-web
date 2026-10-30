@@ -25,12 +25,12 @@ const assistant = readFileSync(join(here, '../../../supabase/functions/grok-assi
 test('daily voice limits match grok-assistant', () => {
   assert.equal(VOICE_DAILY_LIMITS.free, 5);
   assert.equal(VOICE_DAILY_LIMITS.premium, 50);
-  assert.equal(VOICE_DAILY_LIMITS.team, 50);
-  assert.equal(VOICE_DAILY_LIMITS.enterprise, 50);
+  assert.equal(VOICE_DAILY_LIMITS.team, 250);
+  assert.equal(VOICE_DAILY_LIMITS.enterprise, 250);
   assert.match(assistant, /free:\s*\{\s*text:\s*5,\s*voice:\s*5\s*\}/);
   assert.match(assistant, /premium:\s*\{\s*text:\s*50,\s*voice:\s*50\s*\}/);
-  assert.match(assistant, /team:\s*\{\s*text:\s*50,\s*voice:\s*50\s*\}/);
-  assert.match(assistant, /enterprise:\s*\{\s*text:\s*50,\s*voice:\s*50\s*\}/);
+  assert.match(assistant, /team:\s*\{\s*text:\s*250,\s*voice:\s*250\s*\}/);
+  assert.match(assistant, /enterprise:\s*\{\s*text:\s*250,\s*voice:\s*250\s*\}/);
   assert.equal(dailyVoiceLimit('premium'), 50);
   assert.equal(dailyVoiceLimit('unknown'), 5);
   assert.equal(dailyLimitMessage('free', 5), 'Free limit: 5 voice/day.');

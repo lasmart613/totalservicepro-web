@@ -38,6 +38,8 @@ export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Pr
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<AiUsage>(defaultUsage());
+  /** False until grok-assistant reports this caller's real tier limit (never show a guessed 0/5). */
+  const [usageLoaded, setUsageLoaded] = useState(false);
   const [error, setError] = useState('');
 
   const persist = useCallback(
@@ -92,7 +94,10 @@ export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Pr
         const state = readAiState(session.user.id, resolvedOrg);
         setMessages(messagesForManual(state, scopedId));
         const u = await fetchAiUsage(session.access_token);
-        if (!cancelled && u) setUsage(u);
+        if (!cancelled && u) {
+          setUsage(u);
+          setUsageLoaded(true);
+        }
       }
       setReady(true);
     })();
@@ -142,7 +147,10 @@ export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Pr
     if (!result.ok) {
       if (result.status === 429) {
         setError(result.message || 'Daily limit reached');
-        if (result.usage) setUsage((u) => ({ ...u, ...result.usage }));
+        if (result.usage) {
+          setUsage((u) => ({ ...u, ...result.usage }));
+          setUsageLoaded(true);
+        }
       } else {
         setError(result.error || 'AI request failed');
       }
@@ -162,6 +170,7 @@ export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Pr
         voice: result.usage!.voice || u.voice,
         tier: result.usage!.tier || u.tier,
       }));
+      setUsageLoaded(true);
     }
     setSending(false);
   }
@@ -202,7 +211,7 @@ export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Pr
         </Link>
       </div>
       <p className="viewer-ai-note">
-        Soft beta · scoped to {title || 'this book'} · {usage.text.used}/{usage.text.limit} texts
+        Soft beta · scoped to {title || 'this book'} · {usageLoaded ? `${usage.text.used}/${usage.text.limit} texts` : 'checking daily limit…'}
       </p>
       <textarea
         className="viewer-ai-input"
