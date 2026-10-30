@@ -98,6 +98,26 @@
             .select(`manual_id, manuals (id, brand, title, file_path)`)
             .eq('user_id', user.id);
 
+        // 000943: adds land in organization_manuals (company library). Merge
+        // those first, then legacy personal rows, de-duplicated by manual_id.
+        const { data: prof } = await supabaseClient
+            .from('user_profiles').select('organization_id').eq('id', user.id).single();
+        if (prof && prof.organization_id != null) {
+            const { data: orgManuals, error: orgErr } = await supabaseClient
+                .from('organization_manuals')
+                .select(`manual_id, manuals (id, brand, title, file_path)`)
+                .eq('organization_id', prof.organization_id);
+            if (!orgErr && orgManuals) {
+                const seen = new Set();
+                userManuals = orgManuals.concat(userManuals || []).filter((r) => {
+                    const k = String(r.manual_id);
+                    if (seen.has(k)) return false;
+                    seen.add(k);
+                    return true;
+                });
+            }
+        }
+
         let manuals = [];
 
         if (userManuals && userManuals.length > 0) {
