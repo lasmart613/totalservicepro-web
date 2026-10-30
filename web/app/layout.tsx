@@ -93,7 +93,7 @@ export default function RootLayout({
           <GoogleAnalytics />
           <AdBannerGate />
           <div className="flex-1 flex flex-col">
-		<main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-full">
+		<main className="flex-1 w-full min-w-0 mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-full">
 		{children}
 		</main>
           </div>

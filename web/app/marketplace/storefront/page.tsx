@@ -334,7 +334,7 @@ export default function SupplierStorefrontSettings() {
                     {preview.filename}: {preview.counts.create} new, {preview.counts.update} updates,{' '}
                     {preview.counts.skip} skipped, {preview.counts.error} errors.
                   </p>
-                  <div className="overflow-x-auto">
+                  <div className="overflow-x-auto table-scroll">
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="text-left text-[var(--text3)]">

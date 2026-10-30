@@ -165,7 +165,7 @@ function DetailedSections({
               : t('No issued invoice has a remaining balance from the rows that were read.')}
           </div>
         ) : (
-          <div className="card overflow-x-auto">
+          <div className="card overflow-x-auto table-scroll">
             <table className="w-full text-sm">
               <thead className="text-start text-[var(--text3)]">
                 <tr>
@@ -218,7 +218,7 @@ function DetailedSections({
           <p className="text-xs text-[var(--text3)] mb-3">
             These rows were read and left out of a total because the source field was empty.
           </p>
-          <div className="card overflow-x-auto">
+          <div className="card overflow-x-auto table-scroll">
             <table className="w-full text-sm">
               <thead className="text-start text-[var(--text3)]">
                 <tr>
@@ -251,7 +251,7 @@ function DetailedSections({
         {report.paymentMethods.length === 0 ? (
           <div className="card p-4 text-sm text-[var(--text3)]">{t('No collected payments were read, or payment rows are unavailable.')}</div>
         ) : (
-          <div className="card overflow-x-auto">
+          <div className="card overflow-x-auto table-scroll">
             <table className="w-full text-sm">
               <thead className="text-start text-[var(--text3)]">
                 <tr>

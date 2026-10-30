@@ -1143,7 +1143,7 @@ export default function InvoiceFormClient() {
           </div>
 
           <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Line Items')}</h3>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto table-scroll">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
                 <tr className="text-left text-[var(--text3)] text-xs border-b border-[var(--border2)]">
