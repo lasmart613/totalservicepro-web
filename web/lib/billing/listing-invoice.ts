@@ -145,14 +145,20 @@ function listingTitle(listing: ListingInvoiceSource): string {
 
 export function lineItemFromStored(raw: unknown, index = 0): LineItem {
   const li = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const line = recomputeExt({
+  const qtyN = Number(li.qty);
+  const priceN = Number(li.unit_price);
+  const qty = Number.isFinite(qtyN) ? qtyN : 0;
+  const unit = Number.isFinite(priceN) ? priceN : 0;
+  const extRaw = li.ext;
+  const extMissing = extRaw == null || extRaw === '' || !Number.isFinite(Number(extRaw));
+  const line: LineItem = {
     id: li.id != null && String(li.id).trim() ? String(li.id) : `LI${index + 1}`,
     part_number: String(li.part_number || ''),
     description: String(li.description || ''),
-    qty: Number(li.qty) || 0,
-    unit_price: Number(li.unit_price) || 0,
-    ext: Number(li.ext) || 0,
-  });
+    qty,
+    unit_price: unit,
+    ext: extMissing ? Math.round(qty * unit * 100) / 100 : Math.round(Number(extRaw) * 100) / 100,
+  };
   const listingId = li.marketplace_listing_id;
   if (listingId != null && String(listingId).trim()) {
     line.marketplace_listing_id = String(listingId).trim();
@@ -207,9 +213,12 @@ export function appendListingLine(existing: unknown, line: LineItem): LineItem[]
 
 export function invoiceTotalsFromLines(
   lines: LineItem[],
-  tax: unknown
+  tax: unknown,
+  laborSubtotal: unknown = 0
 ): { subtotal: number; tax: number; total: number } {
-  const subtotal = lineItemsSubtotal(lines);
+  const parts = lineItemsSubtotal(lines);
+  const labor = roundMoney(Math.max(0, Number(laborSubtotal) || 0));
+  const subtotal = roundMoney(parts + labor);
   const taxN = roundMoney(Number(tax) || 0);
   return { subtotal, tax: taxN, total: roundMoney(subtotal + taxN) };
 }
@@ -262,13 +271,13 @@ function applyCollectableAfterAppend(
 }
 
 export function mergeListingOntoDraft(
-  row: { invoice_data?: unknown; tax?: unknown; amount_paid?: unknown; total?: unknown },
+  row: { invoice_data?: unknown; tax?: unknown; amount_paid?: unknown; total?: unknown; labor_subtotal?: unknown },
   line: LineItem
 ): { invoice_data: Record<string, unknown>; subtotal: number; total: number } {
   const stored = parseJsonField(row.invoice_data);
   const oldTotal = previousInvoiceTotal(row, stored, row.tax);
   const lines = appendListingLine(stored.line_items, line);
-  const totals = invoiceTotalsFromLines(lines, row.tax);
+  const totals = invoiceTotalsFromLines(lines, row.tax, row.labor_subtotal);
   const paidRaw = Number(row.amount_paid);
   const received =
     Number.isFinite(paidRaw) && paidRaw > 0

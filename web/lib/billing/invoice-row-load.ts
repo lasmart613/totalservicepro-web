@@ -9,6 +9,7 @@
  */
 
 export const INVOICE_ROW_SELECTS = [
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, subtotal, tax, labor_hours, labor_half_days, labor_full_days, labor_hourly_rate, labor_half_day_rate, labor_full_day_rate, labor_subtotal, amount_paid, invoice_data, invoice_number, status',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, status',
   'id, created_by, organization_id, customer_name, total, amount_paid, invoice_data, status',

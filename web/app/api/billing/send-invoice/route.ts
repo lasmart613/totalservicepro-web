@@ -10,7 +10,8 @@ import { decideSellerChargeRoute, CONNECT_REQUIRED_CODE } from '@/lib/billing/st
 import { loadSellerPayoutAccount } from '@/lib/billing/stripe-connect-api';
 import {
   invoiceCheckoutDescription,
-  resolveInvoiceCollectable,
+  invoiceSavedCollectable,
+  STRIPE_INVOICE_MAX,
 } from '@/lib/billing/invoice-collectable';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/customer-invite';
@@ -162,13 +163,31 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         : senderCompanyFromOrg(null, techName);
     const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
 
-    const collectable = resolveInvoiceCollectable({
-      total: inv.total,
-      amountPaid: inv.amount_paid,
-      invoice_data: inv.invoice_data,
-    });
-    const payAmount = collectable.stripeAmount;
     const includePay = request.includePaymentLink;
+    const collectable = invoiceSavedCollectable(inv);
+    if (!collectable) {
+      return respond(
+        {
+          ok: false,
+          emailSent: false,
+          error: 'This invoice has no total, so it was not sent.',
+        },
+        400,
+        [recipient.email]
+      );
+    }
+    if (includePay && collectable && collectable.stripeAmount > STRIPE_INVOICE_MAX) {
+      return respond(
+        {
+          ok: false,
+          emailSent: false,
+          error: 'Invoice total cannot be more than $999,999.99.',
+        },
+        400,
+        [recipient.email]
+      );
+    }
+    const payAmount = collectable ? collectable.stripeAmount : 0;
 
     const resendKey = process.env.RESEND_API_KEY;
     if (!resendKey) {
@@ -213,7 +232,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     const stripeProblem = stripeSecretProblem();
     if (isVoidInvoiceStatus(inv.status)) {
       stripeSkippedReason = VOIDED_INVOICE_MESSAGE;
-    } else if (includePay && payAmount >= 0.5) {
+    } else if (includePay && collectable && payAmount >= 0.5) {
       if (stripeProblem) {
         stripeSkippedReason = stripeProblem;
       } else {
@@ -292,7 +311,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
           }
         }
       }
-    } else if (includePay && payAmount < 0.5) {
+    } else if (includePay && collectable && payAmount < 0.5) {
       stripeSkippedReason = collectable.hasDeferredSplit && !collectable.deferredReleased
         ? collectable.amountPaid > 0
           ? 'Deposit is paid. Remaining balance is due on completion — use Collect remaining balance to enable Stripe.'

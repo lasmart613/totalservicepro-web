@@ -408,4 +408,111 @@ describe('send invoice', { concurrency: false }, () => {
       fetchLog.restore();
     }
   });
+
+  test('checkout cents are the saved total, including an override and a partial payment', async () => {
+    resetDocumentSendRateLimit();
+    const override = {
+      ...invoiceRow(),
+      total: 108,
+      subtotal: 100,
+      tax: 8,
+      labor_subtotal: 100,
+      invoice_data: {
+        custEmail: CLINIC,
+        line_items: [{ description: 'Handpiece service', qty: 1, unit_price: 100, ext: 100 }],
+      },
+    };
+    const already = { ...override, total: 158, labor_subtotal: 50 };
+    const partial = { ...override, amount_paid: 40 };
+    const zeroLabor = invoiceRow();
+    const cases = [
+      { row: override, cents: 10800 },
+      { row: already, cents: 15800 },
+      { row: partial, cents: 6800 },
+      { row: zeroLabor, cents: 12000 },
+    ];
+    for (const item of cases) {
+      resetDocumentSendRateLimit();
+      const db = memoryClient({
+        user_profiles: [profile],
+        organizations: [shopOrg],
+        service_invoices: [item.row],
+      });
+      const checkout = checkoutSpy();
+      const fetchLog = installFetch(() => {
+        return new Response(JSON.stringify({ message: 'provider down' }), {
+          status: 502,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+      try {
+        await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+          const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: checkout.createCheckout as never,
+          });
+          assert.equal(res.status, 502);
+          assert.equal(checkout.calls.length, 1);
+          assert.equal(checkout.calls[0].amountCents, item.cents);
+        });
+      } finally {
+        fetchLog.restore();
+      }
+    }
+  });
+
+  test('a null or empty total is not emailed, and a total above the Stripe cap does not create a pay link', async () => {
+    const base = {
+      user_profiles: [profile],
+      organizations: [shopOrg],
+    };
+    for (const total of [null, '', '   ']) {
+      for (const includePaymentLink of [true, false]) {
+        const checkout = checkoutSpy();
+        const fetchLog = installFetch(() => {
+          throw new Error('resend should not be called');
+        });
+        try {
+          await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+            const res = await runSendInvoice(
+              request({ invoice_id: 42, include_payment_link: includePaymentLink }),
+              {
+                userClient: memoryClient({
+                  ...base,
+                  service_invoices: [{ ...invoiceRow(), total }],
+                }) as never,
+                adminClient: null,
+                createCheckout: checkout.createCheckout as never,
+              }
+            );
+            const json = await res.json();
+            assert.equal(res.status, 400, `total ${JSON.stringify(total)} pay ${includePaymentLink}`);
+            assert.equal(json.emailSent, false);
+            assert.match(String(json.error), /no total/);
+            assert.match(String(json.error), /not sent/);
+            assert.equal(checkout.calls.length, 0);
+            assert.equal(fetchLog.calls, 0);
+          });
+        } finally {
+          fetchLog.restore();
+        }
+      }
+    }
+
+    const checkout = checkoutSpy();
+
+    const over = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+      userClient: memoryClient({
+        ...base,
+        service_invoices: [{ ...invoiceRow(), total: 1_000_000 }],
+      }) as never,
+      adminClient: null,
+      createCheckout: checkout.createCheckout as never,
+    });
+    const overJson = await over.json();
+    assert.equal(over.status, 400);
+    assert.match(String(overJson.error), /999,999\.99/);
+    assert.equal(checkout.calls.length, 0);
+  });
 });
