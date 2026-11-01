@@ -74,9 +74,9 @@ test('shared entitlements appear on every audience and every tier', () => {
       assert.ok(lines.includes(WEEKLY_UPDATES_LINE), `${audience} ${tile} weekly`);
       assert.ok(lines.includes(SHARED_SERVICE_HISTORY_LINE), `${audience} ${tile} history`);
       assert.equal(
-        lines.filter((l) => /unlimited/i.test(l) && l !== TEAM_MANUALS_LINE).length,
+        lines.filter((l) => /unlimited/i.test(l)).length,
         0,
-        `${audience} ${tile} only the Team manuals line may say unlimited`
+        `${audience} ${tile} no tile line may say unlimited (Team is 50 manuals)`
       );
     }
   }
