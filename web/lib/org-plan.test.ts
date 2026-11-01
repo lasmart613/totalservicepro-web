@@ -7,6 +7,7 @@ import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
   UNLIMITED_MANUAL_SLOTS,
+  TEAM_MANUAL_SLOTS,
   complimentaryPremiumExpired,
   currentOrgPlan,
   currentOrgPlanLabel,
@@ -144,11 +145,17 @@ test('current plan label is Free / Premium / Team from paid helper', () => {
 
 test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => {
   assert.equal(PREMIUM_MANUAL_SLOTS, 15);
+  assert.equal(FREE_MANUAL_SLOTS, 10);
+  // Free: stale stored 5 is raised to 10; a higher grant (e.g. 7 → still 10, 12 → 12) is never cut.
+  assert.equal(manualSlotLimit({ is_premium: false, manual_slots: 5 }), 10);
+  assert.equal(manualSlotLimit({ is_premium: false, manual_slots: 7 }), 10);
+  assert.equal(manualSlotLimit({ is_premium: false, manual_slots: 12 }), 12);
+  assert.equal(manualSlotLimit(null), 10);
   assert.equal(manualSlotLimit({ plan: 'premium' }), 15);
   assert.equal(manualSlotLimit({ is_premium: true }), 15);
   assert.equal(manualSlotLimit({ is_premium: true, manual_slots: 999 }), 15);
   assert.equal(manualSlotLimit({ plan: 'pro', manual_slots: null }), FREE_MANUAL_SLOTS);
-  assert.equal(manualSlotLimit({ plan: 'team' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team' }), TEAM_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ is_premium: false }), FREE_MANUAL_SLOTS);
 });
@@ -165,15 +172,72 @@ test('a Premium org whose stored manual_slots is 5 still gets 15, including from
   assert.equal(manualSlotLimit({ subscription_tier: 'premium', manual_slots: 5 }), 15);
   assert.equal(manualSlotLimit({ subscription_tier: 'pro' }), FREE_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ subscription_tier: 'Pro', manual_slots: null }), FREE_MANUAL_SLOTS);
-  assert.equal(manualSlotLimit({ plan: 'team', manual_slots: 5 }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team', manual_slots: 5 }), TEAM_MANUAL_SLOTS);
 
   const edge = readFileSync(
     join(dirname(fileURLToPath(import.meta.url)), '../../supabase/functions/get-manual-url/index.ts'),
     'utf8',
   );
-  assert.match(edge, /import \{ manualSlotLimit \} from "\.\.\/\.\.\/\.\.\/web\/lib\/org-plan\.ts"/);
+  assert.match(edge, /import \{[^}]*\bmanualSlotLimit\b[^}]*\} from "\.\.\/\.\.\/\.\.\/web\/lib\/org-plan\.ts"/);
   assert.match(edge, /manualSlotLimit\(orgRes\.error \? null : orgRes\.data\)/);
   assert.match(edge, /is_premium, subscription_tier, plan, manual_slots, premium_until/);
   assert.doesNotMatch(edge, /let slotLimit = 5/);
   assert.doesNotMatch(edge, /premium\|team\|enterprise\|pro/);
+});
+
+
+// ---------- grandfathering: over-cap libraries keep every manual ----------
+import { readFileSync as __read } from 'node:fs';
+import { fileURLToPath as __path } from 'node:url';
+import { libraryAddBlocked, libraryFullMessage, MANUAL_UPGRADE_PATH } from './org-plan.ts';
+const __src = (rel: string) => __read(__path(new URL(rel, import.meta.url)), 'utf8');
+
+test('over-cap add: 12 of 10 blocks new adds with the upgrade nudge; unlimited never blocks', () => {
+  assert.equal(libraryAddBlocked(9, 10), false);
+  assert.equal(libraryAddBlocked(10, 10), true);
+  assert.equal(libraryAddBlocked(12, 10), true);
+  assert.equal(libraryAddBlocked(5000, 999), false);
+  assert.equal(libraryFullMessage(12, 10, true), "You're using 12 of 10 free slots — upgrade to add more.");
+  assert.equal(MANUAL_UPGRADE_PATH, '/plans');
+});
+
+test('server add guards use libraryAddBlocked and return the upgrade link', () => {
+  const edge = __src('../../supabase/functions/get-manual-url/index.ts');
+  assert.match(edge, /libraryAddBlocked\(usedSlots \+ slotsHeld, slotLimit\) && !reAddHeld/);
+  assert.match(edge, /upgrade_url: MANUAL_UPGRADE_PATH/);
+  const route = __src('../app/api/manuals/library/route.ts');
+  assert.match(route, /!free && libraryAddBlocked\(usedNow, limit\) && !reAddHeld/);
+  assert.match(route, /library_full: true/);
+  const page = __src('../app/manuals/page.tsx');
+  assert.match(page, /data-testid="library-full-nudge"/);
+  assert.match(page, /\(\{slotsUsed\}\/\{isUnlimitedManualSlots\(slotLimit\) \? '∞' : slotLimit\}\)/);
+});
+
+test('over-cap open: the cap is only checked for manuals not already owned', () => {
+  const edge = __src('../../supabase/functions/get-manual-url/index.ts');
+  const ownedAt = edge.indexOf('if (!owned.has(manualId))');
+  const capAt = edge.indexOf('libraryAddBlocked(usedSlots + slotsHeld, slotLimit)');
+  assert.ok(ownedAt > 0 && capAt > ownedAt, 'cap check sits inside the not-owned branch');
+});
+
+test('downgrade paths never delete library rows', () => {
+  for (const rel of [
+    '../app/api/billing/upgrade/webhook/route.ts',
+    './billing/apply-org-downgrade.ts',
+    './billing/upgrade-session.ts',
+    './complimentary-premium.ts',
+  ]) {
+    let text = '';
+    try { text = __src(rel); } catch { continue; }
+    assert.doesNotMatch(text, /from\(['"]organization_manuals['"]\)\s*\.delete|manual_library_remove/, rel);
+  }
+});
+
+test('Team is capped at 50 manuals; over-cap Team orgs keep manuals but block new adds', () => {
+  assert.equal(TEAM_MANUAL_SLOTS, 50);
+  assert.equal(manualSlotLimit({ subscription_tier: 'team', is_premium: true }), 50);
+  assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(libraryAddBlocked(49, 50), false);
+  assert.equal(libraryAddBlocked(50, 50), true);
+  assert.equal(libraryAddBlocked(73, 50), true);
 });

@@ -21,6 +21,7 @@ import {
   type MarketplaceListingLike,
 } from '@/lib/marketplace/parts';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { listingPhotoCount, listingPhotoLimit, listingPhotoLimitError } from '@/lib/marketplace/storefront';
 import { resolveListingStorefront } from '@/lib/marketplace/storefront-server';
 import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { stripPrivatePartFields, viewerSeesPartSerial } from '@/lib/marketplace/part-public';
@@ -155,6 +156,28 @@ export async function PATCH(
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
     const patch = buildListingUpdatePayload(body, { details: gate.listing.details });
     const admin = getSupabaseAdmin();
+    // Photo cap by plan (Free 1, paid 8). Existing over-cap listings are
+    // grandfathered: only an edit that ADDS photos past the cap is refused.
+    const patchRec = patch as Record<string, unknown>;
+    if ('images' in patchRec || 'photos' in patchRec) {
+      const newCount = listingPhotoCount(patchRec as { images?: unknown; photos?: unknown });
+      const oldCount = listingPhotoCount(gate.listing as { images?: unknown; photos?: unknown });
+      const orgId = (gate.listing as { organization_id?: string | number | null }).organization_id;
+      let limit = listingPhotoLimit(null);
+      if (orgId != null) {
+        const { data: org, error: orgErr } = await admin
+          .from('organizations')
+          .select('is_premium, subscription_tier, plan, premium_until, premium_grant')
+          .eq('id', orgId)
+          .maybeSingle();
+        if (orgErr) return NextResponse.json({ error: 'Could not check your plan. Try again.' }, { status: 503 });
+        limit = listingPhotoLimit(org);
+      }
+      const photoErr = newCount > oldCount ? listingPhotoLimitError(newCount, limit) : null;
+      if (photoErr) {
+        return NextResponse.json({ error: photoErr, photo_limit: limit, upgrade_url: '/plans' }, { status: 403 });
+      }
+    }
     const { data, error } = await admin
       .from('marketplace_listings')
       .update(patch)

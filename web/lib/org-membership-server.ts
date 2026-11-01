@@ -8,6 +8,7 @@ import {
   sameOrg,
   type MembershipSnapshot,
 } from '@/lib/org-membership';
+import { orgSeatLimit, seatAddBlocked, seatLimitMessage, type OrgPlanFields } from '@/lib/org-plan';
 
 export type MembershipRow = {
   user_id: string;
@@ -53,6 +54,41 @@ export async function listMembershipsWithOrgs(
   return (data || []) as MembershipRow[];
 }
 
+export type OrgSeatCheck =
+  | { ok: true; used: number; limit: number }
+  | { ok: false; status: 403 | 503; error: string; used?: number; limit?: number };
+
+/**
+ * Seat cap for a NEW member (Free/Premium 1, Team 10). A user who is already a
+ * member always passes, so over-cap orgs keep everyone. Fails closed (503) when
+ * the plan or member list cannot be read. Never removes anyone.
+ */
+export async function orgSeatCheck(
+  admin: SupabaseClient,
+  organizationId: number | string,
+  userId?: string | null
+): Promise<OrgSeatCheck> {
+  const { data: org, error: orgErr } = await admin
+    .from('organizations')
+    .select('is_premium, subscription_tier, plan, premium_until, premium_grant')
+    .eq('id', organizationId)
+    .maybeSingle();
+  if (orgErr) return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+  const { data: rows, error: memErr } = await admin
+    .from('organization_memberships')
+    .select('user_id')
+    .eq('organization_id', organizationId);
+  if (memErr) return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+  const members = (rows || []) as Array<{ user_id: string }>;
+  const limit = orgSeatLimit((org as OrgPlanFields | null) ?? null);
+  const used = members.length;
+  if (userId && members.some((m) => m.user_id === userId)) return { ok: true, used, limit };
+  if (seatAddBlocked(used, limit)) {
+    return { ok: false, status: 403, error: seatLimitMessage(used, limit), used, limit };
+  }
+  return { ok: true, used, limit };
+}
+
 export async function upsertMembership(
   admin: SupabaseClient,
   input: {
@@ -63,7 +99,7 @@ export async function upsertMembership(
     /** With isHome, also point user_profiles at this org in the same transaction. */
     syncProfile?: boolean;
   }
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; seatLimited?: boolean }> {
   const role = membershipRoleForInvite(input.role);
   if (input.isHome) {
     const organizationId = Number(input.organizationId);
@@ -99,6 +135,10 @@ export async function upsertMembership(
     if (error) return { ok: false, error: error.message };
     return { ok: true };
   }
+
+  // Seat cap on every NEW membership. Over-cap orgs keep their members.
+  const seats = await orgSeatCheck(admin, input.organizationId, input.userId);
+  if (!seats.ok) return { ok: false, error: seats.error, seatLimited: true };
 
   const { error } = await admin.from('organization_memberships').insert({
     user_id: input.userId,
@@ -181,6 +221,9 @@ export async function applyInviteToExistingUser(
   if (decision.action === 'already_on_team' || decision.action === 'already_member') {
     return { ok: true, linked: true, moonlight: false, message: decision.message };
   }
+
+  const seats = await orgSeatCheck(admin, input.inviteOrgId, input.userId);
+  if (!seats.ok) return { ok: false, error: seats.error };
 
   const isHome = decision.action === 'attach_first_org' ? decision.isHome : false;
   const added = await upsertMembership(admin, {

@@ -814,8 +814,8 @@ async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise
 const LIMITS: Record<string, { text: number; voice: number }> = {
   free: { text: 5, voice: 5 },
   premium: { text: 50, voice: 50 },
-  team: { text: 50, voice: 50 },
-  enterprise: { text: 50, voice: 50 },
+  team: { text: 250, voice: 250 },
+  enterprise: { text: 250, voice: 250 },
 }
 
 const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (TSP), helping licensed Laser Service Engineers with laser and aesthetic medical equipment.

@@ -17,6 +17,7 @@ import {
   listMembershipsForUser,
   setActiveOrganization,
   upsertMembership,
+  orgSeatCheck,
 } from '@/lib/org-membership-server';
 
 type ClaimBody = {
@@ -339,6 +340,14 @@ export async function runTeamClaim(
       activeOrgIsEmpty,
     });
 
+    // Seat cap (Free/Premium 1, Team 10). Members already on the org pass.
+    const seats = await orgSeatCheck(admin, decision.add.organizationId, user.id);
+    if (!seats.ok) {
+      return NextResponse.json(
+        { ok: false, error: seats.error, seat_limited: seats.status === 403, upgrade_url: '/plans' },
+        { status: seats.status }
+      );
+    }
     const added = await upsertMembership(admin, {
       userId: user.id,
       organizationId: decision.add.organizationId,

@@ -132,7 +132,7 @@ test('get-manual-url and the viewer require a library row for every manual', () 
   assert.match(edge, /suggest_add: true/);
   assert.match(edge, /Add to library to open/);
   assert.match(edge, /requires_add: true/);
-  assert.match(edge, /!targetIncomplete && usedSlots \+ slotsHeld >= slotLimit/);
+  assert.match(edge, /!targetIncomplete && libraryAddBlocked\(usedSlots \+ slotsHeld, slotLimit\)/);
   assert.doesNotMatch(viewer, /ai_context:\s*true/);
   assert.match(viewer, /viewerBlockedUntilLibraryAdd/);
   assert.match(viewer, /data-testid="add-to-library-to-open"/);

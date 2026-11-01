@@ -486,6 +486,8 @@ export const ES_COPY: Record<string, string> = {
     'Plan de pago para talleres que necesitan más de la aplicación',
   '50 text + 50 voice AI queries per member per day':
     '50 consultas de texto y 50 de voz con IA por miembro al día',
+  '10 service manuals in your library': '10 manuales de servicio en tu biblioteca',
+  'New service companies get a 60-day free Premium trial': 'Las nuevas empresas de servicio reciben 60 días de Premium gratis',
   '15 service manuals': '15 manuales de servicio',
   'Find work and bid on open service requests': 'Encuentra trabajo y cotiza solicitudes abiertas',
   'More access to nearby clinics over time': 'Con el tiempo, más acceso a clínicas cercanas',

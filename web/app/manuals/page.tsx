@@ -5,7 +5,15 @@ import { Header } from '@/components/Header';
 import { ShelfScroller } from '@/components/ShelfScroller';
 import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
-import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
+import {
+  FREE_MANUAL_SLOTS,
+  isUnlimitedManualSlots,
+  libraryAddBlocked,
+  libraryFullMessage,
+  MANUAL_UPGRADE_PATH,
+  manualSlotLimit,
+  orgIsPaid,
+} from '@/lib/org-plan';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/fa/locale';
 import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
@@ -92,7 +100,7 @@ const WAVELENGTH_OPTIONS = [
   { label: 'Multi-Wavelength', value: 'multi' },
 ];
 
-const DEFAULT_SLOT_LIMIT = 5; // free default; Premium is 15 via manualSlotLimit()
+const DEFAULT_SLOT_LIMIT = FREE_MANUAL_SLOTS; // free default; Premium is 15 via manualSlotLimit()
 
 export default function ManualsLibrary() {
   const t = useT();
@@ -114,6 +122,7 @@ export default function ManualsLibrary() {
   const [bodyMatchIds, setBodyMatchIds] = useState<Set<string> | null>(null);
   const [bodySearchReady, setBodySearchReady] = useState(true);
   const [slotLimit, setSlotLimit] = useState(DEFAULT_SLOT_LIMIT);
+  const [orgPaid, setOrgPaid] = useState(false);
   const [orgId, setOrgId] = useState<string | number | null>(null);
   const [canService, setCanService] = useState<boolean | null>(null);
   const [callerRole, setCallerRole] = useState<string | null>(null);
@@ -289,6 +298,7 @@ export default function ManualsLibrary() {
         }
         org = orgRes.data as Record<string, unknown> | null;
         setSlotLimit(manualSlotLimit(org));
+        setOrgPaid(orgIsPaid(org as never));
       } else {
         setSlotLimit(DEFAULT_SLOT_LIMIT);
       }
@@ -388,8 +398,8 @@ export default function ManualsLibrary() {
       toast.error('No service company on your profile — complete onboarding first. Manuals are shared by your organization.');
       return false;
     }
-    if (!manualIsIncomplete(m) && !isUnlimitedManualSlots(slotLimit) && slotsUsed >= slotLimit) {
-      toast.error(`Library full (${slotsUsed}/${slotLimit}). Upgrade or remove a manual.`);
+    if (!manualIsIncomplete(m) && libraryAddBlocked(slotsUsed, slotLimit)) {
+      toast.error(libraryFullMessage(slotsUsed, slotLimit, !orgPaid));
       return false;
     }
 
@@ -419,7 +429,7 @@ export default function ManualsLibrary() {
           return true;
         }
         if (res.status === 409) {
-          toast.error(json?.error || `Library full (${slotsUsed}/${slotLimit}). Upgrade or remove a manual.`);
+          toast.error(json?.error || libraryFullMessage(slotsUsed, slotLimit, !orgPaid));
           return false;
         }
         if (json?.error && res.status < 500) {
@@ -486,7 +496,7 @@ export default function ManualsLibrary() {
       const remaining = unlimited ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
       const free = manualIsIncomplete(m);
       if (!free && !unlimited && remaining <= 0) {
-        toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
+        toast.error(libraryFullMessage(used, limit, !orgPaid));
         return false;
       }
       const detail = free
@@ -1177,6 +1187,21 @@ export default function ManualsLibrary() {
             {t('My Library')} ({slotsUsed}/{isUnlimitedManualSlots(slotLimit) ? '∞' : slotLimit})
           </button>
         </div>
+
+        {libraryAddBlocked(slotsUsed, slotLimit) && (
+          <div
+            role="status"
+            data-testid="library-full-nudge"
+            className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--gold)]/50 bg-[var(--gold)]/10 px-4 py-3 text-sm"
+          >
+            <span dir="auto">
+              {libraryFullMessage(slotsUsed, slotLimit, !orgPaid)} {t('Your saved manuals still open.')}
+            </span>
+            <a href={MANUAL_UPGRADE_PATH} className="btn btn-primary px-4 py-1.5 text-sm font-semibold">
+              {t('Upgrade')}
+            </a>
+          </div>
+        )}
 
         {tab === 'browse' && (
           <p className="text-sm text-[var(--text3)] mb-4">

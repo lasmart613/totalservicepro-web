@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
+import {
+  libraryAddBlocked,
+  libraryFullMessage,
+  manualSlotLimit,
+  MANUAL_UPGRADE_PATH,
+  orgIsPaid,
+} from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import { canAccessServiceManuals } from '@/lib/roles';
 import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
@@ -219,10 +225,13 @@ export async function POST(req: NextRequest) {
     // Re-adding a manual whose slot is held nets zero, so it is allowed when full.
     const reAddHeld = held > 0 && (await slotIsHeld(writer, orgId, manualId));
     // Incomplete manuals are free: they never use a slot, so the cap does not apply.
-    if (!free && !isUnlimitedManualSlots(limit) && usedNow >= limit && !reAddHeld) {
+    // Over the cap after a downgrade: saved manuals stay and still open; only new adds stop.
+    if (!free && libraryAddBlocked(usedNow, limit) && !reAddHeld) {
       return NextResponse.json(
         {
-          error: `Company library is full (${usedNow}/${limit}). Upgrade for more slots.`,
+          error: libraryFullMessage(usedNow, limit, !orgIsPaid(orgRes.data)),
+          upgrade_url: MANUAL_UPGRADE_PATH,
+          library_full: true,
           slot_limit: limit,
           used: usedNow,
           held,

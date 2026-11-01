@@ -11,6 +11,7 @@ import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError, teamInviteSentMessage } from '@/lib/team-invite';
 import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite, teamMemberRoleChoices } from '@/lib/org-membership';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
+import { SeatLimitNudge } from '@/components/SeatLimitNudge';
 
 function inviteListStatus(
   inv: {
@@ -283,6 +284,7 @@ export default function TeamManagement() {
 
       <div className="card p-6 mb-10">
         <h2 className="font-bold text-xl mb-4">{t('Invite Team Member')}</h2>
+        <SeatLimitNudge used={teamMembers.length} orgId={orgId} />
         <p className="text-xs text-[var(--text3)] mb-4">
           {t('The invite is emailed to them. They sign in with that address to join.')}
         </p>

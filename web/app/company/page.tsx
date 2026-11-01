@@ -29,6 +29,7 @@ import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo, loadLinkedCustomers } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
+import { SeatLimitNudge } from '@/components/SeatLimitNudge';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
 import { OrgMoneySettings } from '@/components/OrgMoneySettings';
@@ -1027,6 +1028,12 @@ function CompanyProfile() {
                 : supplierMode
                   ? t('Save Supplier Details') : t('Save Company Details')}
           </button>
+          {org && !orgIsPaid(org) ? (
+            <p className="mt-2 text-xs text-[var(--text3)]" data-testid="branding-save-locked">
+              <span aria-hidden="true">🔒</span> {t('Custom colors are a paid feature. Upgrade to save them.')}{' '}
+              <a href="/plans" className="text-[var(--gold)] underline">{t('Upgrade')}</a>
+            </p>
+          ) : null}
         </div>
 
         {/* Team + CRM: service company admins only (hidden for owners / suppliers) */}
@@ -1051,6 +1058,7 @@ function CompanyProfile() {
                 <p className="text-xs text-[var(--text3)] mb-3">
                   {t('The invite is emailed to them. They sign in with that address to join.')}
                 </p>
+                <SeatLimitNudge used={members.length} org={org} />
                 <div className="space-y-2 text-sm">
                   <div>
                     <label className="label" htmlFor="team-invite-email">{t('Invitee email')}</label>

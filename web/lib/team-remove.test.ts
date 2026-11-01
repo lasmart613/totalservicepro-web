@@ -84,7 +84,7 @@ type Invite = {
   last_name?: string | null;
 };
 
-type Org = { id: number; created_by: string | null; name?: string; type?: string };
+type Org = { id: number; created_by: string | null; name?: string; type?: string; is_premium?: boolean; subscription_tier?: string; plan?: string };
 
 type Store = {
   memberships: Membership[];
@@ -141,7 +141,7 @@ function baseStore(overrides: Partial<Store> = {}): Store {
         last_name: 'Person',
       },
     ],
-    orgs: [{ id: ORG, created_by: ADMIN, name: 'North Shop', type: 'service_company' }, { id: HOME, created_by: 'someone-else', name: 'Home Shop', type: 'service_company' }],
+    orgs: [{ id: ORG, created_by: ADMIN, name: 'North Shop', type: 'service_company', is_premium: true, subscription_tier: 'team', plan: 'team' }, { id: HOME, created_by: 'someone-else', name: 'Home Shop', type: 'service_company' }],
     authUsers: [
       { id: ADMIN, email: 'admin@shop.test' },
       { id: MEMBER, email: INVITEE },
@@ -1102,7 +1102,7 @@ test('a removed member can be re-invited and the rejoin claim adds the membershi
                 },
                 maybeSingle: async () => {
                   if (table === 'organizations') {
-                    return { data: { id: ORG, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
+                    return { data: { id: ORG, name: 'North Shop', type: 'service_company', services_offered: null, is_premium: true, subscription_tier: 'team', plan: 'team' }, error: null };
                   }
                   if (table === 'user_profiles') {
                     return { data: state.profiles.find((row) => row.id === MEMBER) || null, error: null };
@@ -1246,7 +1246,7 @@ async function reopenAccepted(invite: Invite, profile: Profile) {
               },
               maybeSingle: async () => {
                 if (table === 'organizations') {
-                  return { data: { id: ORG, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
+                  return { data: { id: ORG, name: 'North Shop', type: 'service_company', services_offered: null, is_premium: true, subscription_tier: 'team', plan: 'team' }, error: null };
                 }
                 if (table === 'user_profiles') return { data: profile, error: null };
                 if (table === 'engineer_invitations') return { data: invite, error: null };
@@ -1317,7 +1317,7 @@ function claimAdmin(state: { invite: Invite; memberships: Membership[]; profiles
           return { data: row, error: null };
         }
         if (table === 'organizations') {
-          return { data: { id: filters.id, created_at: '2020-01-01T00:00:00.000Z', created_by: 'other-user' }, error: null };
+          return { data: { id: filters.id, created_at: '2020-01-01T00:00:00.000Z', created_by: 'other-user', is_premium: true, subscription_tier: 'team', plan: 'team' }, error: null };
         }
         return { data: null, error: null };
       };

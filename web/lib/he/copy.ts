@@ -486,6 +486,8 @@ export const HE_COPY: Record<string, string> = {
     'מסלול בתשלום לסדנאות שצריכות יותר מהיישום',
   '50 text + 50 voice AI queries per member per day':
     '50 שאלות טקסט ו-50 שאלות קול לבינה המלאכותית לכל חבר ביום',
+  '10 service manuals in your library': '10 ספרי שירות בספרייה שלכם',
+  'New service companies get a 60-day free Premium trial': 'חברות שירות חדשות מקבלות ניסיון Premium חינם ל-60 יום',
   '15 service manuals': '15 ספרי שירות',
   'Find work and bid on open service requests': 'מוצאים עבודה ומגישים הצעה על בקשות פתוחות',
   'More access to nearby clinics over time': 'עם הזמן, גישה רחבה יותר למרפאות קרובות',

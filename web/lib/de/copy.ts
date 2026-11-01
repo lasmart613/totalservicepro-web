@@ -486,6 +486,8 @@ export const DE_COPY: Record<string, string> = {
     'Bezahlter Tarif für Werkstätten, die mehr von der Anwendung brauchen',
   '50 text + 50 voice AI queries per member per day':
     '50 Textfragen und 50 Sprachfragen an die KI pro Mitglied und Tag',
+  '10 service manuals in your library': '10 Servicehandbücher in Ihrer Bibliothek',
+  'New service companies get a 60-day free Premium trial': 'Neue Serviceunternehmen erhalten 60 Tage Premium kostenlos zum Testen',
   '15 service manuals': '15 Servicehandbücher',
   'Find work and bid on open service requests': 'Aufträge finden und auf offene Anfragen bieten',
   'More access to nearby clinics over time': 'Mit der Zeit mehr Zugang zu Kliniken in der Nähe',
