@@ -2,14 +2,20 @@
 
 import React from 'react';
 import { useT } from '@/lib/fa/locale';
-import { PULSE_MODE_LABELS, pulseModeDisplay, pulseModeOptions } from '@/lib/laser-pulse-modes';
 import {
-  CW_SET_UNITS,
-  isCwMode,
+  COMMON_WAVELENGTHS,
+  configuredWavelengths,
+  PULSE_MODE_LABELS,
+  pulseModeDisplay,
+  pulseModeOptions,
+} from '@/lib/laser-pulse-modes';
+import {
   measuredUnitFor,
   MEASURED_QUANTITIES,
-  QUANTITY_UNITS,
+  MEASURED_UNITS,
+  SET_UNITS,
   setUnitFor,
+  usesSpot,
   type MeasuredQuantity,
   isFluenceMeasurement,
   SPOT_SIZE_OTHER,
@@ -51,6 +57,10 @@ export function PerformanceMeasurements({
   onChange: (index: number, key: string, value: string) => void;
 }) {
   const pulseOptions = pulseModeOptions(make, model);
+  const configured = configuredWavelengths(make, model);
+  const wlOptions: WavelengthOption[] | null | undefined = configured
+    ? configured.map((name) => ({ name }))
+    : wavelengths;
   return (
     <div className="section mb-6">
       <div className="section-hdr">
@@ -75,7 +85,7 @@ export function PerformanceMeasurements({
               key={i}
               row={row}
               index={i}
-              wavelengths={wavelengths}
+              wavelengths={wlOptions}
               spotSizes={spotSizes}
               pulseOptions={pulseOptions}
               onRemove={onRemove}
@@ -86,7 +96,7 @@ export function PerformanceMeasurements({
               key={i}
               row={row}
               index={i}
-              wavelengths={wavelengths}
+              wavelengths={wlOptions}
               pulseOptions={pulseOptions}
               onRemove={onRemove}
               onChange={onChange}
@@ -123,7 +133,8 @@ function FluenceRow({
   const measuredUnit = measuredUnitFor(mode, row.measuredUnit);
   const setUnit = setUnitFor(mode, row.setUnit);
   const modeLabel = (q: MeasuredQuantity) =>
-    `${t(QUANTITY_LABELS[q])} (${QUANTITY_UNITS[q].join(', ')})`;
+    `${t(QUANTITY_LABELS[q])} (${SET_UNITS[q].join(', ')})`;
+  const spotOn = usesSpot(mode);
   const passClass =
     view.pass === false ? 'text-red-400' : view.pass ? 'text-green-400' : 'text-[var(--text3)]';
 
@@ -134,19 +145,22 @@ function FluenceRow({
     >
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2 items-end">
         <label className="text-xs text-[var(--text3)]">
-          Wavelength
+          {t('Wavelength')}
           <WavelengthField
             row={row}
             wavelengths={wavelengths}
             onChange={(value) => onChange(index, 'wavelength', value)}
           />
         </label>
-        <label className="text-xs text-[var(--text3)]">
-          Spot size
+        <label className={`text-xs text-[var(--text3)] ${spotOn ? '' : 'opacity-50'}`}>
+          {t('Spot size')}
           <select
             className="input mt-1"
-            aria-label="Spot size"
+            aria-label={t('Spot size')}
             data-testid="spot-size"
+            disabled={!spotOn}
+            aria-disabled={!spotOn}
+            title={spotOn ? undefined : t('Spot size is not used for Energy or Power')}
             value={spotValue}
             onChange={(e) => onChange(index, 'spotSizeMm', e.target.value)}
           >
@@ -162,7 +176,7 @@ function FluenceRow({
             <option value={SPOT_SIZE_OTHER}>Other</option>
           </select>
         </label>
-        {spotValue === SPOT_SIZE_OTHER && (
+        {spotOn && spotValue === SPOT_SIZE_OTHER && (
           <label className="text-xs text-[var(--text3)]">
             Diameter (mm)
             <input
@@ -180,7 +194,7 @@ function FluenceRow({
           </label>
         )}
         <label className="text-xs text-[var(--text3)]">
-          {isCwMode(mode) ? t('Set value') : `${t('Set fluence')} (J/cm²)`}
+          {`${t('Set value')} (${SET_UNITS[mode].join(', ')})`}
           <div className="flex gap-1 mt-1">
             <input
               className="input"
@@ -193,7 +207,7 @@ function FluenceRow({
               value={row.setFluence ?? ''}
               onChange={(e) => onChange(index, 'setFluence', e.target.value)}
             />
-            {isCwMode(mode) && (
+            {SET_UNITS[mode].length > 1 && (
               <select
                 className="input w-28"
                 aria-label={t('Set unit')}
@@ -201,7 +215,7 @@ function FluenceRow({
                 value={setUnit}
                 onChange={(e) => onChange(index, 'setUnit', e.target.value)}
               >
-                {CW_SET_UNITS.map((u) => (
+                {SET_UNITS[mode].map((u) => (
                   <option key={u} value={u}>
                     {u}
                   </option>
@@ -238,7 +252,7 @@ function FluenceRow({
               value={row.measuredValue ?? ''}
               onChange={(e) => onChange(index, 'measuredValue', e.target.value)}
             />
-            {QUANTITY_UNITS[mode].length > 1 && (
+            {MEASURED_UNITS[mode].length > 1 && (
               <select
                 className="input w-28"
                 aria-label={t('Measured unit')}
@@ -246,7 +260,7 @@ function FluenceRow({
                 value={measuredUnit}
                 onChange={(e) => onChange(index, 'measuredUnit', e.target.value)}
               >
-                {QUANTITY_UNITS[mode].map((u) => (
+                {MEASURED_UNITS[mode].map((u) => (
                   <option key={u} value={u}>
                     {u}
                   </option>
@@ -359,11 +373,12 @@ function WavelengthField({
   wavelengths?: WavelengthOption[] | null;
   onChange: (value: string) => void;
 }) {
+  const t = useT();
   if (wavelengths?.length) {
     return (
       <select
         className="input mt-1"
-        aria-label="Wavelength"
+        aria-label={t('Wavelength')}
         value={row.wavelength || ''}
         onChange={(e) => onChange(e.target.value)}
       >
@@ -380,13 +395,21 @@ function WavelengthField({
     );
   }
   return (
-    <input
-      className="input mt-1"
-      placeholder="Wavelength / channel"
-      aria-label="Wavelength"
-      value={row.wavelength || ''}
-      onChange={(e) => onChange(e.target.value)}
-    />
+    <>
+      <input
+        className="input mt-1"
+        placeholder={t('Wavelength / channel')}
+        aria-label={t('Wavelength')}
+        list="sr-common-wavelengths"
+        value={row.wavelength || ''}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <datalist id="sr-common-wavelengths">
+        {COMMON_WAVELENGTHS.map((wl) => (
+          <option key={wl} value={wl} />
+        ))}
+      </datalist>
+    </>
   );
 }
 

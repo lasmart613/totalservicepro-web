@@ -26,6 +26,7 @@ import {
   spotSizeChoicesMm,
 } from '@/lib/fluence-measurement';
 import { PerformanceMeasurements } from '@/components/PerformanceMeasurements';
+import { wavelengthForNewRow } from '@/lib/laser-pulse-modes';
 import { SystemParameterFields } from '@/components/SystemParameterFields';
 import {
   canonicalManufacturerSpelling,
@@ -1354,15 +1355,23 @@ export default function NewServiceReport() {
 
   function addPerfRow() {
     const firstWl = currentModel?.wavelengths?.[0];
-    setPowerMeasurements((prev) => [
+    setPowerMeasurements((prev) => {
+      const wavelength = wavelengthForNewRow(
+        prev[prev.length - 1]?.wavelength,
+        manufacturerValue,
+        resolvedModelKey,
+        firstWl?.name,
+      );
+      return [
       ...prev,
       newFluenceMeasurement({
-        wavelength: firstWl?.name || '',
-        spotSizeMm: defaultSpotChoice(currentModel, firstWl?.name),
+        wavelength,
+        spotSizeMm: defaultSpotChoice(currentModel, wavelength || firstWl?.name),
         setFluence: firstWl?.unit === 'J/cm²' && firstWl.sets?.[0] != null ? String(firstWl.sets[0]) : '',
         measuredMode: 'fluence',
       }),
-    ]);
+      ];
+    });
   }
 
   /** Auto PASS/FAIL for electrical safety (Android checkSafety: ground ≤0.2Ω, leakage ≤300µA) */

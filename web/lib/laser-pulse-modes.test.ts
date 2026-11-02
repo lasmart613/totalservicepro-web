@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { ALL_PULSE_MODES, pulseModeDisplay, pulseModeOptions } from './laser-pulse-modes.ts';
+import {
+  ALL_PULSE_MODES,
+  COMMON_WAVELENGTHS,
+  configuredWavelengths,
+  pulseModeDisplay,
+  pulseModeOptions,
+  wavelengthForNewRow,
+} from './laser-pulse-modes.ts';
 import {
   applyMeasurementEdit,
   hydrateMeasurement,
@@ -59,8 +66,8 @@ test('power row: W set vs mW measured converts units', () => {
 
 test('irradiance row converts measured power through the spot area', () => {
   let row = newFluenceMeasurement({ spotSizeMm: '10' });
-  row = applyMeasurementEdit(row, 'measuredMode', 'power');
-  row = applyMeasurementEdit(row, 'setUnit', 'W/cm²');
+  row = applyMeasurementEdit(row, 'measuredMode', 'irradiance');
+  row = applyMeasurementEdit(row, 'measuredUnit', 'W');
   row = applyMeasurementEdit(row, 'setFluence', String(1 / (Math.PI * 0.25)));
   row = applyMeasurementEdit(row, 'measuredValue', '1');
   assert.equal(row.errorPercent, '0.0%');
@@ -73,18 +80,71 @@ test('irradiance row converts measured power through the spot area', () => {
   assert.equal(irr.pass, false);
 });
 
-test('energy in mJ converts to fluence; old rows unchanged', () => {
+test('energy row compares J/mJ directly and ignores spot size', () => {
   let row = newFluenceMeasurement({ spotSizeMm: '10', setFluence: '1' });
   row = applyMeasurementEdit(row, 'measuredMode', 'energy');
+  assert.equal(row.setUnit, 'J');
   row = applyMeasurementEdit(row, 'measuredUnit', 'mJ');
-  row = applyMeasurementEdit(row, 'measuredValue', String(Math.PI * 0.25 * 1000));
-  assert.equal(row.errorPercent, '0.0%');
-  const old = viewMeasurement({ wavelength: 'x', measuredMode: 'energy', spotSizeMm: '10', setFluence: '1', measuredValue: String(Math.PI * 0.25) });
-  assert.equal(old.measured, `${(Math.PI * 0.25).toFixed(2)} J`);
-  assert.equal(old.error, '0.0%');
-  // switching back to pulsed resets set unit
-  const back = applyMeasurementEdit(applyMeasurementEdit(newFluenceMeasurement(), 'measuredMode', 'power'), 'measuredMode', 'fluence');
-  assert.equal(back.setUnit, 'J/cm²');
+  row = applyMeasurementEdit(row, 'measuredValue', '950');
+  assert.equal(row.errorPercent, '-5.0%');
+  assert.equal(row.spotSizeMm, '10', 'saved spot is kept');
+  const view = viewMeasurement(row);
+  assert.equal(view.spot, '—', 'spot hidden for energy');
+  assert.equal(view.result, '0.95 J');
+  // changing the spot does not change the result
+  const moved = applyMeasurementEdit(row, 'spotSizeMm', '3');
+  assert.equal(moved.errorPercent, '-5.0%');
+});
+
+test('power row hides spot; fluence read in mJ uses spot', () => {
+  let p = applyMeasurementEdit(newFluenceMeasurement({ spotSizeMm: '5' }), 'measuredMode', 'power');
+  p = applyMeasurementEdit(applyMeasurementEdit(p, 'setFluence', '10'), 'measuredValue', '10');
+  assert.equal(viewMeasurement(p).spot, '—');
+  let f = newFluenceMeasurement({ spotSizeMm: '10', setFluence: '1' });
+  f = applyMeasurementEdit(f, 'measuredUnit', 'mJ');
+  f = applyMeasurementEdit(f, 'measuredValue', String(Math.PI * 0.25 * 1000));
+  assert.equal(f.errorPercent, '0.0%');
+  assert.equal(viewMeasurement(f).spot, '10 mm');
+});
+
+test('old energy rows (J vs J/cm², no setUnit) still read the same', () => {
+  const old = { wavelength: 'x', measuredMode: 'energy', spotSizeMm: '10', setFluence: '1', measuredValue: String(Math.PI * 0.25) };
+  const view = viewMeasurement(old);
+  assert.equal(view.measured, `${(Math.PI * 0.25).toFixed(2)} J`);
+  assert.equal(view.set, '1.00 J/cm²');
+  assert.equal(view.spot, '10 mm');
+  assert.equal(view.error, '0.0%');
+  const h = hydrateMeasurement(old);
+  assert.equal(h.measuredMode, 'fluence');
+  assert.equal(h.measuredUnit, 'J');
+  assert.equal(h.errorPercent, '0.0%');
+});
+
+test('configured wavelengths per laser', () => {
+  assert.deepEqual(configuredWavelengths('Lumenis', 'UltraPulse Encore'), ['10600 nm']);
+  assert.deepEqual(configuredWavelengths('COHERENT', 'UltraPulse 5000C'), ['10600 nm']);
+  assert.deepEqual(configuredWavelengths('lumenis', 'SurgiTouch'), ['10600 nm']);
+  assert.deepEqual(configuredWavelengths('Laserscope', 'Aura XP'), ['532 nm']);
+  assert.deepEqual(configuredWavelengths('AMS', 'Aura'), ['532 nm']);
+  assert.equal(configuredWavelengths('Candela', 'GentleMax'), null);
+  assert.equal(configuredWavelengths('Lumenis', 'M22'), null);
+  assert.ok(COMMON_WAVELENGTHS.includes('1064 nm'));
+});
+
+test('new row wavelength: previous row, else single configured, else fallback', () => {
+  assert.equal(wavelengthForNewRow('755 nm', 'Lumenis', 'UltraPulse Encore'), '755 nm');
+  assert.equal(wavelengthForNewRow('', 'Lumenis', 'UltraPulse Encore', '10600 nm CO₂ CW'), '10600 nm');
+  assert.equal(wavelengthForNewRow(undefined, 'Laserscope', 'Aura XP'), '532 nm');
+  assert.equal(wavelengthForNewRow(undefined, 'Candela', 'GentleMax', '755 nm Alexandrite'), '755 nm Alexandrite');
+  assert.equal(wavelengthForNewRow(undefined, null, null), '');
+});
+
+test('saved off-list wavelength still displays', () => {
+  const view = viewMeasurement({ wavelength: '11000 nm', measuredMode: 'power', setUnit: 'W', setFluence: '10', measuredValue: '10' });
+  assert.equal(view.wavelength, '11000 nm');
+  const html = buildServiceReportPrintHTML({ power_measurements: [{ wavelength: '11000 nm', measuredMode: 'power', setUnit: 'W', setFluence: '10', measuredValue: '10', spotSizeMm: '7' }] } as any);
+  assert.match(html, /11000 nm/);
+  assert.doesNotMatch(html, /7 mm/);
 });
 
 test('hydrate keeps pulse mode and units; print shows them', () => {
@@ -102,9 +162,32 @@ test('hydrate keeps pulse mode and units; print shows them', () => {
 });
 
 test('new strings are translated for all locales', () => {
-  for (const key of ['Power', 'Irradiance', 'Energy', 'Pulse mode', 'Set value', 'Measured unit', 'Set unit', 'Other pulse mode', 'Measurement type', 'None']) {
+  for (const key of ['Power', 'Irradiance', 'Energy', 'Pulse mode', 'Set value', 'Measured unit', 'Set unit', 'Other pulse mode', 'Measurement type', 'None', 'Wavelength', 'Wavelength / channel', 'Spot size', 'Spot size is not used for Energy or Power']) {
     const row = GAP_STRINGS[key];
     assert.ok(row, key);
     for (const loc of ['fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar'] as const) assert.ok(row[loc], `${key}/${loc}`);
   }
+});
+
+test('exactly ±10% passes both ways (inclusive, rounded to 0.1%)', () => {
+  const mk = (mode: any, unit: string, set: string, meas: string) => {
+    let r = applyMeasurementEdit(newFluenceMeasurement({ spotSizeMm: '10' }), 'measuredMode', mode);
+    r = applyMeasurementEdit(r, 'setUnit', unit);
+    r = applyMeasurementEdit(r, 'measuredUnit', unit);
+    r = applyMeasurementEdit(r, 'setFluence', set);
+    return applyMeasurementEdit(r, 'measuredValue', meas);
+  };
+  for (const [m, u, s, v, err] of [
+    ['power', 'mW', '1000', '1100', '10.0%'],
+    ['power', 'mW', '1000', '900', '-10.0%'],
+    ['irradiance', 'mW/cm²', '2000', '2200', '10.0%'],
+    ['irradiance', 'mW/cm²', '2000', '1800', '-10.0%'],
+    ['energy', 'J', '1.1', '1.21', '10.0%'],
+  ] as const) {
+    const r = mk(m, u, s, v);
+    assert.equal(r.errorPercent, err);
+    assert.equal(r.pass, true, `${m} ${v}`);
+  }
+  assert.equal(mk('power', 'mW', '1000', '1101').pass, false);
+  assert.equal(mk('power', 'mW', '1000', '899').pass, false);
 });
