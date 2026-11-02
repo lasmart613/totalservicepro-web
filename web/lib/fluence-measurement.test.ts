@@ -82,7 +82,8 @@ test('other diameter uses the same circle as a listed spot', () => {
     wavelength: '755 nm Alexandrite',
     spotSizeMm: 'other',
     setFluence: 10,
-    measuredMode: 'energy',
+    measuredMode: 'fluence',
+    measuredUnit: 'J',
     measuredValue: 5,
   });
   row.spotSizeOtherMm = '10';
@@ -208,7 +209,8 @@ test('editing a row recalculates fluence and leaves a legacy row on set versus m
       wavelength: '755 nm Alexandrite',
       spotSizeMm: '10',
       setFluence: 10,
-      measuredMode: 'energy',
+      measuredMode: 'fluence',
+      measuredUnit: 'J',
     }),
     'measuredValue',
     '5',
@@ -216,7 +218,7 @@ test('editing a row recalculates fluence and leaves a legacy row on set versus m
   );
   assert.equal(viewMeasurement(fluence).result, '6.37 J/cm²');
 
-  const switched = applyMeasurementEdit(fluence, 'measuredMode', 'fluence', MODELS['Cynosure Apogee Elite MPX']);
+  const switched = applyMeasurementEdit(fluence, 'measuredUnit', 'J/cm²', MODELS['Cynosure Apogee Elite MPX']);
   const switchedAgain = applyMeasurementEdit(switched, 'measuredValue', '8.4', MODELS['Cynosure Apogee Elite MPX']);
   assert.equal(viewMeasurement(switchedAgain).error, '-16.0%');
 
@@ -254,7 +256,8 @@ test('print HTML shows MPX labels, pump shots, fluence result, and legacy rows',
         wavelength: '755 nm Alexandrite',
         spotSizeMm: '10',
         setFluence: 10,
-        measuredMode: 'energy',
+        measuredMode: 'fluence',
+        measuredUnit: 'J',
         measuredValue: 5,
       }),
     ],

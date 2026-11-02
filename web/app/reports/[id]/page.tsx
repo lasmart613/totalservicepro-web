@@ -343,7 +343,14 @@ export default function ReportDetail() {
                             : `${view.result}${outcome ? ` ${outcome}` : ''}`.trim();
                           return (
                             <tr key={i}>
-                              <td className="p-2 border-b border-[var(--border)]">{view.wavelength}</td>
+                              <td className="p-2 border-b border-[var(--border)]">
+                                {view.wavelength}
+                                {view.pulse && (
+                                  <div className="text-[10px] text-[var(--text3)]" data-testid="measurement-pulse-mode">
+                                    {t('Pulse mode')}: {view.pulse === 'Other' ? t('Other') : view.pulse}
+                                  </div>
+                                )}
+                              </td>
                               <td className="p-2 border-b border-[var(--border)]">{view.spot}</td>
                               <td className="p-2 border-b border-[var(--border)]">{view.set}</td>
                               <td className="p-2 border-b border-[var(--border)]">{view.measured}</td>
