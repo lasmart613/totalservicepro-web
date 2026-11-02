@@ -2,11 +2,19 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
+import { useT } from '@/lib/fa/locale';
+import {
+  checkInPatch,
+  checkInReportHref,
+  formatArrival,
+  ticketAssetTag,
+  ticketSerialNumber,
+} from '@/lib/ticket-checkin';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
-import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
+import { ArrowLeft, Edit2, MapPinCheck, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { filterLinkedCustomers, loadLinkedCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
@@ -78,6 +86,10 @@ export default function ServiceTicketDetail() {
   const [viewerOrgType, setViewerOrgType] = useState<string | null>(null);
   const [existingReports, setExistingReports] = useState<ExistingTicketReport[]>([]);
   const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
+  const [linkedEquipment, setLinkedEquipment] = useState<Record<string, unknown> | null>(null);
+  const [checkingIn, setCheckingIn] = useState(false);
+  const router = useRouter();
+  const t = useT();
 
   // DB dropdowns for equipment
   const [dbMfrs, setDbMfrs] = useState<any[]>([]);
@@ -118,6 +130,21 @@ export default function ServiceTicketDetail() {
         const assigned = ticketAssigneeId(ticketData);
         const normalized = { ...ticketData, assigned_to: assigned };
         setTicket(normalized);
+        // Linked equipment record: serial fallback when the ticket has none stored.
+        if (normalized?.equipment_id != null && normalized.equipment_id !== '') {
+          try {
+            const { data: eq } = await supabase
+              .from('equipment')
+              .select('*')
+              .eq('id', normalized.equipment_id)
+              .maybeSingle();
+            setLinkedEquipment((eq as Record<string, unknown>) || null);
+          } catch {
+            setLinkedEquipment(null);
+          }
+        } else {
+          setLinkedEquipment(null);
+        }
         setFormData(normalized);
         try {
           setExistingReports(await listReportsForTicket(supabase, normalized));
@@ -327,6 +354,23 @@ export default function ServiceTicketDetail() {
     setIsEditing(false);
   };
 
+  const handleCheckIn = async () => {
+    if (!ticket?.id || checkingIn) return;
+    setCheckingIn(true);
+    try {
+      const patch = checkInPatch(new Date());
+      const { error } = await supabase.from('service_tickets').update(patch).eq('id', ticket.id);
+      if (error) throw error;
+      setTicket((prev: any) => (prev ? { ...prev, ...patch } : prev));
+      toast.success(t('Checked in at {time}').replace('{time}', formatArrival(patch.arrival_time, docZone)));
+      router.push(checkInReportHref(ticket.id));
+    } catch (err: any) {
+      console.error('check in', err);
+      toast.error(t('Could not check in. Please try again.'));
+      setCheckingIn(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -366,6 +410,17 @@ export default function ServiceTicketDetail() {
           </div>
 
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            {canCreateReport && !isEditing && (
+              <button
+                type="button"
+                onClick={handleCheckIn}
+                disabled={checkingIn}
+                data-testid="ticket-check-in"
+                className="btn btn-secondary flex w-full items-center justify-center gap-2 disabled:opacity-60 sm:w-auto"
+              >
+                <MapPinCheck size={18} /> {checkingIn ? t('Checking in...') : t('Check in')}
+              </button>
+            )}
             <CreateServiceReportActions
               canCreate={canCreateReport}
               ticketId={ticket.id}
@@ -489,7 +544,8 @@ export default function ServiceTicketDetail() {
                   <Field label="Model" value={catalogChoiceLabel(ticket.equipment_model)} />
                 </>
               )}
-              <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
+              <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticketSerialNumber(ticket, linkedEquipment)} />
+              <Field label={t('Asset Tag')} value={ticketAssetTag(ticket, linkedEquipment)} />
               <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : displayStoredDay(ticket.service_date, docZone)} />
             </div>
           </div>
@@ -521,7 +577,7 @@ export default function ServiceTicketDetail() {
                   )
                 }
               />
-              <Field label="Arrival Time" value={ticket.arrival_time} />
+              <Field label={t('Arrival Time')} value={formatArrival(ticket.arrival_time, docZone) || ticket.arrival_time} />
               <Field label="Departure Time" value={ticket.departure_time} />
             </div>
           </div>
