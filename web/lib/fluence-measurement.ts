@@ -10,6 +10,8 @@
  *   (measuredFluence − setFluence) / setFluence × 100
  */
 
+import { pulseModeDisplay } from './laser-pulse-modes.ts';
+
 export const SPOT_SIZE_OTHER = 'other';
 
 /** Sizes used when a model does not publish spot diameters. */
@@ -18,7 +20,87 @@ export const COMMON_SPOT_SIZES_MM = [2, 3, 4, 5, 6, 7, 8, 10, 12, 15, 18, 20, 22
 /** Same ±10% band the performance row already used for pass/fail. */
 export const FLUENCE_TOLERANCE_PERCENT = 10;
 
-export type MeasuredQuantity = 'energy' | 'fluence';
+export type MeasuredQuantity = 'energy' | 'fluence' | 'power' | 'irradiance';
+
+/** Measurement types offered on a row, in UI order. */
+export const MEASURED_QUANTITIES: readonly MeasuredQuantity[] = ['energy', 'fluence', 'power', 'irradiance'];
+
+/** Units each measurement type can be read in. The first is the default. */
+export const QUANTITY_UNITS: Record<MeasuredQuantity, readonly string[]> = {
+  energy: ['J', 'mJ'],
+  fluence: ['J/cm²'],
+  power: ['W', 'mW'],
+  irradiance: ['W/cm²', 'mW/cm²'],
+};
+
+/** Set units: pulsed rows set fluence; CW rows set power or irradiance. */
+export const PULSED_SET_UNITS = ['J/cm²'] as const;
+export const CW_SET_UNITS = ['W', 'mW', 'W/cm²', 'mW/cm²'] as const;
+
+const UNIT_INFO: Record<string, { kind: MeasuredQuantity; scale: number }> = {
+  J: { kind: 'energy', scale: 1 },
+  mJ: { kind: 'energy', scale: 1e-3 },
+  'J/cm²': { kind: 'fluence', scale: 1 },
+  W: { kind: 'power', scale: 1 },
+  mW: { kind: 'power', scale: 1e-3 },
+  'W/cm²': { kind: 'irradiance', scale: 1 },
+  'mW/cm²': { kind: 'irradiance', scale: 1e-3 },
+};
+
+export function normalizeMode(value: unknown): MeasuredQuantity {
+  return MEASURED_QUANTITIES.includes(value as MeasuredQuantity) ? (value as MeasuredQuantity) : 'fluence';
+}
+
+export function isCwMode(mode: MeasuredQuantity): boolean {
+  return mode === 'power' || mode === 'irradiance';
+}
+
+/** Unit the meter reading is in; falls back to the type's default (old rows had none). */
+export function measuredUnitFor(mode: MeasuredQuantity, unit: unknown): string {
+  const units = QUANTITY_UNITS[mode];
+  return units.includes(String(unit)) ? String(unit) : units[0];
+}
+
+/** Unit the set value is in. Pulsed rows are always J/cm² (old rows). */
+export function setUnitFor(mode: MeasuredQuantity, unit: unknown): string {
+  if (!isCwMode(mode)) return 'J/cm²';
+  if ((CW_SET_UNITS as readonly string[]).includes(String(unit))) return String(unit);
+  return mode === 'irradiance' ? 'W/cm²' : 'W';
+}
+
+function areal(kind: MeasuredQuantity) {
+  return kind === 'fluence' || kind === 'irradiance';
+}
+function family(kind: MeasuredQuantity) {
+  return isCwMode(kind) ? 'cw' : 'pulsed';
+}
+
+/**
+ * Convert a measured value to the set value's unit so error % compares like with like.
+ * Energy↔fluence and power↔irradiance convert through the circular spot area.
+ */
+export function convertToUnit(
+  value: number,
+  fromUnit: string,
+  toUnit: string,
+  spotDiameterMm: number | null,
+): number | null {
+  const from = UNIT_INFO[fromUnit];
+  const to = UNIT_INFO[toUnit];
+  if (!from || !to || !Number.isFinite(value)) return null;
+  if (family(from.kind) !== family(to.kind)) return null;
+  let base = value * from.scale;
+  if (areal(from.kind) !== areal(to.kind)) {
+    const area = spotDiameterMm == null ? null : circularSpotAreaCm2(spotDiameterMm);
+    if (area == null || area === 0) return null;
+    base = areal(to.kind) ? base / area : base * area;
+  }
+  return base / to.scale;
+}
+
+export function formatValue(value: number, unit: string): string {
+  return `${formatFluence(value)} ${unit}`;
+}
 
 export type SpotModel = {
   wavelengths?: { name?: string; spotMm?: number; unit?: string; sets?: number[] }[];
@@ -36,13 +118,24 @@ export type FluenceMeasurement = {
   spotSizeOtherMm: string;
   setFluence: string;
   measuredMode: MeasuredQuantity;
+  /** Unit of the meter reading (J, mJ, J/cm², W, mW, W/cm², mW/cm²). */
+  measuredUnit: string;
+  /** Unit of the set value: J/cm² for pulsed rows; W, mW, W/cm² or mW/cm² for CW rows. */
+  setUnit: string;
   measuredValue: string;
+  /** Measured value converted to setUnit (name kept for saved-row compatibility). */
   resultFluence: string;
   errorPercent: string;
 };
 
+export function pulseModeLabel(row: any, tr: (text: string) => string = (t) => t): string {
+  return pulseModeDisplay(row, tr);
+}
+
 export type MeasurementView = {
   legacy: boolean;
+  /** Pulse mode text ('' when not recorded). */
+  pulse: string;
   wavelength: string;
   spot: string;
   set: string;
@@ -131,7 +224,18 @@ export function measurementResult(input: {
   measured: number;
   measuredAs: MeasuredQuantity;
   spotDiameterMm: number | null;
+  measuredUnit?: string;
+  setUnit?: string;
 }): { resultFluence: number | null; errorPercent: number | null } {
+  if (input.measuredUnit || input.setUnit || isCwMode(input.measuredAs)) {
+    const measuredUnit = measuredUnitFor(input.measuredAs, input.measuredUnit);
+    const setUnit = setUnitFor(input.measuredAs, input.setUnit);
+    const result = convertToUnit(input.measured, measuredUnit, setUnit, input.spotDiameterMm);
+    return {
+      resultFluence: result,
+      errorPercent: result == null ? null : errorPercent(result, input.setFluence),
+    };
+  }
   const resultFluence =
     input.measuredAs === 'energy'
       ? input.spotDiameterMm == null
@@ -148,8 +252,8 @@ export function measurementResult(input: {
 
 export function isFluenceMeasurement(row: any): boolean {
   if (!row || typeof row !== 'object') return false;
-  if (row.measuredMode === 'energy' || row.measuredMode === 'fluence') return true;
-  if (row.measured_mode === 'energy' || row.measured_mode === 'fluence') return true;
+  if (MEASURED_QUANTITIES.includes(row.measuredMode)) return true;
+  if (MEASURED_QUANTITIES.includes(row.measured_mode)) return true;
   if (row.setFluence != null && String(row.setFluence) !== '') return true;
   if (row.set_fluence != null && String(row.set_fluence) !== '') return true;
   if (row.spotSizeMm != null && String(row.spotSizeMm) !== '') return true;
@@ -160,12 +264,16 @@ export function isFluenceMeasurement(row: any): boolean {
 }
 
 export function withFluenceCalculations<T extends Record<string, any>>(row: T): T & FluenceMeasurement {
-  const measuredMode: MeasuredQuantity = row.measuredMode === 'energy' ? 'energy' : 'fluence';
+  const measuredMode = normalizeMode(row.measuredMode);
+  const measuredUnit = measuredUnitFor(measuredMode, row.measuredUnit);
+  const setUnit = setUnitFor(measuredMode, row.setUnit);
   const computed = measurementResult({
     setFluence: parseNum(row.setFluence) ?? Number.NaN,
     measured: parseNum(row.measuredValue) ?? Number.NaN,
     measuredAs: measuredMode,
     spotDiameterMm: effectiveSpotDiameterMm(row),
+    measuredUnit,
+    setUnit,
   });
   const error = computed.errorPercent == null ? '' : formatErrorPercent(computed.errorPercent);
   const pass =
@@ -177,6 +285,8 @@ export function withFluenceCalculations<T extends Record<string, any>>(row: T): 
     spotSizeOtherMm: row.spotSizeOtherMm == null ? '' : String(row.spotSizeOtherMm),
     setFluence: row.setFluence == null ? '' : String(row.setFluence),
     measuredMode,
+    measuredUnit,
+    setUnit,
     measuredValue: row.measuredValue == null ? '' : String(row.measuredValue),
     resultFluence: computed.resultFluence == null ? '' : formatFluence(computed.resultFluence),
     errorPercent: error,
@@ -185,16 +295,26 @@ export function withFluenceCalculations<T extends Record<string, any>>(row: T): 
     result: pass == null ? '' : pass ? 'PASS' : 'FAIL',
     setting: row.setFluence == null ? row.setting ?? '' : String(row.setFluence),
     measured: row.measuredValue == null ? row.measured ?? '' : String(row.measuredValue),
-    unit: measuredMode === 'energy' ? 'J' : 'J/cm²',
+    unit: measuredUnit,
   };
 }
 
-const FLUENCE_EDIT_KEYS = ['setFluence', 'measuredValue', 'measuredMode', 'spotSizeMm', 'spotSizeOtherMm'];
+const FLUENCE_EDIT_KEYS = ['setFluence', 'measuredValue', 'measuredMode', 'measuredUnit', 'setUnit', 'spotSizeMm', 'spotSizeOtherMm'];
 
 /** Apply one field edit and recompute fluence rows. Legacy rows keep set / measured / unit. */
 export function applyMeasurementEdit(row: any, key: string, value: any, model?: SpotModel): any {
   const prevRow = row || {};
   const next: any = { ...prevRow, [key]: value };
+  if (key === 'measuredMode') {
+    const mode = normalizeMode(value);
+    next.measuredMode = mode;
+    next.measuredUnit = measuredUnitFor(mode, prevRow.measuredUnit);
+    const prevMode = normalizeMode(prevRow.measuredMode);
+    next.setUnit =
+      isCwMode(mode) && isCwMode(prevMode)
+        ? setUnitFor(mode, prevRow.setUnit)
+        : setUnitFor(mode, undefined);
+  }
   if (key === 'wavelength' && (isFluenceMeasurement(next) || isFluenceMeasurement(prevRow))) {
     const prevWl = model?.wavelengths?.find((item) => item.name === prevRow.wavelength);
     const nextWl = model?.wavelengths?.find((item) => item.name === value);
@@ -244,6 +364,8 @@ export function newFluenceMeasurement(opts?: {
     spotSizeOtherMm: '',
     setFluence: opts?.setFluence == null ? '' : String(opts.setFluence),
     measuredMode: opts?.measuredMode || 'fluence',
+    measuredUnit: '',
+    setUnit: '',
     measuredValue: opts?.measuredValue == null ? '' : String(opts.measuredValue),
     resultFluence: '',
     errorPercent: '',
@@ -291,10 +413,11 @@ export function hydrateMeasurement(pm: any) {
             ? false
             : null,
       deviation: pm.deviation || pm.dev || '',
+      pulseMode: String(pm.pulseMode ?? pm.pulse_mode ?? ''),
+      pulseModeOther: String(pm.pulseModeOther ?? pm.pulse_mode_other ?? ''),
     };
   }
-  const measuredMode: MeasuredQuantity =
-    pm.measuredMode === 'energy' || pm.measured_mode === 'energy' ? 'energy' : 'fluence';
+  const measuredMode = normalizeMode(pm.measuredMode ?? pm.measured_mode);
   const measuredValue = pm.measuredValue ?? pm.measured_value ?? pm.measured ?? pm.actual ?? '';
   return withFluenceCalculations({
     wavelength: pm.wavelength || pm.name || '',
@@ -308,6 +431,10 @@ export function hydrateMeasurement(pm: any) {
     spotSizeOtherMm: String(pm.spotSizeOtherMm ?? pm.spot_size_other_mm ?? ''),
     setFluence: String(pm.setFluence ?? pm.set_fluence ?? ''),
     measuredMode,
+    pulseMode: String(pm.pulseMode ?? pm.pulse_mode ?? ''),
+    pulseModeOther: String(pm.pulseModeOther ?? pm.pulse_mode_other ?? ''),
+    measuredUnit: String(pm.measuredUnit ?? pm.measured_unit ?? ''),
+    setUnit: String(pm.setUnit ?? pm.set_unit ?? ''),
     measuredValue: measuredValue == null ? '' : String(measuredValue),
     resultFluence: '',
     errorPercent: '',
@@ -334,6 +461,7 @@ export function viewMeasurement(row: any): MeasurementView {
     const deviation = row?.deviation ?? row?.dev ?? '';
     return {
       legacy: true,
+      pulse: pulseModeLabel(row),
       wavelength,
       spot: '—',
       set: `${set == null || set === '' ? '—' : set}${set == null || set === '' ? '' : unit}`.trim(),
@@ -343,7 +471,9 @@ export function viewMeasurement(row: any): MeasurementView {
       pass,
     };
   }
-  const mode: MeasuredQuantity = row.measuredMode === 'energy' || row.measured_mode === 'energy' ? 'energy' : 'fluence';
+  const mode = normalizeMode(row.measuredMode ?? row.measured_mode);
+  const measuredUnit = measuredUnitFor(mode, row.measuredUnit ?? row.measured_unit);
+  const setUnit = setUnitFor(mode, row.setUnit ?? row.set_unit);
   const diameter = effectiveSpotDiameterMm({
     spotSizeMm: row.spotSizeMm ?? row.spot_size_mm,
     spotSizeOtherMm: row.spotSizeOtherMm ?? row.spot_size_other_mm,
@@ -355,21 +485,19 @@ export function viewMeasurement(row: any): MeasurementView {
     measured: measuredRaw ?? Number.NaN,
     measuredAs: mode,
     spotDiameterMm: diameter,
+    measuredUnit,
+    setUnit,
   });
   const pass =
     computed.errorPercent == null ? null : Math.abs(computed.errorPercent) <= FLUENCE_TOLERANCE_PERCENT;
   return {
     legacy: false,
+    pulse: pulseModeLabel(row),
     wavelength,
     spot: diameter == null ? '—' : `${formatDiameterMm(diameter)} mm`,
-    set: setFluence == null ? '—' : `${formatFluence(setFluence)} J/cm²`,
-    measured:
-      measuredRaw == null
-        ? '—'
-        : mode === 'energy'
-          ? `${formatFluence(measuredRaw)} J`
-          : `${formatFluence(measuredRaw)} J/cm²`,
-    result: computed.resultFluence == null ? '—' : `${formatFluence(computed.resultFluence)} J/cm²`,
+    set: setFluence == null ? '—' : formatValue(setFluence, setUnit),
+    measured: measuredRaw == null ? '—' : formatValue(measuredRaw, measuredUnit),
+    result: computed.resultFluence == null ? '—' : formatValue(computed.resultFluence, setUnit),
     error: computed.errorPercent == null ? '—' : formatErrorPercent(computed.errorPercent),
     pass,
   };

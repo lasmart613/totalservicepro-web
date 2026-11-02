@@ -1,7 +1,16 @@
 'use client';
 
 import React from 'react';
+import { useT } from '@/lib/fa/locale';
+import { PULSE_MODE_LABELS, pulseModeDisplay, pulseModeOptions } from '@/lib/laser-pulse-modes';
 import {
+  CW_SET_UNITS,
+  isCwMode,
+  measuredUnitFor,
+  MEASURED_QUANTITIES,
+  QUANTITY_UNITS,
+  setUnitFor,
+  type MeasuredQuantity,
   isFluenceMeasurement,
   SPOT_SIZE_OTHER,
   viewMeasurement,
@@ -26,6 +35,8 @@ export function PerformanceMeasurements({
   rows,
   wavelengths,
   spotSizes,
+  make,
+  model,
   onAdd,
   onRemove,
   onChange,
@@ -33,10 +44,13 @@ export function PerformanceMeasurements({
   rows: any[];
   wavelengths?: WavelengthOption[] | null;
   spotSizes: number[];
+  make?: string | null;
+  model?: string | null;
   onAdd: () => void;
   onRemove: (index: number) => void;
   onChange: (index: number, key: string, value: string) => void;
 }) {
+  const pulseOptions = pulseModeOptions(make, model);
   return (
     <div className="section mb-6">
       <div className="section-hdr">
@@ -63,6 +77,7 @@ export function PerformanceMeasurements({
               index={i}
               wavelengths={wavelengths}
               spotSizes={spotSizes}
+              pulseOptions={pulseOptions}
               onRemove={onRemove}
               onChange={onChange}
             />
@@ -72,6 +87,7 @@ export function PerformanceMeasurements({
               row={row}
               index={i}
               wavelengths={wavelengths}
+              pulseOptions={pulseOptions}
               onRemove={onRemove}
               onChange={onChange}
             />
@@ -87,6 +103,7 @@ function FluenceRow({
   index,
   wavelengths,
   spotSizes,
+  pulseOptions,
   onRemove,
   onChange,
 }: {
@@ -94,13 +111,19 @@ function FluenceRow({
   index: number;
   wavelengths?: WavelengthOption[] | null;
   spotSizes: number[];
+  pulseOptions: string[];
   onRemove: (index: number) => void;
   onChange: (index: number, key: string, value: string) => void;
 }) {
   const view = viewMeasurement(row);
   const spotValue = row.spotSizeMm == null ? '' : String(row.spotSizeMm);
   const knownSpot = spotSizes.some((size) => String(size) === spotValue);
-  const mode = row.measuredMode === 'energy' ? 'energy' : 'fluence';
+  const t = useT();
+  const mode: MeasuredQuantity = MEASURED_QUANTITIES.includes(row.measuredMode) ? row.measuredMode : 'fluence';
+  const measuredUnit = measuredUnitFor(mode, row.measuredUnit);
+  const setUnit = setUnitFor(mode, row.setUnit);
+  const modeLabel = (q: MeasuredQuantity) =>
+    `${t(QUANTITY_LABELS[q])} (${QUANTITY_UNITS[q].join(', ')})`;
   const passClass =
     view.pass === false ? 'text-red-400' : view.pass ? 'text-green-400' : 'text-[var(--text3)]';
 
@@ -157,54 +180,83 @@ function FluenceRow({
           </label>
         )}
         <label className="text-xs text-[var(--text3)]">
-          Set fluence (J/cm²)
-          <input
-            className="input mt-1"
-            type="number"
-            inputMode="decimal"
-            step="any"
-            aria-label="Set fluence (J/cm²)"
-            data-testid="set-fluence"
-            placeholder="J/cm²"
-            value={row.setFluence ?? ''}
-            onChange={(e) => onChange(index, 'setFluence', e.target.value)}
-          />
+          {isCwMode(mode) ? t('Set value') : `${t('Set fluence')} (J/cm²)`}
+          <div className="flex gap-1 mt-1">
+            <input
+              className="input"
+              type="number"
+              inputMode="decimal"
+              step="any"
+              aria-label={`${t('Set value')} (${setUnit})`}
+              data-testid="set-fluence"
+              placeholder={setUnit}
+              value={row.setFluence ?? ''}
+              onChange={(e) => onChange(index, 'setFluence', e.target.value)}
+            />
+            {isCwMode(mode) && (
+              <select
+                className="input w-28"
+                aria-label={t('Set unit')}
+                data-testid="set-unit"
+                value={setUnit}
+                onChange={(e) => onChange(index, 'setUnit', e.target.value)}
+              >
+                {CW_SET_UNITS.map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </label>
         <div>
-          <div className="text-xs text-[var(--text3)] mb-1">Actual / measured</div>
-          <div className="flex gap-1 mb-1" role="group" aria-label="Measured quantity">
-            <button
-              type="button"
-              className={modeButton(mode === 'energy')}
-              aria-pressed={mode === 'energy'}
-              data-testid="measured-mode-energy"
-              onClick={() => onChange(index, 'measuredMode', 'energy')}
-            >
-              Energy (J)
-            </button>
-            <button
-              type="button"
-              className={modeButton(mode === 'fluence')}
-              aria-pressed={mode === 'fluence'}
-              data-testid="measured-mode-fluence"
-              onClick={() => onChange(index, 'measuredMode', 'fluence')}
-            >
-              Fluence (J/cm²)
-            </button>
+          <div className="text-xs text-[var(--text3)] mb-1">{t('Actual / measured')}</div>
+          <div className="flex flex-wrap gap-1 mb-1" role="group" aria-label={t('Measurement type')}>
+            {MEASURED_QUANTITIES.map((q) => (
+              <button
+                key={q}
+                type="button"
+                className={modeButton(mode === q)}
+                aria-pressed={mode === q}
+                data-testid={`measured-mode-${q}`}
+                onClick={() => onChange(index, 'measuredMode', q)}
+              >
+                {modeLabel(q)}
+              </button>
+            ))}
           </div>
-          <input
-            className="input"
-            type="number"
-            inputMode="decimal"
-            step="any"
-            aria-label={mode === 'energy' ? 'Measured energy (J)' : 'Measured fluence (J/cm²)'}
-            data-testid="measured-value"
-            placeholder={mode === 'energy' ? 'Energy (J)' : 'Fluence (J/cm²)'}
-            value={row.measuredValue ?? ''}
-            onChange={(e) => onChange(index, 'measuredValue', e.target.value)}
-          />
+          <div className="flex gap-1">
+            <input
+              className="input"
+              type="number"
+              inputMode="decimal"
+              step="any"
+              aria-label={`${t('Measured')} ${t(QUANTITY_LABELS[mode])} (${measuredUnit})`}
+              data-testid="measured-value"
+              placeholder={`${t(QUANTITY_LABELS[mode])} (${measuredUnit})`}
+              value={row.measuredValue ?? ''}
+              onChange={(e) => onChange(index, 'measuredValue', e.target.value)}
+            />
+            {QUANTITY_UNITS[mode].length > 1 && (
+              <select
+                className="input w-28"
+                aria-label={t('Measured unit')}
+                data-testid="measured-unit"
+                value={measuredUnit}
+                onChange={(e) => onChange(index, 'measuredUnit', e.target.value)}
+              >
+                {QUANTITY_UNITS[mode].map((u) => (
+                  <option key={u} value={u}>
+                    {u}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
       </div>
+      <PulseModeField row={row} index={index} options={pulseOptions} onChange={onChange} />
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span data-testid="measurement-result">
           Result: <span className="font-semibold">{view.result}</span>
@@ -225,17 +277,20 @@ function LegacyRow({
   row,
   index,
   wavelengths,
+  pulseOptions,
   onRemove,
   onChange,
 }: {
   row: any;
   index: number;
   wavelengths?: WavelengthOption[] | null;
+  pulseOptions: string[];
   onRemove: (index: number) => void;
   onChange: (index: number, key: string, value: string) => void;
 }) {
   const view = viewMeasurement(row);
   return (
+    <div className="mb-2">
     <div
       className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2 items-center text-sm"
       data-testid="legacy-measurement-row"
@@ -290,6 +345,8 @@ function LegacyRow({
         × Remove
       </button>
     </div>
+      <PulseModeField row={row} index={index} options={pulseOptions} onChange={onChange} />
+    </div>
   );
 }
 
@@ -337,4 +394,60 @@ function modeButton(active: boolean): string {
   return active
     ? 'px-2 py-1 text-xs rounded border border-[var(--gold)] text-[var(--gold)] bg-[var(--surface)]'
     : 'px-2 py-1 text-xs rounded border border-[var(--border)] text-[var(--text3)]';
+}
+
+const QUANTITY_LABELS: Record<MeasuredQuantity, string> = {
+  energy: 'Energy',
+  fluence: 'Fluence',
+  power: 'Power',
+  irradiance: 'Irradiance',
+};
+
+/** Radio buttons for the row's pulse mode. Options come from lib/laser-pulse-modes.ts. */
+function PulseModeField({
+  row,
+  index,
+  options,
+  onChange,
+}: {
+  row: any;
+  index: number;
+  options: string[];
+  onChange: (index: number, key: string, value: string) => void;
+}) {
+  const t = useT();
+  const current = String(row?.pulseMode || '');
+  const name = `pulse-mode-${index}`;
+  const savedOutside = current && !options.includes(current);
+  const radio = (value: string, label: string) => (
+    <label key={value || 'none'} className="inline-flex items-center gap-1 text-xs">
+      <input
+        type="radio"
+        name={name}
+        value={value}
+        checked={current === value}
+        data-testid={`pulse-mode-${value || 'none'}`}
+        onChange={() => onChange(index, 'pulseMode', value)}
+      />
+      {label}
+    </label>
+  );
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1" role="radiogroup" aria-label={t('Pulse mode')} data-testid="pulse-mode">
+      <span className="text-xs text-[var(--text3)]">{t('Pulse mode')}:</span>
+      {radio('', t('None'))}
+      {options.map((key) => radio(key, key === 'other' ? t('Other') : PULSE_MODE_LABELS[key] || key))}
+      {savedOutside && radio(current, pulseModeDisplay(row, t))}
+      {current === 'other' && (
+        <input
+          className="input h-7 w-40 text-xs"
+          aria-label={t('Other pulse mode')}
+          data-testid="pulse-mode-other"
+          placeholder={t('Other pulse mode')}
+          value={row.pulseModeOther || ''}
+          onChange={(e) => onChange(index, 'pulseModeOther', e.target.value)}
+        />
+      )}
+    </div>
+  );
 }

@@ -2203,6 +2203,8 @@ export default function NewServiceReport() {
             rows={powerMeasurements}
             wavelengths={currentModel?.wavelengths}
             spotSizes={spotSizeChoicesMm(currentModel)}
+            make={manufacturerValue}
+            model={resolvedModelKey}
             onAdd={addPerfRow}
             onRemove={removePerf}
             onChange={updatePerf}

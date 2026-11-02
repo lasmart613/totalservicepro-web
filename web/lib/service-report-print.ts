@@ -123,7 +123,7 @@ function perfTable(
         : `${view.result}${outcome ? ` ${outcome}` : ''}`.trim();
       return (
         `<tr>` +
-        `<td style="padding:5px 8px;border:1px solid #ddd">${esc(view.wavelength)}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd">${esc(view.wavelength)}${view.pulse ? `<br><span style="font-size:10px;color:#555">${esc(tr('Pulse mode'))}: ${esc(view.pulse === 'Other' ? tr('Other') : view.pulse)}</span>` : ''}</td>` +
         `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(view.spot)}</td>` +
         `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(view.set)}</td>` +
         `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(view.measured)}</td>` +
