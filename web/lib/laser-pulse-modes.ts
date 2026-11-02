@@ -29,19 +29,19 @@ export const PULSE_MODE_RULES: PulseModeRule[] = [
     id: 'lumenis-coherent-co2',
     makes: ['lumenis', 'coherent', 'sharplan'],
     models: ['co2', 'ultrapulse', 'encore', 'acupulse', 'surgitouch', 'novapulse', 'sharplan', '40c', '30c'],
-    modes: ['cw', 'superpulse', 'ultrapulse'],
+    modes: ['cw', 'superpulse', 'ultrapulse', 'other'],
   },
   {
     id: 'laserscope-ams-ktp',
     makes: ['laserscope', 'ams', 'american medical systems'],
-    modes: ['cw', 'starpulse'],
+    modes: ['cw', 'starpulse', 'other'],
   },
   {
     // AMS/Laserscope Aura sold under other names: match by model alone.
     id: 'aura-ktp-by-model',
     makes: [''],
     models: ['aura', 'ktp'],
-    modes: ['cw', 'starpulse'],
+    modes: ['cw', 'starpulse', 'other'],
   },
 ];
 

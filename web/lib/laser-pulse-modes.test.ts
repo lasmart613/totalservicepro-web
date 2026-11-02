@@ -10,17 +10,17 @@ import {
 import { buildServiceReportPrintHTML } from './service-report-print.ts';
 import { GAP_STRINGS } from './i18n/gap-copy.ts';
 
-test('Lumenis / Coherent CO2 get CW, SuperPulse, UltraPulse (case-insensitive)', () => {
-  assert.deepEqual(pulseModeOptions('LUMENIS', 'UltraPulse Encore'), ['cw', 'superpulse', 'ultrapulse']);
-  assert.deepEqual(pulseModeOptions('coherent', 'ultrapulse 5000c'), ['cw', 'superpulse', 'ultrapulse']);
-  assert.deepEqual(pulseModeOptions('Lumenis', 'AcuPulse CO2'), ['cw', 'superpulse', 'ultrapulse']);
+test('Lumenis / Coherent CO2 get CW, SuperPulse, UltraPulse, Other (case-insensitive)', () => {
+  assert.deepEqual(pulseModeOptions('LUMENIS', 'UltraPulse Encore'), ['cw', 'superpulse', 'ultrapulse', 'other']);
+  assert.deepEqual(pulseModeOptions('coherent', 'ultrapulse 5000c'), ['cw', 'superpulse', 'ultrapulse', 'other']);
+  assert.deepEqual(pulseModeOptions('Lumenis', 'AcuPulse CO2'), ['cw', 'superpulse', 'ultrapulse', 'other']);
 });
 
-test('Laserscope / AMS Aura get CW, StarPulse', () => {
-  assert.deepEqual(pulseModeOptions('Laserscope', 'Aura XP'), ['cw', 'starpulse']);
-  assert.deepEqual(pulseModeOptions('AMS', 'aura'), ['cw', 'starpulse']);
-  assert.deepEqual(pulseModeOptions('American Medical Systems', 'GreenLight'), ['cw', 'starpulse']);
-  assert.deepEqual(pulseModeOptions('', 'AURA KTP'), ['cw', 'starpulse']);
+test('Laserscope / AMS Aura get CW, StarPulse, Other', () => {
+  assert.deepEqual(pulseModeOptions('Laserscope', 'Aura XP'), ['cw', 'starpulse', 'other']);
+  assert.deepEqual(pulseModeOptions('AMS', 'aura'), ['cw', 'starpulse', 'other']);
+  assert.deepEqual(pulseModeOptions('American Medical Systems', 'GreenLight'), ['cw', 'starpulse', 'other']);
+  assert.deepEqual(pulseModeOptions('', 'AURA KTP'), ['cw', 'starpulse', 'other']);
 });
 
 test('unknown or blank make shows every mode plus Other', () => {
