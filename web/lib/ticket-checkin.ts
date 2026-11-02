@@ -63,3 +63,23 @@ export function commentsWithArrival(comments: unknown, arrivalLabel: string): st
 export function checkInReportHref(ticketId: string | number): string {
   return `/reports/new?ticketId=${encodeURIComponent(String(ticketId))}&checkin=1`;
 }
+
+export type CheckInState = 'not-checked-in' | 'report-pending' | 'report-saved';
+
+/**
+ * Where a ticket is in the check-in flow. Arrival stays on the ticket (it is the
+ * real arrival time); a check-in with no linked report is "report-pending" and the
+ * ticket view offers "Continue service report" instead of a second Check in.
+ */
+export function checkInState(
+  ticket: Record<string, unknown> | null | undefined,
+  linkedReportCount: number
+): CheckInState {
+  if (!clean(ticket?.arrival_time)) return 'not-checked-in';
+  return linkedReportCount > 0 ? 'report-saved' : 'report-pending';
+}
+
+/** Check in only stamps a ticket that has no arrival yet (never overwrite). */
+export function canCheckIn(ticket: Record<string, unknown> | null | undefined): boolean {
+  return !clean(ticket?.arrival_time);
+}
