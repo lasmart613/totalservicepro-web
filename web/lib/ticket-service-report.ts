@@ -55,6 +55,8 @@ export type TicketReportPrefill = {
   dateOut: string;
   serviceEngineer: string;
   comments: string;
+  /** service_tickets.arrival_time (ISO). Empty when not checked in. */
+  arrivalTime: string;
 };
 
 export type ExistingTicketReport = {
@@ -242,6 +244,7 @@ export function reportPrefillFromTicket(source: TicketReportSource): TicketRepor
     dateOut: isoDateOnly(ticket.service_date),
     serviceEngineer,
     comments: ticketProblemComments(ticket.description, ticket.notes),
+    arrivalTime: clean(ticket.arrival_time),
   };
 }
 

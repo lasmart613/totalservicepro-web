@@ -39,7 +39,8 @@ import {
 } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices } from '@/lib/laser-catalog';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
-import { orgTodayIso } from '@/lib/org-timezone';
+import { orgTodayIso, resolveNumberingTimeZone } from '@/lib/org-timezone';
+import { commentsWithArrival, formatArrival } from '@/lib/ticket-checkin';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
@@ -189,6 +190,8 @@ export default function NewServiceReport() {
   const [ticketEquipmentId, setTicketEquipmentId] = useState<string | number | null>(null);
   const [ticketExistingReports, setTicketExistingReports] = useState<ExistingTicketReport[]>([]);
   const [ticketContextReady, setTicketContextReady] = useState(!ticketIdParam);
+  // ?checkin=1 from the ticket Check in button: the signed-in tech is on site.
+  const checkInMode = !editReportId && searchParams?.get('checkin') === '1';
   const [ticketCatalogKey, setTicketCatalogKey] = useState(0);
   const ticketMakeRef = useRef('');
   const ticketModelRef = useRef('');
@@ -968,8 +971,16 @@ export default function NewServiceReport() {
         if (prefill.serviceType) setServiceType(prefill.serviceType);
         if (prefill.dateOut) setDateOut(prefill.dateOut);
         if (prefill.serialNumber) setSerialNumber(prefill.serialNumber);
-        if (prefill.comments) setComments(prefill.comments);
-        if (prefill.serviceEngineer) setServiceEngineer(prefill.serviceEngineer);
+        let arrivalLabel = '';
+        if (prefill.arrivalTime) {
+          const zone = await resolveNumberingTimeZone(supabase, currentUserOrgId, { allowBrowser: false });
+          if (cancelled) return;
+          arrivalLabel = formatArrival(prefill.arrivalTime, zone.timeZone);
+        }
+        const comments = commentsWithArrival(prefill.comments, arrivalLabel);
+        if (comments) setComments(comments);
+        // Check in: the signed-in user is the tech on site (profile default), not the assignee.
+        if (prefill.serviceEngineer && !checkInMode) setServiceEngineer(prefill.serviceEngineer);
         if (prefill.customerName) {
           setSearchTerm(prefill.customerName);
           locationLoadRef.current = {
@@ -1027,7 +1038,7 @@ export default function NewServiceReport() {
     return () => {
       cancelled = true;
     };
-  }, [sessionReady, ticketIdParam, editReportId, currentUserOrgId, supabase]);
+  }, [sessionReady, ticketIdParam, editReportId, currentUserOrgId, supabase, checkInMode]);
 
   // Match ticket make/model onto catalog option values once those lists load.
   useEffect(() => {
