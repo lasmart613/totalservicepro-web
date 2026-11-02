@@ -9,6 +9,7 @@
  * on the current /reports/new model (ticketId query + service_reports.ticket_id).
  */
 
+import { loadPendingFromLastVisit, type PendingFromLastVisit } from './sr-carry-forward.ts';
 import { persistedLocationId } from './customer-locations.ts';
 import { memberDisplayName, looksLikeUuid } from './ticket-assignees.ts';
 import {
@@ -68,6 +69,8 @@ export type ExistingTicketReport = {
 export type TicketReportContext = {
   prefill: TicketReportPrefill;
   existingReports: ExistingTicketReport[];
+  /** Pending issues from the equipment's last report (same org). Null when none or 000949 not applied. */
+  pendingFromLastVisit?: PendingFromLastVisit | null;
 };
 
 export type TicketReportSource = {
@@ -551,5 +554,13 @@ export async function loadTicketReportContext(
 
   const prefill = reportPrefillFromTicket({ ticket, customer, location, equipment, assignee });
   if (!prefill) return null;
-  return { prefill, existingReports };
+  const pendingFromLastVisit = await loadPendingFromLastVisit(supabase as any, {
+    organizationId: ticket.organization_id ?? callerOrg,
+    equipmentId: prefill.equipmentId,
+    serialNumber: prefill.serialNumber,
+    excludeReportIds: existingReports.map((r) => r.id),
+    excludeTicketId: ticket.id,
+    excludeTicketNumber: prefill.ticketNumber || null,
+  });
+  return { prefill, existingReports, pendingFromLastVisit };
 }
