@@ -5,7 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   CHECKED_IN_STATUS,
+  canCheckIn,
   checkInPatch,
+  checkInState,
   checkInReportHref,
   commentsWithArrival,
   formatArrival,
@@ -84,4 +86,25 @@ test('ticket page wires check-in and serial fallback; report reads checkin', () 
   const report = read('app/reports/new/NewServiceReportClient.tsx');
   assert.match(report, /get\('checkin'\) === '1'/);
   assert.match(report, /commentsWithArrival\(/);
+});
+
+test('check-in never overwrites an existing arrival', () => {
+  assert.equal(canCheckIn({ arrival_time: null }), true);
+  assert.equal(canCheckIn({ arrival_time: '' }), true);
+  assert.equal(canCheckIn({ arrival_time: '2026-11-02T20:18:00Z' }), false);
+});
+
+test('check-in state: pending report vs saved report', () => {
+  assert.equal(checkInState({ arrival_time: null }, 0), 'not-checked-in');
+  assert.equal(checkInState({ arrival_time: '2026-11-02T20:18:00Z' }, 0), 'report-pending');
+  assert.equal(checkInState({ arrival_time: '2026-11-02T20:18:00Z' }, 2), 'report-saved');
+});
+
+test('ticket page guards the update and offers Continue service report', () => {
+  const src = read('app/service-tickets/[id]/page.tsx');
+  assert.match(src, /\.is\('arrival_time', null\)/);
+  assert.match(src, /checkIn === 'not-checked-in'/);
+  assert.match(src, /ticket-continue-report/);
+  assert.match(src, /checkIn === 'report-pending'/);
+  assert.ok(APP_STRING_KEYS.includes('Continue service report'));
 });

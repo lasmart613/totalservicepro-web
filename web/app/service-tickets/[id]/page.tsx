@@ -5,8 +5,10 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useT } from '@/lib/fa/locale';
 import {
+  canCheckIn,
   checkInPatch,
   checkInReportHref,
+  checkInState,
   formatArrival,
   ticketAssetTag,
   ticketSerialNumber,
@@ -358,11 +360,31 @@ export default function ServiceTicketDetail() {
     if (!ticket?.id || checkingIn) return;
     setCheckingIn(true);
     try {
-      const patch = checkInPatch(new Date());
-      const { error } = await supabase.from('service_tickets').update(patch).eq('id', ticket.id);
-      if (error) throw error;
-      setTicket((prev: any) => (prev ? { ...prev, ...patch } : prev));
-      toast.success(t('Checked in at {time}').replace('{time}', formatArrival(patch.arrival_time, docZone)));
+      if (canCheckIn(ticket)) {
+        const patch = checkInPatch(new Date());
+        // Guarded update: only stamps arrival when it is still null, so a second
+        // click / second device never overwrites the first arrival time.
+        const { data, error } = await supabase
+          .from('service_tickets')
+          .update(patch)
+          .eq('id', ticket.id)
+          .is('arrival_time', null)
+          .select('arrival_time, status');
+        if (error) throw error;
+        const row = Array.isArray(data) ? data[0] : null;
+        if (row) {
+          setTicket((prev: any) => (prev ? { ...prev, ...row } : prev));
+          toast.success(t('Checked in at {time}').replace('{time}', formatArrival(row.arrival_time, docZone)));
+        } else {
+          // Someone already checked in: keep their arrival, just reload it.
+          const { data: fresh } = await supabase
+            .from('service_tickets')
+            .select('arrival_time, status')
+            .eq('id', ticket.id)
+            .maybeSingle();
+          if (fresh) setTicket((prev: any) => (prev ? { ...prev, ...fresh } : prev));
+        }
+      }
       router.push(checkInReportHref(ticket.id));
     } catch (err: any) {
       console.error('check in', err);
@@ -370,6 +392,8 @@ export default function ServiceTicketDetail() {
       setCheckingIn(false);
     }
   };
+
+  const checkIn = checkInState(ticket, existingReports.length);
 
   if (loading) {
     return (
@@ -410,7 +434,7 @@ export default function ServiceTicketDetail() {
           </div>
 
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
-            {canCreateReport && !isEditing && (
+            {canCreateReport && !isEditing && checkIn === 'not-checked-in' && (
               <button
                 type="button"
                 onClick={handleCheckIn}
@@ -420,6 +444,20 @@ export default function ServiceTicketDetail() {
               >
                 <MapPinCheck size={18} /> {checkingIn ? t('Checking in...') : t('Check in')}
               </button>
+            )}
+            {!isEditing && checkIn !== 'not-checked-in' && (
+              <span data-testid="ticket-checked-in" className="flex items-center gap-1 text-sm text-gray-600">
+                <MapPinCheck size={16} /> {t('Checked in at {time}').replace('{time}', formatArrival(ticket.arrival_time, docZone) || String(ticket.arrival_time))}
+              </span>
+            )}
+            {canCreateReport && !isEditing && checkIn === 'report-pending' && (
+              <Link
+                href={checkInReportHref(ticket.id)}
+                data-testid="ticket-continue-report"
+                className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto"
+              >
+                {t('Continue service report')}
+              </Link>
             )}
             <CreateServiceReportActions
               canCreate={canCreateReport}
