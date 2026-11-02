@@ -36,6 +36,9 @@ export type PrintReportInput = {
   customer_website?: string | null;
   service_type?: string | null;
   comments?: string | null;
+  /** 000949 */
+  work_performed?: string | null;
+  pending_issues?: string | null;
   checklist_electrical?: Record<string, string> | null;
   checklist_mechanical?: Record<string, string> | null;
   checklist_aesthetic?: Record<string, string> | null;
@@ -290,6 +293,17 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
       ? `<h3 style="margin:14px 0 6px;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">${esc(tr('Comments & Notes'))}</h3>` +
         `<p style="font-size:12px;background:#f9f9f9;padding:10px;border-radius:4px"><bdi dir="auto">${esc(r.comments)}</bdi></p>`
       : '') +
+    (['work_performed', 'pending_issues'] as const)
+      .map((key) => {
+        const text = String(r[key] ?? '').trim();
+        if (!text) return '';
+        const title = key === 'work_performed' ? 'Work Performed' : 'Pending Issues / Watch Items to be Addressed on Next Visit';
+        return (
+          `<h3 data-sr-field="${key}" style="margin:14px 0 6px;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">${esc(tr(title))}</h3>` +
+          `<p style="font-size:12px;background:#f9f9f9;padding:10px;border-radius:4px;white-space:pre-wrap"><bdi dir="auto">${esc(text)}</bdi></p>`
+        );
+      })
+      .join('') +
     `<div style="margin-top:28px;border-top:2px solid ${accent};padding-top:12px">` +
     `<table style="width:100%;font-size:12px;margin-bottom:10px"><tr>` +
     `<td>${esc(tr('Technician'))}: <strong>${esc(engineer)}</strong></td>` +

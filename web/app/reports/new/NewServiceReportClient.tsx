@@ -41,6 +41,8 @@ import { listManufacturerChoices } from '@/lib/laser-catalog';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { commentsWithArrival, formatArrival } from '@/lib/ticket-checkin';
+import { commentsWithPending } from '@/lib/sr-carry-forward';
+import { useT } from '@/lib/fa/locale';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
@@ -238,6 +240,9 @@ export default function NewServiceReport() {
   /** Service Engineer / FSE — Android #engineer parity */
   const [serviceEngineer, setServiceEngineer] = useState('');
   const [comments, setComments] = useState('');
+  const [workPerformed, setWorkPerformed] = useState('');
+  const [pendingIssues, setPendingIssues] = useState('');
+  const tSr = useT();
 
   // Equipment in report
   const [equipName, setEquipName] = useState('');
@@ -628,6 +633,8 @@ export default function NewServiceReport() {
         if (r.equipment_name) setEquipName(r.equipment_name);
         if (r.sku) setSku(r.sku);
         if (r.comments) setComments(r.comments);
+        if (r.work_performed) setWorkPerformed(r.work_performed);
+        if (r.pending_issues) setPendingIssues(r.pending_issues);
         // Prefer saved service_engineer; never clobber with profile after load
         if (r.service_engineer) setServiceEngineer(r.service_engineer);
         if (r.customer_name) {
@@ -977,7 +984,7 @@ export default function NewServiceReport() {
           if (cancelled) return;
           arrivalLabel = formatArrival(prefill.arrivalTime, zone.timeZone);
         }
-        const comments = commentsWithArrival(prefill.comments, arrivalLabel);
+        const comments = commentsWithArrival(commentsWithPending(prefill.comments, ctx.pendingFromLastVisit), arrivalLabel);
         if (comments) setComments(comments);
         // Check in: the signed-in user is the tech on site (profile default), not the assignee.
         if (prefill.serviceEngineer && !checkInMode) setServiceEngineer(prefill.serviceEngineer);
@@ -1532,6 +1539,9 @@ export default function NewServiceReport() {
         next_pm_due: nextPm || null,
         ...serviceReportTicketColumns({ ticketId: linkedTicketId, ticketNumber: ticketNum }),
         comments: comments || null,
+        // 000949. Dropped by writeReport's schema retry when the columns are not applied yet.
+        work_performed: workPerformed.trim() ? workPerformed : null,
+        pending_issues: pendingIssues.trim() ? pendingIssues : null,
         ground_resistance: groundResistance === '' ? null : groundResistance,
         leakage_current: leakageCurrent === '' ? null : leakageCurrent,
         ground_resistance_pass: groundPass,
@@ -2384,6 +2394,16 @@ export default function NewServiceReport() {
         <div className="section mb-6 p-6">
           <h3 className="font-semibold mb-2">💬 Comments / Parts Needed</h3>
           <textarea className="input w-full h-24" value={comments} onChange={e=>setComments(e.target.value)} placeholder="Observations, parts, follow-up..." />
+        </div>
+
+        <div className="section mb-6 p-6" data-testid="sr-work-performed">
+          <h3 className="font-semibold mb-2">🛠️ {tSr('Work Performed')}</h3>
+          <textarea className="input w-full h-40" value={workPerformed} onChange={e=>setWorkPerformed(e.target.value)} placeholder={tSr('Describe the work performed on this visit...')} />
+        </div>
+
+        <div className="section mb-6 p-6" data-testid="sr-pending-issues">
+          <h3 className="font-semibold mb-2">⚠️ {tSr('Pending Issues / Watch Items to be Addressed on Next Visit')}</h3>
+          <textarea className="input w-full h-40" value={pendingIssues} onChange={e=>setPendingIssues(e.target.value)} placeholder={tSr('Items to check or fix on the next visit...')} />
         </div>
 
         {/* Signatures - Canvas pad matching Android SR exactly (touch/mouse + snapshot dataURL + fallback to profile) */}

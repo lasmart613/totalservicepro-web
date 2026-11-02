@@ -13,6 +13,7 @@ import {
   ticketAssetTag,
   ticketSerialNumber,
 } from '@/lib/ticket-checkin';
+import { loadPendingFromLastVisit, type PendingFromLastVisit } from '@/lib/sr-carry-forward';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
@@ -90,6 +91,7 @@ export default function ServiceTicketDetail() {
   const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
   const [linkedEquipment, setLinkedEquipment] = useState<Record<string, unknown> | null>(null);
   const [checkingIn, setCheckingIn] = useState(false);
+  const [pendingFromLast, setPendingFromLast] = useState<PendingFromLastVisit | null>(null);
   const router = useRouter();
   const t = useT();
 
@@ -148,6 +150,27 @@ export default function ServiceTicketDetail() {
           setLinkedEquipment(null);
         }
         setFormData(normalized);
+        let ticketReports: ExistingTicketReport[] = [];
+        try {
+          ticketReports = await listReportsForTicket(supabase, normalized);
+        } catch {
+          ticketReports = [];
+        }
+        // Carry-forward: pending issues from this equipment's last report (same org only).
+        try {
+          setPendingFromLast(
+            await loadPendingFromLastVisit(supabase as any, {
+              organizationId: normalized.organization_id,
+              equipmentId: normalized.equipment_id,
+              serialNumber: normalized.serial_number,
+              excludeReportIds: ticketReports.map((r) => r.id),
+              excludeTicketId: normalized.id,
+              excludeTicketNumber: normalized.ticket_number || null,
+            })
+          );
+        } catch {
+          setPendingFromLast(null);
+        }
         try {
           setExistingReports(await listReportsForTicket(supabase, normalized));
         } catch (reportErr) {
@@ -568,6 +591,24 @@ export default function ServiceTicketDetail() {
               )}
             </div>
           </div>
+
+          {pendingFromLast && (
+            <div
+              role="note"
+              data-testid="ticket-pending-from-last"
+              className="card p-4 border-l-4 border-amber-500 bg-amber-500/10"
+            >
+              <div className="font-semibold mb-1">
+                ⚠️ {pendingFromLast.date
+                  ? t('Pending from last visit ({date})').replace('{date}', pendingFromLast.date)
+                  : t('Pending from last visit')}
+              </div>
+              <p className="whitespace-pre-wrap text-sm"><bdi dir="auto">{pendingFromLast.pendingIssues}</bdi></p>
+              <Link href={`/reports/${pendingFromLast.reportId}`} className="text-xs text-[var(--gold)] font-bold">
+                {t('View report')}{pendingFromLast.reportNumber ? ` ${pendingFromLast.reportNumber}` : ''}
+              </Link>
+            </div>
+          )}
 
           {/* Equipment Information */}
           <div className="card p-6">

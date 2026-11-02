@@ -397,6 +397,20 @@ export default function ReportDetail() {
                 </div>
               )}
 
+              {report.work_performed && (
+                <div className="pt-3 border-t border-[var(--border)]" data-testid="sr-view-work-performed">
+                  <div className="text-[var(--text3)] mb-1">{t('Work Performed')}</div>
+                  <p className="whitespace-pre-wrap"><bdi dir="auto">{report.work_performed}</bdi></p>
+                </div>
+              )}
+
+              {report.pending_issues && (
+                <div className="pt-3 border-t border-[var(--border)]" data-testid="sr-view-pending-issues">
+                  <div className="text-[var(--text3)] mb-1">{t('Pending Issues / Watch Items to be Addressed on Next Visit')}</div>
+                  <p className="whitespace-pre-wrap"><bdi dir="auto">{report.pending_issues}</bdi></p>
+                </div>
+              )}
+
               {report.tech_signature && String(report.tech_signature).startsWith('data:image') && (
                 <div className="pt-3 border-t border-[var(--border)]">
                   <div className="text-[var(--text3)] mb-1">{t('Technician signature')}</div>
