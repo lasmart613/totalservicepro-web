@@ -18,8 +18,8 @@ import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/appl
 import { canVoidInvoice, isVoidInvoiceStatus } from '@/lib/billing/void-invoice';
 import { getOrgRole, voidInvoiceRole } from '@/lib/org-role';
 import {
+  invoiceSavedCollectable,
   releaseDeferredBalance,
-  resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { toast } from 'sonner';
 import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
@@ -330,11 +330,11 @@ export default function InvoicesListPage() {
   }
 
   async function collectRemaining(inv: InvoiceRow) {
-    const split = resolveInvoiceCollectable({
-      total: inv.total,
-      amountPaid: existingPaidAmount(inv),
-      invoice_data: parseJsonField(inv.invoice_data),
-    });
+    const split = invoiceSavedCollectable(inv);
+    if (!split) {
+      toast.error('This invoice has no total, so a payment was not recorded.');
+      return;
+    }
     if (!split.hasDeferredSplit || split.deferredReleased) {
       toast.message('No deferred remainder to collect.');
       return;
@@ -498,13 +498,13 @@ export default function InvoicesListPage() {
                     </div>
                   </Link>
                   <div className="font-bold text-[var(--gold)] text-lg flex-shrink-0 text-right">
-                    <div>{money(Number(inv.total) || 0)}</div>
                     {(() => {
-                      const split = resolveInvoiceCollectable({
-                        total: inv.total,
-                        amountPaid: existingPaidAmount(inv),
-                        invoice_data: parseJsonField(inv.invoice_data),
-                      });
+                      const split = invoiceSavedCollectable(inv);
+                      if (!split) return <div>—</div>;
+                      return (
+                        <>
+                    <div>{money(split.total)}</div>
+                    {(() => {
                       if (!split.hasDeferredSplit) return null;
                       if (split.deferredReleased) {
                         return (
@@ -521,6 +521,9 @@ export default function InvoicesListPage() {
                         </div>
                       );
                     })()}
+                        </>
+                      );
+                    })()}
                   </div>
                   {!alreadyPaid && (
                     <div className="flex gap-2 w-full sm:w-auto flex-wrap">
@@ -528,12 +531,12 @@ export default function InvoicesListPage() {
                         type="button"
                         className="btn btn-secondary text-xs"
                         onClick={() => {
+                          const split = invoiceSavedCollectable(inv);
+                          if (!split) {
+                            toast.error('This invoice has no total, so a payment was not recorded.');
+                            return;
+                          }
                           setPayRow(inv);
-                          const split = resolveInvoiceCollectable({
-                            total: inv.total,
-                            amountPaid: existingPaidAmount(inv),
-                            invoice_data: parseJsonField(inv.invoice_data),
-                          });
                           const remain = split.stripeAmount || split.remainingOwed;
                           setPayAmt(remain ? String(remain) : '');
                           setPayMethod('Check');
@@ -544,23 +547,20 @@ export default function InvoicesListPage() {
                       <button
                         type="button"
                         className="btn btn-secondary text-xs"
-                        onClick={() =>
-                          applyManualPayment(
-                            inv,
-                            Math.max(0, Number(inv.total || 0) - existingPaidAmount(inv)),
-                            'Other'
-                          )
-                        }
+                        onClick={() => {
+                          const split = invoiceSavedCollectable(inv);
+                          if (!split) {
+                            toast.error('This invoice has no total, so a payment was not recorded.');
+                            return;
+                          }
+                          applyManualPayment(inv, split.remainingOwed, 'Other');
+                        }}
                       >
                         {t('Mark paid')}
                       </button>
                       {(() => {
-                        const split = resolveInvoiceCollectable({
-                          total: inv.total,
-                          amountPaid: existingPaidAmount(inv),
-                          invoice_data: parseJsonField(inv.invoice_data),
-                        });
-                        if (!split.hasDeferredSplit || split.deferredReleased) return null;
+                        const split = invoiceSavedCollectable(inv);
+                        if (!split || !split.hasDeferredSplit || split.deferredReleased) return null;
                         return (
                           <button
                             type="button"

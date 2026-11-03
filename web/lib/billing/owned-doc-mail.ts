@@ -23,7 +23,12 @@ import {
   isEstimateDepositEnabled,
   printableEstimateDeposit,
 } from './estimate-deposit.ts';
-import { resolveInvoiceCollectable } from './invoice-collectable.ts';
+import { invoiceSavedCollectable } from './invoice-collectable.ts';
+import {
+  laborFromInvoiceRow,
+  partsSubtotalFromLines,
+  roundMoney,
+} from './invoice-labor.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
 
@@ -230,19 +235,40 @@ export function buildOwnedInvoiceMessage(input: {
 }): string {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
-  const collectable = resolveInvoiceCollectable({
-    total: input.row.total,
-    amountPaid: input.row.amount_paid,
-    invoice_data: input.row.invoice_data,
-  });
+  const labor = laborFromInvoiceRow(input.row);
+  const parts = partsSubtotalFromLines(lines);
   const lineSum = lines.reduce(
     (sum: number, line: { ext?: unknown; qty?: unknown; unit_price?: unknown }) =>
       sum + num(line.ext ?? num(line.qty) * num(line.unit_price)),
     0
   );
-  const subtotal = num(input.row.subtotal ?? data.subtotal) || lineSum;
   const tax = num(input.row.tax ?? data.tax);
-  const total = num(input.row.total ?? data.total) || subtotal + tax;
+  const storedSubtotalRaw = input.row.subtotal ?? data.subtotal;
+  const storedSubtotal = Number(storedSubtotalRaw);
+  const subtotal = Number.isFinite(storedSubtotal)
+    ? roundMoney(storedSubtotal)
+    : roundMoney(parts || lineSum);
+  const saved = invoiceSavedCollectable({
+    total: input.row.total ?? data.total,
+    amount_paid: input.row.amount_paid,
+    invoice_data: input.row.invoice_data,
+  });
+  // A missing total is not parts + tax and is not a $0 charge. The pay link
+  // is refused before this HTML is used for checkout.
+  const total = saved ? saved.total : 0;
+  const collectable = saved ?? {
+    total: 0,
+    amountPaid: 0,
+    partsDeposit: 0,
+    dueNowOriginal: 0,
+    deferredOriginal: 0,
+    deferredReleased: false,
+    hasDeferredSplit: false,
+    stripeAmount: 0,
+    remainingOwed: 0,
+    deferredUnpaid: 0,
+    paymentKind: 'full' as const,
+  };
   return buildInvoiceHtml({
     company: input.company,
     customer: {
@@ -264,6 +290,7 @@ export function buildOwnedInvoiceMessage(input: {
     subtotal,
     tax,
     total,
+    labor,
     deposit: num(data.deposit ?? input.row.amount_paid),
     depositDate: data.depositDate ? String(data.depositDate) : undefined,
     depositMethod: data.depositMethod ? String(data.depositMethod) : undefined,

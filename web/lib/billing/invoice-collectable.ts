@@ -56,6 +56,28 @@ function paidFromInvoiceData(data: Record<string, unknown>, amountPaidCol?: unkn
   return dep > 0 ? dep : 0;
 }
 
+/**
+ * service_invoices.total is the only amount due. A null or non-numeric total
+ * is not $0: callers must refuse a pay link and a payment instead of charging.
+ */
+export function invoiceSavedCollectable(row: {
+  total?: unknown;
+  amount_paid?: unknown;
+  invoice_data?: unknown;
+} | null | undefined): InvoiceCollectableSplit | null {
+  if (!row || row.total == null) return null;
+  if (typeof row.total === 'string' && row.total.trim() === '') return null;
+  const n = typeof row.total === 'number' ? row.total : Number(String(row.total).trim());
+  if (!Number.isFinite(n)) return null;
+  return resolveInvoiceCollectable({
+    total: n,
+    amountPaid: row.amount_paid,
+    invoice_data: row.invoice_data,
+  });
+}
+
+export { STRIPE_INVOICE_MAX } from './apply-invoice-payment.ts';
+
 export function resolveInvoiceCollectable(input: {
   total?: unknown;
   amountPaid?: unknown;

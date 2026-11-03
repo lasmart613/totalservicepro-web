@@ -91,6 +91,15 @@ test('contact-for-price listings start at zero and still keep the listing id', (
   assert.equal(line.marketplace_listing_id, 'lst_ask');
 });
 
+test('a stored line without an extended price uses qty times the unit price', () => {
+  const missing = lineItemFromStored({ description: 'Tip', qty: 2, unit_price: 10 }, 0);
+  assert.equal(missing.ext, 20);
+  const blank = lineItemFromStored({ description: 'Tip', qty: 2, unit_price: 10, ext: '' }, 1);
+  assert.equal(blank.ext, 20);
+  const explicitZero = lineItemFromStored({ description: 'Tip', qty: 2, unit_price: 10, ext: 0 }, 2);
+  assert.equal(explicitZero.ext, 0);
+});
+
 test('stored lines keep the listing reference through a form round trip', () => {
   const stored = lineItemFromStored(
     {
@@ -143,6 +152,24 @@ test('append replaces a blank starter line and keeps real lines and Stripe keys'
   assert.equal(patch.invoice_data.dueNow, 50);
   assert.equal(patch.invoice_data.deferred, 310);
   assert.equal(patch.invoice_data.status, undefined);
+});
+
+test('appending a listing keeps an existing labor subtotal in the invoice total', () => {
+  const line = listingToInvoiceLine(flashlamp, 1, 'line-new');
+  const patch = mergeListingOntoDraft(
+    {
+      tax: 0,
+      amount_paid: 0,
+      labor_subtotal: 40,
+      invoice_data: {
+        line_items: [{ id: 'old', description: 'Tip', qty: 1, unit_price: 100, ext: 100 }],
+      },
+    },
+    line
+  );
+  assert.deepEqual(Object.keys(patch).sort(), ['invoice_data', 'subtotal', 'total']);
+  assert.equal(patch.subtotal, 390);
+  assert.equal(patch.total, 390);
 });
 
 test('a full-charge draft stays fully due after the listing is added', () => {

@@ -142,6 +142,44 @@ test('invoice HTML shows due-now deposit vs deferred remainder; pay button is de
   assert.doesNotMatch(html, /Pay \$905\.00 securely with Stripe/);
 });
 
+test('invoice HTML hides a zero labor block and shows a positive one on its own', () => {
+  const hidden = buildInvoiceHtml({
+    ...invoiceBase,
+    labor: {
+      hours: 0,
+      halfDays: 0,
+      fullDays: 0,
+      hourlyRate: 150,
+      halfDayRate: 500,
+      fullDayRate: 900,
+      subtotal: 0,
+    },
+  });
+  assert.doesNotMatch(hidden, /Labor subtotal/);
+  assert.doesNotMatch(hidden, /Half days/);
+  const shown = buildInvoiceHtml({
+    ...invoiceBase,
+    subtotal: 2805,
+    tax: 8,
+    total: 2813,
+    labor: {
+      hours: 2,
+      halfDays: 1,
+      fullDays: 0.5,
+      hourlyRate: 150,
+      halfDayRate: 500,
+      fullDayRate: 900,
+      subtotal: 1250,
+    },
+  });
+  assert.match(shown, /Labor subtotal/);
+  assert.match(shown, />Hours</);
+  assert.match(shown, /Half days/);
+  assert.match(shown, /Full days/);
+  assert.match(shown, /\$1,250\.00/);
+  assert.match(shown, /\$2,813\.00/);
+});
+
 test('invoice HTML after deposit paid has no Stripe button until remainder is released', () => {
   const html = buildInvoiceHtml({
     ...invoiceBase,

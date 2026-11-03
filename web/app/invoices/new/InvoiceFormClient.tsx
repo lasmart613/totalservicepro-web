@@ -38,8 +38,27 @@ import {
   collectableInvoiceDataFields,
   estimatePartsDeposit,
   resolveInvoiceCollectable,
+  STRIPE_INVOICE_MAX,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
+import {
+  emptyLabor,
+  emptyOrgLaborRates,
+  LABOR_INPUT_MAX,
+  isMissingLaborColumnError,
+  laborColumnPayload,
+  laborFromEstimate,
+  laborForInvoiceEdit,
+  laborFromQuantities,
+  laborLineAmounts,
+  ORG_LABOR_RATE_SELECT,
+  orgLaborRatesFromRow,
+  roundMoney,
+  stripMovedEstimateLaborLines,
+  withOrgRateDefaults,
+  type InvoiceLabor,
+  type OrgLaborRates,
+} from '@/lib/billing/invoice-labor';
 import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
@@ -110,6 +129,8 @@ export default function InvoiceFormClient() {
   const [dueDate, setDueDate] = useState('');
   const [description, setDescription] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem('LI')]);
+  const [laborReady, setLaborReady] = useState(false);
+  const [labor, setLabor] = useState<InvoiceLabor>(emptyLabor());
   const [tax, setTax] = useState(0);
   const [totalOverride, setTotalOverride] = useState<number | null>(null);
   const [deposit, setDeposit] = useState(0);
@@ -121,7 +142,11 @@ export default function InvoiceFormClient() {
   const [chargeDepositOnly, setChargeDepositOnly] = useState(true);
   const [partsCatalog, setPartsCatalog] = useState<any[]>([]);
 
-  const subtotal = useMemo(() => lineItemsSubtotal(lineItems), [lineItems]);
+  const partsSubtotal = useMemo(() => lineItemsSubtotal(lineItems), [lineItems]);
+  const subtotal = useMemo(
+    () => roundMoney(partsSubtotal + (laborReady ? labor.subtotal : 0)),
+    [partsSubtotal, labor.subtotal, laborReady]
+  );
   const computedTotal = useMemo(
     () => Math.round((subtotal + (Number(tax) || 0)) * 100) / 100,
     [subtotal, tax]
@@ -210,7 +235,7 @@ export default function InvoiceFormClient() {
   };
 
   const loadInvoice = useCallback(
-    async (id: string) => {
+    async (id: string, orgRates?: OrgLaborRates) => {
       const { data, error } = await supabase
         .from('service_invoices')
         .select('*')
@@ -276,6 +301,12 @@ export default function InvoiceFormClient() {
       if (Array.isArray(lines) && lines.length) {
         setLineItems(lines.map((li: unknown, i: number) => lineItemFromStored(li, i)));
       }
+      if ('labor_hours' in data || 'labor_subtotal' in data) {
+        setLaborReady(true);
+        // Org rates prefill only when this invoice has no labor. A saved labor
+        // section keeps its rate snapshots, including nulls, and its subtotal.
+        setLabor(laborForInvoiceEdit(data, orgRates));
+      }
     },
     [supabase]
   );
@@ -302,7 +333,7 @@ export default function InvoiceFormClient() {
   }
 
   const prefillFromEstimate = useCallback(
-    async (estimateId: string) => {
+    async (estimateId: string, opts?: { laborReady?: boolean; orgRates?: OrgLaborRates }) => {
       const { data, error } = await supabase
         .from('service_estimates')
         .select('*')
@@ -350,11 +381,14 @@ export default function InvoiceFormClient() {
       setChargeDepositOnly(estDeposit > 0);
       setDeferredReleased(false);
 
+      const carried = opts?.laborReady ? laborFromEstimate(ed, opts.orgRates) : null;
+      if (carried) setLabor(carried);
       let lines: any[] = ed.line_items || ed.part_lines || [];
       if (!Array.isArray(lines) || !lines.length) {
-        // Build basic lines from snapshot totals
+        // Build basic lines from snapshot totals. Hourly labor moves into the
+        // labor section when those columns exist, so it is not also a part line.
         lines = [];
-        if (ed.labor) {
+        if (ed.labor && !carried) {
           lines.push({
             description: `Labor (${ed.laborHours || ''} hrs)`,
             qty: 1,
@@ -375,6 +409,8 @@ export default function InvoiceFormClient() {
             unit_price: ed.travel,
           });
         }
+      } else if (carried) {
+        lines = stripMovedEstimateLaborLines(lines, carried);
       }
       if (lines.length) {
         setLineItems(
@@ -480,10 +516,28 @@ export default function InvoiceFormClient() {
         }
         await loadParts();
 
+        let laborColumns = false;
+        let orgRates = emptyOrgLaborRates();
+        const laborProbe = await supabase.from('service_invoices').select('labor_hours').limit(1);
+        if (!laborProbe.error) laborColumns = true;
+        else if (!isMissingLaborColumnError(laborProbe.error)) laborColumns = false;
+        setLaborReady(laborColumns);
+        if (orgId && laborColumns) {
+          const rates = await supabase
+            .from('organizations')
+            .select(ORG_LABOR_RATE_SELECT)
+            .eq('id', orgId)
+            .maybeSingle();
+          if (!rates.error && rates.data) {
+            orgRates = orgLaborRatesFromRow(rates.data as unknown as Record<string, unknown>);
+          }
+        }
         if (editIdParam) {
-          await loadInvoice(editIdParam);
+          await loadInvoice(editIdParam, orgRates);
         } else if (fromEstimateParam) {
-          await prefillFromEstimate(fromEstimateParam);
+          await prefillFromEstimate(fromEstimateParam, { laborReady: laborColumns, orgRates });
+        } else if (laborColumns) {
+          setLabor(withOrgRateDefaults(emptyLabor(), orgRates));
         }
         // Allocate invoice numbers at save, not on form open.
       } catch (e) {
@@ -495,7 +549,52 @@ export default function InvoiceFormClient() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, router, editIdParam, fromEstimateParam]);
 
+  function updateLabor(patch: {
+    hours?: number;
+    halfDays?: number;
+    fullDays?: number;
+    hourlyRate?: number | null;
+    halfDayRate?: number | null;
+    fullDayRate?: number | null;
+  }) {
+    const qtyOver =
+      (patch.hours != null && patch.hours > LABOR_INPUT_MAX) ||
+      (patch.halfDays != null && patch.halfDays > LABOR_INPUT_MAX) ||
+      (patch.fullDays != null && patch.fullDays > LABOR_INPUT_MAX);
+    if (qtyOver) {
+      toast.error(t('Enter hours, half days, or full days up to 99,999,999.99.'));
+      return;
+    }
+    const rateOver =
+      (patch.hourlyRate != null && patch.hourlyRate > LABOR_INPUT_MAX) ||
+      (patch.halfDayRate != null && patch.halfDayRate > LABOR_INPUT_MAX) ||
+      (patch.fullDayRate != null && patch.fullDayRate > LABOR_INPUT_MAX);
+    if (rateOver) {
+      toast.error(t('Enter a labor rate up to 99,999,999.99.'));
+      return;
+    }
+    setTotalOverride(null);
+    setLabor((prev) =>
+      laborFromQuantities({
+        hours: patch.hours ?? prev.hours,
+        halfDays: patch.halfDays ?? prev.halfDays,
+        fullDays: patch.fullDays ?? prev.fullDays,
+        hourlyRate: patch.hourlyRate !== undefined ? patch.hourlyRate : prev.hourlyRate,
+        halfDayRate: patch.halfDayRate !== undefined ? patch.halfDayRate : prev.halfDayRate,
+        fullDayRate: patch.fullDayRate !== undefined ? patch.fullDayRate : prev.fullDayRate,
+      })
+    );
+  }
+
   function updateLine(id: string, patch: Partial<LineItem>) {
+    if (patch.qty != null && Number(patch.qty) > LABOR_INPUT_MAX) {
+      toast.error(t('Enter a quantity up to 99,999,999.99.'));
+      return;
+    }
+    if (patch.unit_price != null && Number(patch.unit_price) > LABOR_INPUT_MAX) {
+      toast.error(t('Enter a price up to 99,999,999.99.'));
+      return;
+    }
     setTotalOverride(null);
     setLineItems((rows) =>
       rows.map((r) => (r.id === id ? recomputeExt({ ...r, ...patch }) : r))
@@ -523,6 +622,10 @@ export default function InvoiceFormClient() {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
       toast.error('Customer name is required');
+      return null;
+    }
+    if (!Number.isFinite(total) || total > STRIPE_INVOICE_MAX) {
+      toast.error(t('Invoice total cannot be more than $999,999.99.'));
       return null;
     }
     setSaving(true);
@@ -616,6 +719,7 @@ export default function InvoiceFormClient() {
         payment_method: depositMethod || null,
         invoice_number: invNum,
         invoice_data: await invoiceDataForSave(supabase, existingId, formInvoiceData),
+        ...(laborReady ? laborColumnPayload(labor) : {}),
       };
 
       if (!existingId) {
@@ -707,6 +811,7 @@ export default function InvoiceFormClient() {
       lines: lineItems,
       subtotal,
       tax: Number(tax) || 0,
+      labor: laborReady ? labor : null,
       total,
       deposit: received,
       depositDate: depositDate || undefined,
@@ -1265,9 +1370,81 @@ export default function InvoiceFormClient() {
             + {t('Add line item')}
           </button>
 
+          {laborReady && (
+            <div className="mt-5">
+              <h3 className="font-bold text-sm mb-1 text-[var(--gold)]">{t('Labor')}</h3>
+              <p className="text-xs text-[var(--text3)] mb-2">
+                {t(
+                  'Rates start from the company profile and can be changed on this invoice. Labor is included in the subtotal. Tax stays the amount you enter.'
+                )}
+              </p>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[420px]">
+                  <thead>
+                    <tr className="text-left text-[var(--text3)] text-xs border-b border-[var(--border2)]">
+                      <th className="py-2 pr-2">{t('Description')}</th>
+                      <th className="py-2 pr-2 w-24">{t('Qty')}</th>
+                      <th className="py-2 pr-2 w-28">{t('Rate')}</th>
+                      <th className="py-2 pr-2 w-28">{t('Ext')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(
+                      [
+                        ['hours', t('Hours'), labor.hours, labor.hourlyRate, laborLineAmounts(labor).hourly],
+                        ['halfDays', t('Half days'), labor.halfDays, labor.halfDayRate, laborLineAmounts(labor).halfDay],
+                        ['fullDays', t('Full days'), labor.fullDays, labor.fullDayRate, laborLineAmounts(labor).fullDay],
+                      ] as const
+                    ).map(([key, label, qty, rate, ext]) => (
+                      <tr key={key} className="border-b border-[var(--border)]/50">
+                        <td className="py-1.5 pr-2">{label}</td>
+                        <td className="py-1.5 pr-2">
+                          <input
+                            className="input text-sm py-1.5"
+                            type="number"
+                            step="any"
+                            min={0}
+                            value={qty}
+                            aria-label={label}
+                            onChange={(e) =>
+                              updateLabor({ [key]: parseFloat(e.target.value) || 0 })
+                            }
+                          />
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <input
+                            className="input text-sm py-1.5"
+                            type="number"
+                            step="0.01"
+                            min={0}
+                            value={rate ?? ''}
+                            aria-label={`${label} ${t('Rate')}`}
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              updateLabor({
+                                [key === 'hours' ? 'hourlyRate' : key === 'halfDays' ? 'halfDayRate' : 'fullDayRate']:
+                                  raw === '' ? null : parseFloat(raw) || 0,
+                              });
+                            }}
+                          />
+                        </td>
+                        <td className="py-1.5 pr-2">
+                          <input className="input text-sm py-1.5 opacity-80" readOnly value={money(ext)} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="text-right text-sm font-bold mt-2">
+                {t('Labor subtotal')}: {money(labor.subtotal)}
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="text-xs text-[var(--text3)]">{t('Subtotal (from line items)')}</label>
+              <label className="text-xs text-[var(--text3)]">{t('Subtotal')}</label>
               <input className="input mt-1 opacity-90" readOnly value={money(subtotal)} />
             </div>
             <div>
@@ -1278,7 +1455,10 @@ export default function InvoiceFormClient() {
                 step="0.01"
                 min={0}
                 value={tax}
-                onChange={(e) => setTax(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  setTotalOverride(null);
+                  setTax(parseFloat(e.target.value) || 0);
+                }}
               />
             </div>
           </div>
@@ -1402,7 +1582,18 @@ export default function InvoiceFormClient() {
                 type="number"
                 step="0.01"
                 value={total}
-                onChange={(e) => setTotalOverride(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  const next = parseFloat(e.target.value);
+                  if (!Number.isFinite(next)) {
+                    setTotalOverride(0);
+                    return;
+                  }
+                  if (next > STRIPE_INVOICE_MAX) {
+                    toast.error(t('Invoice total cannot be more than $999,999.99.'));
+                    return;
+                  }
+                  setTotalOverride(next);
+                }}
               />
             </div>
             <div>

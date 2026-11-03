@@ -5,6 +5,7 @@ import {
   buildInvoicePaymentPatch,
   checkoutLooksLikeInvoicePay,
   paymentStatusFromAmounts,
+  STRIPE_INVOICE_MAX,
 } from './apply-invoice-payment.ts';
 
 test('full payment marks paid; short payment is partially_paid', () => {
@@ -42,6 +43,34 @@ test('applying a Stripe session is idempotent and adds to prior deposit', () => 
   assert.equal(patch.amount_paid, 250);
   assert.equal(patch.invoice_data.balanceDue, 0);
   assert.deepEqual(patch.invoice_data.stripe_checkout_session_ids, ['cs_live_old', 'cs_live_new']);
+});
+
+test('manual payment amounts and invoice totals stay within the Stripe cap', () => {
+  assert.throws(
+    () =>
+      buildInvoicePaymentPatch({
+        invoice: { id: 1, total: STRIPE_INVOICE_MAX + 0.01, invoice_data: {} },
+        addAmount: 10,
+        method: 'Check',
+      }),
+    /999,999\.99/
+  );
+  assert.throws(
+    () =>
+      buildInvoicePaymentPatch({
+        invoice: { id: 1, total: 108, invoice_data: {} },
+        addAmount: 1_000_000,
+        method: 'Cash',
+      }),
+    /999,999\.99/
+  );
+  const atCap = buildInvoicePaymentPatch({
+    invoice: { id: 1, total: STRIPE_INVOICE_MAX, invoice_data: {} },
+    addAmount: 20,
+    method: 'Check',
+  });
+  assert.equal(atCap.amount_paid, 20);
+  assert.equal(atCap.status, 'partially_paid');
 });
 
 test('cash partial leaves remaining balance', () => {
