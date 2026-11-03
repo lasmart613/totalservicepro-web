@@ -208,6 +208,7 @@ export const IT_COPY: Record<string, string> = {
   'Sterile processing': 'Sterilizzazione',
   Ultrasound: 'Ecografo',
   Ventilator: 'Ventilatore',
+  'High Voltage Power Supply': 'Alimentatore ad alta tensione',
   'Emergency Repair': 'Riparazione urgente',
   PM: 'Manutenzione preventiva',
   'Install / Commission': 'Installazione e collaudo',
