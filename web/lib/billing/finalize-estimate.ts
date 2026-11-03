@@ -108,31 +108,17 @@ async function updateServiceEstimate(
   body: Record<string, unknown>,
   matchStatus?: unknown
 ): Promise<{ updated: boolean; error: { message?: string; code?: string } | null }> {
-  let patch = { ...body };
-  for (let attempt = 0; attempt < 6; attempt++) {
-    let query = client.from('service_estimates').update(patch).eq('id', id);
-    if (matchStatus !== undefined) {
-      query =
-        matchStatus == null || matchStatus === ''
-          ? query.is('status', null)
-          : query.eq('status', matchStatus);
-    }
-    const { data, error } = await query.select('id');
-    if (!error) {
-      const row = Array.isArray(data) ? data[0] : data;
-      return { updated: row?.id != null, error: null };
-    }
-    const message = String(error.message || '');
-    const col =
-      message.match(/Could not find the '([^']+)' column/i)?.[1] ||
-      message.match(/column ["']?(\w+)["']? of relation/i)?.[1];
-    if (col && col in patch) {
-      delete patch[col];
-      continue;
-    }
-    return { updated: false, error };
+  let query = client.from('service_estimates').update(body).eq('id', id);
+  if (matchStatus !== undefined) {
+    query =
+      matchStatus == null || matchStatus === ''
+        ? query.is('status', null)
+        : query.eq('status', matchStatus);
   }
-  return { updated: false, error: { message: 'Could not update estimate' } };
+  const { data, error } = await query.select('id');
+  if (error) return { updated: false, error };
+  const row = Array.isArray(data) ? data[0] : data;
+  return { updated: row?.id != null, error: null };
 }
 
 async function readEstimateStatus(client: QueryClient, id: string | number): Promise<unknown> {
@@ -158,11 +144,10 @@ export async function claimEstimateForSend(
   if (isEstimateMarkedSent(row.status)) {
     return { ok: true, send: false, alreadySent: true, status: String(row.status) };
   }
-  const sentAt = new Date().toISOString();
   const result = await updateServiceEstimate(
     client,
     estimateId,
-    { status: ESTIMATE_SENT_STATUS, sent_at: sentAt },
+    { status: ESTIMATE_SENT_STATUS },
     row.status ?? null
   );
   if (result.error) {
@@ -185,7 +170,6 @@ export async function revertEstimateSendClaim(
 ): Promise<void> {
   const result = await updateServiceEstimate(client, estimateId, {
     status: previousStatus || 'draft',
-    sent_at: null,
   });
   if (result.error) {
     console.warn('revertEstimateSendClaim', result.error.message);

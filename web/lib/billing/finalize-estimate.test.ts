@@ -17,14 +17,13 @@ type Row = {
   organization_id: number;
   estimate_number: string;
   status: string | null;
-  sent_at?: string | null;
   total?: number;
 };
 
-function memoryEstimates(initial: Row[], opts?: { missingColumns?: string[] }) {
+function memoryEstimates(initial: Row[]) {
   const rows = initial.map((row) => ({ ...row }));
   const ops: string[] = [];
-  const missing = new Set(opts?.missingColumns || []);
+  const patches: Record<string, unknown>[] = [];
 
   function from(table: string) {
     if (table !== 'service_estimates') throw new Error(`unexpected table ${table}`);
@@ -80,16 +79,8 @@ function memoryEstimates(initial: Row[], opts?: { missingColumns?: string[] }) {
 
     function execute() {
       if (mode === 'update' && patch) {
-        const missingCol = Object.keys(patch).find((key) => missing.has(key));
-        ops.push(missingCol ? `update-missing:${missingCol}` : 'update');
-        if (missingCol) {
-          return {
-            data: null,
-            error: {
-              message: `Could not find the '${missingCol}' column of 'service_estimates' in the schema cache`,
-            },
-          };
-        }
+        ops.push('update');
+        patches.push({ ...patch });
         const found = match();
         if (!found.length) return { data: [], error: null };
         Object.assign(found[0], patch);
@@ -129,7 +120,7 @@ function memoryEstimates(initial: Row[], opts?: { missingColumns?: string[] }) {
     return api;
   }
 
-  return { from, rows, ops };
+  return { from, rows, ops, patches };
 }
 
 test('finalize after a saved draft updates that id and does not insert', async () => {
@@ -362,18 +353,34 @@ test('provider failure restores draft so a later finalize can send once', async 
   assert.equal(db.rows[0].status, 'pending');
 });
 
-test('missing sent_at column still marks the existing row pending', async () => {
-  const db = memoryEstimates(
-    [
-      {
-        id: 24,
-        organization_id: 2639,
-        estimate_number: 'QAL-EST-20261005-01',
-        status: 'draft',
-      },
-    ],
-    { missingColumns: ['sent_at'] }
+test('claim and revert write status only and do not stamp sent_at', async () => {
+  const db = memoryEstimates([
+    {
+      id: 24,
+      organization_id: 2639,
+      estimate_number: 'QAL-EST-20261005-01',
+      status: 'draft',
+    },
+  ]);
+  const failed = await finalizeEstimateDelivery({
+    client: db,
+    estimateId: 24,
+    row: { status: 'draft' },
+    send: async () => ({ ok: false, error: 'Email provider error (502)' }),
+  });
+  assert.equal(failed.ok, false);
+  assert.equal(db.rows[0].status, 'draft');
+  assert.deepEqual(db.patches, [{ status: 'pending' }, { status: 'draft' }]);
+  assert.equal(
+    db.patches.some((patch) => Object.prototype.hasOwnProperty.call(patch, 'sent_at')),
+    false
   );
+  assert.equal(
+    db.ops.some((op) => op.startsWith('update-missing')),
+    false
+  );
+  assert.equal(db.ops.includes('insert'), false);
+
   let statusWhenSent: string | null = null;
   const delivery = await finalizeEstimateDelivery({
     client: db,
@@ -386,9 +393,19 @@ test('missing sent_at column still marks the existing row pending', async () => 
   });
   assert.equal(delivery.ok, true);
   assert.equal(statusWhenSent, 'pending');
-  assert.ok(db.ops.includes('update-missing:sent_at'));
-  assert.ok(db.ops.includes('update'));
-  assert.equal(db.ops.includes('insert'), false);
+  assert.deepEqual(db.patches[db.patches.length - 1], { status: 'pending' });
+  assert.equal(db.rows[0].status, 'pending');
+});
+
+test('estimate send claim does not reference sent_at or strip a missing column', () => {
+  const src = readFileSync(join(here, 'finalize-estimate.ts'), 'utf8');
+  const start = src.indexOf('async function updateServiceEstimate');
+  const end = src.indexOf('export type FinalizeEstimateResult');
+  const section = src.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.doesNotMatch(section, /sent_at/);
+  assert.doesNotMatch(section, /Could not find the/);
+  assert.doesNotMatch(section, /delete patch/);
 });
 
 test('finalize payload does not downgrade a sent row back to draft', () => {
