@@ -107,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_AUTH_NONCE = "pending_auth_nonce";
     private static final String PREFS_AUTH_STATE = "pending_auth_state";
     private static final String PREFS_AUTH_EXPIRY = "pending_auth_expiry";
+    private static final String PREFS_CARD_DRAFTS = "card_drafts";
     private static final int RECORD_AUDIO_PERMISSION_CODE = 2108;
 
     private static final Map<String, String> ASSET_TO_PATH = new HashMap<>();
@@ -170,6 +171,11 @@ public class MainActivity extends AppCompatActivity {
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<Intent> fileChooserLauncher;
     private Uri pendingCameraUri;
+    private ActivityResultLauncher<Intent> cardCameraLauncher;
+    private Uri pendingCardCameraUri;
+    private File pendingCardCameraFile;
+    private CardScanController cardScanController;
+    private String cardScanScript;
     private String pendingLaunchUrl = null;
     private String acceptedAuthNavigation;
     private boolean closedForExternalAuth;
@@ -225,6 +231,75 @@ public class MainActivity extends AppCompatActivity {
                         filePathCallback = null;
                     }
                 });
+
+        cardCameraLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    Uri uri = pendingCardCameraUri;
+                    File photo = pendingCardCameraFile;
+                    pendingCardCameraUri = null;
+                    pendingCardCameraFile = null;
+                    if (cardScanController != null) {
+                        cardScanController.onCameraResult(result.getResultCode() == RESULT_OK, uri, photo);
+                    }
+                });
+        cardScanController = new CardScanController(new CardScanController.Host() {
+            @Override
+            public android.app.Activity activity() {
+                return MainActivity.this;
+            }
+
+            @Override
+            public boolean online() {
+                return isNetworkAvailable();
+            }
+
+            @Override
+            public String sessionJson() {
+                return storedSession;
+            }
+
+            @Override
+            public String readDrafts() {
+                return getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREFS_CARD_DRAFTS, "[]");
+            }
+
+            @Override
+            public void writeDrafts(String json) {
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putString(PREFS_CARD_DRAFTS, json == null ? "[]" : json)
+                        .apply();
+            }
+
+            @Override
+            public void reloadPage() {
+                if (webView != null) webView.reload();
+            }
+
+            @Override
+            public void complete(String requestId, boolean ok, String valueJson, String error) {
+                completeCardScan(requestId, ok, valueJson, error);
+            }
+
+            @Override
+            public boolean launchCamera() {
+                Intent intent = cardCameraIntent();
+                if (intent == null || cardCameraLauncher == null) return false;
+                cardCameraLauncher.launch(intent);
+                return true;
+            }
+
+            @Override
+            public void alert(String title, String message) {
+                if (isFinishing()) return;
+                new androidx.appcompat.app.AlertDialog.Builder(MainActivity.this)
+                        .setTitle(title)
+                        .setMessage(message)
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            }
+        });
 
         if (biometricEnabled && canAuthenticateWithBiometrics() && storedSession != null && !storedSession.isEmpty()) {
             showBiometricPrompt(this::loadApp);
@@ -561,6 +636,17 @@ public class MainActivity extends AppCompatActivity {
                 if (webView != null && webView.canGoBack()) webView.goBack();
             });
         }
+
+        /**
+         * File pages cannot use a WebMessageListener without {@code *}.
+         * The page wrapper calls this, then {@code window.__tspComplete}.
+         * The body is a method name and request id, not a session.
+         */
+        @JavascriptInterface
+        public void __startCardScan(String body) {
+            if (!javascriptInterfaceAllowed()) return;
+            runOnUiThread(() -> beginCardScan(body));
+        }
     }
 
     private boolean canAuthenticateWithBiometrics() {
@@ -633,7 +719,7 @@ public class MainActivity extends AppCompatActivity {
         // Without these, window.open returns null and the page reports a blocked pop-up.
         settings.setSupportMultipleWindows(true);
         settings.setJavaScriptCanOpenWindowsAutomatically(true);
-        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.2-beta");
+        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.3-beta");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -791,6 +877,8 @@ public class MainActivity extends AppCompatActivity {
                 injectOnlineVoice(view, page);
                 injectPrintHook(view);
                 injectOriginLockedShim(view);
+                injectFileCardShim(view);
+                injectCardScanPage(view);
             }
 
             @Override
@@ -1309,6 +1397,9 @@ public class MainActivity extends AppCompatActivity {
                 else if ("onCitationObserved".equals(method)) bridge.onCitationObserved(
                         obj.optString("manualId", ""), obj.optString("page", ""));
                 else if ("goBack".equals(method)) bridge.goBack();
+                else if ("captureCardImage".equals(method) || "openCamera".equals(method)) {
+                    beginCardScan(data);
+                }
                 else if ("printPage".equals(method)) printWebView(source != null ? source : webView, data, source != null && source != webView);
             } catch (Exception e) {
                 Log.w(TAG, "tspNative message rejected", e);
@@ -1336,6 +1427,9 @@ public class MainActivity extends AppCompatActivity {
     private static final String ORIGIN_SHIM_JS =
             "(function(){window.__tspOriginShim=true;"
                     + "function post(o){try{if(window.tspNative&&window.tspNative.postMessage)window.tspNative.postMessage(JSON.stringify(o));}catch(e){}}"
+                    + "window.__tspPending=window.__tspPending||{};"
+                    + "window.__tspComplete=function(msg){if(!msg||!msg.id)return;var pending=window.__tspPending[msg.id];if(!pending)return;delete window.__tspPending[msg.id];if(msg.ok)pending.resolve(msg.value);else pending.reject(new Error(msg.error||'Native request failed'));};"
+                    + "function invoke(method,payload){return new Promise(function(resolve,reject){var id=String(Date.now())+'-'+Math.random().toString(16).slice(2);window.__tspPending[id]={resolve:resolve,reject:reject};var spec=payload&&typeof payload==='object'?payload:{};post({m:method,requestId:id,payload:spec});});}"
                     + "window.Android={"
                     + "showToast:function(m){post({m:'showToast',msg:m});},"
                     + "saveSession:function(j){post({m:'saveSession',json:j});},"
@@ -1356,13 +1450,94 @@ public class MainActivity extends AppCompatActivity {
                     + "startVoiceRecognition:function(){post({m:'startVoiceRecognition'});},"
                     + "stopVoiceRecognition:function(){post({m:'stopVoiceRecognition'});},"
                     + "onCitationObserved:function(id,p){post({m:'onCitationObserved',manualId:id,page:p});},"
-                    + "goBack:function(){post({m:'goBack'});}"
+                    + "goBack:function(){post({m:'goBack'});},"
+                    + "captureCardImage:function(p){return invoke('captureCardImage',p);},"
+                    + "openCamera:function(p){return invoke('openCamera',p);}"
+                    + "};})();";
+
+    /**
+     * File pages keep the JavascriptInterface. This wrapper adds the same
+     * Promise methods the https shim exposes. It does not return a session.
+     */
+    private static final String FILE_CARD_SHIM =
+            "(function(){if(window.__tspFileCardShim)return;var host=window.Android;if(!host||host.__tspWrapped)return;window.__tspFileCardShim=true;"
+                    + "window.__tspPending=window.__tspPending||{};"
+                    + "window.__tspComplete=function(msg){if(!msg||!msg.id)return;var pending=window.__tspPending[msg.id];if(!pending)return;delete window.__tspPending[msg.id];if(msg.ok)pending.resolve(msg.value);else pending.reject(new Error(msg.error||'Native request failed'));};"
+                    + "function invoke(method,payload){return new Promise(function(resolve,reject){var id=String(Date.now())+'-'+Math.random().toString(16).slice(2);window.__tspPending[id]={resolve:resolve,reject:reject};var spec=payload&&typeof payload==='object'?payload:{};try{host.__startCardScan(JSON.stringify({m:method,requestId:id,payload:spec}));}catch(e){delete window.__tspPending[id];reject(e);}});}"
+                    + "window.Android={__tspWrapped:true,"
+                    + "showToast:function(m){return host.showToast(m);},"
+                    + "saveSession:function(j){return host.saveSession(j);},"
+                    + "clearSession:function(){return host.clearSession();},"
+                    + "setBiometricEnabled:function(v){return host.setBiometricEnabled(v);},"
+                    + "isBiometricEnabled:function(){return host.isBiometricEnabled();},"
+                    + "canUseBiometric:function(){return host.canUseBiometric();},"
+                    + "setPremiumStatus:function(p){return host.setPremiumStatus(p);},"
+                    + "launchBillingFlow:function(s){return host.launchBillingFlow(s);},"
+                    + "openUrl:function(u){return host.openUrl(u);},"
+                    + "postOrgApi:function(p,o,b){return host.postOrgApi(p,o,b);},"
+                    + "printReport:function(h,n){return host.printReport(h,n);},"
+                    + "speak:function(t){return host.speak(t);},"
+                    + "speakAnswer:function(t,v,e,a){return host.speakAnswer(t,v,e,a);},"
+                    + "interruptSpeech:function(){return host.interruptSpeech();},"
+                    + "stopSpeaking:function(){return host.stopSpeaking();},"
+                    + "startVoiceRecognition:function(){return host.startVoiceRecognition();},"
+                    + "stopVoiceRecognition:function(){return host.stopVoiceRecognition();},"
+                    + "onCitationObserved:function(id,p){return host.onCitationObserved(id,p);},"
+                    + "goBack:function(){return host.goBack();},"
+                    + "captureCardImage:function(p){return invoke('captureCardImage',p);},"
+                    + "openCamera:function(p){return invoke('openCamera',p);}"
                     + "};})();";
 
     private void injectOriginLockedShim(WebView view) {
         if (view == null) return;
         if (!TrustedOrigins.isFirstPartyAppPage(view.getUrl())) return;
         view.evaluateJavascript(ORIGIN_SHIM_JS, null);
+    }
+
+    private void injectFileCardShim(WebView view) {
+        if (view == null || !TrustedOrigins.isBundledAsset(view.getUrl())) return;
+        view.evaluateJavascript(FILE_CARD_SHIM, null);
+    }
+
+    private void injectCardScanPage(WebView view) {
+        if (view == null || !TrustedOrigins.isSessionPage(view.getUrl())) return;
+        if (cardScanScript == null) cardScanScript = assetText("CardScanPageScript.js");
+        if (cardScanScript.isEmpty()) return;
+        view.evaluateJavascript(
+                "(function(){if(window.__tspCardScanInstalled)return;window.__tspCardScanInstalled=1;\n"
+                        + cardScanScript + "\n})();",
+                null);
+    }
+
+    private void beginCardScan(String body) {
+        if (cardScanController == null || body == null || body.isEmpty()) return;
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject(body);
+            String method = obj.optString("m", "");
+            if (!"captureCardImage".equals(method) && !"openCamera".equals(method)) return;
+            String page = webView != null ? webView.getUrl() : mainFrameUrl;
+            cardScanController.start(obj.optString("requestId", ""), obj.optJSONObject("payload"), page);
+        } catch (Exception e) {
+            Log.w(TAG, "card scan start rejected", e);
+        }
+    }
+
+    private void completeCardScan(String requestId, boolean ok, String valueJson, String error) {
+        if (webView == null || requestId == null || requestId.isEmpty()) return;
+        try {
+            org.json.JSONObject msg = new org.json.JSONObject();
+            msg.put("id", requestId);
+            msg.put("ok", ok);
+            if (ok) {
+                if (valueJson != null && !valueJson.isEmpty()) msg.put("value", new org.json.JSONObject(valueJson));
+            } else {
+                msg.put("error", error == null || error.isEmpty() ? "Card scan failed" : error);
+            }
+            String json = msg.toString().replace("\u2028", "\\u2028").replace("\u2029", "\\u2029");
+            webView.evaluateJavascript("window.__tspComplete&&window.__tspComplete(" + json + ");", null);
+        } catch (Exception e) {
+            Log.w(TAG, "card scan reply failed", e);
+        }
     }
 
     private boolean acceptsImages(WebChromeClient.FileChooserParams params) {
@@ -1392,6 +1567,31 @@ public class MainActivity extends AppCompatActivity {
             return capture;
         } catch (RuntimeException e) {
             pendingCameraUri = null;
+            return null;
+        }
+    }
+
+    /** Separate from the file-chooser capture so the two extras do not share a URI. */
+    private Intent cardCameraIntent() {
+        try {
+            File dir = new File(getCacheDir(), "camera");
+            if (!dir.exists() && !dir.mkdirs()) return null;
+            File photo = new File(dir, "card-" + System.currentTimeMillis() + ".jpg");
+            Uri output = FileProvider.getUriForFile(this, getPackageName() + ".fileprovider", photo);
+            Intent capture = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+            if (capture.resolveActivity(getPackageManager()) == null) {
+                if (!photo.delete()) photo.deleteOnExit();
+                return null;
+            }
+            capture.putExtra(MediaStore.EXTRA_OUTPUT, output);
+            capture.setClipData(android.content.ClipData.newRawUri("card", output));
+            capture.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            pendingCardCameraUri = output;
+            pendingCardCameraFile = photo;
+            return capture;
+        } catch (RuntimeException e) {
+            pendingCardCameraUri = null;
+            pendingCardCameraFile = null;
             return null;
         }
     }
