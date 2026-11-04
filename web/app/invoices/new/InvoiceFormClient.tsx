@@ -44,6 +44,7 @@ import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display'
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
 import type { SendDocResult } from '@/lib/billing/send-doc-email';
+import { fillIfEmpty, loadBillingPrefill, netDueDate } from '@/lib/billing/doc-prefill';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -56,6 +57,8 @@ export default function InvoiceFormClient() {
   const searchParams = useSearchParams();
   const editIdParam = searchParams.get('id');
   const fromEstimateParam = searchParams.get('fromEstimate');
+  const fromTicketParam = searchParams.get('ticketId') || searchParams.get('ticket_id');
+  const fromReportParam = searchParams.get('reportId') || searchParams.get('report_id');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -108,6 +111,12 @@ export default function InvoiceFormClient() {
   const orgTodayRef = useRef(orgTodayIso());
   const [invoiceDate, setInvoiceDate] = useState(() => orgTodayRef.current);
   const [dueDate, setDueDate] = useState('');
+  // Net 30: follow the invoice date until the user (or a saved invoice) sets the due date.
+  const dueDateTouched = useRef(false);
+  useEffect(() => {
+    if (editIdParam || dueDateTouched.current) return;
+    setDueDate(netDueDate(invoiceDate));
+  }, [invoiceDate, editIdParam]);
   const [description, setDescription] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem('LI')]);
   const [tax, setTax] = useState(0);
@@ -417,6 +426,59 @@ export default function InvoiceFormClient() {
     [supabase, router, t, money]
   );
 
+  const prefillFromServiceDocs = useCallback(
+    async (orgId: string | number | null) => {
+      const p = await loadBillingPrefill(supabase as any, {
+        ticketId: fromTicketParam,
+        reportId: fromReportParam,
+        organizationId: orgId,
+      });
+      if (!p) {
+        toast.error(t('Could not load that ticket or report'));
+        return;
+      }
+      // Only fill blanks: never overwrite something already typed.
+      setCustomerName((v) => fillIfEmpty(v, p.customerName));
+      setCustSearch((v) => fillIfEmpty(v, p.customerName));
+      setCustomerOrgId((v) => (v != null && v !== '' ? v : p.customerOrganizationId));
+      setCustAddress((v) => fillIfEmpty(v, p.customerAddress));
+      setCustCity((v) => fillIfEmpty(v, p.customerCity));
+      setCustState((v) => fillIfEmpty(v, p.customerState));
+      setCustPhone((v) => fillIfEmpty(v, p.customerPhone));
+      setCustEmail((v) => fillIfEmpty(v, p.customerEmail));
+      setCustContact((v) => fillIfEmpty(v, p.customerContactName));
+      if (p.equipmentMake || p.equipmentModel) {
+        cascade.hydrate({
+          equipmentType: p.equipmentType || undefined,
+          manufacturer: p.equipmentMake,
+          model: p.equipmentModel,
+        });
+      }
+      setSerial((v) => fillIfEmpty(v, p.serialNumber));
+      setPulseCount((v) => fillIfEmpty(v, p.pulseCount));
+      const ref = [
+        p.reportNumber ? `${t('Service Report')} ${p.reportNumber}` : '',
+        p.ticketNumber ? `${t('Ticket')} ${p.ticketNumber}` : '',
+      ]
+        .filter(Boolean)
+        .join(' · ');
+      const desc = [p.description, ref].filter(Boolean).join('\n\n');
+      setDescription((v) => fillIfEmpty(v, desc));
+      if (p.laborLines.length) {
+        setLineItems((rows) => {
+          const blank = rows.every((r) => !String(r.description || '').trim() && !Number(r.unit_price));
+          if (!blank) return rows;
+          return p.laborLines.map((li, i) =>
+            recomputeExt({ ...emptyLineItem('LI'), id: `LI${i + 1}`, ...li, ext: 0 })
+          );
+        });
+      }
+      toast.message(t('Prefilled from the service ticket / report. Review and save.'));
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [supabase, fromTicketParam, fromReportParam, t]
+  );
+
   useEffect(() => {
     (async () => {
       setLoading(true);
@@ -484,6 +546,8 @@ export default function InvoiceFormClient() {
           await loadInvoice(editIdParam);
         } else if (fromEstimateParam) {
           await prefillFromEstimate(fromEstimateParam);
+        } else if (fromTicketParam || fromReportParam) {
+          await prefillFromServiceDocs(orgId);
         }
         // Allocate invoice numbers at save, not on form open.
       } catch (e) {
@@ -493,7 +557,7 @@ export default function InvoiceFormClient() {
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, router, editIdParam, fromEstimateParam]);
+  }, [supabase, router, editIdParam, fromEstimateParam, fromTicketParam, fromReportParam]);
 
   function updateLine(id: string, patch: Partial<LineItem>) {
     setTotalOverride(null);
@@ -1127,7 +1191,10 @@ export default function InvoiceFormClient() {
                 className="input mt-1"
                 type="date"
                 value={dueDate}
-                onChange={(e) => setDueDate(e.target.value)}
+                onChange={(e) => {
+                  dueDateTouched.current = true;
+                  setDueDate(e.target.value);
+                }}
               />
             </div>
           </div>
