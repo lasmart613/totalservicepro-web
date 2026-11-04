@@ -162,7 +162,7 @@ test('hydrate keeps pulse mode and units; print shows them', () => {
 });
 
 test('new strings are translated for all locales', () => {
-  for (const key of ['Power', 'Irradiance', 'Energy', 'Pulse mode', 'Set value', 'Measured unit', 'Set unit', 'Other pulse mode', 'Measurement type', 'None', 'Wavelength', 'Wavelength / channel', 'Spot size', 'Spot size is not used for Energy or Power']) {
+  for (const key of ['Power', 'Irradiance', 'Energy', 'Pulse mode', 'Set value', 'Measured unit', 'Set unit', 'Other pulse mode', 'Measurement type', 'None', 'Wavelength', 'Wavelength / channel', 'Spot size', 'Spot size is not used for Energy or Power', 'Measured energy', 'Computed fluence', 'Tolerance', 'Error', '— Wavelength —', '— Spot size —']) {
     const row = GAP_STRINGS[key];
     assert.ok(row, key);
     for (const loc of ['fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar'] as const) assert.ok(row[loc], `${key}/${loc}`);

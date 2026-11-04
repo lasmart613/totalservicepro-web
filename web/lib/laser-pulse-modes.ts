@@ -126,3 +126,24 @@ export function pulseModeDisplay(row: any, tr: (text: string) => string = (t) =>
   }
   return PULSE_MODE_LABELS[mode.toLowerCase()] ?? mode;
 }
+
+/**
+ * Wavelength text only. Model tables name some channels '1064 nm @ 3mm spot'; the spot
+ * belongs in its own field, so strip a trailing '@ <n>mm [spot]' part. Old saved values
+ * that carry it still display, just without the spot text.
+ */
+export function wavelengthLabel(value: unknown): string {
+  return String(value ?? '')
+    .replace(/\s*@\s*[\d.,]+\s*(mm|cm)\b(\s*spot)?\s*$/i, '')
+    .trim();
+}
+
+/** Wavelength options with spot text stripped and duplicates removed (first wins). */
+export function wavelengthOptionNames(names: (string | null | undefined)[]): string[] {
+  const out: string[] = [];
+  for (const n of names) {
+    const label = wavelengthLabel(n);
+    if (label && !out.includes(label)) out.push(label);
+  }
+  return out;
+}
