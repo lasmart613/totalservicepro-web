@@ -216,7 +216,8 @@ function ServiceRequestsInner() {
   function openPost() {
     const pro = proView && !ownerView;
     // Clinic view: pick from the clinic's own equipment (or Add new equipment).
-    setLaserPick(pro ? OTHER_LASER : lasers[0] ? String(lasers[0].id) : '');
+    // Show the placeholder unless a laser_id was passed in the URL.
+    setLaserPick(pro ? OTHER_LASER : preLaserId && lasers.some((l) => String(l.id) === String(preLaserId)) ? String(preLaserId) : '');
     setMfr('');
     setMfrOther('');
     setModel('');

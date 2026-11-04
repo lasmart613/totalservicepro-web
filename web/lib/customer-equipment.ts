@@ -147,7 +147,8 @@ export async function addEquipmentToCustomerOrg(
     customer_organization_id: customerOrgId,
     manufacturer,
     model,
-    serial_number: serial || null,
+    // equipment.serial_number is NOT NULL: a blank serial is stored as ''.
+    serial_number: serial || '',
   };
   if (type) row.equipment_type = type;
   const room = clean(draft.room);
@@ -166,6 +167,9 @@ export async function addEquipmentToCustomerOrg(
       const msg = String(ins.error.message || '');
       if (ins.error.code === '23505' || /unique|duplicate/i.test(msg)) {
         return { status: 'failed', reason: 'duplicate_serial' };
+      }
+      if (ins.error.code === '23502' || /null value/i.test(msg)) {
+        return { status: 'failed', reason: 'missing_field' };
       }
       if (ins.error.code === '42501' || /row-level security|permission/i.test(msg)) {
         return { status: 'failed', reason: 'not_allowed' };
@@ -194,6 +198,10 @@ export function addEquipmentMessage(result: AddEquipmentResult, orgName: string)
       if (result.reason === 'duplicate_serial') return `Not added to ${org}: that serial # is already on file.`;
       if (result.reason === 'not_allowed')
         return `Not added to ${org}: your company is not linked to this customer.`;
+      if (result.reason === 'missing_field')
+        return `Not added to ${org}: a required field is missing. Check make, model and serial #.`;
+      if (result.reason && result.reason !== 'insert_failed')
+        return `Could not add the equipment to ${org}: ${result.reason}`;
       return `Could not add the equipment to ${org}.`;
   }
 }

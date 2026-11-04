@@ -151,7 +151,7 @@ test('new equipment needs make and model; serial optional when requireSerial is 
   assert.deepEqual(res, { status: 'created', id: 41 });
   const ins = calls.find((c: any) => c.op === 'insert');
   assert.equal(ins.rows[0].customer_organization_id, 2655);
-  assert.equal(ins.rows[0].serial_number, null);
+  assert.equal(ins.rows[0].serial_number, '');
   assert.equal(ins.rows[0].room, 'Room 2');
   const strict = await addEquipmentToCustomerOrg(client as any, 2655, { equipment_type: null, manufacturer: 'A', model: 'B', serial: '' });
   assert.equal(strict.status, 'skipped');

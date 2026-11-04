@@ -199,7 +199,7 @@ export default function ClinicEquipmentSelect({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <input className="input" data-testid="new-eq-make" placeholder={t('Make *')} value={make} onChange={(e) => setMake(e.target.value)} autoComplete="off" />
             <input className="input" data-testid="new-eq-model" placeholder={t('Model *')} value={model} onChange={(e) => setModel(e.target.value)} autoComplete="off" />
-            <input className="input" data-testid="new-eq-serial" placeholder={t('Serial #')} value={serial} onChange={(e) => setSerial(e.target.value)} autoComplete="off" />
+            <input className="input" data-testid="new-eq-serial" placeholder={t('Serial # (recommended)')} title={t('Serial # is optional, but recommended so the unit can be matched later.')} value={serial} onChange={(e) => setSerial(e.target.value)} autoComplete="off" />
             <input className="input" data-testid="new-eq-room" placeholder={t('Nickname / location (optional)')} value={room} onChange={(e) => setRoom(e.target.value)} autoComplete="off" />
           </div>
           {error && <div className="text-xs text-red-400">{error}</div>}
