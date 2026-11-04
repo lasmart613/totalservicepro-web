@@ -177,7 +177,8 @@ test('service report form shows the location dropdown and resets on customer cha
   const form = readFileSync(join(here, '../app/reports/new/NewServiceReportClient.tsx'), 'utf8');
   assert.match(form, /data-testid="report-location"/);
   assert.match(form, /locationUi\.disabled/);
-  assert.match(form, /data-testid="report-equipment"/);
+  assert.match(form, /idPrefix="report-equipment"/);
+  assert.match(form, /<ClinicEquipmentSelect/);
   assert.match(form, /data-testid="report-site"/);
   assert.match(form, /UNASSIGNED_EQUIPMENT_LABEL/);
   assert.match(form, /groupEquipmentForSite/);

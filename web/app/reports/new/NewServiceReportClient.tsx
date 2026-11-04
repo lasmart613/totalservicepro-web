@@ -44,6 +44,9 @@ import { orgTodayIso, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { commentsWithArrival, formatArrival } from '@/lib/ticket-checkin';
 import { commentsWithPending } from '@/lib/sr-carry-forward';
 import { useT } from '@/lib/fa/locale';
+import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
+import type { CustomerEquipment } from '@/lib/customer-equipment';
+
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
@@ -66,7 +69,6 @@ import {
 } from '@/lib/customer-locations';
 import {
   UNASSIGNED_EQUIPMENT_LABEL,
-  equipmentOptionLabel,
   groupEquipmentForSite,
   loadCustomerEquipment,
   matchLocationId,
@@ -167,6 +169,16 @@ function normalizeChecklistMap(data: any): Record<string, string> {
 }
 
 const CL_BUTTONS = ['PASS', 'FAIL', 'N/A'] as const;
+
+function toClinicEquipment(row: ReportEquipmentRow): CustomerEquipment {
+  return {
+    id: row.id,
+    equipment_type: null,
+    manufacturer: String(row.manufacturer || '').trim(),
+    model: String(row.model || '').trim(),
+    serial_number: String(row.serial_number || '').trim(),
+  };
+}
 
 export default function NewServiceReport() {
   /* Full functional Service Report matching Android service_report.html (source of truth - do not change Android SR).
@@ -1205,10 +1217,10 @@ export default function NewServiceReport() {
     }
   }
 
-  function handleEquipmentChange(id: string) {
+  function handleEquipmentChange(id: string, picked?: ReportEquipmentRow) {
     setSelectedEquipmentId(id);
     if (!id) return;
-    const row = customerEquipment.find((item) => String(item.id) === id);
+    const row = picked || customerEquipment.find((item) => String(item.id) === id);
     if (!row) return;
     setTicketEquipmentId(row.id);
     const make = String(row.manufacturer || '').trim();
@@ -2075,38 +2087,39 @@ export default function NewServiceReport() {
         {/* Manufacturer + Model dropdowns (sole equipment name source for draft/save) */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Name / Model</h3>
-          {selectedCustomer?.id && (
-            <div className="mb-3">
-              <label className="label" htmlFor="report-equipment">Equipment at this site</label>
-              <select
-                id="report-equipment"
-                data-testid="report-equipment"
-                className="input w-full"
-                value={selectedEquipmentId}
-                onChange={(e) => handleEquipmentChange(e.target.value)}
-              >
-                <option value="">Select equipment or enter it below</option>
-                {equipmentGroups.atSite.length > 0 && (
-                  <optgroup label={equipmentGroups.siteLabel}>
-                    {equipmentGroups.atSite.map((row) => (
-                      <option key={String(row.id)} value={String(row.id)}>
-                        {equipmentOptionLabel(row)}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {equipmentGroups.unassigned.length > 0 && (
-                  <optgroup label={UNASSIGNED_EQUIPMENT_LABEL}>
-                    {equipmentGroups.unassigned.map((row) => (
-                      <option key={String(row.id)} value={String(row.id)}>
-                        {equipmentOptionLabel(row)}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-            </div>
-          )}
+          <ClinicEquipmentSelect
+            className="mb-3"
+            client={supabase}
+            clinicOrgId={selectedCustomer?.id ?? null}
+            clinicName={selectedCustomer?.name || ''}
+            label={tSr('Equipment at this site')}
+            value={selectedEquipmentId}
+            equipment={customerEquipment.map(toClinicEquipment)}
+            groups={[
+              { label: equipmentGroups.siteLabel, rows: equipmentGroups.atSite.map(toClinicEquipment) },
+              { label: UNASSIGNED_EQUIPMENT_LABEL, rows: equipmentGroups.unassigned.map(toClinicEquipment) },
+            ]}
+            reload={async () => {
+              const id = selectedCustomer?.id;
+              if (id == null || id === '') return;
+              setCustomerEquipment(await loadCustomerEquipment(supabase, id));
+            }}
+            onSelect={(row) => {
+              if (!row) {
+                handleEquipmentChange('');
+                return;
+              }
+              handleEquipmentChange(String(row.id), {
+                id: row.id,
+                manufacturer: row.manufacturer,
+                model: row.model,
+                serial_number: row.serial_number,
+                location_id: null,
+              });
+            }}
+            t={tSr}
+            idPrefix="report-equipment"
+          />
           <div className="mb-3">
             <label className="text-xs text-[var(--text3)]">Equipment type</label>
             <select

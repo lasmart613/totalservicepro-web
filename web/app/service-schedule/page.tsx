@@ -57,6 +57,7 @@ import {
 import { catalogChoiceLabel, mergedManufacturerOption, mergedModelOption } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices, listModelChoices, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
 import { DEFAULT_EQUIPMENT_TYPE, EQUIPMENT_TYPES, equipmentTypeOrDefault, type EquipmentType } from '@/lib/equipment-types';
 import {
   OTHER_MANUFACTURER,
@@ -166,6 +167,7 @@ export default function ServiceSchedule() {
   const [customers, setCustomers] = useState<LinkedCustomerOpt[]>([]);
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
+  const [ticketEquipmentId, setTicketEquipmentId] = useState('');
   const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
   const [selectedLocationId, setSelectedLocationId] = useState('');
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -605,6 +607,7 @@ export default function ServiceSchedule() {
     setForm(EMPTY_FORM(presetDate || orgTodayIso(orgZone)));
     setFormError(null);
     setCustomerOrgId(null);
+    setTicketEquipmentId('');
     setCustomerLocations([]);
     setSelectedLocationId('');
     setShowCustDrop(false);
@@ -700,6 +703,9 @@ export default function ServiceSchedule() {
         equipment_make: equipment.equipment_make,
         equipment_model: equipment.equipment_model,
         serial_number: form.serial_number.trim() || null,
+        ...(ticketEquipmentId && linkedCustomerId != null && String(linkedCustomerId) === String(customerOrgId)
+          ? { equipment_id: Number(ticketEquipmentId) }
+          : {}),
         service_date: form.service_date || null,
         scheduled_time: form.scheduled_time || null,
         end_time: form.end_time || null,
@@ -1499,6 +1505,37 @@ export default function ServiceSchedule() {
                   </select>
                 </div>
               </div>
+              <ClinicEquipmentSelect
+                client={supabase}
+                clinicOrgId={customerOrgId}
+                clinicName={form.customer_name}
+                value={ticketEquipmentId}
+                onSelect={(row) => {
+                  if (!row) {
+                    if (ticketEquipmentId) {
+                      setForm((prev) => ({
+                        ...prev,
+                        ...selectionAfterManufacturerChange('', ''),
+                        serial_number: '',
+                      }));
+                    }
+                    setTicketEquipmentId('');
+                    return;
+                  }
+                  setTicketEquipmentId(String(row.id));
+                  setForm((prev) => ({
+                    ...prev,
+                    ...(row.equipment_type ? { equipment_type: equipmentTypeOrDefault(row.equipment_type) } : {}),
+                    equipment_make: row.manufacturer,
+                    equipment_make_other: '',
+                    equipment_model: row.model,
+                    equipment_model_other: '',
+                    serial_number: row.serial_number,
+                  }));
+                }}
+                t={t}
+                idPrefix="ticket-eq"
+              />
               <div>
                 <label className="label">{t('Equipment type')}</label>
                 <select

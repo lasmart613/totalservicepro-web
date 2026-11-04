@@ -14,6 +14,8 @@ import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 import { rememberManufacturerName } from '@/lib/remember-manufacturer';
+import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
+import { useT } from '@/lib/fa/locale';
 
 type Laser = {
   id: number;
@@ -43,6 +45,7 @@ type ReqRow = {
 function ServiceRequestsInner() {
   const supabase = getSupabaseClient();
   const searchParams = useSearchParams();
+  const t = useT();
   const preLaserId = searchParams.get('laser_id');
   const openedFromQuery = useRef(false);
 
@@ -199,8 +202,8 @@ function ServiceRequestsInner() {
     setLoading(false);
   }
 
-  function fillFromLaser(id: string) {
-    const L = lasers.find((x) => String(x.id) === String(id));
+  function fillFromLaser(id: string, row?: Laser) {
+    const L = row || lasers.find((x) => String(x.id) === String(id));
     if (!L) return;
     setDesc(
       `Service needed on ${L.manufacturer || ''} ${displayModelName(L.model || '')}` +
@@ -212,7 +215,8 @@ function ServiceRequestsInner() {
 
   function openPost() {
     const pro = proView && !ownerView;
-    setLaserPick(lasers[0] && !pro ? String(lasers[0].id) : OTHER_LASER);
+    // Clinic view: pick from the clinic's own equipment (or Add new equipment).
+    setLaserPick(pro ? OTHER_LASER : lasers[0] ? String(lasers[0].id) : '');
     setMfr('');
     setMfrOther('');
     setModel('');
@@ -254,6 +258,10 @@ function ServiceRequestsInner() {
     let room = '';
     const isSub = proView && !ownerView;
 
+    if (!isSub && (!laserPick || laserPick === OTHER_LASER)) {
+      toast.error('Select equipment, or choose + Add new equipment');
+      return;
+    }
     if (laserPick === OTHER_LASER || !laserPick) {
       // Other brand → free-text manufacturer (never store literal "Other")
       manufacturer = mfr === 'Other' ? mfrOther.trim() : mfr.trim();
@@ -480,6 +488,7 @@ function ServiceRequestsInner() {
             </p>
 
             <div className="space-y-3">
+              {proView && !ownerView ? (
               <div>
                 <label className="label">Model / System *</label>
                 <select
@@ -501,6 +510,47 @@ function ServiceRequestsInner() {
                   <option value={OTHER_LASER}>Different laser / not in list…</option>
                 </select>
               </div>
+              ) : (
+                <ClinicEquipmentSelect
+                  client={supabase}
+                  clinicOrgId={orgId}
+                  label={`${t('Equipment')} *`}
+                  value={laserPick === OTHER_LASER ? '' : laserPick}
+                  equipment={lasers.map((L) => ({
+                    id: L.id,
+                    equipment_type: null,
+                    manufacturer: L.manufacturer || '',
+                    model: L.model || '',
+                    serial_number: L.serial_number || '',
+                  }))}
+                  reload={() => {}}
+                  onAdded={(row) => {
+                    const added: Laser = {
+                      id: Number(row.id),
+                      manufacturer: row.manufacturer,
+                      model: row.model,
+                      serial_number: row.serial_number,
+                    };
+                    setLasers((prev) => (prev.some((x) => String(x.id) === String(row.id)) ? prev : [...prev, added]));
+                  }}
+                  onSelect={(row) => {
+                    if (!row) {
+                      setLaserPick('');
+                      return;
+                    }
+                    setLaserPick(String(row.id));
+                    const L = lasers.find((x) => String(x.id) === String(row.id)) || {
+                      id: Number(row.id),
+                      manufacturer: row.manufacturer,
+                      model: row.model,
+                      serial_number: row.serial_number,
+                    };
+                    fillFromLaser(String(row.id), L);
+                  }}
+                  t={t}
+                  idPrefix="sr-eq"
+                />
+              )}
 
               {laserPick === OTHER_LASER && (
                 <>

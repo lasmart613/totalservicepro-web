@@ -83,6 +83,26 @@ export function useCustomerEquipment(opts: {
     [list, cascade, setSerial]
   );
 
+  /** Apply a unit picked (or just added) in ClinicEquipmentSelect; null clears the pick. */
+  const selectRow = useCallback(
+    (row: CustomerEquipment | null) => {
+      setChoseNew(false);
+      setAddToOrg(false);
+      if (!row) {
+        cascade.reset(cascade.state.equipmentType);
+        setSerial('');
+        return;
+      }
+      cascade.hydrate({
+        equipmentType: row.equipment_type,
+        manufacturer: row.manufacturer,
+        model: row.model,
+      });
+      setSerial(row.serial_number);
+    },
+    [cascade, setSerial]
+  );
+
   /** Call after the estimate/invoice saved. Returns a toast message or null. */
   const saveToOrgIfChecked = useCallback(
     async (orgName: string): Promise<{ ok: boolean; message: string | null; equipmentId?: number | string }> => {
@@ -106,6 +126,8 @@ export function useCustomerEquipment(opts: {
     loading,
     selectedId,
     pick,
+    selectRow,
+    reload,
     offerAdd,
     addToOrg,
     setAddToOrg,

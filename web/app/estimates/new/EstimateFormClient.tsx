@@ -41,8 +41,10 @@ import {
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { useEquipmentCascade } from '@/lib/use-equipment-cascade';
 import EquipmentCascadeFields from '@/components/EquipmentCascadeFields';
-import CustomerEquipmentPicker, { AddToOrgCheckbox } from '@/components/CustomerEquipmentPicker';
+import { AddToOrgCheckbox } from '@/components/CustomerEquipmentPicker';
 import { useCustomerEquipment } from '@/lib/use-customer-equipment';
+import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
+import { NEW_EQUIPMENT_VALUE } from '@/lib/customer-equipment';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import { documentDirection } from '@/lib/i18n/translate-app';
 import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
@@ -1021,17 +1023,18 @@ export default function EstimateFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {customerEquipment.visible && (
-              <CustomerEquipmentPicker
-                orgName={customerName.trim() || custSearch.trim()}
-                equipment={customerEquipment.list}
-                loading={customerEquipment.loading}
-                selectedId={customerEquipment.selectedId}
-                onPick={customerEquipment.pick}
-                t={t}
-                idPrefix="est-eq-cust"
-              />
-            )}
+            <ClinicEquipmentSelect
+              className="sm:col-span-2"
+              client={supabase}
+              clinicOrgId={customerOrgId}
+              clinicName={customerName.trim() || custSearch.trim()}
+              value={customerEquipment.selectedId === NEW_EQUIPMENT_VALUE ? '' : customerEquipment.selectedId}
+              equipment={customerEquipment.list}
+              reload={customerEquipment.reload}
+              onSelect={customerEquipment.selectRow}
+              t={t}
+              idPrefix="est-eq-cust"
+            />
             <EquipmentCascadeFields cascade={cascade} t={t} idPrefix="est-eq" />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
