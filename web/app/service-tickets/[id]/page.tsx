@@ -488,7 +488,16 @@ export default function ServiceTicketDetail() {
               ticketId={ticket.id}
               existingReports={existingReports}
             />
-            {canCreateReport && !isEditing && (
+            {canCreateReport && !isEditing && !ticket.customer_organization_id && (
+              <span
+                data-testid="ticket-create-docs-need-clinic"
+                title={t('Estimates and invoices need a clinic. Edit the ticket to add one.')}
+                className="text-xs text-[var(--text3)] self-center"
+              >
+                {t('Add a clinic to create an estimate or invoice.')}
+              </span>
+            )}
+            {canCreateReport && !isEditing && !!ticket.customer_organization_id && (
               <>
                 <Link
                   href={estimateFromTicketHref(ticket.id)}

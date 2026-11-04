@@ -384,31 +384,26 @@ export default function NewServiceReport() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
     setTechSig('');
+    setSigFromProfile(false);
+    sigClearedRef.current = true;
   }
 
-  // New report: start from the tech's saved profile signature (user_profiles.signature_data).
+  // New report: prefill the tech's saved profile signature (user_profiles.signature_data)
+  // visibly in the signature box so they can keep it or Clear and sign fresh.
   const profileSigApplied = useRef(false);
+  const [sigFromProfile, setSigFromProfile] = useState(false);
+  const sigClearedRef = useRef(false);
   useEffect(() => {
-    if (profileSigApplied.current || !sigPadReady || editReportId) return;
+    if (profileSigApplied.current || editReportId) return;
     const saved = String(currentProfile?.signature_data || '');
-    if (!saved.startsWith('data:image')) return;
+    if (!/^(data:image|https?:)/.test(saved)) return;
     profileSigApplied.current = true;
     setTechSig((prev) => {
       if (prev) return prev;
-      const canvas = sigCanvasRef.current;
-      const ctx = canvas?.getContext('2d');
-      if (canvas && ctx && typeof Image !== 'undefined') {
-        const img = new Image();
-        img.onload = () => {
-          try {
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          } catch {}
-        };
-        img.src = saved;
-      }
+      setSigFromProfile(true);
       return saved;
     });
-  }, [sigPadReady, editReportId, currentProfile]);
+  }, [editReportId, currentProfile]);
 
   // init canvas on mount
   useEffect(() => {
@@ -1524,7 +1519,7 @@ export default function NewServiceReport() {
       // Force latest canvas capture for sig (Android parity)
       const canvas = sigCanvasRef.current;
       let latestSig = techSig;
-      if (canvas && !latestSig) {
+      if (canvas && !latestSig && !sigFromProfile) {
         try {
           latestSig = canvas.toDataURL('image/png');
           setTechSig(latestSig);
@@ -1624,7 +1619,7 @@ export default function NewServiceReport() {
         tech_company_phone: techCompanyCache.company_phone,
         tech_company_logo_url: techCompanyCache.company_logo_url,
         // Android parity: service_reports.tech_signature + signed_date (NOT signature_data / signed_at)
-        tech_signature: latestSig || currentProfile?.signature_data || null,
+        tech_signature: latestSig || (sigClearedRef.current ? null : currentProfile?.signature_data) || null,
         signed_date:
           (techSigDate && String(techSigDate).slice(0, 10)) ||
           (status === 'complete'
@@ -2461,10 +2456,19 @@ export default function NewServiceReport() {
           <h3 className="font-semibold mb-2">✍️ Signatures</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Technician Signature (draw below)</label>
-              <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4, touchAction: 'none' }}>
+              <label className="label">{tSr('Technician Signature')}</label>
+              {sigFromProfile && techSig && (
+                <div data-testid="sr-profile-signature" style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={techSig} alt={tSr('Saved profile signature')} style={{ width: '100%', maxWidth: 320, height: 90, objectFit: 'contain', display: 'block' }} />
+                </div>
+              )}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4, touchAction: 'none', display: sigFromProfile && techSig ? 'none' : undefined }}>
                 <canvas
-                  ref={sigCanvasRef}
+                  ref={(el) => {
+                    sigCanvasRef.current = el;
+                    if (el && !sigPadReady) initSigCanvas();
+                  }}
                   onMouseDown={startDraw}
                   onMouseMove={draw}
                   onMouseUp={endDraw}
@@ -2481,13 +2485,13 @@ export default function NewServiceReport() {
                   const c = sigCanvasRef.current;
                   if (c) { try { setTechSig(c.toDataURL('image/png')); } catch {} }
                 }} className="text-xs px-2 py-0.5 border rounded">Capture</button>
-                <span className="text-[10px] text-[var(--text3)] self-center">Draw with mouse or finger</span>
+                <span className="text-[10px] text-[var(--text3)] self-center">{sigFromProfile && techSig ? tSr('Your saved profile signature. Keep it, or Clear to sign again.') : tSr('Draw with mouse or finger')}</span>
               </div>
             </div>
             <div>
               <label className="label">Date Signed</label>
               <input type="datetime-local" className="input" value={techSigDate} onChange={e=>setTechSigDate(e.target.value)} />
-              <div className="text-[10px] text-[var(--text3)] mt-2">If blank on complete, profile signature will be used (Android parity). Saved as tech_signature on the report.</div>
+              <div className="text-[10px] text-[var(--text3)] mt-2">{tSr('Your saved profile signature is filled in automatically on new reports. Clear it to sign by hand.')}</div>
             </div>
           </div>
         </div>

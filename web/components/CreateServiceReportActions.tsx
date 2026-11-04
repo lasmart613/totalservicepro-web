@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useT } from '@/lib/fa/locale';
 import {
   newServiceReportHref,
   type ExistingTicketReport,
@@ -20,6 +21,7 @@ export function CreateServiceReportActions({
   existingReports = [],
   placement = 'header',
 }: Props) {
+  const t = useT();
   const href = newServiceReportHref(ticketId);
   const reports = existingReports.filter((report) => report.id);
 
@@ -32,7 +34,7 @@ export function CreateServiceReportActions({
           data-testid="create-service-report"
           className="btn btn-primary flex w-full items-center justify-center gap-2"
         >
-          Create Service Report
+          {t('Create Service Report')}
         </Link>
       </div>
     );
@@ -49,7 +51,7 @@ export function CreateServiceReportActions({
             data-testid="create-service-report"
             className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto"
           >
-            Create Service Report
+            {t('Create Service Report')}
           </Link>
         </div>
       )}
@@ -57,7 +59,7 @@ export function CreateServiceReportActions({
         <div className="flex flex-col gap-1 text-xs text-[var(--text3)] sm:text-right">
           {reports.map((report) => (
             <Link key={report.id} href={`/reports/${report.id}`} className="underline">
-              Open {report.reportNumber || 'existing report'}
+              {t('Open')} {report.reportNumber || t('existing report')}
               {report.status ? ` (${report.status})` : ''}
             </Link>
           ))}
