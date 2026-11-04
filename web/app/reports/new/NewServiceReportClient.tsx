@@ -13,6 +13,11 @@ import {
   CL_MECHANICAL,
   MODELS,
   mergeModelParamValues,
+  visibleReportParams,
+  addableReportParams,
+  removeReportParam,
+  restoreReportParam,
+  addCustomReportParam,
   paramStorageKey,
   resolveModelDef,
   type ModelParam,
@@ -284,6 +289,8 @@ export default function NewServiceReport() {
   // Performance / params
   const [powerMeasurements, setPowerMeasurements] = useState<any[]>([]);
   const [modelParams, setModelParams] = useState<Record<string, any>>({});
+  const [customParamName, setCustomParamName] = useState('');
+  const [customParamValue, setCustomParamValue] = useState('');
   const [groundResistance, setGroundResistance] = useState<number | ''>('');
   const [leakageCurrent, setLeakageCurrent] = useState<number | ''>('');
   const [groundPass, setGroundPass] = useState<boolean | null>(null);
@@ -464,6 +471,8 @@ export default function NewServiceReport() {
     !manufacturerNamesEqual(resolvedModel.mfg, manufacturerValue)
       ? null
       : resolvedModel;
+  // Names used for the Candela DCD rule when no static model resolves.
+  const paramNames = [manufacturerValue, selectedModelKey, equipName];
 
   // Labels come from the device-type SR template (laser seed = Android CL_*). Fallback arrays stay imported from models.ts.
 
@@ -2246,14 +2255,76 @@ export default function NewServiceReport() {
               Model-specific counters and voltages (e.g. VBeam Perfecta: pulses, dye, HV Final, bubble sense).
             </p>
             <SystemParameterFields
-              params={
-                currentModel?.params?.length
-                  ? currentModel.params
-                  : Object.keys(modelParams).filter((k) => !k.startsWith('__') && !/^wlt_|^gas_|^fiber_/.test(k))
-              }
+              params={visibleReportParams(currentModel, modelParams, paramNames)}
               values={modelParams}
               onChange={(key, value) => setModelParams({ ...modelParams, [key]: value })}
+              onRemove={(key) => setModelParams(removeReportParam(modelParams, key))}
+              removeLabel={tSr('Remove parameter')}
             />
+            <div className="mt-3 flex flex-wrap items-end gap-2" data-testid="param-add">
+              {addableReportParams(currentModel, modelParams, paramNames).length > 0 && (
+                <select
+                  className="input w-auto"
+                  data-testid="param-add-select"
+                  aria-label={tSr('Add parameter')}
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) setModelParams(restoreReportParam(modelParams, e.target.value));
+                  }}
+                >
+                  <option value="">+ {tSr('Add parameter')}</option>
+                  {addableReportParams(currentModel, modelParams, paramNames).map((p) => (
+                    <option key={paramStorageKey(p)} value={paramStorageKey(p)}>
+                      {tSr(typeof p === 'string' ? p : p.label)}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <input
+                className="input w-auto"
+                data-testid="param-custom-name"
+                placeholder={tSr('Parameter name')}
+                aria-label={tSr('Parameter name')}
+                value={customParamName}
+                onChange={(e) => setCustomParamName(e.target.value)}
+              />
+              <input
+                className="input w-auto"
+                data-testid="param-custom-value"
+                placeholder={tSr('Parameter value')}
+                aria-label={tSr('Parameter value')}
+                value={customParamValue}
+                onChange={(e) => setCustomParamValue(e.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn-secondary text-xs"
+                data-testid="param-custom-add"
+                onClick={() => {
+                  const res = addCustomReportParam(modelParams, customParamName, customParamValue, {
+                    model: currentModel,
+                    names: paramNames,
+                  });
+                  if (!res.ok) {
+                    toast.error(
+                      tSr(
+                        res.reason === 'dcd_blocked'
+                          ? 'DCD settings are clinical settings and are not recorded on Candela service reports.'
+                          : res.reason === 'duplicate'
+                            ? 'That parameter is already on this report.'
+                            : 'Enter a parameter name.'
+                      )
+                    );
+                    return;
+                  }
+                  setModelParams(res.values);
+                  setCustomParamName('');
+                  setCustomParamValue('');
+                }}
+              >
+                + {tSr('Add custom parameter')}
+              </button>
+            </div>
             {(currentModel?.wlTest || ['wlt_nofilter','wlt_hd1_pre','wlt_ophir_pre','wlt_filter','wlt_hd1_post','wlt_ophir_post'].some(k => modelParams[k] != null && modelParams[k] !== '')) && (
               <div className="mt-4 pt-4 border-t border-[var(--border)]">
                 <h4 className="text-sm font-bold text-[var(--gold)] mb-2">Wavelength Test</h4>
