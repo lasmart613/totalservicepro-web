@@ -11,9 +11,9 @@ function tokenFrom(req: NextRequest): string {
 
 /**
  * GET /api/business/home-financial-kpis
- * Same gate as Financial Reporting: admin, company_admin, platform admin, or God.
- * The caller's JWT is checked in loadAuthorizedFinancialReport. A refusal
- * returns the error and no amounts.
+ * Active-org membership: admin, company_admin, owner, billing_manager,
+ * platform admin, or God. The org id comes from that login, not from the query.
+ * A refusal returns the error and no amounts.
  * detailRequested stays false so a free org receives the summary and not a 402.
  * Premium cards are added only when that loader sets detailIncluded.
  */
@@ -25,6 +25,7 @@ export async function GET(req: NextRequest) {
 
   const browserTimeZone = req.nextUrl.searchParams.get('tz') || req.cookies.get('rp-tz')?.value || '';
   const result = await loadAuthorizedFinancialReport(token, {
+    access: 'homepage',
     detailRequested: false,
     browserTimeZone,
   });

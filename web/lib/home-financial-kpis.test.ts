@@ -8,6 +8,8 @@ import {
   presentFinancialReport,
   type InvoiceColumnFlags,
 } from './financial-reporting.ts';
+import { canAccessHomepageFinancialKpis } from './financial-reporting-access.ts';
+import { decideFinancialAccess, decideHomepageFinancialAccess } from './financial-reporting-auth.ts';
 import { homepageFinancialKpiResponse, selectHomepageFinancialKpis } from './home-financial-kpis.ts';
 import { appStrings } from './i18n/app-copy.ts';
 
@@ -108,6 +110,7 @@ test('premium homepage cards reuse report totals and omit unavailable cash paid 
   assert.equal(byId.accounts_receivable.detailLabel, 'Outstanding invoices');
   assert.equal(byId.accounts_payable.amount, 80);
   assert.equal(byId.accounts_payable.label, 'Accounts payable');
+  assert.notEqual(byId.accounts_payable.label, 'Purchase-order commitments');
   assert.equal(byId.accounts_payable.detailLabel, 'Purchase-order commitments');
   assert.match(byId.accounts_payable.note || '', /not cash paid to the supplier/);
   assert.equal(byId.collected_this_month.amount, report.summary.collectedThisMonth);
@@ -200,13 +203,120 @@ test('homepage labels used by the cards are translated for es, de, and ar', () =
   assert.ok(appStrings('de')['{count} outstanding invoices'].includes('{count}'));
 });
 
+test('homepage KPI roles are the active-org membership, not another org', () => {
+  const env = {};
+  for (const role of ['admin', 'company_admin', 'owner', 'Owner', 'billing_manager', 'Billing_Manager']) {
+    assert.equal(canAccessHomepageFinancialKpis({ role }), true, role);
+    const access = decideHomepageFinancialAccess({
+      user: { id: 'u1', email: 'person@shop.test' },
+      membershipRole: role,
+      activeOrganizationId: 9,
+      env,
+    });
+    assert.equal(access.ok, true, role);
+    if (access.ok) assert.equal(access.organizationId, 9);
+  }
+
+  const clinic = decideHomepageFinancialAccess({
+    user: { id: 'owner-1', email: 'owner@clinic.test' },
+    membershipRole: 'owner',
+    activeOrganizationId: 9,
+    env,
+  });
+  assert.equal(clinic.ok, true);
+  if (clinic.ok) {
+    assert.equal(clinic.organizationId, 9);
+    assert.equal(clinic.god, false);
+  }
+
+  const otherShop = decideHomepageFinancialAccess({
+    user: { id: 'owner-1', email: 'owner@clinic.test' },
+    membershipRole: 'fse',
+    activeOrganizationId: 2,
+    env,
+  });
+  assert.equal(otherShop.ok, false);
+  if (!otherShop.ok) assert.equal(otherShop.status, 403);
+
+  const billing = decideHomepageFinancialAccess({
+    user: { id: 'bill-1', email: 'bill@shop.test' },
+    membershipRole: 'billing_manager',
+    activeOrganizationId: 4,
+    env,
+  });
+  assert.equal(billing.ok, true);
+  if (billing.ok) assert.equal(billing.organizationId, 4);
+
+  const billingElsewhere = decideHomepageFinancialAccess({
+    user: { id: 'bill-1', email: 'bill@shop.test' },
+    membershipRole: 'fse',
+    activeOrganizationId: 8,
+    env,
+  });
+  assert.equal(billingElsewhere.ok, false);
+
+  const profileOnly = decideHomepageFinancialAccess({
+    user: { id: 'owner-1', email: 'owner@clinic.test' },
+    membershipRole: null,
+    activeOrganizationId: 9,
+    env,
+  });
+  assert.equal(profileOnly.ok, false);
+
+  for (const role of ['fse', 'engineer', 'technician', 'service_manager', 'dispatcher', 'scheduler', 'customer', 'crm', 'parts_supplier', '']) {
+    assert.equal(canAccessHomepageFinancialKpis({ role }), false, role);
+    assert.equal(
+      decideHomepageFinancialAccess({
+        user: { id: 'u1', email: 'person@shop.test' },
+        membershipRole: role,
+        activeOrganizationId: 9,
+        env,
+      }).ok,
+      false,
+      role
+    );
+  }
+
+  assert.equal(canAccessHomepageFinancialKpis({ role: 'fse', god: true }), true);
+  const platformAdmin = decideHomepageFinancialAccess({
+    user: { id: 'u1', email: 'admin@shop.test' },
+    membershipRole: 'fse',
+    isPlatformAdmin: true,
+    activeOrganizationId: 9,
+    env,
+  });
+  assert.equal(platformAdmin.ok, true);
+  if (platformAdmin.ok) assert.equal(platformAdmin.organizationId, 9);
+
+  assert.equal(
+    decideFinancialAccess({
+      user: { id: 'owner-1', email: 'owner@clinic.test' },
+      membershipRole: 'owner',
+      activeOrganizationId: 9,
+      env,
+    }).ok,
+    false
+  );
+  assert.equal(
+    decideFinancialAccess({
+      user: { id: 'bill-1', email: 'bill@shop.test' },
+      membershipRole: 'billing_manager',
+      activeOrganizationId: 4,
+      env,
+    }).ok,
+    false
+  );
+  assert.equal(decideHomepageFinancialAccess({ user: null, env }).status, 401);
+});
+
 test('homepage loads financial cards from the authorized report route', () => {
   const home = readFileSync(join(webDir, 'components/home/HomeDashboard.tsx'), 'utf8');
   const ui = readFileSync(join(webDir, 'components/home/HomeFinancialKpis.tsx'), 'utf8');
   const route = readFileSync(join(webDir, 'app/api/business/home-financial-kpis/route.ts'), 'utf8');
   const server = readFileSync(join(webDir, 'lib/financial-reporting-server.ts'), 'utf8');
 
-  assert.match(home, /canAccessFinancialReporting\(\{ role: orgPowerRole, god \}\) && <HomeFinancialKpis \/>/);
+  assert.match(home, /canAccessHomepageFinancialKpis\(\{ role: orgPowerRole, god \}\) && <HomeFinancialKpis \/>/);
+  assert.match(home, /canAccessFinancialReporting\(\{ role: orgPowerRole, god \}\)/);
   assert.doesNotMatch(home, /from\('service_invoices'\)/);
   assert.doesNotMatch(home, /from\('purchase_orders'\)/);
   assert.match(ui, /HOME_FINANCIAL_KPI_API/);
@@ -216,14 +326,25 @@ test('homepage loads financial cards from the authorized report route', () => {
   assert.doesNotMatch(ui, /from\('purchase_orders'\)/);
 
   assert.match(route, /loadAuthorizedFinancialReport/);
+  assert.match(route, /access: 'homepage'/);
   assert.match(route, /detailRequested: false/);
+  assert.doesNotMatch(route, /searchParams\.get\('org/);
+  assert.doesNotMatch(route, /organizationId/);
   assert.match(route, /homepageFinancialKpiResponse\(result\.report\)/);
   assert.match(route, /if \(!result\.ok\)/);
   assert.match(route, /status: result\.status/);
   assert.doesNotMatch(route, /NextResponse\.json\(result\.report\)/);
   assert.doesNotMatch(route, /getSupabaseAdmin/);
   assert.doesNotMatch(route, /service_invoices/);
+  assert.match(server, /decideHomepageFinancialAccess/);
   assert.match(server, /decideFinancialAccess/);
+  assert.match(server, /getOrgRole\(client, user\.id, activeOrganizationId\)/);
+  assert.match(server, /loadShopFinancialSources\(client as unknown as FinanceClient, access\.organizationId\)/);
   assert.match(server, /gateFinancialDetail/);
   assert.match(server, /presentFinancialReport/);
+  assert.doesNotMatch(server, /getSupabaseAdmin/);
+  const reportRoute = readFileSync(join(webDir, 'app/api/business/financial-reporting/route.ts'), 'utf8');
+  assert.doesNotMatch(reportRoute, /access: 'homepage'/);
+  const load = readFileSync(join(webDir, 'lib/financial-reporting-load.ts'), 'utf8');
+  assert.match(load, /\.eq\('organization_id', organizationId\)/);
 });
