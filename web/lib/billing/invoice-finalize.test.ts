@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { applyInvoiceStatusGuard } from './invoice-status-guard.ts';
+import { columnToOmitOnSchemaRetry, writeWithColumnRetry } from './save-helpers.ts';
 import {
   heldInvoiceNumber,
   invoiceEmailFailureNotice,
@@ -138,4 +139,138 @@ test('the invoice form reuses one number, sends it, and stamps sent_at', () => {
   assert.match(finalizeFn, /stampSent: true/);
   assert.match(finalizeFn, /invoiceEmailFailureNotice/);
   assert.match(src, /saveInvoice\('sent', \{ stampSent: true \}\)/);
+  const formDataStart = saveFn.indexOf('const formInvoiceData');
+  const formDataEnd = saveFn.indexOf('const requestedStatus');
+  assert.doesNotMatch(saveFn.slice(formDataStart, formDataEnd), /sent_at/);
+  assert.match(saveFn, /\.\.\.sentStamp/);
+});
+
+function invoiceWriter(opts: {
+  failMessage?: string;
+  onWrite: (body: Record<string, unknown>, call: number) => void;
+}) {
+  let calls = 0;
+  return {
+    from(table: string) {
+      assert.equal(table, 'service_invoices');
+      const run = (body: Record<string, unknown>) => {
+        calls += 1;
+        opts.onWrite(body, calls);
+        const fail = calls === 1 && opts.failMessage;
+        return {
+          eq() {
+            return this;
+          },
+          select() {
+            return Promise.resolve(
+              fail
+                ? { data: null, error: { message: opts.failMessage } }
+                : { data: [{ id: 9 }], error: null }
+            );
+          },
+        };
+      };
+      return {
+        update: run,
+        insert: run,
+      };
+    },
+  };
+}
+
+test('a successful save keeps top-level sent_at once the column exists', async () => {
+  const writes: Record<string, unknown>[] = [];
+  const supabase = invoiceWriter({
+    onWrite(body) {
+      writes.push(body);
+    },
+  });
+  const stamp = invoiceSentStamp({ requestedStatus: 'sent', stampSent: true, now: sentAt });
+  const updated = await writeWithColumnRetry(
+    supabase,
+    'service_invoices',
+    { status: 'sent', invoice_number: 'LPX-INV-20261105-06', ...stamp },
+    9
+  );
+  assert.equal(updated.error, null);
+  assert.equal(writes[0].sent_at, sentAt);
+  assert.equal(Object.prototype.hasOwnProperty.call(writes[0], 'sent_at'), true);
+
+  const insertedWrites: Record<string, unknown>[] = [];
+  const inserted = await writeWithColumnRetry(
+    invoiceWriter({
+      onWrite(body) {
+        insertedWrites.push(body);
+      },
+    }),
+    'service_invoices',
+    { status: 'sent', ...stamp },
+    null
+  );
+  assert.equal(inserted.error, null);
+  assert.equal(inserted.id, 9);
+  assert.equal(insertedWrites[0].sent_at, sentAt);
+});
+
+test('retrying a different missing column keeps sent_at', async () => {
+  const writes: Record<string, unknown>[] = [];
+  const result = await writeWithColumnRetry(
+    invoiceWriter({
+      failMessage: "Could not find the 'paid_at' column of 'service_invoices' in the schema cache",
+      onWrite(body) {
+        writes.push({ ...body });
+      },
+    }),
+    'service_invoices',
+    { status: 'sent', paid_at: null, sent_at: sentAt },
+    9
+  );
+  assert.equal(result.error, null);
+  assert.equal(writes.length, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(writes[1], 'paid_at'), false);
+  assert.equal(writes[1].sent_at, sentAt);
+});
+
+test('a constraint that mentions sent_at does not drop the stamp', () => {
+  assert.equal(
+    columnToOmitOnSchemaRetry(
+      'null value in column "sent_at" of relation "service_invoices" violates not-null constraint'
+    ),
+    null
+  );
+  assert.equal(
+    columnToOmitOnSchemaRetry(
+      "Could not find the 'sent_at' column of 'service_invoices' in the schema cache"
+    ),
+    'sent_at'
+  );
+  assert.equal(
+    columnToOmitOnSchemaRetry(
+      "Could not find the 'paid_at' column of 'service_invoices' in the schema cache"
+    ),
+    'paid_at'
+  );
+});
+
+test('000955 adds nullable sent_at and its rollback drops only that column', () => {
+  const migrationsDir = join(here, '../../supabase/migrations');
+  const upName = '20261105_000955_service_invoices_sent_at.sql';
+  const downName = '20261105_000955_service_invoices_sent_at_rollback.sql';
+  const up = readFileSync(join(migrationsDir, upName), 'utf8');
+  const down = readFileSync(join(migrationsDir, downName), 'utf8');
+  assert.match(up, /ADD COLUMN IF NOT EXISTS sent_at timestamptz/);
+  assert.match(up, /COMMENT ON COLUMN public\.service_invoices\.sent_at/);
+  assert.match(up, /000955:/);
+  assert.match(up, /NOTIFY pgrst, 'reload schema'/);
+  assert.doesNotMatch(up, /UPDATE\s+public\.service_invoices/i);
+  assert.doesNotMatch(up, /invoice_data/);
+  for (const orgId of ['4', '1005', '5509', '2616']) {
+    assert.doesNotMatch(up, new RegExp(`organization_id\\s*=\\s*${orgId}\\b`));
+    assert.doesNotMatch(down, new RegExp(`organization_id\\s*=\\s*${orgId}\\b`));
+  }
+  assert.match(down, /NOT LIKE '000955:%'/);
+  assert.match(down, /rollback refused: service_invoices\.sent_at was not added by 000955/);
+  assert.match(down, /DROP COLUMN sent_at/);
+  assert.doesNotMatch(down, /UPDATE\s+public\.service_invoices/i);
+  assert.doesNotMatch(down, /DROP COLUMN IF EXISTS sent_at/);
 });

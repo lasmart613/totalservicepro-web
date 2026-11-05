@@ -8,7 +8,9 @@
  * docNumber state from the render that started Finalize.
  *
  * The send route does not write sent_at. Finalize & Email and Mark sent
- * both finish in the form save, so that save stamps sent_at when asked.
+ * both finish in the form save, which stamps the service_invoices.sent_at
+ * column (migration 000955). That file is repo-only until Larry and the CEO
+ * approve applying it. Do not store the stamp under invoice_data.sent_at.
  */
 
 export function heldInvoiceNumber(preferred: unknown, fallback: unknown): string {
@@ -53,8 +55,10 @@ export async function readStoredInvoiceNumber(
 }
 
 /**
- * Stamp sent_at only for the save that marks the invoice sent.
+ * Stamp the service_invoices.sent_at column when this save marks the invoice sent.
  * Other saves omit the column so a draft write cannot clear it.
+ * 000955 adds the nullable column. Until it is applied, PostgREST rejects
+ * sent_at and the schema retry omits that one missing column.
  */
 export function invoiceSentStamp(opts: {
   requestedStatus: unknown;

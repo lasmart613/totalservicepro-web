@@ -911,7 +911,8 @@ export default function InvoiceFormClient() {
         return;
       }
 
-      // Only now mark sent. send-invoice does not write sent_at; this save does.
+      // Mark sent only after the provider accepts the message.
+      // sent_at is the service_invoices column from 000955 (not invoice_data).
       await saveInvoice('sent', { quiet: true, stampSent: true });
       if (result.connectRequired) {
         toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
