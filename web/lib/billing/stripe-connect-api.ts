@@ -12,6 +12,7 @@ import { publicSiteOrigin } from '@/lib/site-origin';
 import {
   canStartStripeConnect,
   emptyPayoutAccount,
+  isStripeConnectReady,
   normalizeStripeAccountId,
   partnerReferralFromEnv,
   authorizeConnectCallback,
@@ -372,7 +373,7 @@ export function connectStatusPayload(caller: ConnectCaller) {
       prompt,
     };
   }
-  const connected = Boolean(caller.account.accountId && caller.account.chargesEnabled);
+  const connected = isStripeConnectReady(caller.account);
   return {
     eligible: true,
     connected,
