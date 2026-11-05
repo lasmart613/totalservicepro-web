@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useT } from '@/lib/fa/locale';
+import { estimateFromTicketHref, invoiceFromTicketHref } from '@/lib/billing/doc-prefill';
 import {
   canCheckIn,
   checkInPatch,
@@ -487,6 +488,33 @@ export default function ServiceTicketDetail() {
               ticketId={ticket.id}
               existingReports={existingReports}
             />
+            {canCreateReport && !isEditing && !ticket.customer_organization_id && (
+              <span
+                data-testid="ticket-create-docs-need-clinic"
+                title={t('Estimates and invoices need a clinic. Edit the ticket to add one.')}
+                className="text-xs text-[var(--text3)] self-center"
+              >
+                {t('Add a clinic to create an estimate or invoice.')}
+              </span>
+            )}
+            {canCreateReport && !isEditing && !!ticket.customer_organization_id && (
+              <>
+                <Link
+                  href={estimateFromTicketHref(ticket.id)}
+                  data-testid="ticket-create-estimate"
+                  className="btn btn-secondary flex w-full items-center justify-center gap-2 sm:w-auto"
+                >
+                  {t('Create estimate')}
+                </Link>
+                <Link
+                  href={invoiceFromTicketHref(ticket.id)}
+                  data-testid="ticket-create-invoice"
+                  className="btn btn-secondary flex w-full items-center justify-center gap-2 sm:w-auto"
+                >
+                  {t('Create invoice')}
+                </Link>
+              </>
+            )}
             {!isEditing ? (
               <button onClick={startEditing} className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto">
                 <Edit2 size={18} /> Edit Ticket

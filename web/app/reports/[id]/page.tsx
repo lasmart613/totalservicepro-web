@@ -1,6 +1,7 @@
 'use client';
 import { useFormatDate } from '@/lib/use-format-date';
 import { useT } from '@/lib/fa/locale';
+import { invoiceFromReportHref } from '@/lib/billing/doc-prefill';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -223,6 +224,9 @@ export default function ReportDetail() {
               )}
               {!viewOnly && report && (
                 <Link href={`/reports/new?id=${id}`} className="btn btn-secondary text-sm">{t('Open in Editor')}</Link>
+              )}
+              {!viewOnly && report && (
+                <Link href={invoiceFromReportHref(String(id))} data-testid="report-create-invoice" className="btn btn-secondary text-sm">{t('Create invoice')}</Link>
               )}
             </div>
             {report && (

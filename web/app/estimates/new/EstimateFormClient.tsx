@@ -48,6 +48,7 @@ import { NEW_EQUIPMENT_VALUE } from '@/lib/customer-equipment';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import { documentDirection } from '@/lib/i18n/translate-app';
 import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
+import { fillIfEmpty, loadBillingPrefill } from '@/lib/billing/doc-prefill';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -59,6 +60,7 @@ export default function EstimateFormClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editIdParam = searchParams.get('id');
+  const fromTicketParam = searchParams.get('ticketId') || searchParams.get('ticket_id');
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -422,6 +424,32 @@ export default function EstimateFormClient() {
 
         if (editIdParam) {
           await loadEstimate(editIdParam);
+        } else if (fromTicketParam) {
+          const p = await loadBillingPrefill(supabase as any, { ticketId: fromTicketParam, organizationId: orgId });
+          if (!p) {
+            toast.error(t('Could not load that ticket or report'));
+          } else {
+            // Only fill blanks: never overwrite something already typed.
+            setCustomerName((v) => fillIfEmpty(v, p.customerName));
+            setCustSearch((v) => fillIfEmpty(v, p.customerName));
+            setCustomerOrgId((v) => (v != null && v !== '' ? v : p.customerOrganizationId));
+            setCustAddress((v) => fillIfEmpty(v, p.customerAddress));
+            setCustCity((v) => fillIfEmpty(v, p.customerCity));
+            setCustState((v) => fillIfEmpty(v, p.customerState));
+            setCustPhone((v) => fillIfEmpty(v, p.customerPhone));
+            setCustEmail((v) => fillIfEmpty(v, p.customerEmail));
+            setCustContact((v) => fillIfEmpty(v, p.customerContactName));
+            if (p.equipmentMake || p.equipmentModel) {
+              cascade.hydrate({
+                equipmentType: p.equipmentType || undefined,
+                manufacturer: p.equipmentMake,
+                model: p.equipmentModel,
+              });
+            }
+            setSerial((v) => fillIfEmpty(v, p.serialNumber));
+            setIssues((v) => fillIfEmpty(v, p.issue));
+            toast.message(t('Prefilled from the service ticket / report. Review and save.'));
+          }
         }
         // Do not allocate estimate numbers on form open — two tabs would both get -01.
       } catch (e) {
@@ -430,7 +458,8 @@ export default function EstimateFormClient() {
         setLoading(false);
       }
     })();
-  }, [supabase, router, editIdParam, loadCustomers, loadParts, loadEstimate]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supabase, router, editIdParam, fromTicketParam, loadCustomers, loadParts, loadEstimate]);
 
   // Persist pricing prefs
   useEffect(() => {

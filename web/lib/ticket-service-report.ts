@@ -40,6 +40,8 @@ export type TicketReportPrefill = {
   customerPhone: string;
   customerEmail: string;
   customerContactName: string;
+  /** organizations.website of the customer. Empty when unknown. */
+  customerWebsite: string;
   /** locations.id from the ticket. Null when the ticket has no customer_location_id. */
   locationId: string | number | null;
   /** Location or legacy site name. Empty when the ticket has neither. */
@@ -235,6 +237,7 @@ export function reportPrefillFromTicket(source: TicketReportSource): TicketRepor
     customerPhone: gapFill(ticket.customer_phone, location?.phone, customer?.phone),
     customerEmail: gapFill(ticket.customer_email, null, customer?.email),
     customerContactName: gapFill(null, location?.contact_name, customer?.contact_name),
+    customerWebsite: clean(customer?.website),
     locationId: persistedLocationId(ticket.customer_location_id),
     siteName: clean(location?.name),
     equipmentId: (ticket.equipment_id ?? equipment?.id ?? null) as string | number | null,
@@ -318,12 +321,12 @@ async function loadLinkedCustomer(
   customerOrganizationId: unknown
 ): Promise<Record<string, unknown> | null> {
   if (customerOrganizationId == null || customerOrganizationId === '') return null;
-  const res = await maybeOne(
-    supabase
-      .from('organizations')
-      .select('id, name, address, city, state, zip, phone, email, contact_name')
-      .eq('id', customerOrganizationId)
-  );
+  const select = (columns: string) =>
+    maybeOne(supabase.from('organizations').select(columns).eq('id', customerOrganizationId));
+  let res = await select('id, name, address, city, state, zip, phone, email, contact_name, website');
+  if (isMissingColumn(res.error, 'website')) {
+    res = await select('id, name, address, city, state, zip, phone, email, contact_name');
+  }
   if (res.error || !res.data) return null;
   return res.data as Record<string, unknown>;
 }

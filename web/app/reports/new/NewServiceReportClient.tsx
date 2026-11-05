@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { imageHasInk } from '@/lib/signature-ink';
 import { Header } from '@/components/Header';
 import { ArrowLeft, Check, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -41,6 +42,7 @@ import {
 import { listManufacturerChoices } from '@/lib/laser-catalog';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso, resolveNumberingTimeZone } from '@/lib/org-timezone';
+import { nextPmDue, signedDateInputValue, signedNowLocal } from '@/lib/sr-form-prefill';
 import { commentsWithArrival, formatArrival } from '@/lib/ticket-checkin';
 import { commentsWithPending } from '@/lib/sr-carry-forward';
 import { useT } from '@/lib/fa/locale';
@@ -247,6 +249,13 @@ export default function NewServiceReport() {
   const [serviceType, setServiceType] = useState('PM');
   const [dateOut, setDateOut] = useState('');
   const [nextPm, setNextPm] = useState('');
+  // Next PM follows Date Out (+12 months) until the user or a saved report sets it.
+  const nextPmTouched = useRef(false);
+  useEffect(() => {
+    if (editReportId || nextPmTouched.current || !dateOut) return;
+    // No PM-interval column exists yet, so this uses the 12-month default.
+    setNextPm(nextPmDue(dateOut));
+  }, [dateOut, editReportId]);
   const [ticketNum, setTicketNum] = useState('');
   /** Universal: {ORG_PREFIX}-SR-YYYYMMDD-NN */
   const [reportNumber, setReportNumber] = useState('');
@@ -375,6 +384,8 @@ export default function NewServiceReport() {
       try {
         const dataUrl = canvas.toDataURL('image/png');
         setTechSig(dataUrl);
+        // Signing stamps today unless a date is already there.
+        setTechSigDate((prev) => prev || signedNowLocal(orgZoneRef.current));
       } catch {}
     }
   }
@@ -386,7 +397,41 @@ export default function NewServiceReport() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
     }
     setTechSig('');
+    setSigFromProfile(false);
+    sigClearedRef.current = true;
   }
+
+  // New report: prefill the tech's saved profile signature (user_profiles.signature_data)
+  // visibly in the signature box so they can keep it or Clear and sign fresh.
+  const profileSigApplied = useRef(false);
+  const [sigFromProfile, setSigFromProfile] = useState(false);
+  const [profileSigBlank, setProfileSigBlank] = useState(false);
+  const sigClearedRef = useRef(false);
+  useEffect(() => {
+    if (profileSigApplied.current || editReportId) return;
+    const saved = String(currentProfile?.signature_data || '');
+    if (!/^(data:image|https?:)/.test(saved)) return;
+    profileSigApplied.current = true;
+    let cancelled = false;
+    // A profile pad saved without drawing is a valid but blank PNG; it paints
+    // as an empty white box. Only prefill when the image actually has ink.
+    imageHasInk(saved).then((ok) => {
+      if (cancelled) return;
+      if (!ok) {
+        setProfileSigBlank(true);
+        return;
+      }
+      setTechSig((prev) => {
+        if (prev) return prev;
+        setSigFromProfile(true);
+        return saved;
+      });
+    });
+    return () => {
+      cancelled = true;
+      profileSigApplied.current = false;
+    };
+  }, [editReportId, currentProfile]);
 
   // init canvas on mount
   useEffect(() => {
@@ -641,7 +686,10 @@ export default function NewServiceReport() {
         if (r.ticket_number) setTicketNum(r.ticket_number);
         if (r.service_type) setServiceType(r.service_type);
         if (r.date_out) setDateOut(String(r.date_out).slice(0, 10));
-        if (r.next_pm_due) setNextPm(String(r.next_pm_due).slice(0, 10));
+        if (r.next_pm_due) {
+          nextPmTouched.current = true;
+          setNextPm(String(r.next_pm_due).slice(0, 10));
+        }
         if (r.serial_number) setSerialNumber(r.serial_number);
         if (r.equipment_name) setEquipName(r.equipment_name);
         if (r.sku) setSku(r.sku);
@@ -728,7 +776,7 @@ export default function NewServiceReport() {
           );
         }
         if (r.tech_signature) setTechSig(r.tech_signature);
-        if (r.signed_date) setTechSigDate(String(r.signed_date).slice(0, 10));
+        if (r.signed_date) setTechSigDate(signedDateInputValue(r.signed_date));
         const reportType = equipmentTypeOrDefault(
           r.equipment_type ||
             inferEquipmentType({
@@ -1018,6 +1066,7 @@ export default function NewServiceReport() {
             phone: prefill.customerPhone,
             email: prefill.customerEmail,
             contact_name: prefill.customerContactName,
+            website: prefill.customerWebsite,
           });
         }
         if (prefill.siteName) setSiteName(prefill.siteName);
@@ -1028,6 +1077,7 @@ export default function NewServiceReport() {
         setCustCity(prefill.customerCity);
         setCustState(prefill.customerState);
         setCustContactName(prefill.customerContactName);
+        if (prefill.customerWebsite) setCustWebsite((prev) => prev || prefill.customerWebsite);
         setCustPhone(prefill.customerPhone);
         setCustEmail(prefill.customerEmail);
         ticketMakeRef.current = prefill.equipmentMake;
@@ -1497,7 +1547,7 @@ export default function NewServiceReport() {
       // Force latest canvas capture for sig (Android parity)
       const canvas = sigCanvasRef.current;
       let latestSig = techSig;
-      if (canvas && !latestSig) {
+      if (canvas && !latestSig && !sigFromProfile) {
         try {
           latestSig = canvas.toDataURL('image/png');
           setTechSig(latestSig);
@@ -1597,7 +1647,7 @@ export default function NewServiceReport() {
         tech_company_phone: techCompanyCache.company_phone,
         tech_company_logo_url: techCompanyCache.company_logo_url,
         // Android parity: service_reports.tech_signature + signed_date (NOT signature_data / signed_at)
-        tech_signature: latestSig || currentProfile?.signature_data || null,
+        tech_signature: latestSig || (sigClearedRef.current ? null : currentProfile?.signature_data) || null,
         signed_date:
           (techSigDate && String(techSigDate).slice(0, 10)) ||
           (status === 'complete'
@@ -2055,7 +2105,7 @@ export default function NewServiceReport() {
               </select>
             </div>
             <div><label className="label">Date Out</label><input type="date" className="input" value={dateOut} onChange={e=>setDateOut(e.target.value)} /></div>
-            <div><label className="label">Next PM Due</label><input type="date" className="input" value={nextPm} onChange={e=>setNextPm(e.target.value)} /></div>
+            <div><label className="label">Next PM Due</label><input type="date" className="input" value={nextPm} onChange={e=>{ nextPmTouched.current = true; setNextPm(e.target.value); }} /></div>
             <div><label className="label">Ticket #</label><input className="input" value={ticketNum} onChange={e=>setTicketNum(e.target.value)} /></div>
             <div><label className="label">Report #</label><input className="input" value={reportNumber} onChange={e=>setReportNumber(e.target.value)} placeholder="Auto: PREFIX-SR-YYYYMMDD-NN" /></div>
             <div className="md:col-span-2">
@@ -2435,10 +2485,19 @@ export default function NewServiceReport() {
           <h3 className="font-semibold mb-2">✍️ Signatures</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Technician Signature (draw below)</label>
-              <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4, touchAction: 'none' }}>
+              <label className="label">{tSr('Technician Signature')}</label>
+              {sigFromProfile && techSig && (
+                <div data-testid="sr-profile-signature" style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4 }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={techSig} alt={tSr('Saved profile signature')} style={{ width: '100%', maxWidth: 320, height: 90, objectFit: 'contain', display: 'block' }} />
+                </div>
+              )}
+              <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4, touchAction: 'none', display: sigFromProfile && techSig ? 'none' : undefined }}>
                 <canvas
-                  ref={sigCanvasRef}
+                  ref={(el) => {
+                    sigCanvasRef.current = el;
+                    if (el && !sigPadReady) initSigCanvas();
+                  }}
                   onMouseDown={startDraw}
                   onMouseMove={draw}
                   onMouseUp={endDraw}
@@ -2449,19 +2508,24 @@ export default function NewServiceReport() {
                   style={{ width: '100%', maxWidth: 320, height: 90, display: 'block', background: '#fff', borderRadius: 4 }}
                 />
               </div>
+              {profileSigBlank && !techSig && (
+                <p className="text-xs text-gray-500 mt-1" data-testid="sr-profile-signature-blank">
+                  {tSr('Your saved profile signature is blank. Sign below, or re-save it on your Profile page.')}
+                </p>
+              )}
               <div className="flex gap-2 mt-1">
                 <button type="button" onClick={clearSig} className="text-xs px-2 py-0.5 border rounded">Clear</button>
                 <button type="button" onClick={() => {
                   const c = sigCanvasRef.current;
                   if (c) { try { setTechSig(c.toDataURL('image/png')); } catch {} }
                 }} className="text-xs px-2 py-0.5 border rounded">Capture</button>
-                <span className="text-[10px] text-[var(--text3)] self-center">Draw with mouse or finger</span>
+                <span className="text-[10px] text-[var(--text3)] self-center">{sigFromProfile && techSig ? tSr('Your saved profile signature. Keep it, or Clear to sign again.') : tSr('Draw with mouse or finger')}</span>
               </div>
             </div>
             <div>
               <label className="label">Date Signed</label>
               <input type="datetime-local" className="input" value={techSigDate} onChange={e=>setTechSigDate(e.target.value)} />
-              <div className="text-[10px] text-[var(--text3)] mt-2">If blank on complete, profile signature will be used (Android parity). Saved as tech_signature on the report.</div>
+              <div className="text-[10px] text-[var(--text3)] mt-2">{tSr('Your saved profile signature is filled in automatically on new reports. Clear it to sign by hand.')}</div>
             </div>
           </div>
         </div>

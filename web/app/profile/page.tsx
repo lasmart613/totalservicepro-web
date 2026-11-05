@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { useT } from '@/lib/fa/locale';
+import { canvasHasInk } from '@/lib/signature-ink';
 
 export default function Profile() {
   const t = useT();
@@ -149,12 +150,12 @@ export default function Profile() {
       const canvas = canvasRef.current;
       if (canvas) {
         try {
-          const blank = document.createElement('canvas');
-          blank.width = canvas.width;
-          blank.height = canvas.height;
-          const drawn = canvas.toDataURL('image/png');
-          if (drawn && drawn !== blank.toDataURL('image/png') && drawn.length > 500) {
-            signature = drawn;
+          // The pad is pre-filled white, so compare by ink, not against a
+          // transparent blank canvas (that saved empty white PNGs as signatures).
+          if (canvasHasInk(canvas)) {
+            signature = canvas.toDataURL('image/png');
+          } else {
+            signature = /^https?:/.test(String(signature || '')) ? signature : null;
           }
         } catch {
           /* ignore */
