@@ -99,19 +99,48 @@ function apexAuthOrigin(origin: string, androidWebView: boolean): string {
   return origin;
 }
 
+/** Play package from assetlinks.json. Intent delivery is limited to this app. */
+export const ANDROID_APP_PACKAGE = 'com.photometrytools';
+
 export type AndroidHandoff = {
   httpsUrl: string;
-  customSchemeUrl: string;
+  /** Package-pinned intent. A bare totalservicepro:// URL is not a handoff. */
+  appUrl: string;
 };
+
+/**
+ * True when the URL is an Android intent aimed at the official app package.
+ * A custom-scheme URL is not official: any app can register that scheme.
+ */
+export function isOfficialAndroidAppUrl(url: string): boolean {
+  if (!url.startsWith(`intent://${ANDROID_AUTH_HOST}?`)) return false;
+  if (url.includes(`${ANDROID_AUTH_SCHEME}://`)) return false;
+  return url.includes(
+    `#Intent;scheme=${ANDROID_AUTH_SCHEME};package=${ANDROID_APP_PACKAGE};`
+  );
+}
+
+function officialAndroidIntentUrl(params: URLSearchParams): string {
+  const fallback = encodeURIComponent(`${PRODUCTION_SITE_ORIGIN}/`);
+  return (
+    `intent://${ANDROID_AUTH_HOST}?${params.toString()}` +
+    `#Intent;scheme=${ANDROID_AUTH_SCHEME};package=${ANDROID_APP_PACKAGE};` +
+    `S.browser_fallback_url=${fallback};end`
+  );
+}
 
 /**
  * App handoff after a sign-in that finished on this page load.
  * An existing session with no fresh code or hash tokens does not qualify.
- * The https URL is the verified App Link. The custom scheme is only a fallback.
+ * issuedForSession is true only after the server confirms tsp_nonce matches
+ * the httpOnly cookie set for this browser when the official app started
+ * sign-in. The https URL is the verified App Link. appUrl is an intent pinned
+ * to com.photometrytools, not a bare custom scheme.
  */
 export function buildAndroidHandoff(input: {
   completedSignIn: boolean;
   appRequested: boolean;
+  issuedForSession: boolean;
   nonce: string | null | undefined;
   state?: string | null;
   accessToken: string | null | undefined;
@@ -120,7 +149,7 @@ export function buildAndroidHandoff(input: {
   inWebView?: boolean;
 }): AndroidHandoff | null {
   if (input.inWebView) return null;
-  if (!input.appRequested || !input.completedSignIn) return null;
+  if (!input.appRequested || !input.completedSignIn || input.issuedForSession !== true) return null;
   const access = String(input.accessToken || '').trim();
   if (!access) return null;
   const nonce = String(input.nonce || '');
@@ -129,17 +158,17 @@ export function buildAndroidHandoff(input: {
   const dest = input.dest || '/';
   const state = input.state == null ? '' : String(input.state);
   const includeState = state.length > 0 && state.length < 512;
-  const hash =
-    `access_token=${encodeURIComponent(access)}` +
-    `&refresh_token=${encodeURIComponent(refresh)}` +
-    `&next=${encodeURIComponent(dest)}` +
-    `&tsp_nonce=${encodeURIComponent(nonce)}` +
-    (includeState ? `&state=${encodeURIComponent(state)}` : '');
+  const tokens = new URLSearchParams();
+  tokens.set('access_token', access);
+  tokens.set('refresh_token', refresh);
+  tokens.set('next', dest);
+  tokens.set('tsp_nonce', nonce);
+  if (includeState) tokens.set('state', state);
   const query = new URLSearchParams();
   query.set('app', '1');
   query.set('tsp_nonce', nonce);
   return {
-    httpsUrl: `${PRODUCTION_SITE_ORIGIN}/auth/callback?${query.toString()}#${hash}`,
-    customSchemeUrl: `${ANDROID_AUTH_SCHEME}://${ANDROID_AUTH_HOST}#${hash}`,
+    httpsUrl: `${PRODUCTION_SITE_ORIGIN}/auth/callback?${query.toString()}#${tokens.toString()}`,
+    appUrl: officialAndroidIntentUrl(tokens),
   };
 }

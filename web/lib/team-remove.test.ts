@@ -416,6 +416,47 @@ test('only a current company admin or owner membership may remove; founder and c
   );
 });
 
+test('a profile admin with no membership cannot remove a team member', async () => {
+  const state = baseStore();
+  state.profiles.push({
+    id: 'platform-1',
+    email: 'root@shop.test',
+    organization_id: ORG,
+    active_organization_id: ORG,
+    role: 'admin',
+    onboarding_completed: true,
+  });
+  const result = await postRemove({ state, callerId: 'platform-1' });
+  assert.equal(result.status, 403, JSON.stringify(result.body));
+  assert.equal(result.body.code, 'not_admin');
+  assert.equal(result.rpcCalls.length, 0);
+  assert.equal(
+    state.memberships.some((row) => row.user_id === MEMBER && row.organization_id === ORG),
+    true
+  );
+
+  const tech = baseStore();
+  const caller = tech.memberships.find((row) => row.user_id === ADMIN && row.organization_id === ORG);
+  assert.ok(caller);
+  caller.role = 'fse';
+  const profile = tech.profiles.find((row) => row.id === ADMIN);
+  assert.ok(profile);
+  profile.role = 'admin';
+  const elevated = await postRemove({ state: tech });
+  assert.equal(elevated.status, 403, JSON.stringify(elevated.body));
+  assert.equal(elevated.rpcCalls.length, 0);
+});
+
+test('a membership role of admin is company admin and may remove', async () => {
+  const state = baseStore();
+  const caller = state.memberships.find((row) => row.user_id === ADMIN && row.organization_id === ORG);
+  assert.ok(caller);
+  caller.role = 'admin';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.removed, true);
+});
+
 test('admin remove drops only that membership and revokes pending invites', async () => {
   const state = baseStore();
   state.invites.push({

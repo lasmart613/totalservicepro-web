@@ -10,11 +10,17 @@ import {
   type PendingSignup,
 } from '@/lib/pending-signup';
 import { decideFounderLink, founderClaimAllowed } from '@/lib/tenant-lockdown';
+import { COMPLIMENTARY_PREMIUM_GRANT_SIGNUP } from '@/lib/complimentary-premium';
 import {
+  clearSignupGrantOnOrg,
+  complimentarySignupAlreadyUsed,
   grantSignupTrialIfEligible,
   isTrialGrantedAtMissing,
   loadFounderOrg,
   markTrialOnInsert,
+  recordSignupGrantClaim,
+  releaseSignupGrantClaim,
+  stripSignupGrantFields,
   type FounderOrgRow,
 } from '@/lib/signup-trial';
 
@@ -151,6 +157,13 @@ export async function runOrgFounder(req: NextRequest, deps: FounderDeps = {}) {
       // trial_granted_at rides on the same insert as the grant.
       pending = { ...pending, orgType: newOrg.orgType };
       const row = markTrialOnInsert(organizationInsertFromPending(pending, user.id));
+      // One complimentary signup grant per user. A second shop stays Free.
+      if (
+        row.premium_grant === COMPLIMENTARY_PREMIUM_GRANT_SIGNUP &&
+        (await complimentarySignupAlreadyUsed(admin, user.id))
+      ) {
+        stripSignupGrantFields(row);
+      }
       row.created_by = user.id;
       delete row.num_lasers;
       let { data, error } = await admin
@@ -180,6 +193,13 @@ export async function runOrgFounder(req: NextRequest, deps: FounderDeps = {}) {
         id: data.id,
         createdAt: (data as { created_at?: string | null }).created_at ?? new Date().toISOString(),
       };
+      if (row.premium_grant === COMPLIMENTARY_PREMIUM_GRANT_SIGNUP) {
+        const claim = await recordSignupGrantClaim(admin, user.id, data.id);
+        if (claim === 'duplicate' || claim === 'error') {
+          stripSignupGrantFields(row);
+          await clearSignupGrantOnOrg(admin, data.id);
+        }
+      }
     } else {
       const loaded = await loadFounderOrg(admin, orgId);
       const org = loaded.org;
@@ -222,6 +242,7 @@ export async function runOrgFounder(req: NextRequest, deps: FounderDeps = {}) {
             .delete()
             .eq('id', createdInRequest.id)
             .eq('created_by', user.id);
+          await releaseSignupGrantClaim(admin, user.id, createdInRequest.id);
         }
         return NextResponse.json({ error: allowed.error }, { status: allowed.status });
       }

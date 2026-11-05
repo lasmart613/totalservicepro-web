@@ -190,6 +190,25 @@ test('legit: a clinic owner (in no shop) founds a clinic and becomes owner, unst
   }
 });
 
+test('a second service company does not get another complimentary Premium grant', async () => {
+  const db = fakeDb();
+  const first = await post(db, TECH, {
+    pending: { kind: 'company', name: 'Shop A', orgType: 'service_company' },
+  });
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  const firstOrg = db.t.organizations.find((o) => o.id === first.body.organizationId);
+  assert.equal(firstOrg?.is_premium, true);
+  assert.equal(firstOrg?.premium_grant, 'complimentary_signup');
+  const second = await post(db, TECH, {
+    pending: { kind: 'company', name: 'Shop B', orgType: 'service_company' },
+  });
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  const secondOrg = db.t.organizations.find((o) => o.id === second.body.organizationId);
+  assert.equal(secondOrg?.is_premium, false);
+  assert.equal(secondOrg?.premium_grant, undefined);
+  assert.equal(secondOrg?.trial_granted_at, undefined);
+});
+
 test('legit: a shop tech may still found their own service company or supplier (not customer-side)', async () => {
   for (const [orgType, role] of [['service_company', 'company_admin'], ['parts_supplier', 'parts_supplier']]) {
     const db = fakeDb();

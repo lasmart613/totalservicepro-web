@@ -98,16 +98,23 @@ test('membership company_admin sees Business Management but not Admin Portal', a
   }
 });
 
-test('platform admin sees Admin Portal and Business Management', async () => {
+test('platform admin sees Admin Portal; Business Management follows the membership', async () => {
   const nav = await navFor({ profileRole: 'admin', membershipRole: 'fse' });
   assert.equal(nav.platformAdmin, true);
-  assert.equal(nav.orgPowerRole, 'admin');
+  assert.equal(nav.orgPowerRole, 'fse');
   assert.equal(adminPortalNavVisible(nav), true);
-  assert.equal(businessManagementNavVisible(nav), true);
+  assert.equal(businessManagementNavVisible(nav), false);
 
   const noShop = await navFor({ profileRole: 'admin', membershipRole: null });
+  assert.equal(noShop.platformAdmin, true);
+  assert.equal(noShop.orgPowerRole, '');
   assert.equal(adminPortalNavVisible(noShop), true);
-  assert.equal(businessManagementNavVisible(noShop), true);
+  assert.equal(businessManagementNavVisible(noShop), false);
+
+  const lead = await navFor({ profileRole: 'admin', membershipRole: 'company_admin' });
+  assert.equal(lead.orgPowerRole, 'company_admin');
+  assert.equal(adminPortalNavVisible(lead), true);
+  assert.equal(businessManagementNavVisible(lead), true);
 });
 
 test('a company_admin membership in another shop does not open this shop', async () => {
