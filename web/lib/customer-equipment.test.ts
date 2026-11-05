@@ -5,11 +5,12 @@ import {
   canOfferAddToOrg,
   CUSTOMER_EQUIPMENT_COLUMNS,
   customerEquipmentLabel,
+  addEquipmentMessage,
   loadCustomerEquipment,
   matchCustomerEquipment,
 } from './customer-equipment.ts';
 
-function fakeClient(opts: { rows?: any[]; selectError?: any; insertError?: any; insertData?: any }) {
+function fakeClient(opts: { rows?: any[]; selectError?: any; insertError?: any; insertData?: any; insertErrors?: any[] }) {
   const calls: any[] = [];
   const client = {
     from(table: string) {
@@ -35,9 +36,10 @@ function fakeClient(opts: { rows?: any[]; selectError?: any; insertError?: any; 
           return q;
         },
         maybeSingle() {
+          const err = opts.insertErrors ? opts.insertErrors.shift() ?? null : opts.insertError || null;
           return Promise.resolve({
-            data: opts.insertError ? null : opts.insertData ?? { id: 99 },
-            error: opts.insertError || null,
+            data: err ? null : opts.insertData ?? { id: 99 },
+            error: err,
           });
         },
       };
@@ -125,4 +127,85 @@ test('RLS refusal and duplicate are reported, not retried as transfer', async ()
   assert.deepEqual(rls, { status: 'failed', reason: 'not_allowed' });
   const dup = await addEquipmentToCustomerOrg(fakeClient({ rows: [], insertError: { code: '23505', message: 'duplicate key' } }).client, 1, d);
   assert.deepEqual(dup, { status: 'failed', reason: 'duplicate_serial' });
+});
+
+test('clinic select is disabled with no clinic and lists units plus Add new', async () => {
+  const { clinicEquipmentSelectState, NEW_EQUIPMENT_VALUE } = await import('./customer-equipment.ts');
+  const none = clinicEquipmentSelectState(null, [], false);
+  assert.equal(none.disabled, true);
+  assert.equal(none.options.length, 0);
+  const empty = clinicEquipmentSelectState(2655, [], false);
+  assert.equal(empty.disabled, false);
+  assert.deepEqual(empty.options.map((o) => o.value), [NEW_EQUIPMENT_VALUE]);
+  const list = [{ id: 7, equipment_type: null, manufacturer: 'Lumenis', model: 'UltraPulse', serial_number: 'SN1' }];
+  const full = clinicEquipmentSelectState('2655', list as any, false);
+  assert.deepEqual(full.options.map((o) => o.value), ['7', NEW_EQUIPMENT_VALUE]);
+  assert.match(full.options[0].label, /Lumenis UltraPulse .*SN1/);
+  assert.equal(clinicEquipmentSelectState(2655, [], true).disabled, true);
+});
+
+test('new equipment needs make and model; serial optional when requireSerial is false', async () => {
+  const { newEquipmentErrors } = await import('./customer-equipment.ts');
+  assert.deepEqual(newEquipmentErrors({ equipment_type: null, manufacturer: '', model: ' ', serial: '' }), ['Make is required', 'Model is required']);
+  assert.deepEqual(newEquipmentErrors({ equipment_type: null, manufacturer: 'A', model: 'B', serial: '' }), []);
+  const { client, calls } = fakeClient({ insertData: { id: 41 } });
+  const res = await addEquipmentToCustomerOrg(client as any, 2655, { equipment_type: null, manufacturer: 'Lumenis', model: 'UltraPulse', serial: '', room: 'Room 2' }, { requireSerial: false });
+  assert.deepEqual(res, { status: 'created', id: 41 });
+  const ins = calls.find((c: any) => c.op === 'insert');
+  assert.equal(ins.rows[0].customer_organization_id, 2655);
+  assert.equal(ins.rows[0].serial_number, null);
+  assert.equal(ins.rows[0].room, 'Room 2');
+  const strict = await addEquipmentToCustomerOrg(client as any, 2655, { equipment_type: null, manufacturer: 'A', model: 'B', serial: '' });
+  assert.equal(strict.status, 'skipped');
+});
+
+test('ClinicEquipmentSelect labels are translated (es/de/ar)', async () => {
+  const { GAP_STRINGS } = await import('./i18n/gap-copy.ts');
+  for (const k of ['+ Add new equipment', 'Select a clinic first', '— Select equipment —', 'No equipment on file yet', 'Add new equipment to {org}', 'Make *', 'Model *', 'Nickname / location (optional)', 'Save equipment', 'Make is required', 'Model is required', 'Equipment at this site']) {
+    const row = GAP_STRINGS[k];
+    assert.ok(row, k);
+    for (const loc of ['es', 'de', 'ar'] as const) assert.ok(row[loc] && row[loc] !== k, `${k} ${loc}`);
+  }
+});
+
+test('every clinic + equipment form uses ClinicEquipmentSelect', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { join, dirname } = await import('node:path');
+  const { fileURLToPath } = await import('node:url');
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  for (const f of ['app/service-requests/page.tsx', 'app/service-schedule/page.tsx', 'app/estimates/new/EstimateFormClient.tsx', 'app/invoices/new/InvoiceFormClient.tsx', 'app/reports/new/NewServiceReportClient.tsx']) {
+    assert.match(readFileSync(join(root, f), 'utf8'), /<ClinicEquipmentSelect/, f);
+  }
+  const sched = readFileSync(join(root, 'app/service-schedule/page.tsx'), 'utf8');
+  assert.match(sched, /equipment_id: Number\(ticketEquipmentId\)/);
+});
+
+test('blank serial is inserted as NULL', async () => {
+  const { client, calls } = fakeClient({});
+  const res = await addEquipmentToCustomerOrg(client, 7, { manufacturer: 'Candela', model: 'GentleMAX', serial: '   ' }, { requireSerial: false });
+  assert.equal(res.status, 'created');
+  const ins = calls.filter((c: any) => c.op === 'insert' && c.rows);
+  assert.equal(ins.length, 1);
+  assert.equal(ins[0].rows[0].serial_number, null);
+});
+
+test('pre-000950 NOT NULL: blank serial retries once with empty string', async () => {
+  const { client, calls } = fakeClient({ insertErrors: [{ code: '23502', message: 'null value in column "serial_number"' }] });
+  const res = await addEquipmentToCustomerOrg(client, 7, { manufacturer: 'Candela', model: 'GentleMAX', serial: '' }, { requireSerial: false });
+  assert.equal(res.status, 'created');
+  const ins = calls.filter((c: any) => c.op === 'insert' && c.rows);
+  assert.equal(ins.length, 2);
+  assert.equal(ins[1].rows[0].serial_number, '');
+});
+
+test('second blank serial collision gets a clear message', async () => {
+  const { client } = fakeClient({ insertErrors: [{ code: '23505', message: 'duplicate key equipment_unique_sn_per_customer' }] });
+  const res = await addEquipmentToCustomerOrg(client, 7, { manufacturer: 'Candela', model: 'GentleMAX', serial: '' }, { requireSerial: false });
+  assert.deepEqual(res, { status: 'failed', reason: 'duplicate_blank_serial' });
+  assert.equal(
+    addEquipmentMessage(res, 'Clinic'),
+    'This clinic already has a unit with no serial number. Enter a serial so they can be told apart.'
+  );
+  const withSn = await addEquipmentToCustomerOrg(fakeClient({ insertErrors: [{ code: '23505', message: 'dup' }] }).client, 7, { manufacturer: 'A', model: 'B', serial: 'X1' });
+  assert.equal((withSn as any).reason, 'duplicate_serial');
 });

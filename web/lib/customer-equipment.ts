@@ -86,6 +86,8 @@ export type EquipmentDraft = {
   manufacturer: string;
   model: string;
   serial: string;
+  /** Optional nickname / room / location, saved to equipment.room. */
+  room?: string | null;
 };
 
 /** The on-file row the form currently describes (serial first, else make + model with no serial). */
@@ -123,37 +125,59 @@ export type AddEquipmentResult =
 export async function addEquipmentToCustomerOrg(
   client: Client,
   customerOrgId: string | number | null | undefined,
-  draft: EquipmentDraft
+  draft: EquipmentDraft,
+  opts: { requireSerial?: boolean } = {}
 ): Promise<AddEquipmentResult> {
   if (customerOrgId == null || customerOrgId === '') return { status: 'skipped', reason: 'no_customer_org' };
+  const requireSerial = opts.requireSerial !== false;
   const manufacturer = clean(draft.manufacturer);
   const model = clean(draft.model);
   const serial = clean(draft.serial);
-  if (!manufacturer || !model || !serial) return { status: 'skipped', reason: 'incomplete' };
+  if (!manufacturer || !model || (requireSerial && !serial)) return { status: 'skipped', reason: 'incomplete' };
   if (/^__/.test(manufacturer) || /^__/.test(model)) return { status: 'skipped', reason: 'incomplete' };
 
-  const current = await loadCustomerEquipment(client, customerOrgId);
-  const hit = matchCustomerEquipment(current, draft);
-  if (hit) return { status: 'exists', id: hit.id };
+  if (serial) {
+    const current = await loadCustomerEquipment(client, customerOrgId);
+    const hit = matchCustomerEquipment(current, draft);
+    if (hit) return { status: 'exists', id: hit.id };
+  }
 
   const type = normalizeEquipmentType(draft.equipment_type);
   const row: Record<string, any> = {
     customer_organization_id: customerOrgId,
     manufacturer,
     model,
-    serial_number: serial,
+    // A blank serial is stored as NULL (migration 000950 allows NULL and only
+    // enforces uniqueness on non-blank serials). Pre-000950 DBs reject NULL, so
+    // the insert below retries with '' on a 23502.
+    serial_number: serial || null,
   };
   if (type) row.equipment_type = type;
+  const room = clean(draft.room);
+  if (room) row.room = room;
   try {
     let ins = await client.from('equipment').insert([row]).select('id').maybeSingle();
     if (ins.error && type && missingTypeColumn(ins.error)) {
       const { equipment_type: _drop, ...slim } = row;
+      delete row.equipment_type;
       ins = await client.from('equipment').insert([slim]).select('id').maybeSingle();
+    }
+    if (ins.error && room && /\broom\b/i.test(String(ins.error.message || ''))) {
+      const { room: _room, ...noRoom } = row;
+      delete row.room;
+      ins = await client.from('equipment').insert([noRoom]).select('id').maybeSingle();
+    }
+    if (ins.error && !serial && (ins.error.code === '23502' || /null value/i.test(String(ins.error.message || '')))) {
+      row.serial_number = '';
+      ins = await client.from('equipment').insert([row]).select('id').maybeSingle();
     }
     if (ins.error) {
       const msg = String(ins.error.message || '');
       if (ins.error.code === '23505' || /unique|duplicate/i.test(msg)) {
-        return { status: 'failed', reason: 'duplicate_serial' };
+        return { status: 'failed', reason: serial ? 'duplicate_serial' : 'duplicate_blank_serial' };
+      }
+      if (ins.error.code === '23502' || /null value/i.test(msg)) {
+        return { status: 'failed', reason: 'missing_field' };
       }
       if (ins.error.code === '42501' || /row-level security|permission/i.test(msg)) {
         return { status: 'failed', reason: 'not_allowed' };
@@ -179,9 +203,40 @@ export function addEquipmentMessage(result: AddEquipmentResult, orgName: string)
         ? `Not added to ${org}: manufacturer, model and serial # are all required.`
         : null;
     case 'failed':
+      if (result.reason === 'duplicate_blank_serial')
+        return 'This clinic already has a unit with no serial number. Enter a serial so they can be told apart.';
       if (result.reason === 'duplicate_serial') return `Not added to ${org}: that serial # is already on file.`;
       if (result.reason === 'not_allowed')
         return `Not added to ${org}: your company is not linked to this customer.`;
+      if (result.reason === 'missing_field')
+        return `Not added to ${org}: a required field is missing. Check make, model and serial #.`;
+      if (result.reason && result.reason !== 'insert_failed')
+        return `Could not add the equipment to ${org}: ${result.reason}`;
       return `Could not add the equipment to ${org}.`;
   }
+}
+
+/** Dropdown state for ClinicEquipmentSelect: disabled until a clinic is picked. */
+export function clinicEquipmentSelectState(
+  clinicOrgId: string | number | null | undefined,
+  list: CustomerEquipment[],
+  loading: boolean
+): { disabled: boolean; placeholder: string; options: { value: string; label: string }[] } {
+  const hasClinic = clinicOrgId != null && clinicOrgId !== '';
+  if (!hasClinic) return { disabled: true, placeholder: 'Select a clinic first', options: [] };
+  const options = list.map((eq) => ({ value: String(eq.id), label: customerEquipmentLabel(eq) }));
+  options.push({ value: NEW_EQUIPMENT_VALUE, label: '+ Add new equipment' });
+  return {
+    disabled: loading,
+    placeholder: loading ? 'Loading…' : list.length ? '— Select equipment —' : 'No equipment on file yet',
+    options,
+  };
+}
+
+/** Errors for the inline "Add new equipment" form (English keys, translated by the caller). */
+export function newEquipmentErrors(draft: EquipmentDraft): string[] {
+  const out: string[] = [];
+  if (!clean(draft.manufacturer)) out.push('Make is required');
+  if (!clean(draft.model)) out.push('Model is required');
+  return out;
 }
