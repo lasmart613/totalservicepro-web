@@ -66,6 +66,8 @@ export interface ModelDef {
   label: string;
   wavelengths: WavelengthSpec[];
   params: ModelParam[];
+  /** Optional rows offered under "+ Add parameter" only; never prefilled. Shown when a saved value exists. */
+  optionalParams?: ModelParam[];
   dyeParams?: boolean;
   wlTest?: boolean;
   gasTest?: boolean;
@@ -76,6 +78,9 @@ export interface ModelDef {
     interlocks?: string[];
   };
 }
+
+/** Cryogen canister counter: optional on Candela (e.g. DCD leak troubleshooting), never a default row (Larry, Nov 4 2026). */
+export const CANDELA_DCD_CANISTER_SHOTS = 'DCD Canister Shots';
 
 const CYNOSURE_ALEX_YAG_WAVELENGTHS: WavelengthSpec[] = [
   { name: '755 nm Alexandrite', mode: 'SP', sets: [6, 8, 10, 12, 14, 16, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' },
@@ -258,11 +263,12 @@ export const MODELS: Record<string, ModelDef> = {
       { name: '1064 nm @ 15mm spot', mode: 'SP', sets: [5, 8, 10, 15, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' }
     ],
     params: [
-      'Total System Shots', 'Handpiece Shots', 'Lamp Shots', 'DCD Canister Shots',
+      'Total System Shots', 'Handpiece Shots', 'Lamp Shots',
       'HV @ Reference Fluence (VDC)', 'Fiber Transmission %',
       'DI Water Temp (°C)', 'DI Conductivity (µS/cm)', 'DI Flow Rate (L/min)',
       'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
-    ]
+    ],
+    optionalParams: [CANDELA_DCD_CANISTER_SHOTS]
   },
   'Candela GentleYAG': {
     mfg: 'Candela',
@@ -274,11 +280,12 @@ export const MODELS: Record<string, ModelDef> = {
       { name: '1064 nm @ 18mm spot', mode: 'SP', sets: [5, 8, 10, 15, 18, 20, 25, 30, 35, 40], unit: 'J/cm²', spotMm: 18, tolLabel: 'Tol ±10%' }
     ],
     params: [
-      'Total System Shots', 'Handpiece Shots', 'Lamp Shots', 'DCD Canister Shots',
+      'Total System Shots', 'Handpiece Shots', 'Lamp Shots',
       'HV @ Reference Fluence (VDC)', 'Fiber Transmission %',
       'DI Water Temp (°C)', 'DI Conductivity (µS/cm)', 'DI Flow Rate (L/min)',
       'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
-    ]
+    ],
+    optionalParams: [CANDELA_DCD_CANISTER_SHOTS]
   },
   'Candela GentleMAX_PRO': {
     mfg: 'Candela',
@@ -337,7 +344,6 @@ export const MODELS: Record<string, ModelDef> = {
       'Total System Shots',
       'Handpiece Shots',
       'Lamp Shots',
-      'DCD Canister Shots',
       'HV @ Reference Fluence (VDC)',
       'Fiber Transmission %',
       'DI Water Temp (°C)',
@@ -347,7 +353,8 @@ export const MODELS: Record<string, ModelDef> = {
       'Bubble Sense HP Empty',
       'Bubble Sense Can Full',
       'Bubble Sense Can Empty'
-    ]
+    ],
+    optionalParams: [CANDELA_DCD_CANISTER_SHOTS]
   },
 
   PicoWay: {
@@ -1200,7 +1207,7 @@ function modelIsCandela(model: { mfg?: string; label?: string } | null | undefin
 
 /** Params the form shows for this job: model params minus removed (and minus DCD on Candela), plus custom ones. */
 export function visibleReportParams(
-  model: { params?: ModelParam[]; mfg?: string; label?: string } | null | undefined,
+  model: { params?: ModelParam[]; optionalParams?: ModelParam[]; mfg?: string; label?: string } | null | undefined,
   values: Record<string, any> | null | undefined,
   names: Array<string | null | undefined> = []
 ): ModelParam[] {
@@ -1217,6 +1224,10 @@ export function visibleReportParams(
   };
   if (model?.params?.length) {
     model.params.forEach(add);
+    // Optional rows appear only once the tech adds one (key present) or an old report saved it.
+    (model.optionalParams || []).forEach((p) => {
+      if (Object.prototype.hasOwnProperty.call(values || {}, paramStorageKey(p))) add(p);
+    });
   } else {
     Object.keys(values || {})
       .filter((k) => !/^wlt_|^gas_|^fiber_/.test(k) && !customParamKeys(values).includes(k))
@@ -1228,16 +1239,22 @@ export function visibleReportParams(
 
 /** Model params the tech removed for this job that can be added back (never DCD on Candela). */
 export function addableReportParams(
-  model: { params?: ModelParam[]; mfg?: string; label?: string } | null | undefined,
+  model: { params?: ModelParam[]; optionalParams?: ModelParam[]; mfg?: string; label?: string } | null | undefined,
   values: Record<string, any> | null | undefined,
   names: Array<string | null | undefined> = []
 ): ModelParam[] {
   const candela = modelIsCandela(model, names);
   const removed = new Set(removedParamKeys(values));
-  return (model?.params || []).filter((p) => {
+  const fromModel = (model?.params || []).filter((p) => {
     const k = paramStorageKey(p);
     return removed.has(k) && !(candela && isDcdSettingParam(k));
   });
+  const present = new Set(visibleReportParams(model, values, names).map(paramStorageKey));
+  const optional = (model?.optionalParams || []).filter((p) => {
+    const k = paramStorageKey(p);
+    return !present.has(k) && !fromModel.some((q) => paramStorageKey(q) === k);
+  });
+  return [...fromModel, ...optional];
 }
 
 /** Drop one param row for this job. Model params are remembered as removed; custom ones are deleted. */
@@ -1274,7 +1291,7 @@ export function addCustomReportParam(
   values: Record<string, any> | null | undefined,
   name: string,
   value: string,
-  ctx: { model?: { params?: ModelParam[]; mfg?: string; label?: string } | null; names?: Array<string | null | undefined> } = {}
+  ctx: { model?: { params?: ModelParam[]; optionalParams?: ModelParam[]; mfg?: string; label?: string } | null; names?: Array<string | null | undefined> } = {}
 ): AddCustomParamResult {
   const key = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
   if (!key) return { ok: false, reason: 'empty' };
@@ -1283,6 +1300,13 @@ export function addCustomReportParam(
   const current = values || {};
   const modelKeys = (ctx.model?.params || []).map(paramStorageKey);
   if (customParamKeys(current).includes(key)) return { ok: false, reason: 'duplicate' };
+  const optionalKeys = (ctx.model?.optionalParams || []).map(paramStorageKey);
+  if (optionalKeys.includes(key)) {
+    if (Object.prototype.hasOwnProperty.call(current, key) && !removedParamKeys(current).includes(key)) return { ok: false, reason: 'duplicate' };
+    const restored = restoreReportParam(current, key);
+    restored[key] = value ?? '';
+    return { ok: true, values: restored };
+  }
   if (modelKeys.includes(key)) {
     if (!removedParamKeys(current).includes(key)) return { ok: false, reason: 'duplicate' };
     const restored = restoreReportParam(current, key);

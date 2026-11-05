@@ -99,7 +99,7 @@ test('remove/restore model param persists in jsonb and hides on render', () => {
   assert.ok(!visibleReportParams(m, saved).map(paramStorageKey).includes('Lamp Shots'));
   assert.ok(!systemParameterRows({ ...saved, 'Total System Shots': '1' }, 'Candela VPYag', '').some((r) => r.key === 'Lamp Shots'));
   assert.ok(!buildServiceReportPrintHTML({ model_type: 'Candela VPYag', model_parameters: { ...saved, 'Total System Shots': '1' } } as any).includes('Lamp Shots'));
-  assert.deepEqual(addableReportParams(m, saved).map(paramStorageKey), ['Lamp Shots']);
+  assert.deepEqual(addableReportParams(m, saved).map(paramStorageKey), ['Lamp Shots', 'DCD Canister Shots']);
   const back = restoreReportParam(saved, 'Lamp Shots');
   assert.equal(REMOVED_PARAMS_KEY in back, false);
   assert.equal(back['Lamp Shots'], '');
@@ -134,3 +134,30 @@ test('non-Candela lasers are unchanged: DCD-named custom fields allowed and rend
   assert.deepEqual(visibleReportParams(m, {}).map(paramStorageKey), m.params.map(paramStorageKey));
   assert.equal(rows.filter((x) => x.value === '—').length, m.params.length - 1);
 });
+
+for (const model of ['Candela VPYag', 'Candela GentleYAG', 'Candela GentleMAX_PRO']) {
+  test(`${model}: DCD Canister Shots is optional, not a default row`, () => {
+    const m = MODELS[model];
+    assert.ok(!m.params.map(paramStorageKey).includes('DCD Canister Shots'));
+    const fresh = mergeModelParamValues(m, {});
+    assert.ok(!('DCD Canister Shots' in fresh));
+    assert.ok(!visibleReportParams(m, fresh).map(paramStorageKey).includes('DCD Canister Shots'));
+    assert.ok(addableReportParams(m, fresh).map(paramStorageKey).includes('DCD Canister Shots'));
+    const added = restoreReportParam(fresh, 'DCD Canister Shots');
+    assert.ok(visibleReportParams(m, added).map(paramStorageKey).includes('DCD Canister Shots'));
+    assert.ok(!addableReportParams(m, added).map(paramStorageKey).includes('DCD Canister Shots'));
+    const removed = removeReportParam({ ...added, 'DCD Canister Shots': '5' }, 'DCD Canister Shots');
+    assert.ok(!visibleReportParams(m, removed).map(paramStorageKey).includes('DCD Canister Shots'));
+    assert.ok(addableReportParams(m, removed).map(paramStorageKey).includes('DCD Canister Shots'));
+    const typed = addCustomReportParam(fresh, 'DCD Canister Shots', '7', { model: m });
+    assert.ok(typed.ok && typed.values['DCD Canister Shots'] === '7' && !typed.values[CUSTOM_PARAMS_KEY]);
+  });
+  test(`${model}: old saved Canister Shots still shows on form, view and print`, () => {
+    const m = MODELS[model];
+    assert.ok(visibleReportParams(m, OLD_DCD).map(paramStorageKey).includes('DCD Canister Shots'));
+    assert.ok(systemParameterRows(OLD_DCD, model, model).some((r) => r.key === 'DCD Canister Shots' && r.value === '300'));
+    const html = buildServiceReportPrintHTML({ model_type: model, equipment_name: model, model_parameters: OLD_DCD } as any);
+    assert.match(html, /DCD Canister Shots/);
+    assert.doesNotMatch(html, /DCD (Delay|Duration)|Pre-spray|Post-spray|Cryogen/i);
+  });
+}
