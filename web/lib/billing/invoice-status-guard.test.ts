@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   applyInvoiceStatusGuard,
-  invoiceDraftSaveLabel,
+  invoiceDraftLockedHint,
   invoiceStatusBlocksDraftDowngrade,
   preserveInvoiceDeliveryFields,
 } from './invoice-status-guard.ts';
@@ -65,7 +65,8 @@ test('sent → draft is blocked and sent_at / delivery / email-sent stay', () =>
   assert.equal(data.email_id, 're_123');
   assert.deepEqual(data.line_items, [{ description: 'service', qty: 1 }]);
   assert.equal(data.custEmail, 'clinic@example.com');
-  assert.equal(invoiceDraftSaveLabel('sent'), 'Save');
+  assert.equal(invoiceDraftLockedHint('sent'), 'Already sent. Edits are saved without changing status');
+  assert.equal(invoiceDraftLockedHint('SENT'), 'Already sent. Edits are saved without changing status');
   assert.equal(invoiceStatusBlocksDraftDowngrade('sent'), true);
 
   for (const existing of ['SENT', 'overdue', 'unpaid', 'invoiced']) {
@@ -86,9 +87,9 @@ test('draft → draft is allowed', () => {
   assert.equal(guarded.payload.status, 'draft');
   assert.equal(guarded.payload.description, 'handpiece notes');
   assert.equal(guarded.payload.sent_at, null);
-  assert.equal(invoiceDraftSaveLabel('draft'), 'Save Draft');
-  assert.equal(invoiceDraftSaveLabel(''), 'Save Draft');
-  assert.equal(invoiceDraftSaveLabel(null), 'Save Draft');
+  assert.equal(invoiceStatusBlocksDraftDowngrade('draft'), false);
+  assert.equal(invoiceStatusBlocksDraftDowngrade(''), false);
+  assert.equal(invoiceStatusBlocksDraftDowngrade(null), false);
 
   const blank = applyInvoiceStatusGuard(draftPayload(), null, 'draft');
   assert.equal(blank.downgradeBlocked, false);
@@ -136,8 +137,14 @@ test('paid, partial, and void are not downgraded to draft', () => {
     assert.equal(data.sent_at, sentAt, existing);
     assert.equal(data.email_sent, true, existing);
   }
-  assert.equal(invoiceDraftSaveLabel('paid'), 'Save');
-  assert.equal(invoiceDraftSaveLabel('void'), 'Save');
+  assert.equal(invoiceDraftLockedHint('paid'), 'Already paid. Edits are saved without changing status');
+  assert.equal(
+    invoiceDraftLockedHint('partially_paid'),
+    'Already partially paid. Edits are saved without changing status'
+  );
+  assert.equal(invoiceDraftLockedHint('partial'), 'Already partially paid. Edits are saved without changing status');
+  assert.equal(invoiceDraftLockedHint('void'), 'Already void. Edits are saved without changing status');
+  assert.equal(invoiceDraftLockedHint('voided'), 'Already void. Edits are saved without changing status');
 });
 
 test('sent → paid and paid → void are not treated as a draft downgrade', () => {
@@ -173,7 +180,7 @@ test('preserveInvoiceDeliveryFields puts back cleared send keys and keeps line e
   assert.equal(Object.prototype.hasOwnProperty.call(next, 'note'), false);
 });
 
-test('invoice form save uses the guard and Save Draft becomes Save after send', () => {
+test('invoice form disables Save Draft after send and saves edits without drafting', () => {
   const src = readFileSync(join(here, '../../app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
   const saveStart = src.indexOf('async function saveInvoice');
   const saveEnd = src.indexOf('function buildInvoiceEmailHtml');
@@ -181,12 +188,22 @@ test('invoice form save uses the guard and Save Draft becomes Save after send', 
   const guardAt = saveFn.indexOf('applyInvoiceStatusGuard');
   const writeAt = saveFn.indexOf('writeWithColumnRetry');
   assert.ok(guardAt > 0 && writeAt > guardAt, 'guard runs before the service_invoices write');
+  assert.match(saveFn, /preserveStatus/);
   assert.match(saveFn, /guarded\.payload/);
   assert.match(saveFn, /setStatus\(guarded\.status\)/);
   assert.match(saveFn, /guarded\.downgradeBlocked/);
-  assert.match(src, /t\(invoiceDraftSaveLabel\(status\)\)/);
-  assert.match(src, /Saving keeps the current status/);
   assert.doesNotMatch(saveFn, /setStatus\(nextStatus\)/);
+  assert.match(src, /draftLocked \? invoiceDraftLockedHint\(status\)/);
+  assert.match(src, /\{t\('Save Draft'\)\}/);
+  assert.match(src, /aria-disabled="true"/);
+  assert.match(src, /title=\{t\(draftLockedHint\)\}/);
+  assert.match(src, /aria-label=\{t\(draftLockedHint\)\}/);
+  assert.match(src, /t\('Save changes'\)/);
+  assert.match(src, /saveInvoice\(status, \{ preserveStatus: true \}\)/);
+  assert.doesNotMatch(src, /invoiceDraftSaveLabel/);
+  const lockedButton = src.slice(src.indexOf('{draftLocked && ('), src.indexOf("{draftLocked && !voided && ("));
+  assert.match(lockedButton, /disabled/);
+  assert.doesNotMatch(lockedButton, /saveInvoice\('draft'\)/);
 });
 
 test('finalized-status migration keeps status and does not rewrite invoice rows', () => {

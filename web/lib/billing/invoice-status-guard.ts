@@ -56,8 +56,17 @@ export function invoiceStatusBlocksDraftDowngrade(status: unknown): boolean {
   return existing !== '' && existing !== 'draft';
 }
 
-export function invoiceDraftSaveLabel(status: unknown): 'Save' | 'Save Draft' {
-  return invoiceStatusBlocksDraftDowngrade(status) ? 'Save' : 'Save Draft';
+/** Tooltip on the disabled Save Draft button. Save changes is the edit path. */
+export function invoiceDraftLockedHint(status: unknown): string {
+  const existing = normalizeInvoiceStatus(status);
+  if (existing === 'paid') return 'Already paid. Edits are saved without changing status';
+  if (existing === 'partially_paid' || existing === 'partial') {
+    return 'Already partially paid. Edits are saved without changing status';
+  }
+  if (existing === 'void' || existing === 'voided' || existing === 'cancelled' || existing === 'canceled') {
+    return 'Already void. Edits are saved without changing status';
+  }
+  return 'Already sent. Edits are saved without changing status';
 }
 
 export function resolveInvoiceSaveStatus(

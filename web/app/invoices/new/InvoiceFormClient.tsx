@@ -44,7 +44,7 @@ import {
 import { invoiceDataForSave, loadStoredInvoiceData } from '@/lib/billing/invoice-form-data';
 import {
   applyInvoiceStatusGuard,
-  invoiceDraftSaveLabel,
+  invoiceDraftLockedHint,
   invoiceStatusBlocksDraftDowngrade,
   resolveInvoiceSaveStatus,
 } from '@/lib/billing/invoice-status-guard';
@@ -590,7 +590,7 @@ export default function InvoiceFormClient() {
 
   async function saveInvoice(
     nextStatus: string,
-    opts?: { quiet?: boolean; deferredReleased?: boolean }
+    opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -668,7 +668,11 @@ export default function InvoiceFormClient() {
         custContact,
       };
 
-      const statusDecision = resolveInvoiceSaveStatus(status, nextStatus);
+      // Save changes on a finalized invoice uses the draft-downgrade guard so
+      // status is omitted from the write. The button itself is not Save Draft.
+      const requestedStatus =
+        opts?.preserveStatus && invoiceStatusBlocksDraftDowngrade(status) ? 'draft' : nextStatus;
+      const statusDecision = resolveInvoiceSaveStatus(status, requestedStatus);
       const previousInvoiceData =
         statusDecision.downgradeBlocked && existingId
           ? await loadStoredInvoiceData(supabase, existingId)
@@ -701,8 +705,8 @@ export default function InvoiceFormClient() {
         payload.created_at = new Date().toISOString();
       }
 
-      // Save Draft after send keeps the stored status. Field edits still write.
-      const guarded = applyInvoiceStatusGuard(payload, status, nextStatus, previousInvoiceData);
+      // A draft request after send keeps the stored status. Field edits still write.
+      const guarded = applyInvoiceStatusGuard(payload, status, requestedStatus, previousInvoiceData);
 
       const result = await writeWithColumnRetry(
         supabase,
@@ -988,6 +992,8 @@ export default function InvoiceFormClient() {
   }
 
   const voided = isVoidInvoiceStatus(status);
+  const draftLocked = invoiceStatusBlocksDraftDowngrade(status);
+  const draftLockedHint = draftLocked ? invoiceDraftLockedHint(status) : '';
   const voidable =
     Boolean(savedId) && canVoidInvoice({ status, amount_paid: received, role: callerRole }).ok;
 
@@ -1524,14 +1530,39 @@ export default function InvoiceFormClient() {
 
         <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
-          {!voided && (
+          {!draftLocked && (
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
             disabled={saving || emailing}
             onClick={() => saveInvoice('draft')}
           >
-            {saving ? t('Saving…') : t(invoiceDraftSaveLabel(status))}
+            {saving ? t('Saving…') : t('Save Draft')}
+          </button>
+          )}
+          {draftLocked && (
+          <span className="inline-flex" title={t(draftLockedHint)}>
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[100px]"
+              disabled
+              aria-disabled="true"
+              title={t(draftLockedHint)}
+              aria-label={t(draftLockedHint)}
+              aria-describedby="invoice-draft-locked-hint"
+            >
+              {t('Save Draft')}
+            </button>
+          </span>
+          )}
+          {draftLocked && !voided && (
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[120px]"
+            disabled={saving || emailing}
+            onClick={() => saveInvoice(status, { preserveStatus: true })}
+          >
+            {saving ? t('Saving…') : t('Save changes')}
           </button>
           )}
           <button
@@ -1639,9 +1670,9 @@ export default function InvoiceFormClient() {
             </div>
           </div>
         )}
-        {invoiceStatusBlocksDraftDowngrade(status) && !voided && (
-          <p className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
-            {t('Saving keeps the current status. A sent, paid, or void invoice is not returned to draft.')}
+        {draftLocked && (
+          <p id="invoice-draft-locked-hint" className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
+            {t(draftLockedHint)}
           </p>
         )}
         <p className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
