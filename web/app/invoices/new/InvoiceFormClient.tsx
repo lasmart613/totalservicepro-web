@@ -43,6 +43,12 @@ import {
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave, loadStoredInvoiceData } from '@/lib/billing/invoice-form-data';
 import {
+  heldInvoiceNumber,
+  invoiceEmailFailureNotice,
+  invoiceSentStamp,
+  readStoredInvoiceNumber,
+} from '@/lib/billing/invoice-finalize';
+import {
   applyInvoiceStatusGuard,
   invoiceDraftLockedHint,
   invoiceStatusBlocksDraftDowngrade,
@@ -78,6 +84,7 @@ export default function InvoiceFormClient() {
   const [userOrgId, setUserOrgId] = useState<string | number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
+  const allocatedNumberRef = useRef('');
   const [status, setStatus] = useState('draft');
   const [callerRole, setCallerRole] = useState('');
   const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
@@ -256,9 +263,12 @@ export default function InvoiceFormClient() {
       setTax(Number(data.tax) || 0);
       if (data.total != null) setTotalOverride(Number(data.total));
       const idata = parseJsonField(data.invoice_data);
-      setDocNumber(
-        data.invoice_number || idata.invoice_number || idata.invNumber || ''
+      const loadedNumber = heldInvoiceNumber(
+        data.invoice_number || idata.invoice_number || idata.invNumber || '',
+        ''
       );
+      allocatedNumberRef.current = loadedNumber;
+      setDocNumber(loadedNumber);
       cascade.hydrate({
         equipmentType: idata.equipment_type || idata.equipmentType,
         manufacturer: idata.manufacturer || '',
@@ -590,7 +600,7 @@ export default function InvoiceFormClient() {
 
   async function saveInvoice(
     nextStatus: string,
-    opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean }
+    opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean; stampSent?: boolean }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -607,7 +617,10 @@ export default function InvoiceFormClient() {
           return null;
         }
       }
-      let invNum = editIdParam ? docNumber : '';
+      // Reuse a number already chosen for this form. Finalize saves the draft
+      // and then saves again before React applies setDocNumber or the URL id,
+      // so a fresh allocation on that second save skipped a number.
+      let invNum = heldInvoiceNumber(docNumber, allocatedNumberRef.current);
       if (!invNum && userOrgId) {
         const dated = invoiceDate || orgTodayRef.current;
         invNum = await allocateDocNumber(supabase, {
@@ -615,11 +628,13 @@ export default function InvoiceFormClient() {
           kind: 'INV',
           date: dated,
         });
-        setDocNumber(invNum);
       }
+      invNum = heldInvoiceNumber(invNum, '');
       if (!invNum) {
         throw new Error('Could not allocate an invoice number. Try again.');
       }
+      allocatedNumberRef.current = invNum;
+      setDocNumber(invNum);
 
       const items = lineItems.filter(
         (li) => li.part_number || li.description || li.qty || li.unit_price
@@ -673,6 +688,11 @@ export default function InvoiceFormClient() {
       const requestedStatus =
         opts?.preserveStatus && invoiceStatusBlocksDraftDowngrade(status) ? 'draft' : nextStatus;
       const statusDecision = resolveInvoiceSaveStatus(status, requestedStatus);
+      const sentStamp = invoiceSentStamp({
+        requestedStatus,
+        stampSent: opts?.stampSent,
+        now: new Date().toISOString(),
+      });
       const previousInvoiceData =
         statusDecision.downgradeBlocked && existingId
           ? await loadStoredInvoiceData(supabase, existingId)
@@ -697,6 +717,7 @@ export default function InvoiceFormClient() {
         paid_at: nextStatus === 'paid' ? new Date().toISOString() : null,
         payment_method: depositMethod || null,
         invoice_number: invNum,
+        ...sentStamp,
         invoice_data: await invoiceDataForSave(supabase, existingId, formInvoiceData),
       };
 
@@ -717,6 +738,13 @@ export default function InvoiceFormClient() {
       if (result.error) throw result.error;
 
       if (result.id) {
+        const storedNumber = await readStoredInvoiceNumber(supabase, result.id);
+        const durable = heldInvoiceNumber(storedNumber, invNum);
+        if (durable) {
+          invNum = durable;
+          allocatedNumberRef.current = durable;
+          setDocNumber(durable);
+        }
         savedIdRef.current = result.id;
         setSavedId(result.id);
         setStatus(guarded.status);
@@ -771,7 +799,11 @@ export default function InvoiceFormClient() {
     }
   }
 
-  function buildInvoiceEmailHtml(themeScope: DocThemeScope = 'email') {
+  function currentInvoiceNumber(): string {
+    return heldInvoiceNumber(docNumber, allocatedNumberRef.current);
+  }
+
+  function buildInvoiceEmailHtml(themeScope: DocThemeScope = 'email', numberOverride?: string) {
     return buildInvoiceHtml({
       company,
       customer: {
@@ -784,7 +816,7 @@ export default function InvoiceFormClient() {
         phone: custPhone,
         email: custEmail,
       },
-      invNumber: docNumber || 'Draft',
+      invNumber: heldInvoiceNumber(numberOverride, currentInvoiceNumber()) || 'Draft',
       invoiceDate: invoiceDate || orgTodayRef.current,
       dueDate: dueDate || undefined,
       description: description || undefined,
@@ -832,6 +864,9 @@ export default function InvoiceFormClient() {
       return;
     }
     const alreadyFinal = invoiceStatusBlocksDraftDowngrade(status);
+    const failureNotice = alreadyFinal
+      ? t('Email was not sent. The invoice status was not changed.')
+      : t('Email was not sent. Invoice remains a draft. Fix email/Resend domain or use “Mark sent without email”.');
     setEmailing(true);
     try {
       const id = await saveInvoice('draft', { quiet: true });
@@ -845,14 +880,15 @@ export default function InvoiceFormClient() {
         return;
       }
 
-      const html = buildInvoiceEmailHtml();
+      const invoiceNumber = currentInvoiceNumber();
+      const html = buildInvoiceEmailHtml('email', invoiceNumber);
       const result = await sendBillingDocEmail({
         kind: 'invoice',
         accessToken: session.access_token,
         payload: {
           invoice_id: id,
           to_email: custEmail.trim() || undefined,
-          invoice_number: docNumber,
+          invoice_number: invoiceNumber,
           balance_due: collectable.remainingOwed,
           due_now: collectable.stripeAmount,
           total,
@@ -865,12 +901,7 @@ export default function InvoiceFormClient() {
       });
 
       if (!result.emailSent) {
-        toast.error(
-          result.error ||
-            (alreadyFinal
-              ? t('Email was not sent. The invoice status was not changed.')
-              : 'Email was not sent. Invoice remains a draft. Fix email/Resend domain or use “Mark sent without email”.')
-        );
+        toast.error(invoiceEmailFailureNotice(failureNotice, result.error));
         if (result.needsConfig) {
           toast.message(
             'Server needs RESEND_API_KEY and a verified From domain (medicalrepairnetwork.com).'
@@ -880,8 +911,9 @@ export default function InvoiceFormClient() {
         return;
       }
 
-      // Only now mark sent
-      await saveInvoice('sent', { quiet: true });
+      // Mark sent only after the provider accepts the message.
+      // sent_at is the service_invoices column from 000955 (not invoice_data).
+      await saveInvoice('sent', { quiet: true, stampSent: true });
       if (result.connectRequired) {
         toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
         toast.message(`Invoice emailed to ${result.to} without a card-payment link.`);
@@ -893,6 +925,9 @@ export default function InvoiceFormClient() {
           ? ` (${result.stripeSkippedReason})`
           : '';
       toast.success(`Invoice emailed to ${result.to}.${payNote}`);
+    } catch (err: unknown) {
+      const detail = err instanceof Error ? err.message : '';
+      toast.error(invoiceEmailFailureNotice(failureNotice, detail));
     } finally {
       setEmailing(false);
     }
@@ -918,7 +953,7 @@ export default function InvoiceFormClient() {
         payload: {
           invoice_id: savedId,
           to_email: custEmail.trim() || undefined,
-          invoice_number: docNumber,
+          invoice_number: currentInvoiceNumber(),
           balance_due: collectable.remainingOwed,
           due_now: collectable.stripeAmount,
           total,
@@ -988,7 +1023,7 @@ export default function InvoiceFormClient() {
     ) {
       return;
     }
-    saveInvoice('sent');
+    saveInvoice('sent', { stampSent: true });
   }
 
   const voided = isVoidInvoiceStatus(status);

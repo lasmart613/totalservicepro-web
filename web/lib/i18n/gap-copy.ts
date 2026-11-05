@@ -1267,6 +1267,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Salvar mantém o status atual. Uma fatura enviada, paga ou anulada não volta a rascunho.',
     'الحفظ يُبقي الحالة الحالية. الفاتورة المُرسلة أو المدفوعة أو الملغاة لا تعود مسودة.',
   ),
+  'Email was not sent. Invoice remains a draft. Fix email/Resend domain or use “Mark sent without email”.': row(
+    'ایمیل ارسال نشد. فاکتور پیش‌نویس می‌ماند. ایمیل یا دامنه Resend را درست کنید، یا از «علامت ارسال بدون ایمیل» استفاده کنید.',
+    'No se envió el correo. La factura sigue en borrador. Corrija el correo o el dominio de Resend, o use “Marcar enviada sin correo”.',
+    'L’e-mail n’a pas été envoyé. La facture reste un brouillon. Corrigez l’e-mail ou le domaine Resend, ou utilisez « Marquer comme envoyée sans e-mail ».',
+    'הדוא״ל לא נשלח. החשבונית נשארת טיוטה. תקנו את הדוא״ל או את דומיין Resend, או השתמשו ב״סמן כנשלח בלי דוא״ל״.',
+    'L’email non è stata inviata. La fattura resta una bozza. Correggi l’email o il dominio Resend, oppure usa “Segna come inviata senza email”.',
+    'Die E-Mail wurde nicht gesendet. Die Rechnung bleibt ein Entwurf. Korrigiere die E-Mail oder die Resend-Domain, oder nutze „Als gesendet markieren (ohne E-Mail)“.',
+    'O e-mail não foi enviado. A fatura continua como rascunho. Corrija o e-mail ou o domínio do Resend, ou use “Marcar como enviada sem e-mail”.',
+    'لم يُرسَل البريد. تبقى الفاتورة مسودة. صحّحوا البريد أو نطاق Resend، أو استخدموا «تعليم كمُرسلة بدون بريد».',
+  ),
   'Email was not sent. The invoice status was not changed.': row(
     'ایمیل ارسال نشد. وضعیت فاکتور تغییر نکرد.',
     'El correo no se envió. El estado de la factura no cambió.',

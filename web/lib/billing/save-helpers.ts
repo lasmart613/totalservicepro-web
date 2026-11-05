@@ -89,6 +89,28 @@ export function lineItemsSubtotal(items: LineItem[]): number {
 }
 
 /**
+ * Column named by a schema-cache / "does not exist" error, or by the older
+ * "column X of relation" match used for other drift.
+ *
+ * service_invoices.sent_at is added by migration 000955. Until that column
+ * exists, PostgREST says it cannot find sent_at and this retry omits it so
+ * the status write can finish. After 000955, that missing-column error stops.
+ * A constraint error that merely mentions sent_at must not drop the stamp.
+ */
+export function columnToOmitOnSchemaRetry(message: string): string | null {
+  const m = String(message || '');
+  const col =
+    m.match(/Could not find the '([^']+)' column/i)?.[1] ||
+    m.match(/column ["']?(\w+)["']? of relation/i)?.[1] ||
+    null;
+  if (!col) return null;
+  if (col === 'sent_at' && !/could not find the|schema cache|does not exist/i.test(m)) {
+    return null;
+  }
+  return col;
+}
+
+/**
  * Insert/update with retry stripping columns PostgREST reports as missing.
  * Matches NewServiceReportClient / Android stripOptionalCols pattern.
  */
@@ -114,9 +136,7 @@ export async function writeWithColumnRetry(
         return { id: rid, error: null };
       }
       const m = String(error.message || '');
-      const col =
-        m.match(/Could not find the '([^']+)' column/i)?.[1] ||
-        m.match(/column ["']?(\w+)["']? of relation/i)?.[1];
+      const col = columnToOmitOnSchemaRetry(m);
       if (col && col in body) {
         console.warn(`${table} missing column, retry without:`, col);
         delete body[col];
@@ -176,9 +196,7 @@ export async function writeWithColumnRetry(
       return { id: rid, error: null };
     }
     const m = String(error.message || '');
-    const col =
-      m.match(/Could not find the '([^']+)' column/i)?.[1] ||
-      m.match(/column ["']?(\w+)["']? of relation/i)?.[1];
+    const col = columnToOmitOnSchemaRetry(m);
     if (col && col in body) {
       console.warn(`${table} missing column, retry without:`, col);
       delete body[col];
