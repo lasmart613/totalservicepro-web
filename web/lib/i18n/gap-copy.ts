@@ -10761,4 +10761,14 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Não foi possível adicionar o equipamento.',
     'تعذّرت إضافة المعدات.',
   ),
+  'When you send this invoice, your customer will have a button to pay online through your Stripe account.': row(
+    'وقتی این فاکتور را بفرستی، مشتری‌ات دکمه‌ای برای پرداخت آنلاین از طریق حساب Stripe تو خواهد داشت.',
+    'Cuando envíe esta factura, su cliente tendrá un botón para pagar en línea a través de su cuenta de Stripe.',
+    'Lorsque vous envoyez cette facture, votre client aura un bouton pour payer en ligne via votre compte Stripe.',
+    'כשתשלחו את החשבונית, ללקוח יהיה כפתור לתשלום מקוון דרך חשבון Stripe שלכם.',
+    'Quando invii questa fattura, il cliente avrà un pulsante per pagare online tramite il tuo account Stripe.',
+    'Wenn Sie diese Rechnung senden, erhält Ihr Kunde eine Schaltfläche, um online über Ihr Stripe-Konto zu bezahlen.',
+    'Quando você enviar esta fatura, seu cliente terá um botão para pagar online pela sua conta Stripe.',
+    'عند إرسال هذه الفاتورة، سيظهر لعميلك زر للدفع عبر الإنترنت من خلال حساب Stripe الخاص بك.',
+  ),
 };

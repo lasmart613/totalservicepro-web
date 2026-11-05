@@ -1493,7 +1493,7 @@ export default function InvoiceFormClient() {
         </section>
 
         <div className="mb-4">
-          <StripeConnectCard returnTo="/invoices/new" />
+          <StripeConnectCard returnTo="/invoices/new" whenConnected="invoice" />
         </div>
 
         {voided && (

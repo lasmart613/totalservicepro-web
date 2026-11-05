@@ -76,6 +76,19 @@ export function emptyPayoutAccount(): PayoutAccount {
   };
 }
 
+/**
+ * Shop can take a card charge on its own Stripe account.
+ * Same rule as connectStatusPayload.connected and routeSellerCardPayment:
+ * a normalized account id and charges enabled. Bank payouts may still be
+ * off; those charges are marked held until Stripe can pay the bank.
+ * The invoice form uses this flag to replace Connect Stripe with the
+ * pay-online note.
+ */
+export function isStripeConnectReady(account: PayoutAccount | null | undefined): boolean {
+  if (!account) return false;
+  return Boolean(normalizeStripeAccountId(account.accountId) && account.chargesEnabled);
+}
+
 /** Connected account ids only. Rejects blank, platform secrets, and placeholders. */
 export function normalizeStripeAccountId(raw: unknown): string | null {
   const id = String(raw ?? '').trim();
