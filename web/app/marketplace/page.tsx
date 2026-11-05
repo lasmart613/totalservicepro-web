@@ -132,6 +132,14 @@ export default function Marketplace() {
             <p className="text-sm text-[var(--text3)] flex-1">{t('Parts listed for sale by suppliers and companies')}</p>
           </PublicLink>
 
+          <PublicLink href="/marketplace/wanted" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">🔎</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Wanted')}</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">
+              {t('Buyers post the laser or medical aesthetic equipment they are looking for. These listings are free.')}
+            </p>
+          </PublicLink>
+
           <PublicLink href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🖥️</div>
             <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Used systems')}</h3>
@@ -199,6 +207,8 @@ export default function Marketplace() {
 
         <div className="mt-10 text-xs text-[var(--text3)]">
           {t('Only items that have been actively listed for sale appear in the Marketplace. The full Parts Catalog (reference) is available in the Tech Hub.')}
+          {' '}
+          {t('Wanted posts are requests to buy equipment. They are free and are not paid ads.')}
         </div>
       </div>
     </div>

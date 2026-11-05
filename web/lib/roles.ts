@@ -221,6 +221,14 @@ export function canPostMarketplaceNeed(role?: RoleLike, orgType?: OrgTypeLike): 
 }
 
 /**
+ * Post a free Wanted listing (equipment the org is looking to buy).
+ * Any marketplace persona with an org may post. Not a paid plan.
+ */
+export function canPostWanted(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  return isOwnerish(role, orgType) || isSupplier(role, orgType) || isServiceCompany(role, orgType);
+}
+
+/**
  * Accept bids on own posts (facility owners + suppliers).
  */
 export function canAcceptBids(role?: RoleLike, orgType?: OrgTypeLike): boolean {

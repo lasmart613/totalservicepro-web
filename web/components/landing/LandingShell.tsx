@@ -34,6 +34,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           <PublicLink href="/directory">{t('Directory')}</PublicLink>
           <PublicLink href="/marketplace">{t('Marketplace')}</PublicLink>
           <PublicLink href="/marketplace/parts">{t('Parts')}</PublicLink>
+          <PublicLink href="/marketplace/wanted">{t('Wanted')}</PublicLink>
           <PublicLink href="/plans">{t('Free Plan')}</PublicLink>
           <LanguageSelector variant="landing" />
         </nav>
@@ -67,6 +68,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           <PublicLink href="/directory">{t('Directory')}</PublicLink>
           <PublicLink href="/marketplace">{t('Marketplace')}</PublicLink>
           <PublicLink href="/marketplace/parts">{t('Parts')}</PublicLink>
+          <PublicLink href="/marketplace/wanted">{t('Wanted')}</PublicLink>
           <PublicLink href="/login">{t('Sign in')}</PublicLink>
           <PublicLink href="/signup">{t('Register for Total Service Pro')}</PublicLink>
           <PublicLink href="/forgot-password">{t('Forgot password')}</PublicLink>
