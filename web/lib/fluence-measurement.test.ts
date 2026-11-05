@@ -277,3 +277,62 @@ test('print HTML shows MPX labels, pump shots, fluence result, and legacy rows',
   assert.match(html, /-36\.3%/);
   assert.match(html, /Error %/);
 });
+
+test("Larry's example: 10.3 J at 15 mm spot vs set 6 J/cm² → 5.83 J/cm², −2.9%, PASS", () => {
+  let r = newFluenceMeasurement({ spotSizeMm: '15', setFluence: '6' });
+  r = applyMeasurementEdit(r, 'readingKind', 'energy');
+  assert.equal(r.measuredMode, 'fluence');
+  assert.equal(r.measuredUnit, 'J');
+  assert.equal(r.setUnit, 'J/cm²');
+  r = applyMeasurementEdit(r, 'measuredValue', '10.3');
+  assert.ok(Math.abs((circularSpotAreaCm2(15) as number) - 1.767) < 1e-3);
+  const v = viewMeasurement(r);
+  assert.equal(v.result, '5.83 J/cm²');
+  assert.equal(v.error, '-2.9%');
+  assert.equal(v.pass, true);
+  assert.equal(v.readingKind, 'energy', 'energy chip, not fluence');
+  assert.equal(v.testKind, 'fluence');
+  assert.equal(v.tolerance, '±10%');
+  assert.equal(v.measured, '10.30 J');
+  assert.equal(v.spot, '15 mm');
+  // mJ reading converts the same way
+  const mj = viewMeasurement(applyMeasurementEdit(r, 'measuredUnit', 'mJ') && { ...r, measuredUnit: 'mJ', measuredValue: '10300' });
+  assert.equal(mj.result, '5.83 J/cm²');
+});
+
+test('chip follows the reading unit; fluence chip only for J/cm² readings', () => {
+  let r = newFluenceMeasurement({ spotSizeMm: '10', setFluence: '1' });
+  assert.equal(viewMeasurement(r).readingKind, 'fluence');
+  r = applyMeasurementEdit(r, 'measuredUnit', 'J');
+  assert.equal(viewMeasurement(r).readingKind, 'energy');
+  r = applyMeasurementEdit(r, 'readingKind', 'fluence');
+  assert.equal(r.measuredUnit, 'J/cm²');
+  assert.equal(viewMeasurement(r).readingKind, 'fluence');
+  // energy reading with a J set value is a plain energy test
+  r = applyMeasurementEdit(applyMeasurementEdit(r, 'readingKind', 'energy'), 'setUnit', 'J');
+  assert.equal(r.measuredMode, 'energy');
+  assert.equal(viewMeasurement(r).spot, '—');
+  // and switching the set back to J/cm² makes it a fluence test read in J again
+  r = applyMeasurementEdit(r, 'setUnit', 'J/cm²');
+  assert.equal(r.measuredMode, 'fluence');
+  assert.equal(r.measuredUnit, 'J');
+});
+
+test('wavelength shows the wavelength only; old @ spot values are stripped', async () => {
+  const { wavelengthLabel, wavelengthOptionNames } = await import('./laser-pulse-modes.ts');
+  assert.equal(wavelengthLabel('1064 nm @ 3mm spot'), '1064 nm');
+  assert.equal(wavelengthLabel('1064 nm Nd:YAG @ 10mm'), '1064 nm Nd:YAG');
+  assert.equal(wavelengthLabel('532 nm (SP)'), '532 nm (SP)');
+  assert.deepEqual(wavelengthOptionNames(['1064 nm @ 3mm spot', '1064 nm @ 6mm spot']), ['1064 nm']);
+  const old = { wavelength: '1064 nm @ 6mm spot', measuredMode: 'fluence', spotSizeMm: '6', setFluence: '10', measuredValue: '10' };
+  assert.equal(viewMeasurement(old).wavelength, '1064 nm');
+  assert.equal(hydrateMeasurement(old).wavelength, '1064 nm');
+  assert.equal(viewMeasurement({ wavelength: '1064 nm @ 3mm spot', setting: '5', measured: '5', unit: 'W' }).wavelength, '1064 nm');
+  const html = buildServiceReportPrintHTML({ power_measurements: [old] } as any);
+  assert.doesNotMatch(html, /@ 6mm/);
+  // picking a stripped wavelength still sets that channel's default spot
+  const model = { wavelengths: [{ name: '1064 nm @ 12mm spot', spotMm: 12, unit: 'J/cm²', sets: [5] }] };
+  const r = applyMeasurementEdit(newFluenceMeasurement(), 'wavelength', '1064 nm', model);
+  assert.equal(r.wavelength, '1064 nm');
+  assert.equal(r.spotSizeMm, '12');
+});

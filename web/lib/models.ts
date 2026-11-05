@@ -66,6 +66,8 @@ export interface ModelDef {
   label: string;
   wavelengths: WavelengthSpec[];
   params: ModelParam[];
+  /** Optional rows offered under "+ Add parameter" only; never prefilled. Shown when a saved value exists. */
+  optionalParams?: ModelParam[];
   dyeParams?: boolean;
   wlTest?: boolean;
   gasTest?: boolean;
@@ -76,6 +78,9 @@ export interface ModelDef {
     interlocks?: string[];
   };
 }
+
+/** Cryogen canister counter: optional on Candela (e.g. DCD leak troubleshooting), never a default row (Larry, Nov 4 2026). */
+export const CANDELA_DCD_CANISTER_SHOTS = 'DCD Canister Shots';
 
 const CYNOSURE_ALEX_YAG_WAVELENGTHS: WavelengthSpec[] = [
   { name: '755 nm Alexandrite', mode: 'SP', sets: [6, 8, 10, 12, 14, 16, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' },
@@ -258,12 +263,12 @@ export const MODELS: Record<string, ModelDef> = {
       { name: '1064 nm @ 15mm spot', mode: 'SP', sets: [5, 8, 10, 15, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' }
     ],
     params: [
-      'Total System Shots', 'Handpiece Shots', 'Lamp Shots', 'DCD Canister Shots',
-      'DCD Delay Set (ms)', 'DCD Delay Measured (ms)', 'DCD Duration Set (ms)', 'DCD Duration Measured (ms)',
+      'Total System Shots', 'Handpiece Shots', 'Lamp Shots',
       'HV @ Reference Fluence (VDC)', 'Fiber Transmission %',
       'DI Water Temp (°C)', 'DI Conductivity (µS/cm)', 'DI Flow Rate (L/min)',
       'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
-    ]
+    ],
+    optionalParams: [CANDELA_DCD_CANISTER_SHOTS]
   },
   'Candela GentleYAG': {
     mfg: 'Candela',
@@ -275,12 +280,12 @@ export const MODELS: Record<string, ModelDef> = {
       { name: '1064 nm @ 18mm spot', mode: 'SP', sets: [5, 8, 10, 15, 18, 20, 25, 30, 35, 40], unit: 'J/cm²', spotMm: 18, tolLabel: 'Tol ±10%' }
     ],
     params: [
-      'Total System Shots', 'Handpiece Shots', 'Lamp Shots', 'DCD Canister Shots',
-      'DCD Delay Set (ms)', 'DCD Delay Measured (ms)', 'DCD Duration Set (ms)', 'DCD Duration Measured (ms)',
+      'Total System Shots', 'Handpiece Shots', 'Lamp Shots',
       'HV @ Reference Fluence (VDC)', 'Fiber Transmission %',
       'DI Water Temp (°C)', 'DI Conductivity (µS/cm)', 'DI Flow Rate (L/min)',
       'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
-    ]
+    ],
+    optionalParams: [CANDELA_DCD_CANISTER_SHOTS]
   },
   'Candela GentleMAX_PRO': {
     mfg: 'Candela',
@@ -339,11 +344,6 @@ export const MODELS: Record<string, ModelDef> = {
       'Total System Shots',
       'Handpiece Shots',
       'Lamp Shots',
-      'DCD Canister Shots',
-      'DCD Delay Set (ms)',
-      'DCD Delay Measured (ms)',
-      'DCD Duration Set (ms)',
-      'DCD Duration Measured (ms)',
       'HV @ Reference Fluence (VDC)',
       'Fiber Transmission %',
       'DI Water Temp (°C)',
@@ -353,7 +353,8 @@ export const MODELS: Record<string, ModelDef> = {
       'Bubble Sense HP Empty',
       'Bubble Sense Can Full',
       'Bubble Sense Can Empty'
-    ]
+    ],
+    optionalParams: [CANDELA_DCD_CANISTER_SHOTS]
   },
 
   PicoWay: {
@@ -1145,17 +1146,176 @@ export function resolveModelDef(
   return null;
 }
 
-/** Fill missing model counters without overwriting values already stored under their keys. */
+/** Fill missing model counters without overwriting values already stored under their keys. Removed and hidden params are skipped. */
 export function mergeModelParamValues(
-  model: { params?: ModelParam[] } | null | undefined,
+  model: { params?: ModelParam[]; mfg?: string } | null | undefined,
   values: Record<string, any> | null | undefined
 ): Record<string, any> {
   const next: Record<string, any> = { ...(values || {}) };
+  const removed = new Set(removedParamKeys(next));
+  const candela = isCandelaLaser(model?.mfg);
   for (const param of model?.params || []) {
     const key = paramStorageKey(param);
+    if (removed.has(key) || (candela && isDcdSettingParam(key))) continue;
     if (next[key] == null) next[key] = '';
   }
   return next;
+}
+
+// ---------------------------------------------------------------------------
+// Candela DCD rule + per-job optional parameters (stored in model_parameters jsonb)
+// ---------------------------------------------------------------------------
+
+/** jsonb keys (prefixed `__` so they never render as rows). */
+export const REMOVED_PARAMS_KEY = '__removed_params';
+export const CUSTOM_PARAMS_KEY = '__custom_params';
+
+const CANDELA_NAME_RE = /candela|v[\s-]*beam|perfecta|gentle\s*(lase|max|yag)|vpyag|\bmgl\b|picoway/i;
+
+/** Any Candela laser, by make (case-insensitive) or a Candela model name. */
+export function isCandelaLaser(...names: Array<string | null | undefined>): boolean {
+  return names.some((n) => !!n && CANDELA_NAME_RE.test(String(n)));
+}
+
+/**
+ * Candela DCD set parameters are clinical user settings, never service data (Larry, Nov 4 2026).
+ * Matches DCD delay/duration, cryogen, pre-/post-spray, spray duration/delay, and a bare "Delay".
+ * The DCD Canister Shots counter is a consumable count, not a setting, and stays.
+ */
+export function isDcdSettingParam(name: string | null | undefined): boolean {
+  const n = String(name || '').trim();
+  if (!n) return false;
+  if (/^dcd\s*canister\s*shots$/i.test(n)) return false;
+  return /\bdcd\b|cryogen|cryo\s*spray|dynamic\s*cooling|pre[\s_-]*spray|post[\s_-]*spray|\bspray\b|^delay\b/i.test(n);
+}
+
+function stringList(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string' && x.trim() !== '') : [];
+}
+
+export function removedParamKeys(values: Record<string, any> | null | undefined): string[] {
+  return stringList(values?.[REMOVED_PARAMS_KEY]);
+}
+
+export function customParamKeys(values: Record<string, any> | null | undefined): string[] {
+  return stringList(values?.[CUSTOM_PARAMS_KEY]);
+}
+
+function modelIsCandela(model: { mfg?: string; label?: string } | null | undefined, extra: Array<string | null | undefined> = []) {
+  return isCandelaLaser(model?.mfg, model?.label, ...extra);
+}
+
+/** Params the form shows for this job: model params minus removed (and minus DCD on Candela), plus custom ones. */
+export function visibleReportParams(
+  model: { params?: ModelParam[]; optionalParams?: ModelParam[]; mfg?: string; label?: string } | null | undefined,
+  values: Record<string, any> | null | undefined,
+  names: Array<string | null | undefined> = []
+): ModelParam[] {
+  const candela = modelIsCandela(model, names);
+  const removed = new Set(removedParamKeys(values));
+  const out: ModelParam[] = [];
+  const seen = new Set<string>();
+  const add = (p: ModelParam) => {
+    const k = paramStorageKey(p);
+    if (!k || k.startsWith('__') || seen.has(k) || removed.has(k)) return;
+    if (candela && isDcdSettingParam(k)) return;
+    seen.add(k);
+    out.push(p);
+  };
+  if (model?.params?.length) {
+    model.params.forEach(add);
+    // Optional rows appear only once the tech adds one (key present) or an old report saved it.
+    (model.optionalParams || []).forEach((p) => {
+      if (Object.prototype.hasOwnProperty.call(values || {}, paramStorageKey(p))) add(p);
+    });
+  } else {
+    Object.keys(values || {})
+      .filter((k) => !/^wlt_|^gas_|^fiber_/.test(k) && !customParamKeys(values).includes(k))
+      .forEach(add);
+  }
+  customParamKeys(values).forEach(add);
+  return out;
+}
+
+/** Model params the tech removed for this job that can be added back (never DCD on Candela). */
+export function addableReportParams(
+  model: { params?: ModelParam[]; optionalParams?: ModelParam[]; mfg?: string; label?: string } | null | undefined,
+  values: Record<string, any> | null | undefined,
+  names: Array<string | null | undefined> = []
+): ModelParam[] {
+  const candela = modelIsCandela(model, names);
+  const removed = new Set(removedParamKeys(values));
+  const fromModel = (model?.params || []).filter((p) => {
+    const k = paramStorageKey(p);
+    return removed.has(k) && !(candela && isDcdSettingParam(k));
+  });
+  const present = new Set(visibleReportParams(model, values, names).map(paramStorageKey));
+  const optional = (model?.optionalParams || []).filter((p) => {
+    const k = paramStorageKey(p);
+    return !present.has(k) && !fromModel.some((q) => paramStorageKey(q) === k);
+  });
+  return [...fromModel, ...optional];
+}
+
+/** Drop one param row for this job. Model params are remembered as removed; custom ones are deleted. */
+export function removeReportParam(values: Record<string, any> | null | undefined, key: string): Record<string, any> {
+  const next: Record<string, any> = { ...(values || {}) };
+  const custom = customParamKeys(next);
+  if (custom.includes(key)) {
+    const left = custom.filter((k) => k !== key);
+    if (left.length) next[CUSTOM_PARAMS_KEY] = left;
+    else delete next[CUSTOM_PARAMS_KEY];
+  } else {
+    next[REMOVED_PARAMS_KEY] = Array.from(new Set([...removedParamKeys(next), key]));
+  }
+  delete next[key];
+  return next;
+}
+
+/** Add a removed model param back. */
+export function restoreReportParam(values: Record<string, any> | null | undefined, key: string): Record<string, any> {
+  const next: Record<string, any> = { ...(values || {}) };
+  const left = removedParamKeys(next).filter((k) => k !== key);
+  if (left.length) next[REMOVED_PARAMS_KEY] = left;
+  else delete next[REMOVED_PARAMS_KEY];
+  if (next[key] == null) next[key] = '';
+  return next;
+}
+
+export type AddCustomParamResult =
+  | { ok: true; values: Record<string, any> }
+  | { ok: false; reason: 'empty' | 'reserved' | 'duplicate' | 'dcd_blocked' };
+
+/** Add a custom name/value row. DCD-like names are refused on Candela lasers. */
+export function addCustomReportParam(
+  values: Record<string, any> | null | undefined,
+  name: string,
+  value: string,
+  ctx: { model?: { params?: ModelParam[]; optionalParams?: ModelParam[]; mfg?: string; label?: string } | null; names?: Array<string | null | undefined> } = {}
+): AddCustomParamResult {
+  const key = String(name || '').trim().replace(/\s+/g, ' ').slice(0, 80);
+  if (!key) return { ok: false, reason: 'empty' };
+  if (key.startsWith('__') || /^wlt_|^gas_|^fiber_/.test(key)) return { ok: false, reason: 'reserved' };
+  if (modelIsCandela(ctx.model, ctx.names || []) && isDcdSettingParam(key)) return { ok: false, reason: 'dcd_blocked' };
+  const current = values || {};
+  const modelKeys = (ctx.model?.params || []).map(paramStorageKey);
+  if (customParamKeys(current).includes(key)) return { ok: false, reason: 'duplicate' };
+  const optionalKeys = (ctx.model?.optionalParams || []).map(paramStorageKey);
+  if (optionalKeys.includes(key)) {
+    if (Object.prototype.hasOwnProperty.call(current, key) && !removedParamKeys(current).includes(key)) return { ok: false, reason: 'duplicate' };
+    const restored = restoreReportParam(current, key);
+    restored[key] = value ?? '';
+    return { ok: true, values: restored };
+  }
+  if (modelKeys.includes(key)) {
+    if (!removedParamKeys(current).includes(key)) return { ok: false, reason: 'duplicate' };
+    const restored = restoreReportParam(current, key);
+    restored[key] = value ?? '';
+    return { ok: true, values: restored };
+  }
+  const next: Record<string, any> = { ...current, [key]: value ?? '' };
+  next[CUSTOM_PARAMS_KEY] = [...customParamKeys(current), key];
+  return { ok: true, values: next };
 }
 
 export type SystemParameterRow = { key: string; label: string; value: string };
@@ -1167,16 +1327,21 @@ export type SystemParameterRow = { key: string; label: string; value: string };
 export function systemParameterRows(
   stored: Record<string, any> | null | undefined,
   modelType?: string | null,
-  equipmentName?: string | null
+  equipmentName?: string | null,
+  manufacturer?: string | null
 ): SystemParameterRow[] {
   const data = stored && typeof stored === 'object' ? stored : {};
   const storedKeys = Object.keys(data).filter((key) => !key.startsWith('__'));
   if (!storedKeys.length) return [];
   const model = resolveModelDef(modelType || equipmentName || '', equipmentName || modelType || '');
+  // Candela DCD settings never render, including on old saved reports (data is kept, only hidden).
+  const candela = isCandelaLaser(manufacturer, model?.mfg, modelType, equipmentName);
+  const removed = new Set(removedParamKeys(data));
   const rows: SystemParameterRow[] = [];
   const seen = new Set<string>();
   const push = (key: string, label: string) => {
-    if (!key || key.startsWith('__') || seen.has(key)) return;
+    if (!key || key.startsWith('__') || seen.has(key) || removed.has(key)) return;
+    if (candela && (isDcdSettingParam(key) || isDcdSettingParam(label))) return;
     seen.add(key);
     const raw = data[key];
     const value = raw == null || String(raw).trim() === '' ? '—' : String(raw);

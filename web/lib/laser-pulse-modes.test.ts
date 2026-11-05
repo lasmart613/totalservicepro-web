@@ -31,7 +31,7 @@ test('Laserscope / AMS Aura get CW, StarPulse, Other', () => {
 });
 
 test('unknown or blank make shows every mode plus Other', () => {
-  assert.deepEqual(pulseModeOptions('Candela', 'GentleMax Pro'), [...ALL_PULSE_MODES]);
+  assert.deepEqual(pulseModeOptions('Candela', 'Picoway'), [...ALL_PULSE_MODES]);
   assert.deepEqual(pulseModeOptions(null, null), ['cw', 'superpulse', 'ultrapulse', 'starpulse', 'other']);
   // "ams" must not match inside another word
   assert.deepEqual(pulseModeOptions('Adams Medical', 'X'), [...ALL_PULSE_MODES]);
@@ -162,7 +162,7 @@ test('hydrate keeps pulse mode and units; print shows them', () => {
 });
 
 test('new strings are translated for all locales', () => {
-  for (const key of ['Power', 'Irradiance', 'Energy', 'Pulse mode', 'Set value', 'Measured unit', 'Set unit', 'Other pulse mode', 'Measurement type', 'None', 'Wavelength', 'Wavelength / channel', 'Spot size', 'Spot size is not used for Energy or Power']) {
+  for (const key of ['Power', 'Irradiance', 'Energy', 'Pulse mode', 'Set value', 'Measured unit', 'Set unit', 'Other pulse mode', 'Measurement type', 'None', 'Wavelength', 'Wavelength / channel', 'Spot size', 'Spot size is not used for Energy or Power', 'Measured energy', 'Computed fluence', 'Tolerance', 'Error', '— Wavelength —', '— Spot size —']) {
     const row = GAP_STRINGS[key];
     assert.ok(row, key);
     for (const loc of ['fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar'] as const) assert.ok(row[loc], `${key}/${loc}`);
@@ -190,4 +190,11 @@ test('exactly ±10% passes both ways (inclusive, rounded to 0.1%)', () => {
   }
   assert.equal(mk('power', 'mW', '1000', '1101').pass, false);
   assert.equal(mk('power', 'mW', '1000', '899').pass, false);
+});
+
+test('Candela GentleMAX / GentleYAG / VPYAG / VBeam get Pulsed + Other, not CO2 modes', () => {
+  for (const model of ['GentleMax Pro', 'GentleMAX', 'GentleYAG', 'VPYAG', 'Vbeam Perfecta']) {
+    assert.deepEqual(pulseModeOptions('Candela', model), ['pulsed', 'other']);
+  }
+  assert.equal(pulseModeDisplay({ pulseMode: 'pulsed' }), 'Pulsed');
 });

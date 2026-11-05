@@ -8,13 +8,17 @@ import {
   PULSE_MODE_LABELS,
   pulseModeDisplay,
   pulseModeOptions,
+  wavelengthOptionNames,
+  wavelengthLabel,
 } from '@/lib/laser-pulse-modes';
 import {
   measuredUnitFor,
   MEASURED_QUANTITIES,
   MEASURED_UNITS,
   SET_UNITS,
+  SET_UNITS_FOR_READING,
   setUnitFor,
+  readingKind,
   usesSpot,
   type MeasuredQuantity,
   isFluenceMeasurement,
@@ -58,9 +62,12 @@ export function PerformanceMeasurements({
 }) {
   const pulseOptions = pulseModeOptions(make, model);
   const configured = configuredWavelengths(make, model);
-  const wlOptions: WavelengthOption[] | null | undefined = configured
-    ? configured.map((name) => ({ name }))
-    : wavelengths;
+  const wlOptions: WavelengthOption[] | null | undefined = (configured
+    ? wavelengthOptionNames(configured)
+    : wavelengths
+      ? wavelengthOptionNames(wavelengths.map((w) => w.name))
+      : null
+  )?.map((name) => ({ name }));
   return (
     <div className="section mb-6">
       <div className="section-hdr">
@@ -71,7 +78,7 @@ export function PerformanceMeasurements({
           {wavelengths?.length
             ? 'Wavelengths for this model are in the dropdown. Spot size uses this model’s sizes when they are known.'
             : 'No OEM wavelength table for this model — enter the channel, then the spot size and fluence.'}{' '}
-          Set fluence is J/cm². The meter reading can be energy (J) or fluence (J/cm²). Energy is converted with the circular spot area, then error % is (measured − set) / set × 100.
+          Set fluence is J/cm². The meter reading can be energy (J/mJ) or fluence (J/cm²). Energy is converted to fluence with the circular spot area, π·(d/2)², then error % is (computed − set) / set × 100. PASS within ±10%.
         </p>
         <button type="button" onClick={onAdd} className="btn btn-secondary text-sm mb-3">
           + Add Measurement Row
@@ -132,8 +139,12 @@ function FluenceRow({
   const mode: MeasuredQuantity = MEASURED_QUANTITIES.includes(row.measuredMode) ? row.measuredMode : 'fluence';
   const measuredUnit = measuredUnitFor(mode, row.measuredUnit);
   const setUnit = setUnitFor(mode, row.setUnit);
+  const kind = readingKind(mode, measuredUnit);
+  const readingUnits = MEASURED_UNITS[mode].filter((u) => readingKind(mode, u) === kind);
+  const setChoices = SET_UNITS_FOR_READING[kind];
   const modeLabel = (q: MeasuredQuantity) =>
-    `${t(QUANTITY_LABELS[q])} (${SET_UNITS[q].join(', ')})`;
+    `${t(QUANTITY_LABELS[q])} (${MEASURED_UNITS[q].filter((u) => readingKind(q, u) === q).join(', ')})`;
+  const converted = kind !== mode;
   const spotOn = usesSpot(mode);
   const passClass =
     view.pass === false ? 'text-red-400' : view.pass ? 'text-green-400' : 'text-[var(--text3)]';
@@ -164,7 +175,7 @@ function FluenceRow({
             value={spotValue}
             onChange={(e) => onChange(index, 'spotSizeMm', e.target.value)}
           >
-            <option value="">— Spot size —</option>
+            <option value="">{t('— Spot size —')}</option>
             {spotSizes.map((size) => (
               <option key={size} value={String(size)}>
                 {size} mm
@@ -194,7 +205,7 @@ function FluenceRow({
           </label>
         )}
         <label className="text-xs text-[var(--text3)]">
-          {`${t('Set value')} (${SET_UNITS[mode].join(', ')})`}
+          {`${t('Set value')} (${setUnit})`}
           <div className="flex gap-1 mt-1">
             <input
               className="input"
@@ -207,7 +218,7 @@ function FluenceRow({
               value={row.setFluence ?? ''}
               onChange={(e) => onChange(index, 'setFluence', e.target.value)}
             />
-            {SET_UNITS[mode].length > 1 && (
+            {setChoices.length > 1 && (
               <select
                 className="input w-28"
                 aria-label={t('Set unit')}
@@ -215,7 +226,7 @@ function FluenceRow({
                 value={setUnit}
                 onChange={(e) => onChange(index, 'setUnit', e.target.value)}
               >
-                {SET_UNITS[mode].map((u) => (
+                {setChoices.map((u) => (
                   <option key={u} value={u}>
                     {u}
                   </option>
@@ -231,10 +242,10 @@ function FluenceRow({
               <button
                 key={q}
                 type="button"
-                className={modeButton(mode === q)}
-                aria-pressed={mode === q}
+                className={modeButton(kind === q)}
+                aria-pressed={kind === q}
                 data-testid={`measured-mode-${q}`}
-                onClick={() => onChange(index, 'measuredMode', q)}
+                onClick={() => onChange(index, 'readingKind', q)}
               >
                 {modeLabel(q)}
               </button>
@@ -246,13 +257,13 @@ function FluenceRow({
               type="number"
               inputMode="decimal"
               step="any"
-              aria-label={`${t('Measured')} ${t(QUANTITY_LABELS[mode])} (${measuredUnit})`}
+              aria-label={`${t(MEASURED_LABELS[kind])} (${measuredUnit})`}
               data-testid="measured-value"
-              placeholder={`${t(QUANTITY_LABELS[mode])} (${measuredUnit})`}
+              placeholder={`${t(MEASURED_LABELS[kind])} (${measuredUnit})`}
               value={row.measuredValue ?? ''}
               onChange={(e) => onChange(index, 'measuredValue', e.target.value)}
             />
-            {MEASURED_UNITS[mode].length > 1 && (
+            {readingUnits.length > 1 && (
               <select
                 className="input w-28"
                 aria-label={t('Measured unit')}
@@ -260,7 +271,7 @@ function FluenceRow({
                 value={measuredUnit}
                 onChange={(e) => onChange(index, 'measuredUnit', e.target.value)}
               >
-                {MEASURED_UNITS[mode].map((u) => (
+                {readingUnits.map((u) => (
                   <option key={u} value={u}>
                     {u}
                   </option>
@@ -273,11 +284,15 @@ function FluenceRow({
       <PulseModeField row={row} index={index} options={pulseOptions} onChange={onChange} />
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span data-testid="measurement-result">
-          Result: <span className="font-semibold">{view.result}</span>
+          {converted ? `${t(COMPUTED_LABELS[mode])}: ` : `${t('Result')}: `}
+          <span className="font-semibold">{view.result}</span>
         </span>
         <span className={`font-bold ${passClass}`} data-testid="measurement-error">
-          Error: {view.error}
-          {view.pass === true ? ' PASS' : view.pass === false ? ' FAIL' : ''}
+          {t('Error')}: {view.error}
+          {view.pass === true ? ` ${t('PASS')}` : view.pass === false ? ` ${t('FAIL')}` : ''}
+        </span>
+        <span className="text-xs text-[var(--text3)]" data-testid="measurement-tolerance">
+          {t('Tolerance')} {view.tolerance}
         </span>
         <button type="button" onClick={() => onRemove(index)} className="text-red-400 text-xs ml-auto">
           × Remove
@@ -379,17 +394,17 @@ function WavelengthField({
       <select
         className="input mt-1"
         aria-label={t('Wavelength')}
-        value={row.wavelength || ''}
+        value={wavelengthLabel(row.wavelength)}
         onChange={(e) => onChange(e.target.value)}
       >
-        <option value="">— Wavelength —</option>
+        <option value="">{t('— Wavelength —')}</option>
         {wavelengths.map((wavelength) => (
           <option key={wavelength.name} value={wavelength.name}>
             {wavelength.name}
           </option>
         ))}
-        {row.wavelength && !wavelengths.some((wavelength) => wavelength.name === row.wavelength) && (
-          <option value={row.wavelength}>{row.wavelength}</option>
+        {wavelengthLabel(row.wavelength) && !wavelengths.some((wavelength) => wavelength.name === wavelengthLabel(row.wavelength)) && (
+          <option value={wavelengthLabel(row.wavelength)}>{wavelengthLabel(row.wavelength)}</option>
         )}
       </select>
     );
@@ -418,6 +433,20 @@ function modeButton(active: boolean): string {
     ? 'px-2 py-1 text-xs rounded border border-[var(--gold)] text-[var(--gold)] bg-[var(--surface)]'
     : 'px-2 py-1 text-xs rounded border border-[var(--border)] text-[var(--text3)]';
 }
+
+const MEASURED_LABELS: Record<MeasuredQuantity, string> = {
+  energy: 'Measured energy',
+  fluence: 'Measured fluence',
+  power: 'Measured power',
+  irradiance: 'Measured irradiance',
+};
+
+const COMPUTED_LABELS: Record<MeasuredQuantity, string> = {
+  energy: 'Result',
+  fluence: 'Computed fluence',
+  power: 'Result',
+  irradiance: 'Computed irradiance',
+};
 
 const QUANTITY_LABELS: Record<MeasuredQuantity, string> = {
   energy: 'Energy',
