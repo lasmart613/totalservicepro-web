@@ -40,6 +40,8 @@ Disallow: /api
 Disallow: /marketplace/list
 Disallow: /marketplace/my-listings
 Disallow: /marketplace/storefront
+Disallow: /marketplace/jobs/new
+Disallow: /marketplace/jobs/mine
 Disallow: /pdf-viewer-demo
 Disallow: /dev
 

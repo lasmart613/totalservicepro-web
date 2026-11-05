@@ -4,6 +4,7 @@
  * Prices, record text, and manual PDF text are not in this table.
  */
 import { GAP_STRINGS } from './gap-copy.ts';
+import { JOB_BOARD_STRINGS } from './jobs-copy.ts';
 import { MANUAL_LIBRARY_STRINGS } from './manual-library-copy.ts';
 import type { PublicLocale } from './locales.ts';
 
@@ -1256,6 +1257,10 @@ for (const [key, value] of Object.entries(MANUAL_LIBRARY_STRINGS)) {
 }
 
 for (const [key, value] of Object.entries(GAP_STRINGS)) {
+  if (!TABLE[key]) TABLE[key] = value;
+}
+
+for (const [key, value] of Object.entries(JOB_BOARD_STRINGS)) {
   if (!TABLE[key]) TABLE[key] = value;
 }
 

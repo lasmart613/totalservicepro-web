@@ -34,6 +34,7 @@ export const PUBLIC_PATHS = new Set([
   '/marketplace/parts',
   '/marketplace/used-systems',
   '/marketplace/consumables',
+  '/marketplace/jobs',
   '/directory',
   '/find-a-rep',
   '/login',

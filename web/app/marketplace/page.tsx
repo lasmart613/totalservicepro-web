@@ -147,6 +147,14 @@ export default function Marketplace() {
             <p className="text-sm text-[var(--text3)] flex-1">{t('Handpieces, fibers, tips, gels, and common consumables')}</p>
           </PublicLink>
 
+          <PublicLink href="/marketplace/jobs" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">💼</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Jobs')}</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">
+              {t('Full-time, part-time, contract, and subcontract work. Free to post.')}
+            </p>
+          </PublicLink>
+
           {/* Service section lives outside marketplace sales lanes */}
           <PublicLink href="/service-requests" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🛠️</div>

@@ -856,6 +856,14 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                   <div className="text-sm text-[var(--text3)]">{t('Handpieces, fibers, tips & more')}</div>
                 </Link>
 
+                <Link href="/marketplace/jobs" className="card p-6 hover:border-[var(--gold)] group">
+                  <div className="text-3xl mb-3">💼</div>
+                  <div className="font-bold text-lg mb-1">{t('Jobs')}</div>
+                  <div className="text-sm text-[var(--text3)]">
+                    {t('Full-time, part-time, contract, and subcontract work. Free to post.')}
+                  </div>
+                </Link>
+
                 <Link href="/service-requests" className="card p-6 hover:border-[var(--gold)] group">
                   <div className="text-3xl mb-3">🛠️</div>
                   <div className="font-bold text-lg mb-1">{t('Laser Repair Jobs')}</div>

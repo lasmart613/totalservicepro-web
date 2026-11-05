@@ -277,6 +277,8 @@ export function Header({
       { href: '/marketplace/used-systems', label: 'Used Equipment' },
       { href: '/marketplace/parts', label: 'Parts' },
       { href: '/marketplace/consumables', label: 'Consumables' },
+      { href: '/marketplace/jobs', label: 'Jobs' },
+      { href: '/marketplace/jobs/mine', label: 'My job posts' },
       { href: '/service-requests', label: 'Service Requests' },
       { href: '/marketplace/my-listings', label: 'My Listings' },
       { href: '/marketplace/list', label: 'Post a Listing' },

@@ -82,3 +82,13 @@ export async function getMarketplaceCaller(req: NextRequest): Promise<Marketplac
     membershipOrgIds,
   };
 }
+
+/** User-scoped client so job-board writes run as the caller and RLS applies. */
+export function marketplaceUserDb(token: string) {
+  const env = supabasePublicEnv();
+  if (!env || !token) return null;
+  return createClient(env.url, env.anon, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}

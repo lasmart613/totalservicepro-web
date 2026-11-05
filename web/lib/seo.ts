@@ -28,6 +28,7 @@ export const PUBLIC_SITEMAP_PATHS = [
   '/marketplace/parts',
   '/marketplace/used-systems',
   '/marketplace/consumables',
+  '/marketplace/jobs',
   '/directory',
   '/find-a-rep',
   '/calculators',
@@ -126,6 +127,8 @@ export const ROBOTS_DISALLOW = [
   '/marketplace/list',
   '/marketplace/my-listings',
   '/marketplace/storefront',
+  '/marketplace/jobs/new',
+  '/marketplace/jobs/mine',
   '/pdf-viewer-demo',
   '/dev',
 ] as const;
@@ -148,6 +151,7 @@ export type PublicPageKey =
   | 'marketplaceParts'
   | 'marketplaceUsedSystems'
   | 'marketplaceConsumables'
+  | 'marketplaceJobs'
   | 'directory'
   | 'signup'
   | 'signupCompany'
@@ -202,6 +206,12 @@ export const PUBLIC_PAGE_SEO: Record<PublicPageKey, PageSeo> = {
     title: 'Consumables',
     description:
       'Handpieces, fibers, tips, gels, and common consumables listed on the RepairPlanet marketplace.',
+  },
+  marketplaceJobs: {
+    path: '/marketplace/jobs',
+    title: 'Job board',
+    description:
+      'Full-time, part-time, contract, and subcontract posts for biomedical service. Employers and people looking for work can post for free on RepairPlanet.',
   },
   directory: {
     path: '/directory',
