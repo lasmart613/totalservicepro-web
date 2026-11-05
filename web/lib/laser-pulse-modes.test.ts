@@ -31,7 +31,7 @@ test('Laserscope / AMS Aura get CW, StarPulse, Other', () => {
 });
 
 test('unknown or blank make shows every mode plus Other', () => {
-  assert.deepEqual(pulseModeOptions('Candela', 'GentleMax Pro'), [...ALL_PULSE_MODES]);
+  assert.deepEqual(pulseModeOptions('Candela', 'Picoway'), [...ALL_PULSE_MODES]);
   assert.deepEqual(pulseModeOptions(null, null), ['cw', 'superpulse', 'ultrapulse', 'starpulse', 'other']);
   // "ams" must not match inside another word
   assert.deepEqual(pulseModeOptions('Adams Medical', 'X'), [...ALL_PULSE_MODES]);
@@ -190,4 +190,11 @@ test('exactly ±10% passes both ways (inclusive, rounded to 0.1%)', () => {
   }
   assert.equal(mk('power', 'mW', '1000', '1101').pass, false);
   assert.equal(mk('power', 'mW', '1000', '899').pass, false);
+});
+
+test('Candela GentleMAX / GentleYAG / VPYAG / VBeam get Pulsed + Other, not CO2 modes', () => {
+  for (const model of ['GentleMax Pro', 'GentleMAX', 'GentleYAG', 'VPYAG', 'Vbeam Perfecta']) {
+    assert.deepEqual(pulseModeOptions('Candela', model), ['pulsed', 'other']);
+  }
+  assert.equal(pulseModeDisplay({ pulseMode: 'pulsed' }), 'Pulsed');
 });

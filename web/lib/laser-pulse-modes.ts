@@ -10,6 +10,7 @@ export const PULSE_MODE_LABELS: Record<string, string> = {
   superpulse: 'SuperPulse',
   ultrapulse: 'UltraPulse',
   starpulse: 'StarPulse',
+  pulsed: 'Pulsed',
   other: 'Other',
 };
 
@@ -56,6 +57,16 @@ export const PULSE_MODE_RULES: PulseModeRule[] = [
     makes: ['laserscope', 'ams', 'american medical systems'],
     modes: ['cw', 'starpulse', 'other'],
     wavelengths: [WL_KTP],
+  },
+  {
+    // Candela long-pulse Alex/Nd:YAG (GentleMAX, GentleMAX PRO, GentleLASE, GentleYAG,
+    // VPYAG) and pulsed-dye VBeam are pulsed-only: no CW and none of the CO2/KTP
+    // SuperPulse/UltraPulse/StarPulse modes. Pulse width (ms) is its own setting.
+    // Wavelengths are left to the model table. Pending Larry's confirmation of the list.
+    id: 'candela-pulsed',
+    makes: ['candela', 'syneron'],
+    models: ['gentle', 'vpyag', 'vbeam', 'v-beam'],
+    modes: ['pulsed', 'other'],
   },
   {
     // AMS/Laserscope Aura sold under other names: match by model alone.
