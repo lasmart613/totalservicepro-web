@@ -5,11 +5,12 @@ import {
   canOfferAddToOrg,
   CUSTOMER_EQUIPMENT_COLUMNS,
   customerEquipmentLabel,
+  addEquipmentMessage,
   loadCustomerEquipment,
   matchCustomerEquipment,
 } from './customer-equipment.ts';
 
-function fakeClient(opts: { rows?: any[]; selectError?: any; insertError?: any; insertData?: any }) {
+function fakeClient(opts: { rows?: any[]; selectError?: any; insertError?: any; insertData?: any; insertErrors?: any[] }) {
   const calls: any[] = [];
   const client = {
     from(table: string) {
@@ -35,9 +36,10 @@ function fakeClient(opts: { rows?: any[]; selectError?: any; insertError?: any; 
           return q;
         },
         maybeSingle() {
+          const err = opts.insertErrors ? opts.insertErrors.shift() ?? null : opts.insertError || null;
           return Promise.resolve({
-            data: opts.insertError ? null : opts.insertData ?? { id: 99 },
-            error: opts.insertError || null,
+            data: err ? null : opts.insertData ?? { id: 99 },
+            error: err,
           });
         },
       };
@@ -151,7 +153,7 @@ test('new equipment needs make and model; serial optional when requireSerial is 
   assert.deepEqual(res, { status: 'created', id: 41 });
   const ins = calls.find((c: any) => c.op === 'insert');
   assert.equal(ins.rows[0].customer_organization_id, 2655);
-  assert.equal(ins.rows[0].serial_number, '');
+  assert.equal(ins.rows[0].serial_number, null);
   assert.equal(ins.rows[0].room, 'Room 2');
   const strict = await addEquipmentToCustomerOrg(client as any, 2655, { equipment_type: null, manufacturer: 'A', model: 'B', serial: '' });
   assert.equal(strict.status, 'skipped');
@@ -176,4 +178,34 @@ test('every clinic + equipment form uses ClinicEquipmentSelect', async () => {
   }
   const sched = readFileSync(join(root, 'app/service-schedule/page.tsx'), 'utf8');
   assert.match(sched, /equipment_id: Number\(ticketEquipmentId\)/);
+});
+
+test('blank serial is inserted as NULL', async () => {
+  const { client, calls } = fakeClient({});
+  const res = await addEquipmentToCustomerOrg(client, 7, { manufacturer: 'Candela', model: 'GentleMAX', serial: '   ' }, { requireSerial: false });
+  assert.equal(res.status, 'created');
+  const ins = calls.filter((c: any) => c.op === 'insert' && c.rows);
+  assert.equal(ins.length, 1);
+  assert.equal(ins[0].rows[0].serial_number, null);
+});
+
+test('pre-000950 NOT NULL: blank serial retries once with empty string', async () => {
+  const { client, calls } = fakeClient({ insertErrors: [{ code: '23502', message: 'null value in column "serial_number"' }] });
+  const res = await addEquipmentToCustomerOrg(client, 7, { manufacturer: 'Candela', model: 'GentleMAX', serial: '' }, { requireSerial: false });
+  assert.equal(res.status, 'created');
+  const ins = calls.filter((c: any) => c.op === 'insert' && c.rows);
+  assert.equal(ins.length, 2);
+  assert.equal(ins[1].rows[0].serial_number, '');
+});
+
+test('second blank serial collision gets a clear message', async () => {
+  const { client } = fakeClient({ insertErrors: [{ code: '23505', message: 'duplicate key equipment_unique_sn_per_customer' }] });
+  const res = await addEquipmentToCustomerOrg(client, 7, { manufacturer: 'Candela', model: 'GentleMAX', serial: '' }, { requireSerial: false });
+  assert.deepEqual(res, { status: 'failed', reason: 'duplicate_blank_serial' });
+  assert.equal(
+    addEquipmentMessage(res, 'Clinic'),
+    'This clinic already has a unit with no serial number. Enter a serial so they can be told apart.'
+  );
+  const withSn = await addEquipmentToCustomerOrg(fakeClient({ insertErrors: [{ code: '23505', message: 'dup' }] }).client, 7, { manufacturer: 'A', model: 'B', serial: 'X1' });
+  assert.equal((withSn as any).reason, 'duplicate_serial');
 });

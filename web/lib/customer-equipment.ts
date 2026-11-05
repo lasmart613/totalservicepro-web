@@ -147,8 +147,10 @@ export async function addEquipmentToCustomerOrg(
     customer_organization_id: customerOrgId,
     manufacturer,
     model,
-    // equipment.serial_number is NOT NULL: a blank serial is stored as ''.
-    serial_number: serial || '',
+    // A blank serial is stored as NULL (migration 000950 allows NULL and only
+    // enforces uniqueness on non-blank serials). Pre-000950 DBs reject NULL, so
+    // the insert below retries with '' on a 23502.
+    serial_number: serial || null,
   };
   if (type) row.equipment_type = type;
   const room = clean(draft.room);
@@ -157,16 +159,22 @@ export async function addEquipmentToCustomerOrg(
     let ins = await client.from('equipment').insert([row]).select('id').maybeSingle();
     if (ins.error && type && missingTypeColumn(ins.error)) {
       const { equipment_type: _drop, ...slim } = row;
+      delete row.equipment_type;
       ins = await client.from('equipment').insert([slim]).select('id').maybeSingle();
     }
     if (ins.error && room && /\broom\b/i.test(String(ins.error.message || ''))) {
       const { room: _room, ...noRoom } = row;
+      delete row.room;
       ins = await client.from('equipment').insert([noRoom]).select('id').maybeSingle();
+    }
+    if (ins.error && !serial && (ins.error.code === '23502' || /null value/i.test(String(ins.error.message || '')))) {
+      row.serial_number = '';
+      ins = await client.from('equipment').insert([row]).select('id').maybeSingle();
     }
     if (ins.error) {
       const msg = String(ins.error.message || '');
       if (ins.error.code === '23505' || /unique|duplicate/i.test(msg)) {
-        return { status: 'failed', reason: 'duplicate_serial' };
+        return { status: 'failed', reason: serial ? 'duplicate_serial' : 'duplicate_blank_serial' };
       }
       if (ins.error.code === '23502' || /null value/i.test(msg)) {
         return { status: 'failed', reason: 'missing_field' };
@@ -195,6 +203,8 @@ export function addEquipmentMessage(result: AddEquipmentResult, orgName: string)
         ? `Not added to ${org}: manufacturer, model and serial # are all required.`
         : null;
     case 'failed':
+      if (result.reason === 'duplicate_blank_serial')
+        return 'This clinic already has a unit with no serial number. Enter a serial so they can be told apart.';
       if (result.reason === 'duplicate_serial') return `Not added to ${org}: that serial # is already on file.`;
       if (result.reason === 'not_allowed')
         return `Not added to ${org}: your company is not linked to this customer.`;
