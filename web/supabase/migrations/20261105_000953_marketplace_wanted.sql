@@ -1,4 +1,4 @@
--- 000951: Marketplace Wanted board.
+-- 000953: Marketplace Wanted board.
 --
 -- Buyers post the laser or other biomedical equipment they are looking for.
 -- Posting and viewing are free. This table has no fee column and
@@ -19,7 +19,7 @@
 -- database: sign in as a member of org 2655, 2639, 2656, or 2651.
 -- Never use orgs 1005, 5509, 2616, or 4.
 --
--- Rollback: 20261105_000951_marketplace_wanted_rollback.sql
+-- Rollback: 20261105_000953_marketplace_wanted_rollback.sql
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -27,18 +27,18 @@ SET LOCAL lock_timeout = '5s';
 DO $$
 BEGIN
   IF to_regprocedure('public.is_active_org_member(bigint)') IS NULL THEN
-    RAISE EXCEPTION '000951 drift: public.is_active_org_member(bigint) is missing';
+    RAISE EXCEPTION '000953 drift: public.is_active_org_member(bigint) is missing';
   END IF;
   IF to_regclass('public.organizations') IS NULL THEN
-    RAISE EXCEPTION '000951 drift: public.organizations is missing';
+    RAISE EXCEPTION '000953 drift: public.organizations is missing';
   END IF;
   IF to_regclass('public.marketplace_wanted') IS NOT NULL
-     AND coalesce(pg_catalog.obj_description('public.marketplace_wanted'::regclass, 'pg_class'), '') NOT LIKE '000951:%' THEN
-    RAISE EXCEPTION '000951 drift: public.marketplace_wanted exists and was not created by 000951';
+     AND coalesce(pg_catalog.obj_description('public.marketplace_wanted'::regclass, 'pg_class'), '') NOT LIKE '000953:%' THEN
+    RAISE EXCEPTION '000953 drift: public.marketplace_wanted exists and was not created by 000953';
   END IF;
   IF to_regclass('public.marketplace_wanted_messages') IS NOT NULL
-     AND coalesce(pg_catalog.obj_description('public.marketplace_wanted_messages'::regclass, 'pg_class'), '') NOT LIKE '000951:%' THEN
-    RAISE EXCEPTION '000951 drift: public.marketplace_wanted_messages exists and was not created by 000951';
+     AND coalesce(pg_catalog.obj_description('public.marketplace_wanted_messages'::regclass, 'pg_class'), '') NOT LIKE '000953:%' THEN
+    RAISE EXCEPTION '000953 drift: public.marketplace_wanted_messages exists and was not created by 000953';
   END IF;
   IF EXISTS (
     SELECT 1
@@ -46,9 +46,9 @@ BEGIN
     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
       AND p.proname IN ('marketplace_wanted_guard', 'marketplace_wanted_can_manage')
-      AND coalesce(pg_catalog.obj_description(p.oid, 'pg_proc'), '') NOT LIKE '000951:%'
+      AND coalesce(pg_catalog.obj_description(p.oid, 'pg_proc'), '') NOT LIKE '000953:%'
   ) THEN
-    RAISE EXCEPTION '000951 drift: a marketplace_wanted function not created by 000951 already exists';
+    RAISE EXCEPTION '000953 drift: a marketplace_wanted function not created by 000953 already exists';
   END IF;
 END $$;
 
@@ -110,13 +110,13 @@ CREATE TABLE IF NOT EXISTS public.marketplace_wanted (
 );
 
 COMMENT ON TABLE public.marketplace_wanted IS
-  '000951: Wanted board. Buyers post equipment they are looking for. Posting and viewing are free: no fee column and no payment provider columns. Not an advertisement.';
+  '000953: Wanted board. Buyers post equipment they are looking for. Posting and viewing are free: no fee column and no payment provider columns. Not an advertisement.';
 COMMENT ON COLUMN public.marketplace_wanted.contact_via IS
-  '000951: message = in-app thread on marketplace_wanted_messages. org = reach the posting organization. Email and phone are not stored on this row.';
+  '000953: message = in-app thread on marketplace_wanted_messages. org = reach the posting organization. Email and phone are not stored on this row.';
 COMMENT ON COLUMN public.marketplace_wanted.budget_min IS
-  '000951: Optional amount the buyer hopes to pay. Not a charge for the listing.';
+  '000953: Optional amount the buyer hopes to pay. Not a charge for the listing.';
 COMMENT ON COLUMN public.marketplace_wanted.modality IS
-  '000951: Same equipment rooms as manuals (laser, lithotriptor, c_arm, and the other rooms). Laser is the default.';
+  '000953: Same equipment rooms as manuals (laser, lithotriptor, c_arm, and the other rooms). Laser is the default.';
 
 CREATE TABLE IF NOT EXISTS public.marketplace_wanted_messages (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -128,7 +128,7 @@ CREATE TABLE IF NOT EXISTS public.marketplace_wanted_messages (
 );
 
 COMMENT ON TABLE public.marketplace_wanted_messages IS
-  '000951: Messages on a Wanted post. Readable by the sender and by members of the posting organization. Not public.';
+  '000953: Messages on a Wanted post. Readable by the sender and by members of the posting organization. Not public.';
 
 CREATE INDEX IF NOT EXISTS marketplace_wanted_status_created_idx
   ON public.marketplace_wanted (status, created_at DESC);
@@ -162,7 +162,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.marketplace_wanted_can_manage(bigint, uuid) IS
-  '000951: true when the caller wrote the Wanted post or is an owner/admin of its organization.';
+  '000953: true when the caller wrote the Wanted post or is an owner/admin of its organization.';
 
 REVOKE ALL ON FUNCTION public.marketplace_wanted_can_manage(bigint, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.marketplace_wanted_can_manage(bigint, uuid) TO authenticated, service_role;
@@ -216,7 +216,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.marketplace_wanted_guard() IS
-  '000951: keeps Wanted ownership fixed, requires a membership on insert, and stamps filled/closed times. Does not charge.';
+  '000953: keeps Wanted ownership fixed, requires a membership on insert, and stamps filled/closed times. Does not charge.';
 
 REVOKE ALL ON FUNCTION public.marketplace_wanted_guard() FROM PUBLIC, anon, authenticated;
 
@@ -242,7 +242,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.marketplace_wanted_message_guard() IS
-  '000951: a Wanted message is sent as the signed-in user.';
+  '000953: a Wanted message is sent as the signed-in user.';
 
 REVOKE ALL ON FUNCTION public.marketplace_wanted_message_guard() FROM PUBLIC, anon, authenticated;
 

@@ -1,4 +1,4 @@
--- Rollback 000951. Drops Wanted posts and their messages.
+-- Rollback 000953. Drops Wanted posts and their messages.
 -- Does not delete organizations, users, or marketplace listings.
 -- Repo only. Do not run against production from the pull request.
 BEGIN;
