@@ -196,11 +196,11 @@ test('finalized-status migration keeps status and does not rewrite invoice rows'
     .filter((name) => name.includes('service_invoice_keep_finalized_status'))
     .sort();
   assert.deepEqual(matches, [
-    '20261105_000951_service_invoice_keep_finalized_status.sql',
-    '20261105_000951_service_invoice_keep_finalized_status_rollback.sql',
+    '20261105_000952_service_invoice_keep_finalized_status.sql',
+    '20261105_000952_service_invoice_keep_finalized_status_rollback.sql',
   ]);
   const sql = readFileSync(
-    join(migrationsDir, '20261105_000951_service_invoice_keep_finalized_status.sql'),
+    join(migrationsDir, '20261105_000952_service_invoice_keep_finalized_status.sql'),
     'utf8'
   );
   const firstSql = sql
@@ -241,7 +241,7 @@ test('finalized-status migration keeps status and does not rewrite invoice rows'
   );
 
   const rollback = readFileSync(
-    join(migrationsDir, '20261105_000951_service_invoice_keep_finalized_status_rollback.sql'),
+    join(migrationsDir, '20261105_000952_service_invoice_keep_finalized_status_rollback.sql'),
     'utf8'
   );
   assert.match(rollback, /DROP TRIGGER IF EXISTS service_invoices_keep_finalized_status ON public\.service_invoices/);
