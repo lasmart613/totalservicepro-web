@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { useT } from '@/lib/fa/locale';
 import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { rankPartsForDevice, type PartPick } from '@/lib/parts-inventory/bom';
+import { matchLabel, type CrossRefHit } from '@/lib/parts-inventory/cross-ref';
 
 type InventoryRow = {
   id: number | string;
@@ -35,6 +36,7 @@ export default function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [q, setQ] = useState('');
+  const [crossHits, setCrossHits] = useState<CrossRefHit[]>([]);
   const [make, setMake] = useState('Candela');
   const [model, setModel] = useState('Mini GentleYAG');
   const [bomHits, setBomHits] = useState<PartPick[]>([]);
@@ -91,6 +93,28 @@ export default function InventoryPage() {
   useEffect(() => {
     void loadBom();
   }, [loadBom]);
+
+  useEffect(() => {
+    const needle = q.trim();
+    if (needle.length < 2) {
+      setCrossHits([]);
+      return;
+    }
+    let cancel = false;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const headers = await marketplaceAuthHeaders();
+        const res = await fetch(`/api/inventory/search?q=${encodeURIComponent(needle)}`, { headers });
+        if (!res.ok || cancel) return;
+        const json = (await res.json()) as { hits?: CrossRefHit[] };
+        if (!cancel) setCrossHits(json.hits || []);
+      })();
+    }, 250);
+    return () => {
+      cancel = true;
+      clearTimeout(timer);
+    };
+  }, [q]);
 
   const visible = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -158,6 +182,16 @@ export default function InventoryPage() {
     setDescription(desc);
   }
 
+  function useCrossHit(hit: CrossRefHit) {
+    setMpn(hit.mpn);
+    setDescription(hit.description);
+    const vendor = hit.vendors[0];
+    if (vendor) {
+      setVendor(vendor.vendor_name);
+      setVendorPn(vendor.vendor_part_number || '');
+    }
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
@@ -176,10 +210,46 @@ export default function InventoryPage() {
         </div>
 
         <div className="card p-4 grid grid-cols-1 md:grid-cols-3 gap-3">
-          <input className="input" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search parts')} />
+          <input className="input md:col-span-3" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Search parts')} />
+          <p className="md:col-span-3 text-sm text-[var(--text3)]">
+            {t('Matches a manufacturer number, any vendor number, or your inventory number.')}
+          </p>
           <input className="input" value={make} onChange={(e) => setMake(e.target.value)} placeholder={t('Manufacturer')} />
           <input className="input" value={model} onChange={(e) => setModel(e.target.value)} placeholder={t('Model')} />
         </div>
+
+        {crossHits.length > 0 && (
+          <div className="card p-4">
+            <h2 className="font-bold mb-2">{t('Cross-reference')}</h2>
+            <ul className="space-y-3">
+              {crossHits.slice(0, 12).map((hit) => (
+                <li key={hit.key} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+                  <div>
+                    <div className="font-medium">{hit.mpn} · {hit.description}</div>
+                    <div className="text-sm text-[var(--text3)]">
+                      {t(matchLabel(hit.matchedOn))}
+                      {hit.matchedValue ? ` · ${hit.matchedValue}` : ''}
+                      {hit.vendors.length
+                        ? ` · ${hit.vendors.map((vendor) => [vendor.vendor_name, vendor.vendor_part_number].filter(Boolean).join(' ')).join(', ')}`
+                        : ''}
+                    </div>
+                  </div>
+                  <div className="text-sm">
+                    {hit.orgPartId != null ? (
+                      <span>
+                        {t('Sell price')} {money(hit.sellPrice)} · {t('Qty')} {hit.quantityOnHand ?? 0}
+                      </span>
+                    ) : (
+                      <button type="button" className="btn btn-secondary" onClick={() => useCrossHit(hit)}>
+                        {t('Add to inventory')}
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {bomHits.length > 0 && (
           <div className="card p-4">

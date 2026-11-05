@@ -114,6 +114,7 @@ export async function POST(req: NextRequest) {
     internalPartNumber: body.internal_part_number,
   });
   if (existing?.id != null) {
+    await rememberVendorNumber(auth.client, auth.userId, existing.catalog_part_id ?? null, body);
     return NextResponse.json({ ok: true, id: existing.id, reused: true });
   }
 
@@ -169,5 +170,28 @@ export async function POST(req: NextRequest) {
     console.error('[inventory] org insert', saveError?.message);
     return NextResponse.json({ error: 'Could not save this part' }, { status: 502 });
   }
+  await rememberVendorNumber(auth.client, auth.userId, catalogId, body);
   return NextResponse.json({ ok: true, id: saved.id, reused: false, catalog_part_id: catalogId });
+}
+
+/** Global cross-reference: this vendor's number points at the catalog part. No price is written. */
+async function rememberVendorNumber(
+  client: SupabaseClient,
+  userId: string,
+  catalogPartId: number | string | null,
+  body: OrgPartInput,
+) {
+  const vendor = String(body.preferred_vendor_name || '').trim();
+  const vendorPn = String(body.vendor_part_number || '').trim();
+  if (!catalogPartId || !vendor || !vendorPn) return;
+  const { error } = await client.from('part_catalog_availability').insert({
+    part_id: catalogPartId,
+    vendor_name: vendor,
+    vendor_part_number: vendorPn,
+    availability: 'unknown',
+    created_by: userId,
+  });
+  if (error && !/duplicate|unique/i.test(error.message || '')) {
+    console.error('[inventory] vendor cross-ref', error.message);
+  }
 }

@@ -8,6 +8,7 @@ DROP TABLE IF EXISTS public.manual_bom_sweep;
 DROP TABLE IF EXISTS public.device_bom;
 DROP TABLE IF EXISTS public.organization_parts;
 DROP TABLE IF EXISTS public.part_catalog_availability;
+DROP FUNCTION IF EXISTS public.part_catalog_availability_set_pn();
 
 DROP TRIGGER IF EXISTS parts_catalog_set_mpn ON public.parts_catalog;
 DROP FUNCTION IF EXISTS public.parts_catalog_set_mpn();

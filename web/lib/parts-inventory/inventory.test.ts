@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMiniGentleYag, isStockedBomPart, rankPartsForDevice, sectionForDescription, type PartPick } from './bom.ts';
+import { searchCrossReference } from './cross-ref.ts';
 import { normalizeMpn } from './mpn.ts';
 import {
   catalogInsertFromOrg,
@@ -70,6 +71,47 @@ test('blank org fields can be filled from the catalog, never from a catalog pric
   );
   assert.deepEqual(kept.filled, []);
   assert.equal(publicEnrichmentStub('7122-00-3497').available, false);
+});
+
+test('cross-reference matches MPN, a vendor number, or the org inventory number', () => {
+  const catalog = [
+    { id: 1, part_number: '7122-00-3497', mpn_normalized: '7122003497', name: 'Laser head', brand: 'Candela' },
+    { id: 2, part_number: '7122-00-3165', mpn_normalized: '7122003165', name: 'DI filter', brand: 'Candela' },
+  ];
+  const vendors = [
+    { part_id: 1, vendor_name: 'Candela', vendor_part_number: '7122-00-3497' },
+    { part_id: 1, vendor_name: 'Parts for Laser', vendor_part_number: 'PFL-3497' },
+    { part_id: 2, vendor_name: 'Laser Scientific', vendor_part_number: 'LS-3165' },
+  ];
+  const orgParts = [
+    {
+      id: 9,
+      catalog_part_id: 2,
+      mpn_normalized: '7122003165',
+      internal_part_number: 'SHOP-44',
+      vendor_part_number: null,
+      sell_price: 18,
+      unit_cost: 9,
+      quantity_on_hand: 4,
+    },
+  ];
+  const byMpn = searchCrossReference('7122-00-3497', { catalog, vendors, orgParts });
+  assert.equal(byMpn[0]?.mpn, '7122-00-3497');
+  assert.equal(byMpn[0]?.matchedOn, 'mpn');
+  assert.equal(byMpn[0]?.sellPrice, null);
+  assert.equal(byMpn[0]?.vendors.some((vendor) => vendor.vendor_name === 'Parts for Laser'), true);
+
+  const byVendor = searchCrossReference('PFL-3497', { catalog, vendors, orgParts });
+  assert.equal(byVendor[0]?.catalogPartId, 1);
+  assert.equal(byVendor[0]?.matchedOn, 'vendor_pn');
+  assert.equal(byVendor[0]?.unitCost, null);
+
+  const byOrg = searchCrossReference('shop-44', { catalog, vendors, orgParts });
+  assert.equal(byOrg[0]?.orgPartId, 9);
+  assert.equal(byOrg[0]?.matchedOn, 'org_internal');
+  assert.equal(byOrg[0]?.sellPrice, 18);
+  assert.equal(byOrg[0]?.mpn, '7122-00-3165');
+  assert.equal(normalizeMpn('PFL-3497'), 'PFL3497');
 });
 
 test('a device BOM is offered before the general catalog', () => {
@@ -145,6 +187,8 @@ test('migration keeps prices on the org table and queues the sweep without apply
   assert.match(sql, /7122-00-3497/);
   assert.match(sql, /7122-00-3446/);
   assert.match(sql, /mini gentle \?yag/);
+  assert.match(sql, /part_catalog_availability_vendor_pn_uidx/);
+  assert.match(sql, /vendor_pn_normalized/);
   assert.doesNotMatch(sql.slice(sql.indexOf('part_catalog_availability'), sql.indexOf('organization_parts')), /unit_cost|sell_price/);
   assert.match(rollback, /DROP TABLE IF EXISTS public\.organization_parts/);
   assert.match(rollback, /000951-vpyag/);
