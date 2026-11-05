@@ -23,10 +23,45 @@ const FOUNDER = '145a7a3a-0917-4498-8dae-224645e11a49';
 type Op = { kind: 'select' | 'update'; columns?: string; patch?: Record<string, unknown>; filters: Array<[string, string, unknown]> };
 
 /** In-memory organizations table that honors eq / is(null) on update, like PostgREST. */
-function fakeAdmin(rows: Array<Record<string, unknown>>, opts: { failColumns?: RegExp } = {}) {
+function fakeAdmin(rows: Array<Record<string, unknown>>, opts: { failColumns?: RegExp; claim?: 'ok' | 'duplicate' | 'missing' } = {}) {
   const ops: Op[] = [];
   const admin = {
     from(table: string) {
+      if (table === 'complimentary_signup_grants') {
+        let inserted: Record<string, unknown> | null = null;
+        const claimError =
+          opts.claim === 'duplicate'
+            ? { message: 'duplicate key value violates unique constraint', code: '23505' }
+            : opts.claim === 'missing'
+              ? { message: 'Could not find the table public.complimentary_signup_grants in the schema cache', code: 'PGRST205' }
+              : null;
+        const grants: any = {
+          select() {
+            return grants;
+          },
+          eq() {
+            return grants;
+          },
+          insert(row: Record<string, unknown>) {
+            inserted = row;
+            return grants;
+          },
+          delete() {
+            return grants;
+          },
+          update() {
+            return grants;
+          },
+          maybeSingle() {
+            if (inserted) return Promise.resolve({ data: claimError ? null : inserted, error: claimError });
+            return Promise.resolve({ data: null, error: claimError && opts.claim === 'missing' ? claimError : null });
+          },
+          then(resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) {
+            return Promise.resolve({ data: [], error: null }).then(resolve, reject);
+          },
+        };
+        return grants;
+      }
       assert.equal(table, 'organizations');
       const op: Op = { kind: 'select', filters: [] };
       const match = () =>
@@ -64,9 +99,25 @@ function fakeAdmin(rows: Array<Record<string, unknown>>, opts: { failColumns?: R
         },
         then(resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) {
           ops.push(op);
+          if (opts.failColumns && op.columns && opts.failColumns.test(op.columns)) {
+            return Promise.resolve({ data: null, error: { message: 'column organizations.trial_granted_at does not exist' } }).then(
+              resolve,
+              reject
+            );
+          }
           const hits = match();
-          for (const r of hits) Object.assign(r, op.patch);
-          return Promise.resolve({ data: hits.map((r) => ({ id: r.id })), error: null }).then(resolve, reject);
+          if (op.kind === 'update') {
+            for (const r of hits) Object.assign(r, op.patch);
+            return Promise.resolve({ data: hits.map((r) => ({ id: r.id })), error: null }).then(resolve, reject);
+          }
+          const cols = String(op.columns || '')
+            .split(',')
+            .map((c) => c.trim())
+            .filter(Boolean);
+          const data = hits.map((r) =>
+            cols.length ? Object.fromEntries(cols.map((c) => [c, r[c] ?? null])) : r
+          );
+          return Promise.resolve({ data, error: null }).then(resolve, reject);
         },
       };
       return b;
@@ -198,6 +249,73 @@ test('trial_granted_at read error fails closed: the org still links, no grant', 
   assert.doesNotMatch(String(reads[1]), /trial_granted_at/);
 });
 
+test('a founder who already used a signup grant does not get another on a new shop', async () => {
+  const prior = org({
+    id: 1,
+    trial_granted_at: new Date(NOW.getTime() - 10 * DAY).toISOString(),
+    premium_grant: null,
+    is_premium: false,
+    premium_until: null,
+  });
+  const fresh = org({ id: 2652 });
+  const db = fakeAdmin([prior, fresh]);
+  const result = await grantSignupTrialIfEligible(db.admin, {
+    org: fresh as FounderOrgRow,
+    callerId: FOUNDER,
+    trialColumnRead: true,
+    now: NOW,
+  });
+  assert.equal(result.granted, false);
+  assert.equal(result.skip, 'user_cap');
+  assert.equal(db.updates().length, 0);
+  assert.equal(fresh.is_premium, false);
+
+  const active = org({
+    id: 2,
+    premium_grant: 'complimentary_signup',
+    is_premium: true,
+    trial_granted_at: NOW.toISOString(),
+  });
+  const again = await grantSignupTrialIfEligible(fakeAdmin([active, org({ id: 2653 })]).admin, {
+    org: org({ id: 2653 }) as FounderOrgRow,
+    callerId: FOUNDER,
+    trialColumnRead: true,
+    now: NOW,
+  });
+  assert.equal(again.skip, 'user_cap');
+});
+
+test('an active god grant does not use the signup cap, and a lost race is cleared', async () => {
+  const god = org({
+    id: 3,
+    premium_grant: 'complimentary_god',
+    is_premium: true,
+    trial_granted_at: new Date(NOW.getTime() - DAY).toISOString(),
+    premium_until: new Date(NOW.getTime() + 30 * DAY).toISOString(),
+  });
+  const fresh = org({ id: 2654 });
+  const allowed = await grantSignupTrialIfEligible(fakeAdmin([god, fresh]).admin, {
+    org: fresh as FounderOrgRow,
+    callerId: FOUNDER,
+    trialColumnRead: true,
+    now: NOW,
+  });
+  assert.equal(allowed.granted, true);
+  assert.equal(fresh.premium_grant, 'complimentary_signup');
+
+  const raced = org({ id: 2655 });
+  const lost = await grantSignupTrialIfEligible(fakeAdmin([raced], { claim: 'duplicate' }).admin, {
+    org: raced as FounderOrgRow,
+    callerId: FOUNDER,
+    trialColumnRead: true,
+    now: NOW,
+  });
+  assert.equal(lost.granted, false);
+  assert.equal(lost.skip, 'user_cap');
+  assert.equal(raced.is_premium, false);
+  assert.equal(raced.premium_grant, null);
+});
+
 test('non-creator, non-service, and prior-premium orgs never get a grant', () => {
   const base = { callerId: FOUNDER, trialColumnRead: true, now: NOW };
   assert.equal(existingOrgSignupTrialSkip({ ...base, org: org({ created_by: 'someone-else' }) as FounderOrgRow }), 'not_creator');
@@ -210,6 +328,9 @@ test('non-creator, non-service, and prior-premium orgs never get a grant', () =>
 test('founder route: grant only via the new helpers, after the creator check', () => {
   const route = readFileSync(join(here, '../app/api/org/founder/route.ts'), 'utf8');
   assert.match(route, /markTrialOnInsert\(organizationInsertFromPending\(pending, user\.id\)\)/);
+  assert.match(route, /complimentarySignupAlreadyUsed\(admin, user\.id\)/);
+  assert.match(route, /recordSignupGrantClaim\(admin, user\.id, data\.id\)/);
+  assert.match(route, /releaseSignupGrantClaim\(admin, user\.id, createdInRequest\.id\)/);
   assert.match(route, /loadFounderOrg\(admin, orgId\)/);
   assert.ok(route.indexOf('const decision = decideFounderLink') < route.indexOf('await grantSignupTrialIfEligible(admin'));
   // No other premium write in the route.
@@ -230,6 +351,26 @@ test('expiry and removal fields never touch trial_granted_at', () => {
   assert.deepEqual(Object.keys(complimentaryPremiumExpiryFields()).sort(), ['is_premium', 'premium_grant', 'premium_until']);
   const expire = readFileSync(join(here, '../app/api/god/premium/expire/route.ts'), 'utf8');
   assert.doesNotMatch(expire, /trial_granted_at/);
+});
+
+test('migration 000954: one grant row per user, to_regclass guard, rollback drops the table', () => {
+  const sql = readFileSync(join(here, '../supabase/migrations/20261105_000954_complimentary_signup_grant.sql'), 'utf8');
+  const rollback = readFileSync(
+    join(here, '../supabase/migrations/20261105_000954_complimentary_signup_grant_rollback.sql'),
+    'utf8'
+  );
+  const code = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');
+  assert.match(code(sql), /SET LOCAL lock_timeout = '5s';/);
+  assert.match(sql, /to_regclass\('public\.organizations'\)/);
+  assert.doesNotMatch(sql, /::regclass/);
+  assert.doesNotMatch(rollback, /::regclass/);
+  assert.match(sql, /user_id uuid PRIMARY KEY/);
+  assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(sql, /REVOKE ALL ON TABLE public\.complimentary_signup_grants FROM PUBLIC, anon, authenticated/);
+  assert.match(sql, /GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public\.complimentary_signup_grants TO service_role/);
+  assert.doesNotMatch(sql, /INSERT INTO public\.complimentary_signup_grants/);
+  assert.doesNotMatch(sql, /UPDATE public\.organizations/);
+  assert.match(rollback, /DROP TABLE IF EXISTS public\.complimentary_signup_grants/);
 });
 
 test('migration 000915: lock timeout first, empty search_path, guard covers trial_granted_at, rollback exists', () => {
