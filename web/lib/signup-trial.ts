@@ -1,6 +1,6 @@
 /**
  * One complimentary signup trial per organization (migration 000915), and one
- * complimentary signup grant per user (migration 000954). Founding another
+ * complimentary signup grant per user (migration 000956). Founding another
  * shop does not grant another 60 days.
  *
  * POST /api/org/founder used to grant the 60-day complimentary_signup trial
@@ -50,7 +50,7 @@ export type SignupTrialSkip =
 /**
  * One complimentary signup Premium grant per user, lifetime.
  * organizations.trial_granted_at is per shop, so founding another shop used
- * to grant another 60 days. A row in complimentary_signup_grants (000954)
+ * to grant another 60 days. A row in complimentary_signup_grants (000956)
  * is the race-safe record. Existing shops still count when that table is
  * not applied yet. An active complimentary_god grant does not use the cap.
  */

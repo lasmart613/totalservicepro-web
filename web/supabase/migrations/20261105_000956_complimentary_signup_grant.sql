@@ -1,4 +1,4 @@
--- 000954: one complimentary signup Premium grant per user.
+-- 000956: one complimentary signup Premium grant per user.
 --
 -- organizations.trial_granted_at stops a shop from being granted twice.
 -- It does not stop the same person founding another shop and receiving
@@ -15,7 +15,7 @@
 -- Apply it before merge so the concurrent cap is live. The route still
 -- refuses a second shop from organization history if this table is absent.
 --
--- Rollback: 20261105_000954_complimentary_signup_grant_rollback.sql
+-- Rollback: 20261105_000956_complimentary_signup_grant_rollback.sql
 
 BEGIN;
 SET LOCAL lock_timeout = '5s';
@@ -23,7 +23,7 @@ SET LOCAL lock_timeout = '5s';
 DO $$
 BEGIN
   IF to_regclass('public.organizations') IS NULL THEN
-    RAISE EXCEPTION '000954 drift: public.organizations is missing';
+    RAISE EXCEPTION '000956 drift: public.organizations is missing';
   END IF;
 END $$;
 
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS public.complimentary_signup_grants (
 );
 
 COMMENT ON TABLE public.complimentary_signup_grants IS
-  '000954: one complimentary signup Premium grant per user, lifetime. Service role only. Not an advertisement and not a paid plan.';
+  '000956: one complimentary signup Premium grant per user, lifetime. Service role only. Not an advertisement and not a paid plan.';
 
 ALTER TABLE public.complimentary_signup_grants ENABLE ROW LEVEL SECURITY;
 

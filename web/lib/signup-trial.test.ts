@@ -353,10 +353,10 @@ test('expiry and removal fields never touch trial_granted_at', () => {
   assert.doesNotMatch(expire, /trial_granted_at/);
 });
 
-test('migration 000954: one grant row per user, to_regclass guard, rollback drops the table', () => {
-  const sql = readFileSync(join(here, '../supabase/migrations/20261105_000954_complimentary_signup_grant.sql'), 'utf8');
+test('migration 000956: one grant row per user, to_regclass guard, rollback drops the table', () => {
+  const sql = readFileSync(join(here, '../supabase/migrations/20261105_000956_complimentary_signup_grant.sql'), 'utf8');
   const rollback = readFileSync(
-    join(here, '../supabase/migrations/20261105_000954_complimentary_signup_grant_rollback.sql'),
+    join(here, '../supabase/migrations/20261105_000956_complimentary_signup_grant_rollback.sql'),
     'utf8'
   );
   const code = (s: string) => s.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n');

@@ -1,4 +1,4 @@
--- Rollback 000954. Drops the per-user complimentary signup grant record.
+-- Rollback 000956. Drops the per-user complimentary signup grant record.
 -- Organizations keep whatever premium fields they already have.
 
 BEGIN;
