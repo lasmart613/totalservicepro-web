@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { imageHasInk } from '@/lib/signature-ink';
 import { Header } from '@/components/Header';
 import { ArrowLeft, Check, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -392,17 +393,32 @@ export default function NewServiceReport() {
   // visibly in the signature box so they can keep it or Clear and sign fresh.
   const profileSigApplied = useRef(false);
   const [sigFromProfile, setSigFromProfile] = useState(false);
+  const [profileSigBlank, setProfileSigBlank] = useState(false);
   const sigClearedRef = useRef(false);
   useEffect(() => {
     if (profileSigApplied.current || editReportId) return;
     const saved = String(currentProfile?.signature_data || '');
     if (!/^(data:image|https?:)/.test(saved)) return;
     profileSigApplied.current = true;
-    setTechSig((prev) => {
-      if (prev) return prev;
-      setSigFromProfile(true);
-      return saved;
+    let cancelled = false;
+    // A profile pad saved without drawing is a valid but blank PNG; it paints
+    // as an empty white box. Only prefill when the image actually has ink.
+    imageHasInk(saved).then((ok) => {
+      if (cancelled) return;
+      if (!ok) {
+        setProfileSigBlank(true);
+        return;
+      }
+      setTechSig((prev) => {
+        if (prev) return prev;
+        setSigFromProfile(true);
+        return saved;
+      });
     });
+    return () => {
+      cancelled = true;
+      profileSigApplied.current = false;
+    };
   }, [editReportId, currentProfile]);
 
   // init canvas on mount
@@ -2479,6 +2495,11 @@ export default function NewServiceReport() {
                   style={{ width: '100%', maxWidth: 320, height: 90, display: 'block', background: '#fff', borderRadius: 4 }}
                 />
               </div>
+              {profileSigBlank && !techSig && (
+                <p className="text-xs text-gray-500 mt-1" data-testid="sr-profile-signature-blank">
+                  {tSr('Your saved profile signature is blank. Sign below, or re-save it on your Profile page.')}
+                </p>
+              )}
               <div className="flex gap-2 mt-1">
                 <button type="button" onClick={clearSig} className="text-xs px-2 py-0.5 border rounded">Clear</button>
                 <button type="button" onClick={() => {
