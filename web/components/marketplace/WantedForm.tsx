@@ -16,6 +16,7 @@ import {
   WANTED_CONTACT,
   WANTED_PUBLIC_SELECT,
   prefillWantedFromOrg,
+  wantedApiErrorMessage,
   type OrgWantedPrefill,
   type WantedContact,
   type WantedRecord,
@@ -58,6 +59,7 @@ export function WantedForm({ postId }: { postId?: string }) {
   const [ready, setReady] = useState(false);
   const [missing, setMissing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -154,8 +156,15 @@ export function WantedForm({ postId }: { postId?: string }) {
     }));
   };
 
+  const reportSaveError = (message: string) => {
+    const text = t(message);
+    setSaveError(text);
+    toast.error(text);
+  };
+
   const save = async () => {
     setSaving(true);
+    setSaveError(null);
     try {
       const headers = await marketplaceAuthHeaders();
       const payload = {
@@ -171,12 +180,14 @@ export function WantedForm({ postId }: { postId?: string }) {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast.error(t(json.error || 'That wanted post could not be saved.'));
+        reportSaveError(wantedApiErrorMessage(res.status, json));
         return;
       }
       toast.success(t('Wanted post saved.'));
       const id = json.post?.id || postId;
       router.push(id ? `/marketplace/wanted/${id}` : '/marketplace/wanted');
+    } catch {
+      reportSaveError('That wanted post could not be saved.');
     } finally {
       setSaving(false);
     }
@@ -349,6 +360,11 @@ export function WantedForm({ postId }: { postId?: string }) {
                 <input className="input mt-1" value={text(form.contact_name)} onChange={(e) => setText('contact_name', e.target.value)} />
               </label>
             </div>
+            {saveError ? (
+              <p role="alert" className="text-sm rounded border border-red-700/60 bg-red-950/40 text-red-200 px-3 py-2">
+                {saveError}
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2 pt-2">
               <button type="submit" className="btn btn-primary" disabled={saving}>
                 {saving ? t('Saving...') : editing ? t('Save') : t('Post a Wanted')}

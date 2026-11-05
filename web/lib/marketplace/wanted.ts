@@ -388,6 +388,18 @@ export function filterWantedPosts<T extends WantedRecord>(rows: T[], filters: Wa
   });
 }
 
+export const WANTED_DB_MISSING_MESSAGE = 'The Wanted board is not on this database yet.';
+export const WANTED_SAVE_FAILED_MESSAGE = 'That wanted post could not be saved.';
+
+/** Message for a failed create or edit. A 503 with no body still names the missing migration. */
+export function wantedApiErrorMessage(status: number, body: unknown): string {
+  const rec = asRecord(body);
+  const fromBody = typeof rec?.error === 'string' ? rec.error.trim() : '';
+  if (fromBody) return fromBody;
+  if (status === 503) return WANTED_DB_MISSING_MESSAGE;
+  return WANTED_SAVE_FAILED_MESSAGE;
+}
+
 export function isMissingWantedTable(error: { message?: string; code?: string } | null | undefined): boolean {
   if (!error) return false;
   const code = String(error.code || '');

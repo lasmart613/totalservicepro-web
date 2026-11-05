@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { canPostWanted } from '../roles.ts';
 import {
   WANTED_POSTING_IS_FREE,
+  wantedApiErrorMessage,
   buildWantedContentUpdate,
   buildWantedInsert,
   buildWantedStatusPatch,
@@ -157,6 +158,22 @@ test('migration is free, RLS-locked, and rolls back without touching other table
   assert.match(down, /DROP TABLE IF EXISTS public\.marketplace_wanted;/);
   assert.doesNotMatch(down, /DROP TABLE IF EXISTS public\.organizations/);
   assert.doesNotMatch(down, /DROP TABLE IF EXISTS public\.marketplace_listings/);
+});
+
+test('create and edit surface a 503 when the tables are not on this database', () => {
+  assert.equal(
+    wantedApiErrorMessage(503, { error: 'The Wanted board is not on this database yet.', free: true }),
+    'The Wanted board is not on this database yet.'
+  );
+  assert.equal(wantedApiErrorMessage(503, {}), 'The Wanted board is not on this database yet.');
+  assert.equal(wantedApiErrorMessage(503, null), 'The Wanted board is not on this database yet.');
+  assert.equal(wantedApiErrorMessage(400, { error: 'Add a title (at least 3 characters).' }), 'Add a title (at least 3 characters).');
+  assert.equal(wantedApiErrorMessage(500, {}), 'That wanted post could not be saved.');
+  const form = read('components/marketplace/WantedForm.tsx');
+  assert.match(form, /wantedApiErrorMessage\(res\.status, json\)/);
+  assert.match(form, /role="alert"/);
+  assert.match(form, /toast\.error\(text\)/);
+  assert.doesNotMatch(form, /stripe|checkout/);
 });
 
 test('wanted API validates writes and does not bill', () => {
