@@ -1,0 +1,151 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { isMiniGentleYag, isStockedBomPart, rankPartsForDevice, sectionForDescription, type PartPick } from './bom.ts';
+import { normalizeMpn } from './mpn.ts';
+import {
+  catalogInsertFromOrg,
+  enrichBlankOrgFields,
+  filterInventoryRows,
+  findExistingOrgPart,
+  publicEnrichmentStub,
+} from './org-part.ts';
+import { loadMiniGentleYagSeed, miniGentleYagFamilyTreeText } from './seed.ts';
+import {
+  applySweepOutcome,
+  extractBomLines,
+  MINI_GENTLEYAG_MANUAL,
+  planSweepBatch,
+  scoreBomText,
+  SWEEP_BATCH_DEFAULT,
+  SWEEP_BATCH_MAX,
+  SWEEP_BATCH_MIN,
+  sweepPriority,
+  type SweepProgress,
+} from './sweep.ts';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+test('MPN normalization ignores case, spaces, and dashes', () => {
+  assert.equal(normalizeMpn(' 7122-00-3497 '), '7122003497');
+  assert.equal(normalizeMpn('7122 00 3497'), normalizeMpn('7122-00-3497'));
+});
+
+test('zero quantity is hidden unless the toggle asks for it', () => {
+  const rows = [{ id: 1, quantity_on_hand: 0 }, { id: 2, quantity_on_hand: 3 }, { id: 3, quantity_on_hand: null }];
+  assert.deepEqual(filterInventoryRows(rows).map((row) => row.id), [2]);
+  assert.equal(filterInventoryRows(rows, { hideZero: false }).length, 3);
+});
+
+test('the same MPN is reused and catalog inserts carry no price', () => {
+  const existing = [{ id: 9, mpn_normalized: '7122003497', catalog_part_id: 4, unit_cost: 80 }];
+  assert.equal(findExistingOrgPart(existing, { mpn: '7122-00-3497' })?.id, 9);
+  const created = catalogInsertFromOrg({
+    mpn: '7122-00-3497',
+    brand: 'Candela',
+    description: 'Laser head',
+    unit_cost: 500,
+    sell_price: 900,
+  });
+  assert.equal(created?.mpn_normalized, '7122003497');
+  assert.equal('unit_cost' in (created || {}), false);
+  assert.equal('sell_price' in (created || {}), false);
+});
+
+test('blank org fields can be filled from the catalog, never from a catalog price', () => {
+  const filled = enrichBlankOrgFields(
+    { description_override: null, unit_cost: null, sell_price: 40, field_sources: {} },
+    { description: 'Laser head assembly', sale_price: 999, name: 'Head' },
+    { unit_cost: 10, sell_price: 20, preferred_vendor_name: 'Candela' },
+  );
+  assert.deepEqual(filled.filled.sort(), ['description_override', 'preferred_vendor_name']);
+  assert.equal(filled.patch.description_override, 'Laser head assembly');
+  assert.equal(filled.patch.unit_cost, undefined);
+  assert.equal(filled.patch.sell_price, undefined);
+  const kept = enrichBlankOrgFields(
+    { description_override: 'Shop name', field_sources: { description_override: 'org' } },
+    { description: 'Catalog name' },
+  );
+  assert.deepEqual(kept.filled, []);
+  assert.equal(publicEnrichmentStub('7122-00-3497').available, false);
+});
+
+test('a device BOM is offered before the general catalog', () => {
+  const bom: PartPick[] = [{ key: 'b', part_number: '7122-00-3497', description: 'Laser head', unit_price: 12, source: 'bom', section: 'Laser head' }];
+  const other: PartPick[] = [
+    { key: 'c', part_number: '7122-00-3497', description: 'duplicate', unit_price: 99, source: 'catalog' },
+    { key: 'm', part_number: 'OTHER-1', description: 'Marketplace lamp', unit_price: 5, source: 'marketplace' },
+  ];
+  const ranked = rankPartsForDevice(bom, other, '');
+  assert.equal(ranked[0]?.source, 'bom');
+  assert.equal(ranked[0]?.unit_price, 12);
+  assert.equal(ranked.filter((hit) => hit.part_number === '7122-00-3497').length, 1);
+  assert.equal(isMiniGentleYag('Candela', 'VP YAG'), true);
+  assert.equal(isMiniGentleYag('Candela', 'GentleMAX'), false);
+});
+
+test('Mini GentleYAG seed keeps every stocked section, including head and rail', () => {
+  const lines = loadMiniGentleYagSeed();
+  assert.ok(lines.length >= 150, `expected a full family-tree extract, got ${lines.length}`);
+  const sections = new Set(lines.map((line) => line.section));
+  for (const section of ['Laser head', 'Laser rail', 'Laser rail — aiming beam', 'Fluid section', 'DCD', 'Calport']) {
+    assert.ok(sections.has(section), section);
+  }
+  assert.ok(lines.some((line) => line.mpn === '7122-00-3497'));
+  assert.ok(lines.some((line) => line.mpn === '7122-00-3446'));
+  assert.equal(lines.some((line) => line.mpn.startsWith('7111-80-')), false);
+  assert.equal(isStockedBomPart('7122-99-3497', 'ASSY DWG,LSR HD'), false);
+  assert.equal(sectionForDescription('7122-00-3497', 'ASSY,LSR HD,GL INSR,VPYAG'), 'Laser head');
+  const extracted = extractBomLines(miniGentleYagFamilyTreeText(lines));
+  assert.equal(extracted.length, lines.length);
+  const score = scoreBomText(miniGentleYagFamilyTreeText(lines));
+  assert.equal(score.hasBom, true);
+});
+
+test('the sweep runs Mini GentleYAG first, then other Candela, in batches of 50-100', () => {
+  assert.equal(sweepPriority({ brand: 'Candela', model: 'vpyag', title: 'Mini GentleYAG' }), 0);
+  assert.equal(sweepPriority({ brand: 'Candela', model: 'gentleyag', title: 'GentleYAG' }), 10);
+  assert.equal(sweepPriority({ brand: 'Lumenis', model: 'acupulse', title: 'AcuPulse' }), 100);
+  assert.equal(MINI_GENTLEYAG_MANUAL.libraryId, 9);
+  assert.ok(SWEEP_BATCH_DEFAULT >= SWEEP_BATCH_MIN && SWEEP_BATCH_DEFAULT <= SWEEP_BATCH_MAX);
+
+  const manuals: SweepProgress[] = [
+    { manual_id: 500, brand: 'Quanta', title: 'Cyber Ho', status: 'pending', priority: 100 },
+    { manual_id: 24, brand: 'Candela', model: 'gentleyag', title: 'GentleYag', status: 'pending', priority: 10 },
+    { manual_id: 9, brand: 'Candela', model: 'vpyag', title: 'Mini GentleYAG (VPYag)', status: 'pending', priority: 0 },
+    { manual_id: 8, brand: 'Candela', model: 'vpyag', title: 'already done', status: 'extracted', priority: 0 },
+  ];
+  const batch = planSweepBatch(manuals, 75);
+  assert.deepEqual(batch.map((row) => row.manual_id), [9, 24, 500]);
+  const again = applySweepOutcome(batch[0], { lines: loadMiniGentleYagSeed() });
+  assert.equal(again.status, 'extracted');
+  const rest = manuals.filter((row) => row.manual_id !== 9);
+  assert.equal(planSweepBatch([again, ...rest], 75).some((row) => row.manual_id === 9), false);
+  const failed = applySweepOutcome(batch[1], { lines: [], error: 'unreadable page' });
+  assert.equal(failed.status, 'error');
+  assert.equal(planSweepBatch([failed], 50)[0]?.manual_id, 24);
+});
+
+test('migration keeps prices on the org table and queues the sweep without applying it', () => {
+  const sql = readFileSync(
+    join(here, '../../supabase/migrations/20261105_000951_org_parts_inventory_bom.sql'),
+    'utf8',
+  );
+  const rollback = readFileSync(
+    join(here, '../../supabase/migrations/20261105_000951_org_parts_inventory_bom_rollback.sql'),
+    'utf8',
+  );
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.organization_parts/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.device_bom/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.manual_bom_sweep/);
+  assert.match(sql, /CREATE TABLE IF NOT EXISTS public\.part_catalog_availability/);
+  assert.match(sql, /is_active_org_member\(organization_id\)/);
+  assert.match(sql, /7122-00-3497/);
+  assert.match(sql, /7122-00-3446/);
+  assert.match(sql, /mini gentle \?yag/);
+  assert.doesNotMatch(sql.slice(sql.indexOf('part_catalog_availability'), sql.indexOf('organization_parts')), /unit_cost|sell_price/);
+  assert.match(rollback, /DROP TABLE IF EXISTS public\.organization_parts/);
+  assert.match(rollback, /000951-vpyag/);
+});

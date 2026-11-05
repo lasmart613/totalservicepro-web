@@ -5,7 +5,8 @@ export type PartSuggestHit = {
   part_number: string;
   description: string;
   unit_price: number | null;
-  source: 'catalog' | 'marketplace';
+  source: 'bom' | 'catalog' | 'marketplace';
+  section?: string | null;
 };
 
 export function fromCatalogRow(row: {
@@ -63,8 +64,9 @@ export function fromMarketplaceRow(row: {
 export function mergePartSuggests(hits: PartSuggestHit[]): PartSuggestHit[] {
   const seen = new Set<string>();
   const out: PartSuggestHit[] = [];
+  const rank = (source: PartSuggestHit['source']) => (source === 'bom' ? 0 : source === 'catalog' ? 1 : 2);
   const ranked = [...hits].sort((a, b) => {
-    if (a.source !== b.source) return a.source === 'catalog' ? -1 : 1;
+    if (a.source !== b.source) return rank(a.source) - rank(b.source);
     return a.part_number.localeCompare(b.part_number);
   });
   for (const h of ranked) {
@@ -92,6 +94,7 @@ export function exactPartSuggest(hits: PartSuggestHit[], partNumber: string): Pa
   const s = partNumber.trim().toLowerCase();
   if (!s) return null;
   return (
+    hits.find((h) => h.source === 'bom' && h.part_number.trim().toLowerCase() === s) ||
     hits.find((h) => h.source === 'catalog' && h.part_number.trim().toLowerCase() === s) ||
     hits.find((h) => h.part_number.trim().toLowerCase() === s) ||
     null
@@ -99,5 +102,7 @@ export function exactPartSuggest(hits: PartSuggestHit[], partNumber: string): Pa
 }
 
 export function sourceLabel(source: PartSuggestHit['source']): string {
-  return source === 'marketplace' ? 'Marketplace' : 'Catalog';
+  if (source === 'bom') return 'This device';
+  if (source === 'marketplace') return 'Marketplace';
+  return 'Catalog';
 }

@@ -23,6 +23,7 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { isSentPurchaseOrder, purchaseOrderSavePayload } from '@/lib/billing/purchase-order-save';
+import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { isPartListing } from '@/lib/marketplace/parts';
 import { loadPoCatalogListings } from '@/lib/marketplace/listing-columns';
 import {
@@ -65,6 +66,8 @@ export default function PurchaseOrderFormClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editIdParam = searchParams.get('id');
+  const deviceMake = searchParams.get('manufacturer') || '';
+  const deviceModel = searchParams.get('model') || '';
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -193,8 +196,21 @@ export default function PurchaseOrderFormClient() {
     } catch (e) {
       console.warn('PO marketplace suggest', e);
     }
+    if (deviceMake || deviceModel) {
+      try {
+        const headers = await marketplaceAuthHeaders();
+        const qs = new URLSearchParams({ manufacturer: deviceMake, model: deviceModel });
+        const res = await fetch(`/api/inventory/bom?${qs}`, { headers });
+        if (res.ok) {
+          const json = (await res.json()) as { hits?: PartSuggestHit[] };
+          for (const hit of json.hits || []) hits.push(hit);
+        }
+      } catch (e) {
+        console.warn('PO device BOM', e);
+      }
+    }
     setPartHits(mergePartSuggests(hits));
-  }, [supabase]);
+  }, [supabase, deviceMake, deviceModel]);
 
   const loadSuppliers = useCallback(async () => {
     const { data, error } = await fetchAllPages<SupplierOpt>(async (from, to) => {
@@ -639,7 +655,9 @@ export default function PurchaseOrderFormClient() {
         <section className="card p-4 mb-4 overflow-x-auto">
           <h2 className="font-bold text-[var(--gold)] mb-3">{t('Line items')}</h2>
           <p className="text-[11px] text-[var(--text3)] mb-2">
-            {t('Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.')}
+            {deviceMake || deviceModel
+              ? t('Parts for this device are listed first. Sell price comes from your inventory.')
+              : t('Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.')}
           </p>
           <table className="w-full text-sm">
             <thead>
