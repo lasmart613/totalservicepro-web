@@ -1475,6 +1475,127 @@ export type Database = {
         }
         Relationships: []
       }
+      marketplace_wanted: {
+        Row: {
+          budget_max: number | null
+          budget_min: number | null
+          city: string | null
+          closed_at: string | null
+          contact_name: string | null
+          contact_via: string
+          country: string | null
+          created_at: string
+          created_by: string
+          currency: string
+          description: string
+          filled_at: string | null
+          id: string
+          manufacturer: string | null
+          modality: string
+          model: string | null
+          organization_id: number
+          poster_name: string | null
+          preferred_condition: string
+          service_area: string | null
+          state: string | null
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          budget_max?: number | null
+          budget_min?: number | null
+          city?: string | null
+          closed_at?: string | null
+          contact_name?: string | null
+          contact_via?: string
+          country?: string | null
+          created_at?: string
+          created_by: string
+          currency?: string
+          description: string
+          filled_at?: string | null
+          id?: string
+          manufacturer?: string | null
+          modality?: string
+          model?: string | null
+          organization_id: number
+          poster_name?: string | null
+          preferred_condition?: string
+          service_area?: string | null
+          state?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          budget_max?: number | null
+          budget_min?: number | null
+          city?: string | null
+          closed_at?: string | null
+          contact_name?: string | null
+          contact_via?: string
+          country?: string | null
+          created_at?: string
+          created_by?: string
+          currency?: string
+          description?: string
+          filled_at?: string | null
+          id?: string
+          manufacturer?: string | null
+          modality?: string
+          model?: string | null
+          organization_id?: number
+          poster_name?: string | null
+          preferred_condition?: string
+          service_area?: string | null
+          state?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_wanted_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketplace_wanted_messages: {
+        Row: {
+          body: string
+          created_at: string
+          id: string
+          sender_id: string
+          wanted_id: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          id?: string
+          sender_id: string
+          wanted_id: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          id?: string
+          sender_id?: string
+          wanted_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_wanted_messages_wanted_id_fkey"
+            columns: ["wanted_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_wanted"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       notifications: {
         Row: {
           created_at: string | null

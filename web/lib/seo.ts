@@ -28,6 +28,7 @@ export const PUBLIC_SITEMAP_PATHS = [
   '/marketplace/parts',
   '/marketplace/used-systems',
   '/marketplace/consumables',
+  '/marketplace/wanted',
   '/directory',
   '/find-a-rep',
   '/calculators',
@@ -126,6 +127,7 @@ export const ROBOTS_DISALLOW = [
   '/marketplace/list',
   '/marketplace/my-listings',
   '/marketplace/storefront',
+  '/marketplace/wanted/new',
   '/pdf-viewer-demo',
   '/dev',
 ] as const;
@@ -148,6 +150,7 @@ export type PublicPageKey =
   | 'marketplaceParts'
   | 'marketplaceUsedSystems'
   | 'marketplaceConsumables'
+  | 'marketplaceWanted'
   | 'directory'
   | 'signup'
   | 'signupCompany'
@@ -196,6 +199,12 @@ export const PUBLIC_PAGE_SEO: Record<PublicPageKey, PageSeo> = {
     title: 'Used systems',
     description:
       'Buy or sell pre-owned biomedical systems on RepairPlanet. Lasers, lithotriptors, and C-arms first.',
+  },
+  marketplaceWanted: {
+    path: '/marketplace/wanted',
+    title: 'Wanted equipment',
+    description:
+      'Free Wanted posts on RepairPlanet. Buyers list the laser or medical aesthetic equipment they are looking for. Not a paid ad — posting and viewing are free.',
   },
   marketplaceConsumables: {
     path: '/marketplace/consumables',

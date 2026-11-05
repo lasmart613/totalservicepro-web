@@ -274,6 +274,7 @@ export function Header({
     href: '/marketplace',
     items: [
       { href: '/marketplace', label: 'Marketplace Home' },
+      { href: '/marketplace/wanted', label: 'Wanted' },
       { href: '/marketplace/used-systems', label: 'Used Equipment' },
       { href: '/marketplace/parts', label: 'Parts' },
       { href: '/marketplace/consumables', label: 'Consumables' },
