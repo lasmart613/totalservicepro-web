@@ -30,6 +30,7 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 
 import { OrgTypeStep, type OrgType } from './org-type-step';
 import { onboardingOrgUpdatePayload } from '@/lib/onboarding-org-update';
+import { normalizeOrganizationWebsite } from '@/lib/organization-website';
 import { logoContentType, logoExtension, validateLogoFile } from '@/lib/customer-logo';
 import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
 type TeamMember = {
@@ -517,6 +518,11 @@ export default function Onboarding() {
       alert('At least one admin (company_admin) is required for the organization.');
       return;
     }
+    const site = normalizeOrganizationWebsite(formData.website);
+    if (!site.ok) {
+      alert(site.error);
+      return;
+    }
     setLoading(true);
     try {
       let orgId = existingOrgId;
@@ -555,7 +561,7 @@ export default function Onboarding() {
         state: formData.state || null,
         ...(normalizeCountryName(formData.country) ? { country: normalizeCountryName(formData.country) } : {}),
         phone: formData.phone || null,
-        website: formData.website || null,
+        website: site.website,
         supported_brands: selectedBrands.length ? selectedBrands : null,
         logo_url: logoUrl || null,
         // Free TSP Directory opt-in (product: free for all; no paywall)
@@ -919,7 +925,7 @@ export default function Onboarding() {
             <div><label className="label" htmlFor="onboarding-country">{t('Country')}</label><CountrySelect id="onboarding-country" value={formData.country} onChange={(country)=>updateForm('country',country||'')} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">{t('Phone')}</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
-              <div><label className="label">{t('Website')}</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
+              <div><label className="label">{t('Website')}</label><input className="input" type="text" inputMode="url" autoComplete="url" spellCheck={false} placeholder="example.com" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
             </div>
             <label className="flex items-start gap-3 cursor-pointer card p-4">
               <input

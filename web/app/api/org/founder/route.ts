@@ -9,6 +9,7 @@ import {
   organizationInsertFromPending,
   type PendingSignup,
 } from '@/lib/pending-signup';
+import { normalizeOrganizationWebsite, OrganizationWebsiteError } from '@/lib/organization-website';
 import { decideFounderLink, founderClaimAllowed } from '@/lib/tenant-lockdown';
 import {
   grantSignupTrialIfEligible,
@@ -149,7 +150,11 @@ export async function runOrgFounder(req: NextRequest, deps: FounderDeps = {}) {
       }
       // Created in this request: the one place a trial is granted outright.
       // trial_granted_at rides on the same insert as the grant.
-      pending = { ...pending, orgType: newOrg.orgType };
+      const site = normalizeOrganizationWebsite(pending.website);
+      if (!site.ok) {
+        return NextResponse.json({ error: site.error }, { status: 400 });
+      }
+      pending = { ...pending, orgType: newOrg.orgType, website: site.website };
       const row = markTrialOnInsert(organizationInsertFromPending(pending, user.id));
       row.created_by = user.id;
       delete row.num_lasers;
@@ -326,6 +331,9 @@ export async function runOrgFounder(req: NextRequest, deps: FounderDeps = {}) {
       role: decision.role,
     });
   } catch (e: unknown) {
+    if (e instanceof OrganizationWebsiteError) {
+      return NextResponse.json({ error: e.message }, { status: 400 });
+    }
     const message = e instanceof Error ? e.message : 'Organization setup failed';
     console.error('org founder', e);
     return NextResponse.json({ error: message }, { status: 500 });
