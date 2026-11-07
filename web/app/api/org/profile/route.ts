@@ -8,6 +8,7 @@ import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
 import { parseOrgTimeZone } from '@/lib/org-timezone';
 import { normalizeCountryName } from '@/lib/countries';
 import { guardPrivateFieldWipe, ORG_PROFILE_RESPONSE_COLUMNS } from '@/lib/org-columns';
+import { normalizeOrganizationWebsite } from '@/lib/organization-website';
 
 /**
  * POST /api/org/profile
@@ -202,6 +203,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: checked.error }, { status: 400 });
       }
       payload.timezone = checked.timezone;
+    }
+    if ('website' in payload) {
+      const site = normalizeOrganizationWebsite(payload.website);
+      if (!site.ok) {
+        return NextResponse.json({ error: site.error }, { status: 400 });
+      }
+      payload.website = site.website;
     }
     if ('country' in payload) {
       const raw = payload.country;

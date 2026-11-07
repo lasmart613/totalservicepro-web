@@ -11,6 +11,7 @@ import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
+import { normalizeOrganizationWebsite } from '@/lib/organization-website';
 
 const SERVICES_OFFERED = [
   'Preventive Maintenance (PM)', 'Emergency / On-Call Repair', 'Install / Deinstall',
@@ -47,7 +48,7 @@ export default function CompanySignup() {
     );
   };
 
-  function pendingPayload(): PendingSignup {
+  function pendingPayload(websiteValue: string | null): PendingSignup {
     return {
       kind: 'company',
       name: companyName,
@@ -58,7 +59,7 @@ export default function CompanySignup() {
       address: address || null,
       city: city || null,
       state: state || null,
-      website: website || null,
+      website: websiteValue,
       role: 'company_admin',
       orgType: 'service_company',
       extra: {
@@ -69,8 +70,10 @@ export default function CompanySignup() {
     };
   }
 
-  async function completeCompanySetup(userId: string) {
-    const applied = await applyPendingSignup(supabase, userId, pendingPayload());
+  async function completeCompanySetup(userId: string, websiteValue?: string | null) {
+    const site = normalizeOrganizationWebsite(websiteValue === undefined ? website : websiteValue);
+    if (!site.ok) throw new Error(site.error);
+    const applied = await applyPendingSignup(supabase, userId, pendingPayload(site.website));
     router.push(applied.dest);
   }
 
@@ -90,12 +93,18 @@ export default function CompanySignup() {
       setMessage('Passwords do not match.');
       return;
     }
+    const site = normalizeOrganizationWebsite(website);
+    if (!site.ok) {
+      setMessage(site.error);
+      return;
+    }
+    setWebsite(site.website || '');
     setLoading(true);
 
     try {
       const origin = clientAuthOrigin();
       await prepareFreshSignup(supabase);
-      savePendingSignup(pendingPayload());
+      savePendingSignup(pendingPayload(site.website));
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -111,7 +120,7 @@ export default function CompanySignup() {
             city: city || '',
             state: state || '',
             phone: phone || '',
-            website: website || '',
+            website: site.website || '',
             services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
           },
           emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
@@ -252,7 +261,7 @@ export default function CompanySignup() {
 
             <div>
               <label className="label">{t('Website')}</label>
-              <input className="input" dir="ltr" value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://..." />
+              <input className="input" dir="ltr" type="text" inputMode="url" autoComplete="url" spellCheck={false} value={website} onChange={e => setWebsite(e.target.value)} placeholder="example.com" />
             </div>
 
             <div>
