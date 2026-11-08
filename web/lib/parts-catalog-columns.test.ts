@@ -24,6 +24,7 @@ test('parts catalog writes brand and drops manufacturer and image_urls', () => {
     is_active: true,
   });
   assert.equal(row.brand, 'Candela');
+  assert.equal('sale_price' in row, false);
   assert.equal(row.image_url, 'https://cdn.example/a.webp');
   assert.equal('manufacturer' in row, false);
   assert.equal('image_urls' in row, false);

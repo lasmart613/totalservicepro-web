@@ -1,0 +1,1202 @@
+-- 000951: org parts inventory, shared catalog identity, device BOM, manual sweep queue.
+--
+-- Not applied by this change. Run only after Larry's yes, and only after the
+-- read-only preflight below can establish the price privacy guarantee.
+-- A leftover grant, an owner view, or a realtime publication that still
+-- carries a price column aborts the transaction. This file does not revoke
+-- unrelated roles and does not rewrite a FOR ALL TABLES publication.
+--
+-- Shared catalog stays public.parts_catalog (MPN, description, specs).
+-- This file does not add price columns there. Legacy sale_price and
+-- part_vendors.unit_cost stay stored. anon and authenticated cannot read or
+-- write them. Org prices live on organization_parts.
+--
+-- New:
+--   part_catalog_availability  who carries the part (no cost, no sell price)
+--   organization_parts         org SKU, preferred vendor, vendor PN, cost,
+--                              sell price, lead times, quantity. RLS by membership.
+--   device_bom                 one bill of materials per laser_models row
+--   manual_bom_sweep           resumable progress for the manuals library
+--
+-- Seed: Candela Mini GentleYAG / VP YAG (service manual 8501-01-1769) structured
+-- family-tree and subassembly lines. Laser-head and laser-rail assemblies are
+-- included. Exploded fasteners that exist only as drawing ink are left for the
+-- sweep when those PDFs are read again.
+
+BEGIN;
+
+SET LOCAL lock_timeout = '5s';
+
+-- Preflight. Abort the whole transaction when a listed price path is visible.
+-- This is not a privacy proof and it does not clear production. A human audit
+-- of the real database is mandatory and has not been performed. Source and
+-- dependency scans do not prove that dynamic SQL, obfuscated names, or
+-- functions in other languages are safe. Passing this block only means the
+-- listed checks found nothing.
+-- Revokes below name only PUBLIC, anon, and authenticated. A grant to any other
+-- ordinary role, including a BYPASSRLS role and a role that authenticated
+-- inherits, is left in place and this migration stops. service_role is the
+-- only named exception, because a later backfill may read the stored prices.
+-- This file does not revoke other roles and does not drop functions or views.
+-- PREFLIGHT_CHECK_BEGIN
+DO $$
+DECLARE
+  v_hits text;
+  v_owner text;
+BEGIN
+  IF to_regclass('public.parts_catalog') IS NULL OR to_regclass('public.part_vendors') IS NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: parts_catalog or part_vendors is missing';
+  END IF;
+
+  SELECT string_agg(DISTINCT format('%s %s %s.%s', role_name, privilege_type, relname, attname), '; ' ORDER BY format('%s %s %s.%s', role_name, privilege_type, relname, attname))
+    INTO v_hits
+  FROM (
+    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname AS role_name, c.relowner, gr.oid AS role_oid, gr.rolsuper
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+      CROSS JOIN LATERAL aclexplode(c.relacl) acl
+      JOIN pg_roles gr ON gr.oid = acl.grantee
+     WHERE c.relacl IS NOT NULL
+       AND acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE')
+       AND (
+         (c.relname = 'parts_catalog' AND a.attname = 'sale_price')
+         OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
+       )
+    UNION ALL
+    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname, c.relowner, gr.oid, gr.rolsuper
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
+      CROSS JOIN LATERAL aclexplode(a.attacl) acl
+      JOIN pg_roles gr ON gr.oid = acl.grantee
+     WHERE acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE')
+       AND (
+         (c.relname = 'parts_catalog' AND a.attname = 'sale_price')
+         OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
+       )
+  ) g
+  WHERE g.role_name NOT IN ('anon', 'authenticated', 'service_role')
+    AND NOT g.rolsuper
+    AND g.role_oid <> g.relowner;
+
+  IF v_hits IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: price privilege remains for %. Named revokes of anon and authenticated do not remove grants inherited from another role. This migration does not revoke that role. Run the read-only audit and remove the grant in a reviewed change.', v_hits;
+  END IF;
+
+  SELECT string_agg(DISTINCT format('%s owns %s', own.rolname, c.relname), '; ')
+    INTO v_owner
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+    JOIN pg_roles own ON own.oid = c.relowner
+   WHERE c.relname IN ('parts_catalog', 'part_vendors')
+     AND NOT own.rolsuper
+     AND own.rolname NOT IN ('postgres', 'supabase_admin', 'service_role');
+  IF v_owner IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: table owner can read price columns and this migration will not change ownership (%).', v_owner;
+  END IF;
+
+  SELECT string_agg(DISTINCT format('%s inherits %s', who_name, inherits_name), '; ' ORDER BY format('%s inherits %s', who_name, inherits_name))
+    INTO v_hits
+  FROM (
+    WITH RECURSIVE chain AS (
+      SELECT am.member AS who, am.roleid AS inherits, 1 AS depth
+        FROM pg_auth_members am
+      UNION ALL
+      SELECT c.who, am.roleid, c.depth + 1
+        FROM chain c
+        JOIN pg_auth_members am ON am.member = c.inherits
+       WHERE c.depth < 8
+    )
+    SELECT who.rolname AS who_name, inherits.rolname AS inherits_name
+      FROM chain c
+      JOIN pg_roles who ON who.oid = c.who
+      JOIN pg_roles inherits ON inherits.oid = c.inherits
+     WHERE who.rolname IN ('anon', 'authenticated')
+       AND inherits.rolname NOT IN ('anon', 'authenticated')
+       AND (
+         has_column_privilege(inherits.oid, 'public.parts_catalog'::regclass, 'sale_price'::text, 'SELECT')
+         OR has_column_privilege(inherits.oid, 'public.parts_catalog'::regclass, 'sale_price'::text, 'INSERT')
+         OR has_column_privilege(inherits.oid, 'public.part_vendors'::regclass, 'unit_cost'::text, 'SELECT')
+         OR has_column_privilege(inherits.oid, 'public.part_vendors'::regclass, 'unit_cost'::text, 'INSERT')
+       )
+  ) inherited;
+  IF v_hits IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: anon or authenticated inherits a price grant through %. This migration does not revoke that role. A human audit is required. Passing this preflight does not clear production.', v_hits;
+  END IF;
+
+  -- Views, materialized views, and security-definer functions. A view that
+  -- only calls a function is included through pg_depend. This text scan does
+  -- not prove dynamic SQL is safe.
+  SELECT string_agg(DISTINCT item, '; ' ORDER BY item)
+    INTO v_hits
+  FROM (
+    WITH RECURSIVE direct AS (
+      SELECT c.oid, n.nspname, c.relname, c.relkind, pg_get_viewdef(c.oid, true) AS def,
+             coalesce(array_to_string(c.reloptions, ','), '') AS opts
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE c.relkind IN ('v', 'm')
+         AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    ), price_fn AS (
+      SELECT p.oid, n.nspname, p.proname
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE p.prosecdef
+         AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+         AND (
+           (pg_get_functiondef(p.oid) ILIKE '%parts_catalog%'
+             AND (pg_get_functiondef(p.oid) ILIKE '%sale_price%' OR pg_get_functiondef(p.oid) ~* 'select[[:space:]]+\*'))
+           OR (pg_get_functiondef(p.oid) ILIKE '%part_vendors%'
+             AND (pg_get_functiondef(p.oid) ILIKE '%unit_cost%'
+               OR pg_get_functiondef(p.oid) ILIKE '%currency%'
+               OR pg_get_functiondef(p.oid) ~* 'select[[:space:]]+\*'))
+         )
+    ), seed AS (
+      SELECT format('materialized view %I.%I', nspname, relname) AS item, oid AS rel_oid, NULL::oid AS fn_oid
+        FROM direct
+       WHERE relkind = 'm'
+         AND (
+           (def ILIKE '%parts_catalog%' AND def ILIKE '%sale_price%')
+           OR (def ILIKE '%part_vendors%' AND (def ILIKE '%unit_cost%' OR def ILIKE '%currency%'))
+         )
+      UNION ALL
+      SELECT format('owner view %I.%I', nspname, relname), oid, NULL::oid
+        FROM direct
+       WHERE relkind = 'v'
+         AND opts NOT ILIKE '%security_invoker=true%'
+         AND opts NOT ILIKE '%security_invoker=on%'
+         AND (
+           (def ILIKE '%parts_catalog%' AND def ILIKE '%sale_price%')
+           OR (def ILIKE '%part_vendors%' AND (def ILIKE '%unit_cost%' OR def ILIKE '%currency%'))
+         )
+      UNION ALL
+      SELECT format('security definer function %I.%I', nspname, proname), NULL::oid, oid
+        FROM price_fn
+    ), walk AS (
+      SELECT item, rel_oid, fn_oid FROM seed
+      UNION
+      SELECT format('dependent view %I.%I', n.nspname, c.relname), c.oid, NULL::oid
+        FROM walk w
+        JOIN pg_rewrite rw ON true
+        JOIN pg_depend d ON d.objid = rw.oid
+        JOIN pg_class c ON c.oid = rw.ev_class AND c.relkind IN ('v', 'm')
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+         AND (
+           (w.rel_oid IS NOT NULL AND d.refclassid = 'pg_class'::regclass AND d.refobjid = w.rel_oid AND c.oid <> w.rel_oid)
+           OR (w.fn_oid IS NOT NULL AND d.refclassid = 'pg_proc'::regclass AND d.refobjid = w.fn_oid)
+         )
+    )
+    SELECT item FROM walk
+  ) exposed;
+  IF v_hits IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: shared price read path %. This migration does not drop functions or views. A source scan cannot prove dynamic SQL is safe. A human audit of the real database is required and has not been done. Passing this preflight does not clear production.', v_hits;
+  END IF;
+
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime' AND puballtables) THEN
+    RAISE EXCEPTION '000951 preflight abort: supabase_realtime is FOR ALL TABLES. A price column would stay in the replication stream. This migration will not rewrite that publication.';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+      FROM pg_publication_rel pr
+      JOIN pg_publication p ON p.oid = pr.prpubid
+      JOIN pg_class c ON c.oid = pr.prrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND NOT a.attisdropped
+     WHERE p.pubname = 'supabase_realtime'
+       AND (
+         (c.relname = 'parts_catalog' AND a.attname = 'sale_price')
+         OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
+       )
+       AND (pr.prattrs IS NULL OR a.attnum = ANY (pr.prattrs))
+  ) THEN
+    RAISE EXCEPTION '000951 preflight abort: supabase_realtime still publishes a shared price column. Narrow that publication in a reviewed change. This migration will not drop unrelated tables from it.';
+  END IF;
+  RAISE NOTICE '000951 preflight: listed checks found nothing. This does not clear production. Dynamic SQL is not proved safe. A human audit of the real database is still required.';
+END $$;
+-- PREFLIGHT_CHECK_END
+
+CREATE OR REPLACE FUNCTION public.normalize_mpn(raw text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT upper(regexp_replace(coalesce(raw, ''), '[^[:alnum:]]', '', 'g'));
+$$;
+
+COMMENT ON FUNCTION public.normalize_mpn(text) IS
+  '000951: manufacturer part number with spaces and punctuation removed, uppercased.';
+
+REVOKE ALL ON FUNCTION public.normalize_mpn(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.normalize_mpn(text) TO anon, authenticated, service_role;
+
+ALTER TABLE public.parts_catalog
+  ADD COLUMN IF NOT EXISTS mpn_normalized text,
+  ADD COLUMN IF NOT EXISTS specs jsonb NOT NULL DEFAULT '{}'::jsonb;
+
+COMMENT ON COLUMN public.parts_catalog.mpn_normalized IS
+  '000951: normalize_mpn(part_number). Shared identity. Not a price.';
+COMMENT ON COLUMN public.parts_catalog.specs IS
+  '000951: public specs. No cost, sell price, or margin.';
+
+UPDATE public.parts_catalog
+   SET mpn_normalized = public.normalize_mpn(part_number)
+ WHERE coalesce(mpn_normalized, '') = ''
+   AND coalesce(part_number, '') <> '';
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+      FROM public.parts_catalog
+     WHERE coalesce(mpn_normalized, '') <> ''
+     GROUP BY lower(btrim(brand)), mpn_normalized
+    HAVING count(*) > 1
+  ) THEN
+    CREATE INDEX IF NOT EXISTS parts_catalog_brand_mpn_idx
+      ON public.parts_catalog (lower(btrim(brand)), mpn_normalized);
+    RAISE NOTICE '000951: duplicate brand+MPN rows exist; unique index skipped';
+  ELSE
+    CREATE UNIQUE INDEX IF NOT EXISTS parts_catalog_brand_mpn_uidx
+      ON public.parts_catalog (lower(btrim(brand)), mpn_normalized)
+      WHERE mpn_normalized <> '';
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.parts_catalog_set_mpn()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF NEW.part_number IS NOT NULL THEN
+    NEW.mpn_normalized := public.normalize_mpn(NEW.part_number);
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS parts_catalog_set_mpn ON public.parts_catalog;
+CREATE TRIGGER parts_catalog_set_mpn
+  BEFORE INSERT OR UPDATE OF part_number ON public.parts_catalog
+  FOR EACH ROW
+  EXECUTE FUNCTION public.parts_catalog_set_mpn();
+
+CREATE TABLE IF NOT EXISTS public.part_catalog_availability (
+  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  part_id bigint NOT NULL REFERENCES public.parts_catalog (id) ON DELETE CASCADE,
+  vendor_name text NOT NULL,
+  vendor_part_number text,
+  availability text NOT NULL DEFAULT 'unknown',
+  source_url text,
+  notes text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT part_catalog_availability_status_check
+    CHECK (availability IN ('unknown', 'in_stock', 'limited', 'unavailable', 'discontinued'))
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS part_catalog_availability_vendor_uidx
+  ON public.part_catalog_availability (
+    part_id,
+    lower(btrim(vendor_name)),
+    coalesce(lower(btrim(vendor_part_number)), '')
+  );
+
+COMMENT ON TABLE public.part_catalog_availability IS
+  '000951: which vendors carry a catalog part, and each vendor''s own number. No cost, sell price, or margin. Vendor names are data.';
+
+ALTER TABLE public.part_catalog_availability
+  ADD COLUMN IF NOT EXISTS vendor_pn_normalized text,
+  ADD COLUMN IF NOT EXISTS created_by uuid DEFAULT auth.uid();
+
+COMMENT ON COLUMN public.part_catalog_availability.vendor_part_number IS
+  '000951: that vendor''s own identifier for this catalog part. The manufacturer is just another vendor row.';
+COMMENT ON COLUMN public.part_catalog_availability.vendor_pn_normalized IS
+  '000951: normalize_mpn(vendor_part_number), used for cross-reference search.';
+
+CREATE OR REPLACE FUNCTION public.part_catalog_availability_set_pn()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.vendor_pn_normalized := public.normalize_mpn(NEW.vendor_part_number);
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS part_catalog_availability_set_pn ON public.part_catalog_availability;
+CREATE TRIGGER part_catalog_availability_set_pn
+  BEFORE INSERT OR UPDATE OF vendor_part_number ON public.part_catalog_availability
+  FOR EACH ROW
+  EXECUTE FUNCTION public.part_catalog_availability_set_pn();
+
+-- One catalog part per vendor + that vendor's number. Blank numbers are availability-only.
+CREATE UNIQUE INDEX IF NOT EXISTS part_catalog_availability_vendor_pn_uidx
+  ON public.part_catalog_availability (lower(btrim(vendor_name)), vendor_pn_normalized)
+  WHERE vendor_pn_normalized <> '';
+
+ALTER TABLE public.part_catalog_availability ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS part_catalog_availability_read ON public.part_catalog_availability;
+CREATE POLICY part_catalog_availability_read ON public.part_catalog_availability
+  FOR SELECT TO anon, authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS part_catalog_availability_insert ON public.part_catalog_availability;
+CREATE POLICY part_catalog_availability_insert ON public.part_catalog_availability
+  FOR INSERT TO authenticated
+  WITH CHECK (btrim(vendor_name) <> '' AND created_by = auth.uid());
+
+DROP POLICY IF EXISTS part_catalog_availability_update ON public.part_catalog_availability;
+CREATE POLICY part_catalog_availability_update ON public.part_catalog_availability
+  FOR UPDATE TO authenticated
+  USING (created_by = auth.uid())
+  WITH CHECK (created_by = auth.uid());
+
+DROP POLICY IF EXISTS part_catalog_availability_delete ON public.part_catalog_availability;
+CREATE POLICY part_catalog_availability_delete ON public.part_catalog_availability
+  FOR DELETE TO authenticated
+  USING (created_by = auth.uid());
+
+GRANT SELECT ON public.part_catalog_availability TO anon, authenticated;
+GRANT INSERT, UPDATE, DELETE ON public.part_catalog_availability TO authenticated;
+GRANT ALL ON public.part_catalog_availability TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.part_catalog_availability_id_seq TO authenticated, service_role;
+
+CREATE TABLE IF NOT EXISTS public.organization_parts (
+  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  organization_id bigint NOT NULL REFERENCES public.organizations (id) ON DELETE CASCADE,
+  catalog_part_id bigint REFERENCES public.parts_catalog (id) ON DELETE SET NULL,
+  mpn_normalized text NOT NULL,
+  internal_part_number text,
+  preferred_vendor_name text,
+  vendor_part_number text,
+  unit_cost numeric(12,2),
+  sell_price numeric(12,2),
+  avg_lead_time_days integer,
+  expected_lead_time_days integer,
+  quantity_on_hand integer NOT NULL DEFAULT 0,
+  reorder_point integer,
+  bin_location text,
+  notes text,
+  description_override text,
+  specs_override jsonb NOT NULL DEFAULT '{}'::jsonb,
+  field_sources jsonb NOT NULL DEFAULT '{}'::jsonb,
+  created_by uuid,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT organization_parts_qty_check CHECK (quantity_on_hand >= 0),
+  CONSTRAINT organization_parts_cost_check CHECK (unit_cost IS NULL OR unit_cost >= 0),
+  CONSTRAINT organization_parts_sell_check CHECK (sell_price IS NULL OR sell_price >= 0),
+  CONSTRAINT organization_parts_avg_lead_check CHECK (avg_lead_time_days IS NULL OR avg_lead_time_days >= 0),
+  CONSTRAINT organization_parts_expected_lead_check CHECK (expected_lead_time_days IS NULL OR expected_lead_time_days >= 0)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS organization_parts_org_mpn_uidx
+  ON public.organization_parts (organization_id, mpn_normalized);
+
+CREATE UNIQUE INDEX IF NOT EXISTS organization_parts_org_catalog_uidx
+  ON public.organization_parts (organization_id, catalog_part_id)
+  WHERE catalog_part_id IS NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS organization_parts_org_sku_uidx
+  ON public.organization_parts (organization_id, lower(btrim(internal_part_number)))
+  WHERE internal_part_number IS NOT NULL AND btrim(internal_part_number) <> '';
+
+CREATE INDEX IF NOT EXISTS organization_parts_org_vendor_pn_idx
+  ON public.organization_parts (organization_id, lower(btrim(vendor_part_number)))
+  WHERE vendor_part_number IS NOT NULL AND btrim(vendor_part_number) <> '';
+
+COMMENT ON TABLE public.organization_parts IS
+  '000951: org-private overlay. Cost, sell price, lead time, preferred vendor, internal PN, quantity. Links to parts_catalog when the MPN is known.';
+
+ALTER TABLE public.organization_parts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.organization_parts FROM PUBLIC, anon;
+DROP POLICY IF EXISTS organization_parts_member_all ON public.organization_parts;
+CREATE POLICY organization_parts_member_all ON public.organization_parts
+  FOR ALL TO authenticated
+  USING (public.is_active_org_member(organization_id))
+  WITH CHECK (public.is_active_org_member(organization_id));
+
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.organization_parts TO authenticated;
+GRANT ALL ON public.organization_parts TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.organization_parts_id_seq TO authenticated, service_role;
+
+CREATE TABLE IF NOT EXISTS public.device_bom (
+  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  laser_model_id bigint NOT NULL REFERENCES public.laser_models (id) ON DELETE CASCADE,
+  catalog_part_id bigint NOT NULL REFERENCES public.parts_catalog (id) ON DELETE CASCADE,
+  manual_id bigint REFERENCES public.manuals (id) ON DELETE SET NULL,
+  manual_section text,
+  line_ref text,
+  qty_per_assembly numeric(12,3),
+  notes text,
+  source text NOT NULL DEFAULT 'manual',
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS device_bom_model_part_line_uidx
+  ON public.device_bom (
+    laser_model_id,
+    catalog_part_id,
+    coalesce(manual_section, ''),
+    coalesce(line_ref, '')
+  );
+
+COMMENT ON TABLE public.device_bom IS
+  '000951: one bill of materials per device model (laser_models), not per serial. No prices. Seed parent_mpn stays null. A quote match is an unpersisted candidate, not a source-verified parent.';
+
+ALTER TABLE public.device_bom
+  ADD COLUMN IF NOT EXISTS parent_mpn text,
+  ADD COLUMN IF NOT EXISTS assembly_confidence text NOT NULL DEFAULT 'unassigned';
+
+ALTER TABLE public.device_bom
+  DROP CONSTRAINT IF EXISTS device_bom_assembly_confidence_check;
+ALTER TABLE public.device_bom
+  ADD CONSTRAINT device_bom_assembly_confidence_check
+  CHECK (assembly_confidence IN ('unassigned', 'evidenced'));
+
+COMMENT ON COLUMN public.device_bom.parent_mpn IS
+  '000951: null in this seed. A quote match is a provenance candidate only. It is not source-verified and is not written here.';
+COMMENT ON COLUMN public.device_bom.assembly_confidence IS
+  '000951: seed rows stay unassigned. evidenced is reserved for a source-verified parent, which this migration does not claim.';
+
+ALTER TABLE public.device_bom ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS device_bom_read ON public.device_bom;
+CREATE POLICY device_bom_read ON public.device_bom
+  FOR SELECT TO anon, authenticated
+  USING (true);
+
+GRANT SELECT ON public.device_bom TO anon, authenticated;
+GRANT ALL ON public.device_bom TO service_role;
+GRANT USAGE, SELECT ON SEQUENCE public.device_bom_id_seq TO service_role;
+
+-- HOLD_OBJECTS_BEGIN
+CREATE TABLE IF NOT EXISTS public.manual_bom_sweep (
+  manual_id bigint PRIMARY KEY REFERENCES public.manuals (id) ON DELETE CASCADE,
+  status text NOT NULL DEFAULT 'pending',
+  laser_model_id bigint REFERENCES public.laser_models (id) ON DELETE SET NULL,
+  parts_added integer NOT NULL DEFAULT 0,
+  bom_lines_added integer NOT NULL DEFAULT 0,
+  last_error text,
+  attempts integer NOT NULL DEFAULT 0,
+  priority integer NOT NULL DEFAULT 100,
+  last_started_at timestamptz,
+  last_finished_at timestamptz,
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT manual_bom_sweep_status_check
+    CHECK (status IN ('pending', 'no_bom', 'extracted', 'error', 'held'))
+);
+
+COMMENT ON TABLE public.manual_bom_sweep IS
+  '000951: resumable manuals BOM sweep. priority 0 = manuals.id 9. Other manuals are inserted held and cannot become pending until all 37 manual-9 source files are recorded extracted or no_line_items and manual 9 itself is extracted or no_bom.';
+
+ALTER TABLE public.manual_bom_sweep ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON public.manual_bom_sweep FROM PUBLIC, anon;
+DROP POLICY IF EXISTS manual_bom_sweep_read ON public.manual_bom_sweep;
+CREATE POLICY manual_bom_sweep_read ON public.manual_bom_sweep
+  FOR SELECT TO authenticated
+  USING (true);
+
+GRANT SELECT ON public.manual_bom_sweep TO authenticated;
+GRANT ALL ON public.manual_bom_sweep TO service_role;
+
+-- Durable inventory of the 37 manual-9 files. Seeded pending. Paths cannot be
+-- swapped and rows cannot be deleted, so a runner cannot replace this list
+-- with a shorter one. Status is the only field a later runner may change.
+CREATE TABLE IF NOT EXISTS public.manual_nine_source (
+  storage_path text PRIMARY KEY,
+  role text NOT NULL,
+  title text NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  CONSTRAINT manual_nine_source_status_check
+    CHECK (status IN ('pending', 'extracted', 'no_line_items', 'error'))
+);
+
+COMMENT ON TABLE public.manual_nine_source IS
+  '000951: the 37 Section 4 files for manuals.id 9. Other manuals stay held until every row is extracted or no_line_items. This seed does not mark any file complete.';
+
+INSERT INTO public.manual_nine_source (storage_path, role, title)
+VALUES
+  ('shared/candela/VPYag/Sect 4/7122-00-3287_F.pdf', 'parts_list', 'Fluid Section Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3306_F.pdf', 'parts_list', 'DCD Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3348_C.pdf', 'parts_list', 'DI Pump Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3441_C.pdf', 'parts_list', 'Calport Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3449_C.pdf', 'parts_list', '6/8/10mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3450_B.pdf', 'parts_list', '6/8/10mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3451_B.pdf', 'parts_list', '12/15/18mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3452_A.pdf', 'parts_list', '12/15/18mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3470_B.pdf', 'parts_list', 'Dump Resistor Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3471_C.pdf', 'parts_list', 'AC Input Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3484_03.pdf', 'parts_list', '6/8/10mm Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3487_02.pdf', 'parts_list', '12/15/18mm Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3520_01.pdf', 'parts_list', 'Display Bezel Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3542_B.pdf', 'parts_list', '10/12/15mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3558_B.pdf', 'parts_list', '1.5/3mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3599_A.pdf', 'parts_list', 'Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3615_02.pdf', 'parts_list', '8mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3616_02.pdf', 'parts_list', '8mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3617_02.pdf', 'parts_list', '8mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3618_02.pdf', 'parts_list', '12mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3619_02.pdf', 'parts_list', '12mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3620_02.pdf', 'parts_list', '12mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3621_03.pdf', 'parts_list', '3mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3623_02.pdf', 'parts_list', '3mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3629_02.pdf', 'parts_list', '3mm Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3630_03.pdf', 'parts_list', '3mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7475_A.pdf', 'parts_list', 'Aperture Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7478_03.pdf', 'parts_list', 'Beam Blocker Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7482_B.pdf', 'parts_list', '10/12/15mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7484_A.pdf', 'parts_list', '10/12/15mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/9914-00-0950_C.pdf', 'parts_list', 'Laser System, Shipping Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-99-3446_04.pdf', 'assembly_drawing', 'Laser Rail'),
+  ('shared/candela/VPYag/Sect 4/7122-99-3497_01.pdf', 'assembly_drawing', 'Laser Head'),
+  ('shared/candela/VPYag/Sect 4/7122-99-3476_04.pdf', 'assembly_drawing', 'Aiming Beam'),
+  ('shared/candela/VPYag/Sect 4/7122-99-7476_01.pdf', 'assembly_drawing', 'Focus Lens Housing'),
+  ('shared/candela/VPYag/Sect 4/7122-99-7477_B.pdf', 'assembly_drawing', 'Fiber Receptacle'),
+  ('shared/candela/VPYag/Sect 4/7122-99-7479_02.pdf', 'assembly_drawing', 'Head Detector')
+ON CONFLICT (storage_path) DO NOTHING;
+
+DO $$
+DECLARE
+  v_count integer;
+BEGIN
+  SELECT count(*) INTO v_count FROM public.manual_nine_source;
+  IF v_count <> 37 THEN
+    RAISE EXCEPTION '000951: manual 9 source inventory must be the 37 required files, found %', v_count;
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.manual_nine_source_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND NEW.storage_path IS DISTINCT FROM OLD.storage_path) THEN
+    RAISE EXCEPTION '000951: manual 9 source paths are fixed. Status may change. Paths may not.';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    RAISE EXCEPTION '000951: manual 9 source inventory is the 37 seeded files. Refusing an extra path.';
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS manual_nine_source_guard ON public.manual_nine_source;
+CREATE TRIGGER manual_nine_source_guard
+  BEFORE INSERT OR UPDATE OR DELETE ON public.manual_nine_source
+  FOR EACH ROW
+  EXECUTE FUNCTION public.manual_nine_source_guard();
+
+CREATE OR REPLACE FUNCTION public.manual_bom_sweep_hold()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_ready boolean;
+BEGIN
+  IF NEW.manual_id IS NOT DISTINCT FROM 9 THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'INSERT' AND NEW.status = 'held' THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status = 'held' AND NEW.status = 'held' THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE'
+     AND OLD.status IN ('extracted', 'no_bom')
+     AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+  -- pending, error, extracted, no_bom, and any other status for another manual
+  -- stay closed until manual 9 and all 37 source files are recorded complete.
+  SELECT count(*) = 37 AND coalesce(bool_and(status IN ('extracted', 'no_line_items')), false)
+    INTO v_ready
+    FROM public.manual_nine_source;
+  IF NOT v_ready THEN
+    RAISE EXCEPTION '000951: refusing to queue manual % until all 37 Mini GentleYAG source files are recorded extracted or no_line_items', NEW.manual_id;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.manual_bom_sweep
+     WHERE manual_id = 9 AND status IN ('extracted', 'no_bom')
+  ) THEN
+    RAISE EXCEPTION '000951: refusing to queue manual % until manuals.id 9 is extracted or no_bom', NEW.manual_id;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS manual_bom_sweep_hold ON public.manual_bom_sweep;
+CREATE TRIGGER manual_bom_sweep_hold
+  BEFORE INSERT OR UPDATE ON public.manual_bom_sweep
+  FOR EACH ROW
+  EXECUTE FUNCTION public.manual_bom_sweep_hold();
+
+ALTER TABLE public.manual_nine_source ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS manual_nine_source_read ON public.manual_nine_source;
+CREATE POLICY manual_nine_source_read ON public.manual_nine_source
+  FOR SELECT TO authenticated
+  USING (true);
+REVOKE ALL ON public.manual_nine_source FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.manual_nine_source TO authenticated;
+GRANT ALL ON public.manual_nine_source TO service_role;
+REVOKE ALL ON FUNCTION public.manual_nine_source_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.manual_bom_sweep_hold() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.manual_nine_source_guard() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.manual_bom_sweep_hold() TO authenticated, service_role;
+-- HOLD_OBJECTS_END
+
+INSERT INTO public.manufacturers (name)
+VALUES ('Candela')
+ON CONFLICT (name) DO NOTHING;
+
+INSERT INTO public.laser_models (name, label, manufacturer_id, equipment_type)
+SELECT 'VPYag', 'Mini GentleYAG (VPYag)', m.id, 'laser'
+  FROM public.manufacturers m
+ WHERE m.name = 'Candela'
+   AND NOT EXISTS (
+     SELECT 1
+       FROM public.laser_models lm
+       JOIN public.manufacturers mm ON mm.id = lm.manufacturer_id
+      WHERE lower(mm.name) = 'candela'
+        AND (
+          lower(lm.name) IN ('vpyag', 'vp yag', 'vp-yag', 'gl-vpyag', 'mini gentleyag')
+          OR lower(coalesce(lm.label, '')) LIKE '%mini gentleyag%'
+          OR lower(coalesce(lm.label, '')) LIKE '%vpyag%'
+        )
+   );
+
+-- Queue every library manual. Only manuals.id 9 is pending. Every other manual
+-- is held. The hold trigger rejects pending or error on those rows until the
+-- 37 source files are recorded complete and manual 9 is extracted or no_bom.
+INSERT INTO public.manual_bom_sweep (manual_id, status, priority)
+SELECT m.id,
+       CASE WHEN m.id = 9 THEN 'pending' ELSE 'held' END,
+       CASE
+         WHEN m.id = 9 THEN 0
+         WHEN lower(coalesce(m.brand, '')) = 'candela' THEN 10
+         ELSE 100
+       END
+  FROM public.manuals m
+ON CONFLICT (manual_id) DO NOTHING;
+
+
+-- Mini GentleYAG / VP YAG seed from manual 8501-01-1769 family tree and subassembly BOMs.
+INSERT INTO public.parts_catalog (part_number, mpn_normalized, name, description, brand, category, is_active, specs)
+SELECT v.mpn, public.normalize_mpn(v.mpn), left(v.descr, 200), v.descr, 'Candela', v.category, true, '{"seed":"000951-vpyag"}'::jsonb
+  FROM (VALUES
+  ('1301-00-2256', 'STRAIN RELIEF H/P MGL', 'Delivery system', 'Other', 1),
+  ('1301-00-7160', 'Tube,Handpiece,1/16in OD,GL', 'Delivery system', 'Other', 1),
+  ('1301-00-7741', 'Tube Lock,Handpiece,Diode', 'Delivery system', 'Other', 1),
+  ('1301-00-8041', 'Shield,WTR,Rbr Tube,Iwaki Pmp', 'System', 'Other', 1),
+  ('1301-00-8074', 'Bracket,DCD,MGL', 'DCD', 'Cooling System', 1),
+  ('1301-00-8076', 'Foam,Square,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8077', 'Glove,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8079', 'Plate Interconnect,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8080', 'Bracket,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8095', 'Cover Top,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8096', 'Cover,Reservoir', 'Fluid section', 'Cooling System', 1),
+  ('1301-00-8119', 'Block,Nozzle Adj', 'System', 'Other', 1),
+  ('1301-00-8122', 'PLUNGER,HP LOCKING MGL', 'System', 'Other', 1),
+  ('1301-00-8123', 'TUBE,SLIDER H/P MGL', 'Delivery system', 'Other', 1),
+  ('1301-00-8143', 'SHIELD, DCD TO AC PCB, MGL', 'DCD', 'Electronics/Boards', 1),
+  ('1301-00-8149', 'SPRING,HP SLIDER TUBE GND', 'System', 'Other', 1),
+  ('1301-00-8160', 'RETAINER,CALPORT WINDOW', 'Calport', 'Optical Components', 1),
+  ('1301-00-8161', 'RETAINER,CALPORT CERAMIC', 'Calport', 'Other', 1),
+  ('1301-00-8175', 'ISOLATION PLATE,PVC,GRAY', 'System', 'Other', 1),
+  ('1301-00-8200', 'RAIL,CALPORT,MGL', 'Calport', 'Other', 2),
+  ('1301-00-8376', 'BRKT,DCD HTR TUBE', 'DCD', 'Cooling System', 1),
+  ('1301-00-8377', 'BRKT,DCD NDL VALVE', 'DCD', 'Cooling System', 1),
+  ('1301-00-8383', 'TUBE,DCD CANISTER HEATER', 'DCD', 'Cooling System', 1),
+  ('1301-00-8389', 'CERAMIC,CALPORT,GNR', 'Calport', 'Other', 2),
+  ('1301-00-8486', 'TOOL,LEAK TEST STAND', 'System', 'Other', NULL),
+  ('1615-00-0080', 'Red Glpt Varnish,2oz Bottle', 'System', 'Other', NULL),
+  ('1617-00-0001', 'GREASE,HIGH VACUUM DC 970V', 'System', 'Other', NULL),
+  ('1617-00-0030', 'SEALANT,PIPE,HVAC-BLUE', 'HV section', 'Electronics/Boards', 1),
+  ('2157-10-0060', 'LABEL,ETL,UL 60601-1', 'System', 'Other', 1),
+  ('2157-40-3930', 'Lbl,Hot Surface', 'System', 'Other', 1),
+  ('2157-40-8061', 'Lbl,Misc,MGL,English', 'System', 'Other', NULL),
+  ('2157-40-8064', 'LBL, DEL SYS IDENT, MGL', 'System', 'Other', 1),
+  ('2157-40-8067', 'LBL,CAUT,SHOCK HAZARD,UNGRD PT', 'System', 'Other', 1),
+  ('2157-40-8068', 'LBL,FLAG,FBR APERT,MGL', 'Laser rail — aperture', 'Other', 1),
+  ('2157-40-8077', 'LBL,SAFETY,VPYAG', 'System', 'Other', NULL),
+  ('2157-40-8092', 'LBL,ID,VPYAG', 'System', 'Other', 1),
+  ('2224-20-0867', 'STDF,M/F,5/16 HX,3 3/4L,8-32AL', 'System', 'Other', 4),
+  ('2710-00-0006', 'TAPE,ELECTRICAL 3/4in', 'System', 'Other', NULL),
+  ('2710-00-0007', 'TAPE,KAPTON,1 1/2in WD x 2 MIL', 'System', 'Other', NULL),
+  ('2801-00-0001', 'NUT,SELF-THREAD,5/16ID,.495OD', 'System', 'Mechanical/Frame', 4),
+  ('2801-03-0832', 'NUT,KEPS,EX TTH, 8-32,STL/ZN', 'System', 'Mechanical/Frame', 5),
+  ('2801-03-2520', 'NUT,KEPS,EX TTH,1/4-20,STL/ZN', 'System', 'Mechanical/Frame', 4),
+  ('2817-00-0204', 'WASHER,FLAT #2 ID 1/4 OD', 'System', 'Mechanical/Frame', 2),
+  ('2817-00-0806', 'WASHER,FLAT #8 ID 3/8 OD', 'System', 'Mechanical/Frame', 3),
+  ('2818-00-0200', 'WASHER,LOCK,SPLIT #2 ID', 'System', 'Mechanical/Frame', 2),
+  ('2818-00-0400', 'WASHER,LOCK,SPLIT #4 ID', 'System', 'Mechanical/Frame', 4),
+  ('2818-00-2500', 'WASHER,LOCK,SPLIT 1/4in ID', 'System', 'Mechanical/Frame', 4),
+  ('2833-00-2508', 'BOLT,HEX HD,SS 1/4-20 X 1/2', 'System', 'Mechanical/Frame', 4),
+  ('2843-00-0806', 'SCR,SET SOC NYL PT 8-32 x 3/8', 'System', 'Mechanical/Frame', 1),
+  ('2843-10-0402', 'SCR,SET SC HLF/FPT,SS, 440x1/8', 'System', 'Mechanical/Frame', 2),
+  ('2843-10-0405', 'SCR,SET SC HLF/FPT,SS,440X5/16', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-0203', 'SCR,SEMS,EXT TH,PHLPS,2-56X3/16', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0204', 'SCR,SEMS,EXT TH,PHLPS,2-56x1/4', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0406', 'SCR,SEMS,EXT TH,PHLPS,4-40x3/8', 'System', 'Mechanical/Frame', 3),
+  ('2846-30-0606', 'SCR,SEMS,EXT TH,PHLPS,6-32x3/8', 'System', 'Mechanical/Frame', 13),
+  ('2846-30-0804', 'SCR,SEMS,EXT TH,PHLPS,8-32x1/4', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0806', 'SCR,SEMS,EXT TH,PHLPS,8-32x3/8', 'System', 'Mechanical/Frame', 5),
+  ('2846-30-0808', 'SCR,SEMS,EXT TH,PHLPS,8-32x1/2', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0812', 'SCR,SEMS,EXT TH,PHLPS,8-32x3/4', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-2509', 'SCR,SEMS,EXT,Th,Ph,4-40x.25,BL', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-2510', 'SCR,SEMS,EXT Th,Ph,6-32x3/8,BL', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-2511', 'SCR,SEMS,EXT Th,Ph,8-32x3/8,BL', 'System', 'Mechanical/Frame', 8),
+  ('2860-05-0020', 'RIVET,SNAP,NYL.157MTG.177+GRIP', 'System', 'Mechanical/Frame', 4),
+  ('2869-00-0061', 'CAPLUG,TAPERED,LDPE.361/.427', 'System', 'Other', 1),
+  ('2869-07-0060', 'CAP,.750in ID,1/2in L,VINYL,BLK', 'System', 'Other', 1),
+  ('2902-00-0030', 'CLAMP,HOSE,SS,SAE F 3 1/16-4 D', 'System', 'Other', 1),
+  ('2902-00-0040', 'CLAMP,HOSE,WRM,SS,LINED,5/8-1', 'System', 'Other', 3),
+  ('2902-00-0050', 'CLAMP,HOSE,WRM,SS,LINE7/16-3/4', 'System', 'Other', 7),
+  ('2902-00-0080', 'Clamp,Worm,SS,1 1/16-2 1/2', 'System', 'Other', 1),
+  ('2902-03-0004', 'CLAMP,HOSE,CRIMP,2EAR,1/4', 'System', 'Other', 1),
+  ('2903-01-0005', 'CLAMP,CABLE,0.625 DIA,NYLON', 'System', 'Other', 1),
+  ('2960-00-0001', 'CABLE TIE,.87 D,3.9L,.10W,NYL', 'System', 'Other', 2),
+  ('2960-00-0002', 'CABLE TIE,1.25 D,5.6L,.10W,NYL', 'System', 'Other', 23),
+  ('2960-00-0003', 'CABLE TIE,3 D,11.4L,.14W,NYL', 'System', 'Other', 2),
+  ('2961-00-0030', 'MOUNT,CABLE TIE,#10 SCREW MT,4', 'System', 'Other', 1),
+  ('2961-00-0040', 'MOUNT,CABLE TIE,#10 SCR MT,.61', 'System', 'Other', 1),
+  ('2981-00-1813', 'SPR,CPRSN,.180SS,.188OD,.875L', 'System', 'Other', 1),
+  ('2981-02-2636', 'Sprng,Comp,.026 MW,.36 OD,.5 L', 'System', 'Other', 1),
+  ('2990-07-5012', 'PLGR,SS,DELRIN BL,1/2-13x.75 L', 'System', 'Other', 1),
+  ('3199-00-0012', 'Grom,Adhsv,.036-.062,Natrl', 'System', 'Other', NULL),
+  ('3404-00-1209', 'Rdcr,Brs,1/4NPT,F to 1/8NPT,M', 'System', 'Other', 1),
+  ('3404-10-0202', 'CONN,MALE,1/8Tx1/8MPT,BR,NY FL', 'System', 'Other', 1),
+  ('3404-71-0203', 'Tee, Female Brass,1/8NPT', 'System', 'Other', 1),
+  ('3405-94-6002', 'CONN,CGA#600 X 1/8 MPT,BRASS', 'System', 'Other', 1),
+  ('3406-89-0808', 'ADPTR,1/2ID BARB x 1/2TUBE END', 'System', 'Other', 2),
+  ('3409-02-0200', 'FERRULE,SET,1/8T,NYLON', 'System', 'Other', 1),
+  ('3410-24-0202', 'CONN,BLKHD,HDPE,BARB 1/8 X 1/8', 'System', 'Other', 1),
+  ('3414-00-0160', 'PUMP,PP,4GPM,220V,5/8ARB', 'System', 'Other', 1),
+  ('3423-00-1030', 'TBG,PTFE,5/8 x .030 WALL', 'System', 'Other', NULL),
+  ('3450-00-0340', 'Fltr,Dust,HV,4.68x6.13/tape', 'HV section', 'Electronics/Boards', 1),
+  ('3455-32-0040', 'HEATR,BAND,48W,24VDC,3.25x2.5', 'System', 'Other', 1),
+  ('4050-05-0001', 'Header,PNL MNT,5.08mm,2 POS', 'System', 'Other', 1),
+  ('4050-05-0002', 'PLUG,2 POS,5.08MM,SCREW TERM', 'System', 'Other', 1),
+  ('4050-05-0003', 'Jumper,2 POS,5.08mm', 'System', 'Other', 1),
+  ('4150-03-0027', 'TERM,PIN,.062,18-16G,.090 INS', 'System', 'Other', 2),
+  ('4152-00-0425', 'HSG,.079,12POS,W/KEY', 'System', 'Other', 1),
+  ('4152-00-9021', 'CBL,FFC,JMPR,1mm,6POS,2in', 'System', 'Other', 1),
+  ('4152-21-0203', 'CONN,RCPT,IN-LINE, 3P,AMP#2073', 'System', 'Other', 1),
+  ('5108-06-0210', 'THERMO,NC,OPEN@ 87C,MNL R,VERT', 'System', 'Other', 1),
+  ('5108-06-0310', 'THERMO,NC,OPEN@160F', 'System', 'Other', 1),
+  ('5601-05-0020', 'FILTER,EMI,20A,W/CUTOUT', 'AC input', 'Other', 1),
+  ('5645-00-0060', 'ATTEN,FERRITE,SET,.514 ID', 'System', 'Other', 1),
+  ('6090-00-0040', 'TUBING,SHRINK PVC 1/4 DIA', 'System', 'Other', NULL),
+  ('6090-00-0060', 'TUBING,SHRINK PVC 3/8 DIA', 'System', 'Other', NULL),
+  ('6090-01-0130', 'TUBING,SHRINK,1/8 WHT,POLFN', 'System', 'Other', NULL),
+  ('6090-05-0120', 'TBG,LoTemp,3/4,Black,ADH', 'System', 'Other', 1),
+  ('6090-05-0140', 'TBG,LOTEMP,1 BLK ADH 10 PCS', 'System', 'Other', NULL),
+  ('6091-01-0160', 'BRAID,3/4,CLEAN CUT,PET', 'System', 'Other', 6),
+  ('6510-01-0480', 'SHIP CONT.,DEL SYS,MGL', 'System', 'Other', 1),
+  ('7111-00-2520', 'Assy,BOM,PCB,DCD Canister', 'DCD', 'Electronics/Boards', 1),
+  ('7111-00-2660', 'ASSY BOM, HP PCB, MGL', 'System', 'Electronics/Boards', 1),
+  ('7111-00-2671', 'ASSY BOM,HP SENSE SY125,PCB,MGL', 'System', 'Electronics/Boards', 1),
+  ('7111-00-2680', 'ASSY,BOM,HP SWITCH PCB,MGL', 'System', 'Electronics/Boards', 1),
+  ('7111-00-2682', 'PCB,ASSY,AC DIST,VPYAG', 'System', 'Electronics/Boards', 1),
+  ('7121-96-9360', 'Assy,Hndpc,Cryo,PathFlow Fix', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3165', 'Assy,DI Filter', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3287', 'Assy,Fluid Section', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3294', 'Assy,Circuit Breaker', 'AC input', 'Other', 1),
+  ('7122-00-3306', 'Assy,DCD MGL', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3316', 'Assy,Heat Exchanger,DI', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3317', 'Assy,Manifold,DI Heater', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3323', 'Assy,DCD,Harness,MGL', 'DCD', 'Cooling System', 1),
+  ('7122-00-3329', 'Assy,Axial Fan,80MM SQ,28.2CFM', 'System', 'Other', 1),
+  ('7122-00-3330', 'Assy,Linecord,MGL', 'AC input', 'Other', 1),
+  ('7122-00-3345', 'ASSY,CLPRT,HDPC,TST FXTR,MGL', 'Calport', 'Other', NULL),
+  ('7122-00-3346', 'ASSY,ELEC CBL,W/DCD,MGL', 'DCD', 'Cooling System', 1),
+  ('7122-00-3348', 'ASSY,DI PUMP,MGL', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3349', 'ASSY,DCD VALVE,MGL', 'DCD', 'Cooling System', 1),
+  ('7122-00-3352', 'ASSY,TUBING KIT', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3372', 'CABLE,ASSY,HP VALVE GND,MGL', 'System', 'Other', 1),
+  ('7122-00-3441', 'ASSY,CALPORT', 'Calport', 'Other', NULL),
+  ('7122-00-3442', 'ASSY,PCB,ENERGY DETECTOR', 'Laser rail — head detector', 'Electronics/Boards', 1),
+  ('7122-00-3446', 'ASSY,LASER RAIL', 'Laser rail', 'Other', NULL),
+  ('7122-00-3447', 'ASSY,HV SECTION', 'HV section', 'Electronics/Boards', 1),
+  ('7122-00-3449', 'ASSY,6/8/10 DLVY SYS WITH DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3450', 'ASSY,6/8/10 DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3451', 'ASSY,12/15/18 DLVY SYS WITH DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3452', 'ASSY,12/15/18 DLVY SYS,W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3470', 'ASSY,RESISTOR,DUMP,67J', 'HV section', 'Electronics/Boards', NULL),
+  ('7122-00-3471', 'ASSY,AC INPUT', 'AC input', 'Other', 1),
+  ('7122-00-3475', 'ASSY,FRAME,VPYAG', 'Chassis', 'Mechanical/Frame', 1),
+  ('7122-00-3476', 'ASSY,AIMING BEAM', 'Laser rail — aiming beam', 'Other', NULL),
+  ('7122-00-3484', 'ASSY,6/8/10mm DLVY CA W/DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3485', 'ASSY,6/8/10mm DLVY CA W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3486', 'ASSY12/15/18mm DLVY CA W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3487', 'ASSY,12/15/18mm DLVY CA W/DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3488', 'ASSY,6/8/10mm FIBER,VPYAG', 'Delivery system', 'Optical Components', 1),
+  ('7122-00-3489', 'ASSY,12/15/18mm FIBER,VPYAG', 'Delivery system', 'Optical Components', 1),
+  ('7122-00-3492', 'ASSY,HARN,AC,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3493', 'ASSY,HARN,SIG,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3497', 'ASSY,LSR HD,GL INSR,VPYAG', 'Laser head', 'Other', NULL),
+  ('7122-00-3506', 'ASSY,HAND PIECE TEST CBL,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3507', 'ASSY,CBL,12V,HV CNTRL BD,VPYAG', 'HV section', 'Electronics/Boards', 1),
+  ('7122-00-3510', 'ASSY,UP CHASSIS,VPYAG,MET GRAY', 'Chassis', 'Mechanical/Frame', 1),
+  ('7122-00-3520', 'ASSY,DISPLY BEZ,VPYAG,MET GRAY', 'System', 'Other', NULL),
+  ('7122-00-3541', 'ASSY,10/12/15mmDLVY CA W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3542', 'ASSY,10/12/15mm FIBER,VPYAG', 'Delivery system', 'Optical Components', NULL),
+  ('7122-00-3543', 'ASSY,10/12/15mm DLVY CA W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3546', 'ASSY,INTERLOCK SWITCH,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3555', 'ASSY,1.5/3mm,FIBER,VPYAG', 'Delivery system', 'Optical Components', 1),
+  ('7122-00-3558', 'ASSY,1.5/3mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3560', 'ASSY,1.5/3mm DLVY CBL W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3568', 'ASSY,JUMPER WR,THRM SW,DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3569', 'ASSY,GND WR,HTR TUBE,DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3570', 'ASSY,GND WR,PLMB,DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3599', 'ASSY,DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3600', 'ASSY,ELECL CBL W/DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3601', 'ASSY,DOC,VPYAG W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3606', 'ASSY,LASER ACCESSORIES,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3607', 'ASSY,SKINS,VPYAG,2 TONE', 'Chassis', 'Other', 1),
+  ('7122-00-3615', 'ASSY,8mm DLVY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3616', 'ASSY,8mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3617', 'ASSY,8mm FBR,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3618', 'ASSY,12mm DLVY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3619', 'ASSY,12mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3620', 'ASSY,12mm FBR,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3621', 'ASSY,3mm DLVY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3622', 'ASSY,3mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3623', 'ASSY,3mm FBR,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3628', 'ASSY,12mm DLVY CBL W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3629', 'ASSY,3mm DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3630', 'ASSY,3mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3631', 'ASSY,8mm DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3632', 'ASSY,8mm DLVY CBL W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3633', 'ASSY,12mm DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3634', 'ASSY,1.5/3mm DLVY SYS,0.015NOZ', 'Delivery system', 'Other', NULL),
+  ('7122-00-3652', 'ASSY,HNDPC,PTD,GYAG HR', 'Delivery system', 'Other', 1),
+  ('7122-00-3665', 'ASSY,WTR RSVR', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3668', 'ASSY,HD PC,PD PTD,10/8/6mm', 'System', 'Other', 1),
+  ('7122-00-7475', 'ASSY,APERTURE,VPYAG', 'Laser rail — aperture', 'Other', NULL),
+  ('7122-00-7476', 'ASSY,HSG LENS FOCUS,VPYAG', 'Laser rail — fiber receptacle', 'Optical Components', NULL),
+  ('7122-00-7477', 'ASSY,FIBER RCPT,VPYAG', 'Laser rail — fiber receptacle', 'Optical Components', NULL),
+  ('7122-00-7478', 'ASSY,BEAM BLOCKER', 'Laser rail — beam blocker', 'Other', NULL),
+  ('7122-00-7479', 'ASSY,HEAD DETECTOR', 'Laser rail — head detector', 'Other', NULL),
+  ('7122-00-7482', 'ASSY,10/12/15 DLVRY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-7484', 'ASSY,10/12/15 DLVRY SYS NO DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-7537', 'ASSY,DCD INSTALLATION KIT', 'DCD', 'Cooling System', 1),
+  ('8010-00-0015', 'WINDOW,CALPORT,MGL', 'Calport', 'Optical Components', 1),
+  ('9914-00-0950', 'ASSY,LSR,SHIP,VPYG,MET GRY NEW', 'System', 'Other', NULL),
+  ('9914-00-9002', 'ASSY,OPTIONS,SPARES,VPYAG', 'System', 'Other', NULL)
+  ) AS v(mpn, descr, section, category, qty)
+ WHERE NOT EXISTS (
+   SELECT 1 FROM public.parts_catalog p
+    WHERE p.mpn_normalized = public.normalize_mpn(v.mpn)
+      AND lower(btrim(p.brand)) = 'candela'
+ );
+
+-- Manufacturer is a vendor row. Other vendors (Parts for Laser, Laser Scientific, …) are added the same way.
+INSERT INTO public.part_catalog_availability (part_id, vendor_name, vendor_part_number, availability, notes)
+SELECT p.id, 'Candela', p.part_number, 'unknown', '000951 manufacturer number'
+  FROM public.parts_catalog p
+ WHERE p.specs->>'seed' = '000951-vpyag'
+   AND p.mpn_normalized = public.normalize_mpn('7122-00-3497')
+   AND NOT EXISTS (
+     SELECT 1 FROM public.part_catalog_availability a
+      WHERE a.part_id = p.id AND lower(btrim(a.vendor_name)) = 'candela'
+   );
+
+INSERT INTO public.device_bom (laser_model_id, catalog_part_id, manual_id, manual_section, line_ref, qty_per_assembly, notes, source)
+SELECT lm.id, p.id, man.id, v.section, v.mpn, v.qty, '8501-01-1769 Rev B', 'manual'
+  FROM (VALUES
+  ('1301-00-2256', 'STRAIN RELIEF H/P MGL', 'Delivery system', 'Other', 1),
+  ('1301-00-7160', 'Tube,Handpiece,1/16in OD,GL', 'Delivery system', 'Other', 1),
+  ('1301-00-7741', 'Tube Lock,Handpiece,Diode', 'Delivery system', 'Other', 1),
+  ('1301-00-8041', 'Shield,WTR,Rbr Tube,Iwaki Pmp', 'System', 'Other', 1),
+  ('1301-00-8074', 'Bracket,DCD,MGL', 'DCD', 'Cooling System', 1),
+  ('1301-00-8076', 'Foam,Square,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8077', 'Glove,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8079', 'Plate Interconnect,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8080', 'Bracket,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8095', 'Cover Top,Calport,MGL', 'Calport', 'Other', 1),
+  ('1301-00-8096', 'Cover,Reservoir', 'Fluid section', 'Cooling System', 1),
+  ('1301-00-8119', 'Block,Nozzle Adj', 'System', 'Other', 1),
+  ('1301-00-8122', 'PLUNGER,HP LOCKING MGL', 'System', 'Other', 1),
+  ('1301-00-8123', 'TUBE,SLIDER H/P MGL', 'Delivery system', 'Other', 1),
+  ('1301-00-8143', 'SHIELD, DCD TO AC PCB, MGL', 'DCD', 'Electronics/Boards', 1),
+  ('1301-00-8149', 'SPRING,HP SLIDER TUBE GND', 'System', 'Other', 1),
+  ('1301-00-8160', 'RETAINER,CALPORT WINDOW', 'Calport', 'Optical Components', 1),
+  ('1301-00-8161', 'RETAINER,CALPORT CERAMIC', 'Calport', 'Other', 1),
+  ('1301-00-8175', 'ISOLATION PLATE,PVC,GRAY', 'System', 'Other', 1),
+  ('1301-00-8200', 'RAIL,CALPORT,MGL', 'Calport', 'Other', 2),
+  ('1301-00-8376', 'BRKT,DCD HTR TUBE', 'DCD', 'Cooling System', 1),
+  ('1301-00-8377', 'BRKT,DCD NDL VALVE', 'DCD', 'Cooling System', 1),
+  ('1301-00-8383', 'TUBE,DCD CANISTER HEATER', 'DCD', 'Cooling System', 1),
+  ('1301-00-8389', 'CERAMIC,CALPORT,GNR', 'Calport', 'Other', 2),
+  ('1301-00-8486', 'TOOL,LEAK TEST STAND', 'System', 'Other', NULL),
+  ('1615-00-0080', 'Red Glpt Varnish,2oz Bottle', 'System', 'Other', NULL),
+  ('1617-00-0001', 'GREASE,HIGH VACUUM DC 970V', 'System', 'Other', NULL),
+  ('1617-00-0030', 'SEALANT,PIPE,HVAC-BLUE', 'HV section', 'Electronics/Boards', 1),
+  ('2157-10-0060', 'LABEL,ETL,UL 60601-1', 'System', 'Other', 1),
+  ('2157-40-3930', 'Lbl,Hot Surface', 'System', 'Other', 1),
+  ('2157-40-8061', 'Lbl,Misc,MGL,English', 'System', 'Other', NULL),
+  ('2157-40-8064', 'LBL, DEL SYS IDENT, MGL', 'System', 'Other', 1),
+  ('2157-40-8067', 'LBL,CAUT,SHOCK HAZARD,UNGRD PT', 'System', 'Other', 1),
+  ('2157-40-8068', 'LBL,FLAG,FBR APERT,MGL', 'Laser rail — aperture', 'Other', 1),
+  ('2157-40-8077', 'LBL,SAFETY,VPYAG', 'System', 'Other', NULL),
+  ('2157-40-8092', 'LBL,ID,VPYAG', 'System', 'Other', 1),
+  ('2224-20-0867', 'STDF,M/F,5/16 HX,3 3/4L,8-32AL', 'System', 'Other', 4),
+  ('2710-00-0006', 'TAPE,ELECTRICAL 3/4in', 'System', 'Other', NULL),
+  ('2710-00-0007', 'TAPE,KAPTON,1 1/2in WD x 2 MIL', 'System', 'Other', NULL),
+  ('2801-00-0001', 'NUT,SELF-THREAD,5/16ID,.495OD', 'System', 'Mechanical/Frame', 4),
+  ('2801-03-0832', 'NUT,KEPS,EX TTH, 8-32,STL/ZN', 'System', 'Mechanical/Frame', 5),
+  ('2801-03-2520', 'NUT,KEPS,EX TTH,1/4-20,STL/ZN', 'System', 'Mechanical/Frame', 4),
+  ('2817-00-0204', 'WASHER,FLAT #2 ID 1/4 OD', 'System', 'Mechanical/Frame', 2),
+  ('2817-00-0806', 'WASHER,FLAT #8 ID 3/8 OD', 'System', 'Mechanical/Frame', 3),
+  ('2818-00-0200', 'WASHER,LOCK,SPLIT #2 ID', 'System', 'Mechanical/Frame', 2),
+  ('2818-00-0400', 'WASHER,LOCK,SPLIT #4 ID', 'System', 'Mechanical/Frame', 4),
+  ('2818-00-2500', 'WASHER,LOCK,SPLIT 1/4in ID', 'System', 'Mechanical/Frame', 4),
+  ('2833-00-2508', 'BOLT,HEX HD,SS 1/4-20 X 1/2', 'System', 'Mechanical/Frame', 4),
+  ('2843-00-0806', 'SCR,SET SOC NYL PT 8-32 x 3/8', 'System', 'Mechanical/Frame', 1),
+  ('2843-10-0402', 'SCR,SET SC HLF/FPT,SS, 440x1/8', 'System', 'Mechanical/Frame', 2),
+  ('2843-10-0405', 'SCR,SET SC HLF/FPT,SS,440X5/16', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-0203', 'SCR,SEMS,EXT TH,PHLPS,2-56X3/16', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0204', 'SCR,SEMS,EXT TH,PHLPS,2-56x1/4', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0406', 'SCR,SEMS,EXT TH,PHLPS,4-40x3/8', 'System', 'Mechanical/Frame', 3),
+  ('2846-30-0606', 'SCR,SEMS,EXT TH,PHLPS,6-32x3/8', 'System', 'Mechanical/Frame', 13),
+  ('2846-30-0804', 'SCR,SEMS,EXT TH,PHLPS,8-32x1/4', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0806', 'SCR,SEMS,EXT TH,PHLPS,8-32x3/8', 'System', 'Mechanical/Frame', 5),
+  ('2846-30-0808', 'SCR,SEMS,EXT TH,PHLPS,8-32x1/2', 'System', 'Mechanical/Frame', 1),
+  ('2846-30-0812', 'SCR,SEMS,EXT TH,PHLPS,8-32x3/4', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-2509', 'SCR,SEMS,EXT,Th,Ph,4-40x.25,BL', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-2510', 'SCR,SEMS,EXT Th,Ph,6-32x3/8,BL', 'System', 'Mechanical/Frame', 2),
+  ('2846-30-2511', 'SCR,SEMS,EXT Th,Ph,8-32x3/8,BL', 'System', 'Mechanical/Frame', 8),
+  ('2860-05-0020', 'RIVET,SNAP,NYL.157MTG.177+GRIP', 'System', 'Mechanical/Frame', 4),
+  ('2869-00-0061', 'CAPLUG,TAPERED,LDPE.361/.427', 'System', 'Other', 1),
+  ('2869-07-0060', 'CAP,.750in ID,1/2in L,VINYL,BLK', 'System', 'Other', 1),
+  ('2902-00-0030', 'CLAMP,HOSE,SS,SAE F 3 1/16-4 D', 'System', 'Other', 1),
+  ('2902-00-0040', 'CLAMP,HOSE,WRM,SS,LINED,5/8-1', 'System', 'Other', 3),
+  ('2902-00-0050', 'CLAMP,HOSE,WRM,SS,LINE7/16-3/4', 'System', 'Other', 7),
+  ('2902-00-0080', 'Clamp,Worm,SS,1 1/16-2 1/2', 'System', 'Other', 1),
+  ('2902-03-0004', 'CLAMP,HOSE,CRIMP,2EAR,1/4', 'System', 'Other', 1),
+  ('2903-01-0005', 'CLAMP,CABLE,0.625 DIA,NYLON', 'System', 'Other', 1),
+  ('2960-00-0001', 'CABLE TIE,.87 D,3.9L,.10W,NYL', 'System', 'Other', 2),
+  ('2960-00-0002', 'CABLE TIE,1.25 D,5.6L,.10W,NYL', 'System', 'Other', 23),
+  ('2960-00-0003', 'CABLE TIE,3 D,11.4L,.14W,NYL', 'System', 'Other', 2),
+  ('2961-00-0030', 'MOUNT,CABLE TIE,#10 SCREW MT,4', 'System', 'Other', 1),
+  ('2961-00-0040', 'MOUNT,CABLE TIE,#10 SCR MT,.61', 'System', 'Other', 1),
+  ('2981-00-1813', 'SPR,CPRSN,.180SS,.188OD,.875L', 'System', 'Other', 1),
+  ('2981-02-2636', 'Sprng,Comp,.026 MW,.36 OD,.5 L', 'System', 'Other', 1),
+  ('2990-07-5012', 'PLGR,SS,DELRIN BL,1/2-13x.75 L', 'System', 'Other', 1),
+  ('3199-00-0012', 'Grom,Adhsv,.036-.062,Natrl', 'System', 'Other', NULL),
+  ('3404-00-1209', 'Rdcr,Brs,1/4NPT,F to 1/8NPT,M', 'System', 'Other', 1),
+  ('3404-10-0202', 'CONN,MALE,1/8Tx1/8MPT,BR,NY FL', 'System', 'Other', 1),
+  ('3404-71-0203', 'Tee, Female Brass,1/8NPT', 'System', 'Other', 1),
+  ('3405-94-6002', 'CONN,CGA#600 X 1/8 MPT,BRASS', 'System', 'Other', 1),
+  ('3406-89-0808', 'ADPTR,1/2ID BARB x 1/2TUBE END', 'System', 'Other', 2),
+  ('3409-02-0200', 'FERRULE,SET,1/8T,NYLON', 'System', 'Other', 1),
+  ('3410-24-0202', 'CONN,BLKHD,HDPE,BARB 1/8 X 1/8', 'System', 'Other', 1),
+  ('3414-00-0160', 'PUMP,PP,4GPM,220V,5/8ARB', 'System', 'Other', 1),
+  ('3423-00-1030', 'TBG,PTFE,5/8 x .030 WALL', 'System', 'Other', NULL),
+  ('3450-00-0340', 'Fltr,Dust,HV,4.68x6.13/tape', 'HV section', 'Electronics/Boards', 1),
+  ('3455-32-0040', 'HEATR,BAND,48W,24VDC,3.25x2.5', 'System', 'Other', 1),
+  ('4050-05-0001', 'Header,PNL MNT,5.08mm,2 POS', 'System', 'Other', 1),
+  ('4050-05-0002', 'PLUG,2 POS,5.08MM,SCREW TERM', 'System', 'Other', 1),
+  ('4050-05-0003', 'Jumper,2 POS,5.08mm', 'System', 'Other', 1),
+  ('4150-03-0027', 'TERM,PIN,.062,18-16G,.090 INS', 'System', 'Other', 2),
+  ('4152-00-0425', 'HSG,.079,12POS,W/KEY', 'System', 'Other', 1),
+  ('4152-00-9021', 'CBL,FFC,JMPR,1mm,6POS,2in', 'System', 'Other', 1),
+  ('4152-21-0203', 'CONN,RCPT,IN-LINE, 3P,AMP#2073', 'System', 'Other', 1),
+  ('5108-06-0210', 'THERMO,NC,OPEN@ 87C,MNL R,VERT', 'System', 'Other', 1),
+  ('5108-06-0310', 'THERMO,NC,OPEN@160F', 'System', 'Other', 1),
+  ('5601-05-0020', 'FILTER,EMI,20A,W/CUTOUT', 'AC input', 'Other', 1),
+  ('5645-00-0060', 'ATTEN,FERRITE,SET,.514 ID', 'System', 'Other', 1),
+  ('6090-00-0040', 'TUBING,SHRINK PVC 1/4 DIA', 'System', 'Other', NULL),
+  ('6090-00-0060', 'TUBING,SHRINK PVC 3/8 DIA', 'System', 'Other', NULL),
+  ('6090-01-0130', 'TUBING,SHRINK,1/8 WHT,POLFN', 'System', 'Other', NULL),
+  ('6090-05-0120', 'TBG,LoTemp,3/4,Black,ADH', 'System', 'Other', 1),
+  ('6090-05-0140', 'TBG,LOTEMP,1 BLK ADH 10 PCS', 'System', 'Other', NULL),
+  ('6091-01-0160', 'BRAID,3/4,CLEAN CUT,PET', 'System', 'Other', 6),
+  ('6510-01-0480', 'SHIP CONT.,DEL SYS,MGL', 'System', 'Other', 1),
+  ('7111-00-2520', 'Assy,BOM,PCB,DCD Canister', 'DCD', 'Electronics/Boards', 1),
+  ('7111-00-2660', 'ASSY BOM, HP PCB, MGL', 'System', 'Electronics/Boards', 1),
+  ('7111-00-2671', 'ASSY BOM,HP SENSE SY125,PCB,MGL', 'System', 'Electronics/Boards', 1),
+  ('7111-00-2680', 'ASSY,BOM,HP SWITCH PCB,MGL', 'System', 'Electronics/Boards', 1),
+  ('7111-00-2682', 'PCB,ASSY,AC DIST,VPYAG', 'System', 'Electronics/Boards', 1),
+  ('7121-96-9360', 'Assy,Hndpc,Cryo,PathFlow Fix', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3165', 'Assy,DI Filter', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3287', 'Assy,Fluid Section', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3294', 'Assy,Circuit Breaker', 'AC input', 'Other', 1),
+  ('7122-00-3306', 'Assy,DCD MGL', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3316', 'Assy,Heat Exchanger,DI', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3317', 'Assy,Manifold,DI Heater', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3323', 'Assy,DCD,Harness,MGL', 'DCD', 'Cooling System', 1),
+  ('7122-00-3329', 'Assy,Axial Fan,80MM SQ,28.2CFM', 'System', 'Other', 1),
+  ('7122-00-3330', 'Assy,Linecord,MGL', 'AC input', 'Other', 1),
+  ('7122-00-3345', 'ASSY,CLPRT,HDPC,TST FXTR,MGL', 'Calport', 'Other', NULL),
+  ('7122-00-3346', 'ASSY,ELEC CBL,W/DCD,MGL', 'DCD', 'Cooling System', 1),
+  ('7122-00-3348', 'ASSY,DI PUMP,MGL', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3349', 'ASSY,DCD VALVE,MGL', 'DCD', 'Cooling System', 1),
+  ('7122-00-3352', 'ASSY,TUBING KIT', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3372', 'CABLE,ASSY,HP VALVE GND,MGL', 'System', 'Other', 1),
+  ('7122-00-3441', 'ASSY,CALPORT', 'Calport', 'Other', NULL),
+  ('7122-00-3442', 'ASSY,PCB,ENERGY DETECTOR', 'Laser rail — head detector', 'Electronics/Boards', 1),
+  ('7122-00-3446', 'ASSY,LASER RAIL', 'Laser rail', 'Other', NULL),
+  ('7122-00-3447', 'ASSY,HV SECTION', 'HV section', 'Electronics/Boards', 1),
+  ('7122-00-3449', 'ASSY,6/8/10 DLVY SYS WITH DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3450', 'ASSY,6/8/10 DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3451', 'ASSY,12/15/18 DLVY SYS WITH DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3452', 'ASSY,12/15/18 DLVY SYS,W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3470', 'ASSY,RESISTOR,DUMP,67J', 'HV section', 'Electronics/Boards', NULL),
+  ('7122-00-3471', 'ASSY,AC INPUT', 'AC input', 'Other', 1),
+  ('7122-00-3475', 'ASSY,FRAME,VPYAG', 'Chassis', 'Mechanical/Frame', 1),
+  ('7122-00-3476', 'ASSY,AIMING BEAM', 'Laser rail — aiming beam', 'Other', NULL),
+  ('7122-00-3484', 'ASSY,6/8/10mm DLVY CA W/DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3485', 'ASSY,6/8/10mm DLVY CA W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3486', 'ASSY12/15/18mm DLVY CA W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3487', 'ASSY,12/15/18mm DLVY CA W/DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3488', 'ASSY,6/8/10mm FIBER,VPYAG', 'Delivery system', 'Optical Components', 1),
+  ('7122-00-3489', 'ASSY,12/15/18mm FIBER,VPYAG', 'Delivery system', 'Optical Components', 1),
+  ('7122-00-3492', 'ASSY,HARN,AC,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3493', 'ASSY,HARN,SIG,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3497', 'ASSY,LSR HD,GL INSR,VPYAG', 'Laser head', 'Other', NULL),
+  ('7122-00-3506', 'ASSY,HAND PIECE TEST CBL,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3507', 'ASSY,CBL,12V,HV CNTRL BD,VPYAG', 'HV section', 'Electronics/Boards', 1),
+  ('7122-00-3510', 'ASSY,UP CHASSIS,VPYAG,MET GRAY', 'Chassis', 'Mechanical/Frame', 1),
+  ('7122-00-3520', 'ASSY,DISPLY BEZ,VPYAG,MET GRAY', 'System', 'Other', NULL),
+  ('7122-00-3541', 'ASSY,10/12/15mmDLVY CA W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3542', 'ASSY,10/12/15mm FIBER,VPYAG', 'Delivery system', 'Optical Components', NULL),
+  ('7122-00-3543', 'ASSY,10/12/15mm DLVY CA W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3546', 'ASSY,INTERLOCK SWITCH,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3555', 'ASSY,1.5/3mm,FIBER,VPYAG', 'Delivery system', 'Optical Components', 1),
+  ('7122-00-3558', 'ASSY,1.5/3mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3560', 'ASSY,1.5/3mm DLVY CBL W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3568', 'ASSY,JUMPER WR,THRM SW,DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3569', 'ASSY,GND WR,HTR TUBE,DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3570', 'ASSY,GND WR,PLMB,DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3599', 'ASSY,DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3600', 'ASSY,ELECL CBL W/DCD', 'DCD', 'Cooling System', 1),
+  ('7122-00-3601', 'ASSY,DOC,VPYAG W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3606', 'ASSY,LASER ACCESSORIES,VPYAG', 'System', 'Other', 1),
+  ('7122-00-3607', 'ASSY,SKINS,VPYAG,2 TONE', 'Chassis', 'Other', 1),
+  ('7122-00-3615', 'ASSY,8mm DLVY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3616', 'ASSY,8mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3617', 'ASSY,8mm FBR,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3618', 'ASSY,12mm DLVY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3619', 'ASSY,12mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3620', 'ASSY,12mm FBR,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3621', 'ASSY,3mm DLVY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3622', 'ASSY,3mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3623', 'ASSY,3mm FBR,VPYAG', 'Delivery system', 'Other', NULL),
+  ('7122-00-3628', 'ASSY,12mm DLVY CBL W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3629', 'ASSY,3mm DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3630', 'ASSY,3mm DLVY SYS W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3631', 'ASSY,8mm DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3632', 'ASSY,8mm DLVY CBL W/O DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3633', 'ASSY,12mm DLVY CBL W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-3634', 'ASSY,1.5/3mm DLVY SYS,0.015NOZ', 'Delivery system', 'Other', NULL),
+  ('7122-00-3652', 'ASSY,HNDPC,PTD,GYAG HR', 'Delivery system', 'Other', 1),
+  ('7122-00-3665', 'ASSY,WTR RSVR', 'Fluid section', 'Cooling System', 1),
+  ('7122-00-3668', 'ASSY,HD PC,PD PTD,10/8/6mm', 'System', 'Other', 1),
+  ('7122-00-7475', 'ASSY,APERTURE,VPYAG', 'Laser rail — aperture', 'Other', NULL),
+  ('7122-00-7476', 'ASSY,HSG LENS FOCUS,VPYAG', 'Laser rail — fiber receptacle', 'Optical Components', NULL),
+  ('7122-00-7477', 'ASSY,FIBER RCPT,VPYAG', 'Laser rail — fiber receptacle', 'Optical Components', NULL),
+  ('7122-00-7478', 'ASSY,BEAM BLOCKER', 'Laser rail — beam blocker', 'Other', NULL),
+  ('7122-00-7479', 'ASSY,HEAD DETECTOR', 'Laser rail — head detector', 'Other', NULL),
+  ('7122-00-7482', 'ASSY,10/12/15 DLVRY SYS W/DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-7484', 'ASSY,10/12/15 DLVRY SYS NO DCD', 'DCD', 'Cooling System', NULL),
+  ('7122-00-7537', 'ASSY,DCD INSTALLATION KIT', 'DCD', 'Cooling System', 1),
+  ('8010-00-0015', 'WINDOW,CALPORT,MGL', 'Calport', 'Optical Components', 1),
+  ('9914-00-0950', 'ASSY,LSR,SHIP,VPYG,MET GRY NEW', 'System', 'Other', NULL),
+  ('9914-00-9002', 'ASSY,OPTIONS,SPARES,VPYAG', 'System', 'Other', NULL)
+  ) AS v(mpn, descr, section, category, qty)
+  JOIN public.parts_catalog p
+    ON p.mpn_normalized = public.normalize_mpn(v.mpn)
+   AND lower(btrim(p.brand)) = 'candela'
+  JOIN LATERAL (
+    SELECT lm.id
+      FROM public.laser_models lm
+      JOIN public.manufacturers m ON m.id = lm.manufacturer_id
+     WHERE lower(m.name) = 'candela'
+       AND (
+         lower(lm.name) IN ('vpyag', 'vp yag', 'vp-yag', 'gl-vpyag', 'mini gentleyag')
+         OR lower(coalesce(lm.label, '')) LIKE '%mini gentleyag%'
+         OR lower(coalesce(lm.label, '')) LIKE '%vpyag%'
+       )
+     ORDER BY lm.id
+     LIMIT 1
+  ) lm ON true
+  LEFT JOIN LATERAL (
+    SELECT id FROM public.manuals
+     WHERE lower(coalesce(model, '')) = 'vpyag'
+       AND coalesce(is_folder, false) = true
+     ORDER BY id
+     LIMIT 1
+  ) man ON true
+ WHERE NOT EXISTS (
+   SELECT 1 FROM public.device_bom d
+    WHERE d.laser_model_id = lm.id
+      AND d.catalog_part_id = p.id
+      AND coalesce(d.line_ref, '') = v.mpn
+ );
+
+-- Shared sell price and vendor cost stay stored. anon/authenticated cannot read
+-- or write them. Table-level INSERT/UPDATE from 000700 is revoked first: a column
+-- REVOKE does not cancel a table INSERT, so has_column_privilege stays true.
+-- parts_catalog client UPDATE returns to is_active only (000700). created_by stays
+-- frozen (000401). part_vendors UPDATE excludes created_by, unit_cost, and currency.
+REVOKE ALL ON TABLE public.parts_catalog FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.part_vendors FROM PUBLIC, anon, authenticated;
+DO $$
+DECLARE
+  r record;
+  v_cols text;
+BEGIN
+  FOR r IN
+    SELECT a.attname
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    EXECUTE format('REVOKE ALL (%I) ON TABLE public.parts_catalog FROM PUBLIC, anon, authenticated', r.attname);
+  END LOOP;
+  FOR r IN
+    SELECT a.attname
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    EXECUTE format('REVOKE ALL (%I) ON TABLE public.part_vendors FROM PUBLIC, anon, authenticated', r.attname);
+  END LOOP;
+
+  SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+     AND a.attname <> 'sale_price';
+  EXECUTE format('GRANT SELECT (%s) ON TABLE public.parts_catalog TO anon, authenticated', v_cols);
+  EXECUTE format('GRANT INSERT (%s) ON TABLE public.parts_catalog TO authenticated', v_cols);
+  GRANT UPDATE (is_active) ON TABLE public.parts_catalog TO authenticated;
+
+  SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+     AND a.attname <> ALL (ARRAY['unit_cost', 'currency']);
+  EXECUTE format('GRANT SELECT (%s) ON TABLE public.part_vendors TO anon, authenticated', v_cols);
+  SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+     AND a.attname <> ALL (ARRAY['id', 'part_id', 'created_by', 'unit_cost', 'currency']);
+  EXECUTE format('GRANT INSERT (%s) ON TABLE public.part_vendors TO authenticated', v_cols);
+  EXECUTE format('GRANT UPDATE (%s) ON TABLE public.part_vendors TO authenticated', v_cols);
+  GRANT INSERT (part_id, created_by) ON TABLE public.part_vendors TO authenticated;
+END $$;
+
+-- 000700 granted table DELETE and 000800 kept RLS policy part_vendors_delete_owner
+-- (vendor creator, catalog creator, or caller_is_part_creator_admin). REVOKE ALL
+-- above removed that DELETE privilege, so the part page delete returned 42501
+-- even for an authorized row. Restore DELETE for authenticated only. The
+-- existing policy still decides which rows. anon and PUBLIC do not get DELETE.
+-- parts_catalog stays without DELETE; parts are archived.
+GRANT DELETE ON TABLE public.part_vendors TO authenticated;
+
+COMMIT;
+
+
+NOTIFY pgrst, 'reload schema';

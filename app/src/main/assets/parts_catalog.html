@@ -545,16 +545,10 @@
             <label class="form-label">Compatible Models (comma separated)</label>
             <input class="form-input" id="newPartModels" placeholder="e.g. GentleMax Pro, GentleLASE">
         </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label class="form-label">Sale price (USD)</label>
-                <div style="font-size:11px;color:#9CA3AF;margin:-2px 0 6px;">Shown on the catalog. Vendor names and costs stay hidden.</div>
-                <input class="form-input" id="newPartPrice" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Photo</label>
-                <input class="form-input" id="newPartImage" type="file" accept="image/*">
-            </div>
+        <div class="form-group">
+            <label class="form-label">Photo</label>
+            <input class="form-input" id="newPartImage" type="file" accept="image/*">
+            <div style="font-size:11px;color:#9CA3AF;margin-top:6px;">Sell price and vendor cost belong on your own inventory, not this shared catalog.</div>
         </div>
         <div class="form-group">
             <label class="form-label">Vendor name</label>
@@ -564,10 +558,6 @@
             <div class="form-group">
                 <label class="form-label">Vendor P/N</label>
                 <input class="form-input" id="newPartVendorPn" placeholder="Vendor's part number">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Vendor cost (USD)</label>
-                <input class="form-input" id="newPartVendorCost" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
             </div>
         </div>
         <p style="font-size:11px;color:#9CA3AF;margin:-4px 0 8px;">Add more vendors after save with + Add Vendor on the part card.</p>
@@ -595,22 +585,16 @@
                 <input class="form-input" id="vendorPartNum" placeholder="Vendor's own P/N">
             </div>
             <div class="form-group">
-                <label class="form-label">Vendor cost (USD)</label>
-                <input class="form-input" id="vendorCost" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
                 <label class="form-label">Lead Time (days)</label>
                 <input class="form-input" id="vendorLeadTime" type="number" inputmode="numeric" placeholder="e.g. 7">
             </div>
-            <div class="form-group">
-                <label class="form-label">Preferred Vendor?</label>
-                <select class="form-select" id="vendorPreferred">
-                    <option value="false">No</option>
-                    <option value="true">Yes ⭐</option>
-                </select>
-            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Preferred Vendor?</label>
+            <select class="form-select" id="vendorPreferred">
+                <option value="false">No</option>
+                <option value="true">Yes ⭐</option>
+            </select>
         </div>
         <div class="form-group">
             <label class="form-label">URL / Website</label>
@@ -690,8 +674,8 @@
         return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    function saleOf(part) {
-        return money(part.sale_price != null && part.sale_price !== '' ? part.sale_price : part.unit_cost);
+    function saleOf() {
+        return '';
     }
 
     function toggleVendors() {
@@ -803,9 +787,10 @@
         const container = document.getElementById('partsContainer');
         container.innerHTML = '<div class="loading"><div class="spinner">⚙️</div><div>Loading parts catalog...</div></div>';
 
+        const catalogColumns = 'id, part_number, name, description, category, brand, compatible_models, unit_of_measure, is_active, created_by, created_at, updated_at, image_url, is_consumable, in_stock, quantity_on_hand';
         const { data: parts, error } = await supabaseClient
             .from('parts_catalog')
-            .select('*')
+            .select(catalogColumns)
             .eq('is_active', true)
             .order('brand')
             .order('part_number');
@@ -818,7 +803,7 @@
         // Load all vendors at once
         const { data: vendors } = await supabaseClient
             .from('part_vendors')
-            .select('*')
+            .select('id, part_id, vendor_name, vendor_part_number, lead_time_days, url, notes, is_preferred, is_active')
             .eq('is_active', true)
             .order('is_preferred', { ascending: false });
 
@@ -965,7 +950,7 @@
                                     ${v.notes ? `<div style="font-size:11px;color:#6B7280;margin-top:2px;">${v.notes}</div>` : ''}
                                 </div>
                                 <div style="text-align:right;">
-                                    <div class="vendor-price">${v.unit_cost ? money(v.unit_cost) : '—'}</div>
+                                    <div class="vendor-price">${v.lead_time_days ? v.lead_time_days + ' days' : ''}</div>
                                     ${v.lead_time_days ? `<div class="vendor-lead">${v.lead_time_days}d lead</div>` : ''}
                                     ${v.url ? `<a href="${v.url}" target="_blank" style="font-size:11px;color:#60A5FA;text-decoration:none;" onclick="event.stopPropagation()">🔗 Website</a>` : ''}
                                 </div>
@@ -1007,7 +992,7 @@
     function openAddPartModal() {
         document.getElementById('addPartModal').classList.add('open');
         document.getElementById('addPartError').textContent = '';
-        ['newPartNumber','newPartName','newPartDesc','newPartModels','newPartPrice','newPartVendor','newPartVendorPn','newPartVendorCost'].forEach(id => document.getElementById(id).value = '');
+        ['newPartNumber','newPartName','newPartDesc','newPartModels','newPartVendor','newPartVendorPn'].forEach(id => document.getElementById(id).value = '');
         const imgIn = document.getElementById('newPartImage');
         if (imgIn) imgIn.value = '';
         document.getElementById('newPartBrand').value = '';
@@ -1035,7 +1020,6 @@
 
         const { data: user } = await supabaseClient.auth.getUser();
         const uid = user?.user?.id || null;
-        const listPrice = parseFloat((document.getElementById('newPartPrice') || {}).value || '');
         let imageUrl = null;
         const imgEl = document.getElementById('newPartImage');
         const imgFile = imgEl && imgEl.files && imgEl.files[0];
@@ -1057,11 +1041,10 @@
             category, unit_of_measure: unit,
             compatible_models: models,
             created_by: uid,
-            image_url: imageUrl,
-            sale_price: Number.isFinite(listPrice) ? listPrice : null
+            image_url: imageUrl
         };
         let { data: created, error } = await supabaseClient.from('parts_catalog').insert(insert).select('id').single();
-        if (error && /sale_price|unit_cost|image_url|column/i.test(error.message || '')) {
+        if (error && /sale_price|unit_cost|image_url|column|permission/i.test(error.message || '')) {
             delete insert.sale_price;
             delete insert.unit_cost;
             if (/image_url/i.test(error.message || '')) delete insert.image_url;
@@ -1070,14 +1053,12 @@
 
         if (error) { errEl.textContent = error.message; return; }
         const vendorName = (document.getElementById('newPartVendor') || {}).value.trim();
-        const vendorCostRaw = parseFloat((document.getElementById('newPartVendorCost') || {}).value || '');
         if (created && created.id && vendorName) {
             const added = await postPartsApi('/api/parts/vendors', {
                 action: 'insert',
                 partId: created.id,
                 vendor_name: vendorName,
                 vendor_part_number: (document.getElementById('newPartVendorPn') || {}).value.trim() || null,
-                unit_cost: Number.isFinite(vendorCostRaw) ? vendorCostRaw : null,
                 is_preferred: true
             });
             if (!added.ok) alert(added.error || "Couldn't add this vendor.");
@@ -1092,7 +1073,7 @@
         document.getElementById('vendorPartInfo').textContent = partNumber + ' — ' + partName;
         document.getElementById('addVendorModal').classList.add('open');
         document.getElementById('addVendorError').textContent = '';
-        ['vendorName','vendorPartNum','vendorCost','vendorLeadTime','vendorUrl','vendorNotes'].forEach(id => document.getElementById(id).value = '');
+        ['vendorName','vendorPartNum','vendorLeadTime','vendorUrl','vendorNotes'].forEach(id => document.getElementById(id).value = '');
         document.getElementById('vendorPreferred').value = 'false';
     }
     function closeAddVendorModal() { document.getElementById('addVendorModal').classList.remove('open'); currentVendorPartId = null; }
@@ -1102,7 +1083,6 @@
         const errEl = document.getElementById('addVendorError');
         if (!name) { errEl.textContent = 'Vendor name is required.'; return; }
 
-        const cost = document.getElementById('vendorCost').value;
         const lead = document.getElementById('vendorLeadTime').value;
 
         const added = await postPartsApi('/api/parts/vendors', {
@@ -1110,7 +1090,6 @@
             partId: currentVendorPartId,
             vendor_name: name,
             vendor_part_number: document.getElementById('vendorPartNum').value.trim() || null,
-            unit_cost: cost ? parseFloat(cost) : null,
             lead_time_days: lead ? parseInt(lead) : null,
             url: document.getElementById('vendorUrl').value.trim() || null,
             notes: document.getElementById('vendorNotes').value.trim() || null,

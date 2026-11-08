@@ -73,7 +73,7 @@ test('archived parts are hidden from the catalog list and search load', () => {
     image_urls: ['https://example.test/a.jpg'],
   });
   assert.equal(edit && edit.name, 'Lamp');
-  assert.equal(edit && edit.sale_price, 12);
+  assert.equal(edit && 'sale_price' in edit, false);
   assert.equal(edit && 'created_by' in edit, false);
   assert.equal(edit && 'manufacturer' in edit, false);
   assert.equal(edit && 'image_urls' in edit, false);

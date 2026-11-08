@@ -9,6 +9,7 @@ import {
   fromCatalogRow,
   fromMarketplaceRow,
   mergePartSuggests,
+  sourceLabel,
 } from './part-suggest.ts';
 
 test('catalog and marketplace rows become suggest hits', () => {
@@ -21,7 +22,7 @@ test('catalog and marketplace rows become suggest hits', () => {
     unit_cost: 400,
   });
   assert.equal(cat?.part_number, 'HP-1');
-  assert.equal(cat?.unit_price, 400);
+  assert.equal(cat?.unit_price, null);
   assert.equal(cat?.source, 'catalog');
   const mkt = fromMarketplaceRow({
     id: 'abc',
@@ -42,7 +43,19 @@ test('same part number prefers catalog over marketplace', () => {
   ]);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].source, 'catalog');
-  assert.equal(merged[0].unit_price, 40);
+  assert.equal(merged[0].unit_price, null);
+});
+
+test('device BOM hits stay ahead of the catalog', () => {
+  const merged = mergePartSuggests([
+    fromMarketplaceRow({ id: 'b', title: 'Shop lamp', part_number: '7122-00-3497', price: 10 })!,
+    fromCatalogRow({ id: 1, part_number: '7122-00-3497', name: 'Catalog head', sale_price: 80 })!,
+    { key: 'bom', part_number: '7122-00-3497', description: 'Laser head', unit_price: 25, source: 'bom' },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].source, 'bom');
+  assert.equal(merged[0].unit_price, 25);
+  assert.equal(sourceLabel('bom'), 'This device');
 });
 
 test('query matches part number or description', () => {
@@ -61,4 +74,5 @@ test('PO form loads catalog and marketplace parts for the part# field', () => {
   assert.match(src, /from\('marketplace_listings'\)/);
   assert.match(src, /filterPartSuggests/);
   assert.match(src, /exactPartSuggest/);
+  assert.match(src, /\/api\/inventory\/bom/);
 });

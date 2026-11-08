@@ -243,6 +243,7 @@ export function Header({
           href: '/parts',
           items: [
             { href: '/parts', label: 'Parts Catalog' },
+            { href: '/inventory', label: 'Parts inventory' },
             { href: '/marketplace/parts', label: 'Parts Marketplace' },
             { href: '/marketplace/consumables', label: 'Consumables' },
             { href: '/marketplace/my-listings', label: 'My Listings' },
@@ -263,6 +264,7 @@ export function Header({
             { href: '/accepted-bids', label: 'Accepted Bids' },
             { href: '/test-equipment', label: 'Test Equipment' },
             { href: '/calculators', label: 'Photometry Tools' },
+            { href: '/inventory', label: 'Parts inventory' },
             { href: '/ai-assistant', label: 'AI Assistant' },
             { href: '/directory', label: 'TSP Directory' },
           ],
@@ -294,6 +296,7 @@ export function Header({
           { href: '/estimates', label: 'Estimates' },
           { href: '/invoices', label: 'Invoices' },
           { href: '/purchase-orders', label: 'Purchase Orders' },
+          { href: '/inventory', label: 'Parts inventory' },
           { href: '/company', label: 'Company Profile' },
           ...(financialNav ? [financialNav] : []),
           ...(jobCostingNav ? [jobCostingNav] : []),

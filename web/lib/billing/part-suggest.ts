@@ -5,7 +5,8 @@ export type PartSuggestHit = {
   part_number: string;
   description: string;
   unit_price: number | null;
-  source: 'catalog' | 'marketplace';
+  source: 'bom' | 'catalog' | 'marketplace';
+  section?: string | null;
 };
 
 export function fromCatalogRow(row: {
@@ -21,15 +22,12 @@ export function fromCatalogRow(row: {
   const pn = String(row.part_number || '').trim();
   const desc = String(row.name || row.description || '').trim();
   if (!pn && !desc) return null;
-  const cost = Number(row.unit_cost);
-  const sale = Number(row.sale_price);
-  const price = Number.isFinite(cost) && cost > 0 ? cost : Number.isFinite(sale) && sale > 0 ? sale : null;
   const brand = String(row.brand || '').trim();
   return {
     key: `cat-${row.id ?? (pn || desc)}`,
     part_number: pn || desc.slice(0, 48),
     description: [brand, desc].filter(Boolean).join(' · ') || pn,
-    unit_price: price,
+    unit_price: null,
     source: 'catalog',
   };
 }
@@ -63,8 +61,9 @@ export function fromMarketplaceRow(row: {
 export function mergePartSuggests(hits: PartSuggestHit[]): PartSuggestHit[] {
   const seen = new Set<string>();
   const out: PartSuggestHit[] = [];
+  const rank = (source: PartSuggestHit['source']) => (source === 'bom' ? 0 : source === 'catalog' ? 1 : 2);
   const ranked = [...hits].sort((a, b) => {
-    if (a.source !== b.source) return a.source === 'catalog' ? -1 : 1;
+    if (a.source !== b.source) return rank(a.source) - rank(b.source);
     return a.part_number.localeCompare(b.part_number);
   });
   for (const h of ranked) {
@@ -92,6 +91,7 @@ export function exactPartSuggest(hits: PartSuggestHit[], partNumber: string): Pa
   const s = partNumber.trim().toLowerCase();
   if (!s) return null;
   return (
+    hits.find((h) => h.source === 'bom' && h.part_number.trim().toLowerCase() === s) ||
     hits.find((h) => h.source === 'catalog' && h.part_number.trim().toLowerCase() === s) ||
     hits.find((h) => h.part_number.trim().toLowerCase() === s) ||
     null
@@ -99,5 +99,7 @@ export function exactPartSuggest(hits: PartSuggestHit[], partNumber: string): Pa
 }
 
 export function sourceLabel(source: PartSuggestHit['source']): string {
-  return source === 'marketplace' ? 'Marketplace' : 'Catalog';
+  if (source === 'bom') return 'This device';
+  if (source === 'marketplace') return 'Marketplace';
+  return 'Catalog';
 }

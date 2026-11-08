@@ -100,6 +100,7 @@ export default function TechHub() {
     : supplier
       ? [
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list & listings' },
+          { href: '/inventory', icon: '📦', label: 'Parts inventory', desc: 'On-hand quantity, cost, and lead time' },
           { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Demand & your listings' },
           { href: '/marketplace/storefront', icon: '🏪', label: 'Seller storefront', desc: 'Public shop page & CSV/Excel inventory' },
           { href: '/company', icon: '🏢', label: 'Supplier Profile', desc: 'Company & brands' },
@@ -112,6 +113,7 @@ export default function TechHub() {
           { href: '/accepted-bids', icon: '✓', label: 'Accepted Bids', desc: 'Jobs you won + customer contacts' },
           { href: '/test-equipment', icon: '🔧', label: 'Test Equipment', desc: 'Meters by org, owner, and assigned FSE' },
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
+          { href: '/inventory', icon: '📦', label: 'Parts inventory', desc: 'On-hand quantity, cost, and lead time' },
           { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Service and Operators library tabs' },
           { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
           { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Fault codes & manuals (same engine as mobile)' },
