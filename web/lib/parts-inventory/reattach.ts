@@ -1,7 +1,12 @@
 /**
- * Family-tree lines filed as "System" stay there unless a manual passage
- * names both the child part and a parent assembly. No guessing.
+ * Family-tree lines filed as "System" stay there unless a manual-9 source
+ * passage names both the child part and a parent assembly. No guessing.
+ * This plans a parent. It does not write device_bom.
  */
+
+import { MANUAL_NINE_SOURCES } from './manual-nine.ts';
+
+const MANUAL_NINE_PATHS = new Set(MANUAL_NINE_SOURCES.map((source) => source.storage_path));
 
 export type AssemblyConfidence = 'evidenced' | 'unassigned';
 
@@ -32,7 +37,8 @@ export function reattachSystemLines(lines: SystemLine[], evidence: AssemblyEvide
     const child = compact(line.mpn);
     const hit = evidence.find((item) => {
       if (compact(item.child_mpn) !== child) return false;
-      if (!item.parent_mpn || !item.source_path || !item.quote) return false;
+      if (!MANUAL_NINE_PATHS.has(item.source_path)) return false;
+      if (!item.parent_mpn || !item.quote) return false;
       const quote = compact(item.quote);
       return quote.includes(child) && quote.includes(compact(item.parent_mpn));
     });

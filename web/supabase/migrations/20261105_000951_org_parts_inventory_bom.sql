@@ -3,9 +3,9 @@
 -- Not applied by this change. Run only after Larry's yes.
 --
 -- Shared catalog stays public.parts_catalog (MPN, description, specs).
--- This file does not add price columns there. Legacy sale_price / quantity_on_hand
--- and part_vendors.unit_cost stay for the existing catalog screens and are not
--- the org price of record.
+-- This file does not add price columns there. Legacy sale_price and
+-- part_vendors.unit_cost stay stored. anon and authenticated cannot read or
+-- write them. Org prices live on organization_parts.
 --
 -- New:
 --   part_catalog_availability  who carries the part (no cost, no sell price)
@@ -251,7 +251,22 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_bom_model_part_line_uidx
   );
 
 COMMENT ON TABLE public.device_bom IS
-  '000951: one bill of materials per device model (laser_models), not per serial. No prices.';
+  '000951: one bill of materials per device model (laser_models), not per serial. No prices. parent_mpn stays null until a manual-9 source quote names the parent. This migration does not assign parents.';
+
+ALTER TABLE public.device_bom
+  ADD COLUMN IF NOT EXISTS parent_mpn text,
+  ADD COLUMN IF NOT EXISTS assembly_confidence text NOT NULL DEFAULT 'unassigned';
+
+ALTER TABLE public.device_bom
+  DROP CONSTRAINT IF EXISTS device_bom_assembly_confidence_check;
+ALTER TABLE public.device_bom
+  ADD CONSTRAINT device_bom_assembly_confidence_check
+  CHECK (assembly_confidence IN ('unassigned', 'evidenced'));
+
+COMMENT ON COLUMN public.device_bom.parent_mpn IS
+  '000951: set only from a manual-9 file quote that names this part and the parent. Seed rows stay null.';
+COMMENT ON COLUMN public.device_bom.assembly_confidence IS
+  '000951: unassigned unless parent_mpn was stored from manual evidence. Not inferred from the family-tree section label.';
 
 ALTER TABLE public.device_bom ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS device_bom_read ON public.device_bom;
@@ -312,13 +327,13 @@ SELECT 'VPYag', 'Mini GentleYAG (VPYag)', m.id, 'laser'
         )
    );
 
--- Queue every library manual. Idempotent. Mini GentleYAG is priority 0.
+-- Queue every library manual. Only manuals.id 9 (Mini GentleYAG service folder) is priority 0.
+-- Other Candela titles, including other VP YAG strings, wait at priority 10.
 INSERT INTO public.manual_bom_sweep (manual_id, status, priority)
 SELECT m.id,
        'pending',
        CASE
-         WHEN lower(coalesce(m.model, '') || ' ' || coalesce(m.title, '')) ~ 'vpyag|vp-yag|vp yag|mini gentle ?yag'
-           THEN 0
+         WHEN m.id = 9 THEN 0
          WHEN lower(coalesce(m.brand, '')) = 'candela' THEN 10
          ELSE 100
        END
@@ -782,31 +797,101 @@ SELECT lm.id, p.id, man.id, v.section, v.mpn, v.qty, '8501-01-1769 Rev B', 'manu
       AND coalesce(d.line_ref, '') = v.mpn
  );
 
--- Shared sell price and vendor cost stay in the columns (data is not deleted)
--- but anon/authenticated can no longer read or write them. Org prices live on
--- organization_parts. Service role can still read the legacy values.
-REVOKE SELECT, UPDATE ON public.parts_catalog FROM anon, authenticated;
-REVOKE SELECT, UPDATE ON public.part_vendors FROM anon, authenticated;
+-- Shared sell price and vendor cost stay stored. anon/authenticated cannot read
+-- or write them. Table-level INSERT/UPDATE from 000700 is revoked first: a column
+-- REVOKE does not cancel a table INSERT, so has_column_privilege stays true.
+-- parts_catalog client UPDATE returns to is_active only (000700). created_by stays
+-- frozen (000401). part_vendors UPDATE excludes created_by, unit_cost, and currency.
+REVOKE ALL ON TABLE public.parts_catalog FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON TABLE public.part_vendors FROM PUBLIC, anon, authenticated;
 DO $$
 DECLARE
+  r record;
   v_cols text;
 BEGIN
-  SELECT string_agg(pg_catalog.quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+  FOR r IN
+    SELECT a.attname
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    EXECUTE format('REVOKE ALL (%I) ON TABLE public.parts_catalog FROM PUBLIC, anon, authenticated', r.attname);
+  END LOOP;
+  FOR r IN
+    SELECT a.attname
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+  LOOP
+    EXECUTE format('REVOKE ALL (%I) ON TABLE public.part_vendors FROM PUBLIC, anon, authenticated', r.attname);
+  END LOOP;
+
+  SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
     FROM pg_catalog.pg_attribute a
    WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
      AND a.attname <> 'sale_price';
-  EXECUTE pg_catalog.format('GRANT SELECT (%s) ON public.parts_catalog TO anon, authenticated', v_cols);
-  EXECUTE pg_catalog.format('GRANT UPDATE (%s) ON public.parts_catalog TO authenticated', v_cols);
+  EXECUTE format('GRANT SELECT (%s) ON TABLE public.parts_catalog TO anon, authenticated', v_cols);
+  EXECUTE format('GRANT INSERT (%s) ON TABLE public.parts_catalog TO authenticated', v_cols);
+  GRANT UPDATE (is_active) ON TABLE public.parts_catalog TO authenticated;
 
-  SELECT string_agg(pg_catalog.quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+  SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
     FROM pg_catalog.pg_attribute a
    WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
      AND a.attname <> ALL (ARRAY['unit_cost', 'currency']);
-  EXECUTE pg_catalog.format('GRANT SELECT (%s) ON public.part_vendors TO anon, authenticated', v_cols);
-  EXECUTE pg_catalog.format('GRANT UPDATE (%s) ON public.part_vendors TO authenticated', v_cols);
+  EXECUTE format('GRANT SELECT (%s) ON TABLE public.part_vendors TO anon, authenticated', v_cols);
+  SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+     AND a.attname <> ALL (ARRAY['id', 'part_id', 'created_by', 'unit_cost', 'currency']);
+  EXECUTE format('GRANT INSERT (%s) ON TABLE public.part_vendors TO authenticated', v_cols);
+  EXECUTE format('GRANT UPDATE (%s) ON TABLE public.part_vendors TO authenticated', v_cols);
+  GRANT INSERT (part_id, created_by) ON TABLE public.part_vendors TO authenticated;
 END $$;
-REVOKE INSERT (sale_price) ON public.parts_catalog FROM anon, authenticated;
-REVOKE INSERT (unit_cost, currency) ON public.part_vendors FROM anon, authenticated;
+
+-- Column SELECT is what PostgREST enforces. If supabase_realtime lists these
+-- tables specifically, drop the price columns from that publication too.
+-- A FOR ALL TABLES publication is left alone: rewriting it would drop every
+-- other table. That case is not a live audit.
+DO $$
+DECLARE
+  v_cols text;
+  v_all boolean;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
+    RETURN;
+  END IF;
+  SELECT puballtables INTO v_all FROM pg_publication WHERE pubname = 'supabase_realtime';
+  IF v_all THEN
+    RAISE NOTICE '000951: supabase_realtime is FOR ALL TABLES; price columns stay out of PostgREST via column privileges.';
+    RETURN;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_publication_rel pr
+    JOIN pg_class c ON c.oid = pr.prrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE pr.prpubid = (SELECT oid FROM pg_publication WHERE pubname = 'supabase_realtime')
+      AND n.nspname = 'public' AND c.relname = 'parts_catalog'
+  ) THEN
+    SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname <> 'sale_price';
+    EXECUTE 'ALTER PUBLICATION supabase_realtime DROP TABLE public.parts_catalog';
+    EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.parts_catalog (%s)', v_cols);
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_publication_rel pr
+    JOIN pg_class c ON c.oid = pr.prrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE pr.prpubid = (SELECT oid FROM pg_publication WHERE pubname = 'supabase_realtime')
+      AND n.nspname = 'public' AND c.relname = 'part_vendors'
+  ) THEN
+    SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+      FROM pg_catalog.pg_attribute a
+     WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+       AND a.attname <> ALL (ARRAY['unit_cost', 'currency']);
+    EXECUTE 'ALTER PUBLICATION supabase_realtime DROP TABLE public.part_vendors';
+    EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.part_vendors (%s)', v_cols);
+  END IF;
+END $$;
 
 COMMIT;
 

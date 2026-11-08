@@ -8,7 +8,9 @@
  */
 
 import { isStockedBomPart, sectionForDescription, type BomLine } from './bom.ts';
+import { acceptEvidenceLines, MANUAL_NINE_SOURCES, manualNineBlocksLibrary, type SourceFileStatus } from './manual-nine.ts';
 import { normalizeMpn } from './mpn.ts';
+import { reattachSystemLines, type AssemblyEvidence, type SystemLine } from './reattach.ts';
 
 export const SWEEP_BATCH_DEFAULT = 75;
 export const SWEEP_BATCH_MIN = 50;
@@ -44,20 +46,13 @@ export type SweepProgress = SweepManual & {
 };
 
 export function sweepPriority(manual: {
+  manual_id?: number | null;
   brand?: string | null;
   model?: string | null;
   title?: string | null;
 }): number {
+  if (manual.manual_id === MINI_GENTLEYAG_MANUAL.libraryId) return 0;
   const blob = `${manual.brand || ''} ${manual.model || ''} ${manual.title || ''}`.toLowerCase();
-  const compact = blob.replace(/[^a-z0-9]+/g, '');
-  if (
-    compact.includes('vpyag') ||
-    compact.includes('pvyag') ||
-    compact.includes('minigentleyag') ||
-    /mini\s*gentle\s*yag|vp[\s-]*yag/.test(blob)
-  ) {
-    return 0;
-  }
   if (blob.includes('candela')) return 10;
   return 100;
 }
@@ -68,15 +63,67 @@ export function clampBatchSize(size: number | null | undefined): number {
   return Math.min(SWEEP_BATCH_MAX, Math.max(SWEEP_BATCH_MIN, Math.trunc(n)));
 }
 
-/** Pending and errored manuals. Manual 9 (Mini GentleYAG) blocks every other manual until it is extracted or marked no BOM. */
-export function planSweepBatch(manuals: SweepProgress[], batchSize = SWEEP_BATCH_DEFAULT): SweepProgress[] {
+/**
+ * Pending and errored manuals. manuals.id 9 blocks every other manual, including
+ * another priority-0 row. The 37 Section 4 files block the library until each is
+ * extracted or marked no_line_items.
+ */
+export function planSweepBatch(
+  manuals: SweepProgress[],
+  batchSize = SWEEP_BATCH_DEFAULT,
+  files?: { status: SourceFileStatus }[],
+): SweepProgress[] {
   const size = clampBatchSize(batchSize);
   const eligible = manuals
     .filter((row) => row.status === 'pending' || row.status === 'error')
-    .map((row) => ({ ...row, priority: row.priority ?? sweepPriority(row) }))
+    .map((row) => ({ ...row, priority: row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId ? 0 : (row.priority ?? sweepPriority(row)) }))
     .sort((a, b) => a.priority - b.priority || a.manual_id - b.manual_id);
-  const gate = eligible.filter((row) => row.priority === 0 || row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId);
-  return (gate.length ? gate : eligible).slice(0, size);
+  const nineOpen = eligible.some((row) => row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId);
+  const filesOpen = files ? manualNineBlocksLibrary(files) : false;
+  if (nineOpen || filesOpen) {
+    return eligible.filter((row) => row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId).slice(0, size);
+  }
+  return eligible.slice(0, size);
+}
+
+/**
+ * Read one manual-9 file. Lines from any other path are rejected.
+ * Parent assignments are a plan only: this function does not write device_bom.
+ */
+export function ingestManualNineSource(sourcePath: string, text: string, evidence: AssemblyEvidence[] = []) {
+  const allowed = MANUAL_NINE_SOURCES.some((source) => source.storage_path === sourcePath);
+  if (!allowed) {
+    return {
+      accepted: [],
+      rejected: [{ mpn: '', description: '', source_path: sourcePath }],
+      plan: { persisted: false as const, assignments: [] as SystemLine[], unassigned: [] as string[] },
+    };
+  }
+  const extracted = extractBomLines(text);
+  const gate = acceptEvidenceLines(extracted.map((line) => ({
+    mpn: line.mpn,
+    description: line.description,
+    source_path: sourcePath,
+    qty: line.qtyPerAssembly,
+  })));
+  const system: SystemLine[] = gate.accepted.map((line) => ({
+    mpn: line.mpn,
+    description: line.description,
+    section: 'System',
+    provenance: sourcePath,
+    parent_mpn: null,
+    assembly_confidence: 'unassigned' as const,
+  }));
+  const planned = reattachSystemLines(system, evidence);
+  return {
+    accepted: gate.accepted,
+    rejected: gate.rejected,
+    plan: {
+      persisted: false as const,
+      assignments: planned.filter((row) => row.assembly_confidence === 'evidenced'),
+      unassigned: planned.filter((row) => row.assembly_confidence !== 'evidenced').map((row) => row.mpn),
+    },
+  };
 }
 
 export function scoreBomText(text: string): { score: number; hasBom: boolean } {

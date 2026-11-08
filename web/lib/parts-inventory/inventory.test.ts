@@ -20,6 +20,7 @@ import { loadMiniGentleYagSeed, miniGentleYagFamilyTreeText } from './seed.ts';
 import {
   applySweepOutcome,
   extractBomLines,
+  ingestManualNineSource,
   MINI_GENTLEYAG_MANUAL,
   planSweepBatch,
   scoreBomText,
@@ -150,7 +151,8 @@ test('Mini GentleYAG seed keeps every stocked section, including head and rail',
 });
 
 test('the sweep runs Mini GentleYAG first, then other Candela, in batches of 50-100', () => {
-  assert.equal(sweepPriority({ brand: 'Candela', model: 'vpyag', title: 'Mini GentleYAG' }), 0);
+  assert.equal(sweepPriority({ manual_id: 9, brand: 'Candela', model: 'vpyag', title: 'Mini GentleYAG' }), 0);
+  assert.equal(sweepPriority({ manual_id: 40, brand: 'Candela', model: 'vpyag', title: 'Mini GentleYAG' }), 10);
   assert.equal(sweepPriority({ brand: 'Candela', model: 'gentleyag', title: 'GentleYAG' }), 10);
   assert.equal(sweepPriority({ brand: 'Lumenis', model: 'acupulse', title: 'AcuPulse' }), 100);
   assert.equal(MINI_GENTLEYAG_MANUAL.libraryId, 9);
@@ -162,7 +164,11 @@ test('the sweep runs Mini GentleYAG first, then other Candela, in batches of 50-
     { manual_id: 9, brand: 'Candela', model: 'vpyag', title: 'Mini GentleYAG (VPYag)', status: 'pending', priority: 0 },
     { manual_id: 8, brand: 'Candela', model: 'vpyag', title: 'already done', status: 'extracted', priority: 0 },
   ];
-  const batch = planSweepBatch(manuals, 75);
+  const withAnotherPriorityZero = [
+    ...manuals,
+    { manual_id: 40, brand: 'Candela', model: 'vpyag', title: 'another VP YAG', status: 'pending' as const, priority: 0 },
+  ];
+  const batch = planSweepBatch(withAnotherPriorityZero, 75);
   assert.deepEqual(batch.map((row) => row.manual_id), [9]);
   const again = applySweepOutcome(batch[0], { lines: loadMiniGentleYagSeed() });
   assert.equal(again.status, 'extracted');
@@ -191,6 +197,14 @@ test('System lines stay unassigned unless a manual quote names the parent', () =
   assert.equal(moved[0]?.assembly_confidence, 'evidenced');
   assert.equal(moved[0]?.parent_mpn, '7122-00-3446');
   assert.match(moved[0]?.provenance || '', /7122-99-3446_04/);
+  const forged = reattachSystemLines(lines, [{
+    child_mpn: '2846-30-0806',
+    parent_mpn: '7122-00-3446',
+    source_path: 'notes/not-a-manual.pdf',
+    quote: '2846-30-0806 and 7122-00-3446',
+  }]);
+  assert.equal(forged[0]?.assembly_confidence, 'unassigned');
+  assert.equal(forged[0]?.parent_mpn, null);
 });
 
 test('duplicate MPNs merge only inside one manufacturer and flag conflicting text', () => {
@@ -226,6 +240,41 @@ test('manual 9 parts lists and head/rail drawings block the rest of the library'
   ]);
   assert.equal(imported.accepted.length, 1);
   assert.equal(imported.rejected.length, 1);
+  const blocked = planSweepBatch(
+    [
+      { manual_id: 9, status: 'extracted', priority: 0 },
+      { manual_id: 40, status: 'pending', priority: 0 },
+    ],
+    75,
+    queue,
+  );
+  assert.deepEqual(blocked.map((row) => row.manual_id), []);
+  const released = planSweepBatch(
+    [
+      { manual_id: 9, status: 'extracted', priority: 0 },
+      { manual_id: 40, status: 'pending', priority: 0 },
+    ],
+    75,
+    done,
+  );
+  assert.deepEqual(released.map((row) => row.manual_id), [40]);
+  const rail = queue.find((file) => file.storage_path.endsWith('7122-99-3446_04.pdf'));
+  assert.ok(rail);
+  const ingested = ingestManualNineSource(
+    rail.storage_path,
+    '7122-00-3446 ASSY,LSR RAIL R=. 1 EA\n2846-30-0806 SCR,SEMS R=. 2 EA',
+    [{
+      child_mpn: '2846-30-0806',
+      parent_mpn: '7122-00-3446',
+      source_path: rail.storage_path,
+      quote: '2846-30-0806 on 7122-00-3446',
+    }],
+  );
+  assert.equal(ingested.plan.persisted, false);
+  assert.ok(ingested.plan.assignments.some((row) => row.parent_mpn === '7122-00-3446'));
+  const outside = ingestManualNineSource('notes/not-a-manual.pdf', '7122-00-3446 ASSY R=. 1', []);
+  assert.equal(outside.accepted.length, 0);
+  assert.equal(outside.plan.persisted, false);
 });
 
 test('migration keeps prices on the org table and queues the sweep without applying it', () => {
@@ -244,17 +293,29 @@ test('migration keeps prices on the org table and queues the sweep without apply
   assert.match(sql, /is_active_org_member\(organization_id\)/);
   assert.match(sql, /7122-00-3497/);
   assert.match(sql, /7122-00-3446/);
-  assert.match(sql, /mini gentle \?yag/);
+  assert.match(sql, /WHEN m\.id = 9 THEN 0/);
+  assert.match(sql, /parent_mpn/);
+  assert.match(sql, /assembly_confidence/);
+  assert.doesNotMatch(sql, /GRANT UPDATE \(%s\) ON public\.parts_catalog/);
   assert.match(sql, /part_catalog_availability_vendor_pn_uidx/);
   assert.match(sql, /vendor_pn_normalized/);
   assert.doesNotMatch(sql.slice(sql.indexOf('part_catalog_availability'), sql.indexOf('organization_parts')), /unit_cost|sell_price/);
   assert.match(rollback, /DROP TABLE IF EXISTS public\.organization_parts/);
-  assert.match(sql, /REVOKE SELECT, UPDATE ON public.parts_catalog/);
+  assert.match(sql, /REVOKE ALL ON TABLE public\.parts_catalog FROM PUBLIC, anon, authenticated/);
+  assert.match(sql, /GRANT UPDATE \(is_active\) ON TABLE public\.parts_catalog TO authenticated/);
+  assert.match(rollback, /SELECT includes sale_price/);
+  assert.doesNotMatch(rollback, /GRANT SELECT, UPDATE ON/);
+  assert.doesNotMatch(rollback, /GRANT INSERT \(sale_price\)/);
   assert.match(sql, /a.attname <> 'sale_price'/);
   assert.match(sql, /unit_cost', 'currency'/);
   const fixture = readFileSync(join(here, '../../supabase/fixtures/20261105_qa2655_sample_qty.sql'), 'utf8');
   assert.match(fixture, /organization_id = 2655/);
+  assert.match(fixture, /tsp\.allow_qa_fixture/);
+  assert.match(fixture, /tsp\.environment/);
   assert.doesNotMatch(fixture, /organization_id = (1005|5509|2616|4|5515)/);
+  const html = readFileSync(join(here, '../../../app/src/main/assets/parts_catalog.html'), 'utf8');
+  assert.doesNotMatch(html, /select\('\*'\)/);
+  assert.doesNotMatch(html, /sale_price:/);
   const dedupSql = readFileSync(join(here, '../../supabase/oneoff/20261105_000951_mpn_dedup_dry_run.sql'), 'utf8');
   assert.doesNotMatch(dedupSql, /\b(UPDATE|DELETE|INSERT)\b/i);
 });

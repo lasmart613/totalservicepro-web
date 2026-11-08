@@ -7,9 +7,11 @@
  * Then other Candela manuals, then the rest of the library, 50–100 at a time.
  * --apply is refused here. The long run waits for Larry's yes and a service role.
  */
+import { manualNineQueue } from '../lib/parts-inventory/manual-nine.ts';
 import { loadMiniGentleYagSeed, miniGentleYagFamilyTreeText } from '../lib/parts-inventory/seed.ts';
 import {
   extractBomLines,
+  ingestManualNineSource,
   MINI_GENTLEYAG_MANUAL,
   planSweepBatch,
   scoreBomText,
@@ -27,9 +29,12 @@ const lines = extractBomLines(text);
 const score = scoreBomText(text);
 const sample: SweepProgress[] = [
   { manual_id: MINI_GENTLEYAG_MANUAL.libraryId, brand: 'Candela', model: 'vpyag', title: MINI_GENTLEYAG_MANUAL.title, status: 'pending', priority: 0 },
+  { manual_id: 40, brand: 'Candela', model: 'vpyag', title: 'another VP YAG', status: 'pending', priority: 0 },
   { manual_id: 24, brand: 'Candela', model: 'gentleyag', title: 'GentleYag', status: 'pending', priority: 10 },
   { manual_id: 100, brand: 'Lumenis', model: 'acupulse', title: 'AcuPulse', status: 'pending', priority: 100 },
 ];
+const files = manualNineQueue();
+const outside = ingestManualNineSource('notes/not-a-manual.pdf', text, []);
 const sections: Record<string, number> = {};
 for (const line of lines) sections[line.section] = (sections[line.section] || 0) + 1;
 
@@ -38,7 +43,11 @@ console.log(JSON.stringify({
   batchSize: SWEEP_BATCH_DEFAULT,
   batchRange: [50, 100],
   firstManual: MINI_GENTLEYAG_MANUAL,
-  plannedOrder: planSweepBatch(sample, SWEEP_BATCH_DEFAULT).map((row) => row.manual_id),
+  plannedOrder: planSweepBatch(sample, SWEEP_BATCH_DEFAULT, files).map((row) => row.manual_id),
+  sourceFiles: files.length,
+  sourceFilesBlocking: true,
+  parentsPersisted: false,
+  rejectedOutsideManual: outside.accepted.length === 0,
   seedParts: loadMiniGentleYagSeed().length,
   extractedParts: lines.length,
   hasBom: score.hasBom,
