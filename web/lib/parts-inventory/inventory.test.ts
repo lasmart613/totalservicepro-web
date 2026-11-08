@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { isMiniGentleYag, isStockedBomPart, rankPartsForDevice, sectionForDescription, type PartPick } from './bom.ts';
 import { searchCrossReference } from './cross-ref.ts';
 import { planMpnDedup } from './dedup-plan.ts';
-import { manualNineBlocksLibrary, acceptEvidenceLines, manualNineQueue } from './manual-nine.ts';
+import { manualNineBlocksLibrary, manualNineCoverage, acceptEvidenceLines, manualNineQueue, MANUAL_NINE_SOURCES } from './manual-nine.ts';
 import { reattachSystemLines } from './reattach.ts';
 import { normalizeMpn } from './mpn.ts';
 import {
@@ -173,12 +173,25 @@ test('the sweep runs Mini GentleYAG first, then other Candela, in batches of 50-
   const again = applySweepOutcome(batch[0], { lines: loadMiniGentleYagSeed() });
   assert.equal(again.status, 'extracted');
   const rest = manuals.filter((row) => row.manual_id !== 9);
-  const after = planSweepBatch([again, ...rest], 75);
+  const omitted = planSweepBatch([again, ...rest], 75);
+  assert.deepEqual(omitted.map((row) => row.manual_id), []);
+  const empty = planSweepBatch([again, ...rest], 75, []);
+  assert.deepEqual(empty.map((row) => row.manual_id), []);
+  const done = manualNineQueue().map((file) => ({ ...file, status: 'no_line_items' as const }));
+  const after = planSweepBatch([again, ...rest], 75, done);
   assert.equal(after.some((row) => row.manual_id === 9), false);
   assert.deepEqual(after.map((row) => row.manual_id), [24, 500]);
   const failed = applySweepOutcome(manuals[1], { lines: [], error: 'unreadable page' });
   assert.equal(failed.status, 'error');
-  assert.equal(planSweepBatch([again, failed, manuals[0]], 50)[0]?.manual_id, 24);
+  assert.equal(planSweepBatch([again, failed, manuals[0]], 50, done)[0]?.manual_id, 24);
+  const partial = done.slice(0, 36);
+  assert.equal(manualNineCoverage(partial).complete, false);
+  assert.deepEqual(planSweepBatch([again, ...rest], 75, partial).map((row) => row.manual_id), []);
+  const oneError = done.map((file, index) => (index === 0 ? { ...file, status: 'error' as const } : file));
+  assert.equal(manualNineCoverage(oneError).errored.length, 1);
+  assert.deepEqual(planSweepBatch([again, ...rest], 75, oneError).map((row) => row.manual_id), []);
+  const released = planSweepBatch([again, ...rest], 75, oneError.map((file) => ({ ...file, status: 'extracted' as const })));
+  assert.deepEqual(released.map((row) => row.manual_id), [24, 500]);
 });
 
 test('System lines stay unassigned unless a manual quote names the parent', () => {
@@ -194,8 +207,11 @@ test('System lines stay unassigned unless a manual quote names the parent', () =
     source_path: 'shared/candela/VPYag/Sect 4/7122-99-3446_04.pdf',
     quote: 'Item 4 screw 2846-30-0806 on laser rail assembly 7122-00-3446',
   }]);
-  assert.equal(moved[0]?.assembly_confidence, 'evidenced');
+  assert.equal(moved[0]?.assembly_confidence, 'unassigned');
+  assert.equal(moved[0]?.provenance_kind, 'candidate');
   assert.equal(moved[0]?.parent_mpn, '7122-00-3446');
+  assert.equal(moved[0]?.section, 'System');
+  assert.match(moved[0]?.provenance || '', /^candidate /);
   assert.match(moved[0]?.provenance || '', /7122-99-3446_04/);
   const forged = reattachSystemLines(lines, [{
     child_mpn: '2846-30-0806',
@@ -203,6 +219,7 @@ test('System lines stay unassigned unless a manual quote names the parent', () =
     source_path: 'notes/not-a-manual.pdf',
     quote: '2846-30-0806 and 7122-00-3446',
   }]);
+  assert.equal(forged[0]?.provenance_kind, 'unassigned');
   assert.equal(forged[0]?.assembly_confidence, 'unassigned');
   assert.equal(forged[0]?.parent_mpn, null);
 });
@@ -249,6 +266,13 @@ test('manual 9 parts lists and head/rail drawings block the rest of the library'
     queue,
   );
   assert.deepEqual(blocked.map((row) => row.manual_id), []);
+  assert.deepEqual(planSweepBatch(
+    [
+      { manual_id: 9, status: 'extracted', priority: 0 },
+      { manual_id: 40, status: 'pending', priority: 0 },
+    ],
+    75,
+  ).map((row) => row.manual_id), []);
   const released = planSweepBatch(
     [
       { manual_id: 9, status: 'extracted', priority: 0 },
@@ -270,8 +294,15 @@ test('manual 9 parts lists and head/rail drawings block the rest of the library'
       quote: '2846-30-0806 on 7122-00-3446',
     }],
   );
+  assert.equal(manualNineCoverage(undefined).complete, false);
+  assert.equal(manualNineCoverage(undefined).missing.length, MANUAL_NINE_SOURCES.length);
+  assert.equal(manualNineCoverage([]).missing.length, 37);
+  assert.equal(manualNineCoverage(done.slice(1)).complete, false);
   assert.equal(ingested.plan.persisted, false);
-  assert.ok(ingested.plan.assignments.some((row) => row.parent_mpn === '7122-00-3446'));
+  assert.equal(ingested.plan.sourceVerified.length, 0);
+  assert.equal(ingested.plan.candidates[0]?.provenance_kind, 'candidate');
+  assert.equal(ingested.plan.candidates[0]?.assembly_confidence, 'unassigned');
+  assert.equal(ingested.plan.candidates[0]?.parent_mpn, '7122-00-3446');
   const outside = ingestManualNineSource('notes/not-a-manual.pdf', '7122-00-3446 ASSY R=. 1', []);
   assert.equal(outside.accepted.length, 0);
   assert.equal(outside.plan.persisted, false);
@@ -303,6 +334,17 @@ test('migration keeps prices on the org table and queues the sweep without apply
   assert.match(rollback, /DROP TABLE IF EXISTS public\.organization_parts/);
   assert.match(sql, /REVOKE ALL ON TABLE public\.parts_catalog FROM PUBLIC, anon, authenticated/);
   assert.match(sql, /GRANT UPDATE \(is_active\) ON TABLE public\.parts_catalog TO authenticated/);
+  assert.match(sql, /GRANT DELETE ON TABLE public\.part_vendors TO authenticated/);
+  assert.match(sql, /000951 preflight abort/);
+  assert.match(sql, /FOR ALL TABLES/);
+  assert.doesNotMatch(sql, /ALTER PUBLICATION supabase_realtime DROP TABLE/);
+  assert.match(sql, /ELSE 'held'/);
+  assert.match(sql, /refusing to queue manual/);
+  for (const source of MANUAL_NINE_SOURCES) {
+    assert.ok(sql.includes(source.storage_path), source.storage_path);
+  }
+  assert.match(rollback, /PRICE READS REOPEN/);
+  assert.match(rollback, /ROLLBACK REOPENS PRICE READS/);
   assert.match(rollback, /SELECT includes sale_price/);
   assert.doesNotMatch(rollback, /GRANT SELECT, UPDATE ON/);
   assert.doesNotMatch(rollback, /GRANT INSERT \(sale_price\)/);
@@ -310,12 +352,17 @@ test('migration keeps prices on the org table and queues the sweep without apply
   assert.match(sql, /unit_cost', 'currency'/);
   const fixture = readFileSync(join(here, '../../supabase/fixtures/20261105_qa2655_sample_qty.sql'), 'utf8');
   assert.match(fixture, /organization_id = 2655/);
-  assert.match(fixture, /tsp\.allow_qa_fixture/);
-  assert.match(fixture, /tsp\.environment/);
+  assert.match(fixture, /operator interlock/);
+  assert.match(fixture, /not proof the database is non-production/);
+  assert.doesNotMatch(fixture, /environment-proof|environment proof/i);
   assert.doesNotMatch(fixture, /organization_id = (1005|5509|2616|4|5515)/);
   const html = readFileSync(join(here, '../../../app/src/main/assets/parts_catalog.html'), 'utf8');
   assert.doesNotMatch(html, /select\('\*'\)/);
   assert.doesNotMatch(html, /sale_price:/);
   const dedupSql = readFileSync(join(here, '../../supabase/oneoff/20261105_000951_mpn_dedup_dry_run.sql'), 'utf8');
   assert.doesNotMatch(dedupSql, /\b(UPDATE|DELETE|INSERT)\b/i);
+  const audit = readFileSync(join(here, '../../supabase/oneoff/20261105_000951_price_lock_preflight.sql'), 'utf8');
+  assert.doesNotMatch(audit, /^\s*(INSERT|UPDATE|DELETE|GRANT|REVOKE|ALTER|DROP|CREATE)\b/im);
+  assert.match(audit, /qa_legacy_grant/);
+  assert.match(audit, /FOR ALL TABLES/);
 });

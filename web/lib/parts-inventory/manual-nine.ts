@@ -59,9 +59,49 @@ export function manualNineQueue(): ManualNineFile[] {
   return MANUAL_NINE_SOURCES.map((source) => ({ ...source, status: 'pending' }));
 }
 
-/** Other manuals stay queued until every manual-9 parts list and head/rail drawing is finished. */
-export function manualNineBlocksLibrary(files: { status: SourceFileStatus }[]): boolean {
-  return files.some((file) => file.status === 'pending' || file.status === 'error');
+export type SourceCoverage = {
+  complete: boolean;
+  missing: string[];
+  pending: string[];
+  errored: string[];
+};
+
+/**
+ * Complete only when every required manual-9 path is present and each one is
+ * extracted or no_line_items. A missing argument, an empty list, or a partial
+ * list is not complete.
+ */
+export function manualNineCoverage(
+  files?: { storage_path?: string; status?: string | null }[] | null,
+): SourceCoverage {
+  const byPath = new Map<string, string>();
+  for (const file of files ?? []) {
+    const path = String(file?.storage_path || '').trim();
+    if (!path || byPath.has(path)) continue;
+    byPath.set(path, String(file?.status || 'pending'));
+  }
+  const missing: string[] = [];
+  const pending: string[] = [];
+  const errored: string[] = [];
+  for (const source of MANUAL_NINE_SOURCES) {
+    const status = byPath.get(source.storage_path);
+    if (!status) missing.push(source.storage_path);
+    else if (status === 'error') errored.push(source.storage_path);
+    else if (status !== 'extracted' && status !== 'no_line_items') pending.push(source.storage_path);
+  }
+  return {
+    complete: missing.length === 0 && pending.length === 0 && errored.length === 0,
+    missing,
+    pending,
+    errored,
+  };
+}
+
+/** Other manuals stay queued until the canonical 37 files are recorded finished. */
+export function manualNineBlocksLibrary(
+  files?: { storage_path?: string; status?: string | null }[] | null,
+): boolean {
+  return !manualNineCoverage(files).complete;
 }
 
 export type EvidenceLine = {

@@ -1,16 +1,22 @@
+-- =====================================================================
+-- PRICE READS REOPEN
+-- This rollback grants anon and authenticated SELECT on
+-- parts_catalog.sale_price and on part_vendors.unit_cost and currency.
+-- Shared catalog clients can see those legacy prices again.
+-- It still does not grant price writes, table-level UPDATE, or UPDATE on
+-- created_by. It does restore part_vendors DELETE for authenticated so an
+-- authorized vendor row can be removed under the existing RLS policy.
+-- =====================================================================
 -- Rollback for 20261105_000951_org_parts_inventory_bom.sql
 -- Removes the new tables and the Mini GentleYAG seed rows this migration inserted.
 -- Does not drop legacy parts_catalog.sale_price or part_vendors.unit_cost.
---
--- SECURITY: the SELECT grants below put sale_price, unit_cost, and currency back
--- on anon and authenticated. Shared catalog screens can read those legacy prices
--- again. This file does not grant table-level UPDATE, does not grant UPDATE on
--- created_by, and does not grant INSERT or UPDATE on the price columns.
--- parts_catalog client UPDATE is is_active only.
 
 BEGIN;
 
 DROP TABLE IF EXISTS public.manual_bom_sweep;
+DROP TABLE IF EXISTS public.manual_nine_source;
+DROP FUNCTION IF EXISTS public.manual_bom_sweep_hold();
+DROP FUNCTION IF EXISTS public.manual_nine_source_guard();
 DROP TABLE IF EXISTS public.device_bom;
 DROP TABLE IF EXISTS public.organization_parts;
 DROP TABLE IF EXISTS public.part_catalog_availability;
@@ -49,6 +55,8 @@ BEGIN
     EXECUTE format('REVOKE ALL (%I) ON TABLE public.part_vendors FROM PUBLIC, anon, authenticated', r.attname);
   END LOOP;
 
+  RAISE WARNING '000951 ROLLBACK REOPENS PRICE READS: anon and authenticated regain SELECT on parts_catalog.sale_price and part_vendors.unit_cost and currency';
+
   -- Deliberate: SELECT includes sale_price / unit_cost / currency again.
   SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
     FROM pg_catalog.pg_attribute a
@@ -75,6 +83,7 @@ BEGIN
    WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
      AND a.attname <> ALL (ARRAY['id', 'part_id', 'created_by', 'unit_cost', 'currency']);
   EXECUTE format('GRANT UPDATE (%s) ON TABLE public.part_vendors TO authenticated', v_cols);
+  GRANT DELETE ON TABLE public.part_vendors TO authenticated;
 END $$;
 
 COMMIT;

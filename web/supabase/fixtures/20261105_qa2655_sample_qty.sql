@@ -1,21 +1,26 @@
--- Sample on-hand quantities for a disposable local database only.
--- NOT part of 000951. Do not run on production. Do not run until 000951 is applied
--- on that local database and Larry has approved that step.
+-- Sample on-hand quantities for a database the operator has already chosen.
+-- NOT part of 000951. Do not run this file against production. Do not run it
+-- until 000951 is applied on that chosen database and Larry has approved that step.
 -- Reversible: deletes only rows tagged fixture=qa-2655 on organization 2655.
 --
--- Fail closed. Org id 2655 also exists in production, so the org id is not the guard.
--- A local session must set both:
+-- The two settings below are separate operator interlocks. They are not an
+-- environment attestation. A production session can set both of them; doing so
+-- does not prove the database is local or non-production. This file does not
+-- detect hosting, project, or network. Org id 2655 also exists in production,
+-- so the org id is not the guard either.
 --   SET tsp.allow_qa_fixture = 'local-2655';
 --   SET tsp.environment = 'local';
--- Anything else, including an unset database, raises and writes nothing.
+-- Either setting alone is not enough. An unset database writes nothing.
 
 BEGIN;
 
 DO $$
 BEGIN
-  IF coalesce(current_setting('tsp.allow_qa_fixture', true), '') IS DISTINCT FROM 'local-2655'
-     OR coalesce(current_setting('tsp.environment', true), '') IS DISTINCT FROM 'local' THEN
-    RAISE EXCEPTION 'refusing QA fixture: set tsp.allow_qa_fixture=local-2655 and tsp.environment=local on a disposable database';
+  IF coalesce(current_setting('tsp.allow_qa_fixture', true), '') IS DISTINCT FROM 'local-2655' THEN
+    RAISE EXCEPTION 'refusing QA fixture: operator interlock tsp.allow_qa_fixture is not local-2655. This setting is not proof the database is non-production';
+  END IF;
+  IF coalesce(current_setting('tsp.environment', true), '') IS DISTINCT FROM 'local' THEN
+    RAISE EXCEPTION 'refusing QA fixture: operator interlock tsp.environment is not local. This setting is not proof the database is non-production';
   END IF;
   IF 2655 IN (1005, 5509, 2616, 4, 5515) THEN
     RAISE EXCEPTION 'qa fixture target collided with a live customer org';

@@ -8,7 +8,7 @@
  */
 
 import { isStockedBomPart, sectionForDescription, type BomLine } from './bom.ts';
-import { acceptEvidenceLines, MANUAL_NINE_SOURCES, manualNineBlocksLibrary, type SourceFileStatus } from './manual-nine.ts';
+import { acceptEvidenceLines, MANUAL_NINE_SOURCES, manualNineCoverage, type SourceFileStatus } from './manual-nine.ts';
 import { normalizeMpn } from './mpn.ts';
 import { reattachSystemLines, type AssemblyEvidence, type SystemLine } from './reattach.ts';
 
@@ -25,7 +25,7 @@ export const MINI_GENTLEYAG_MANUAL = {
   priority: 0,
 } as const;
 
-export type SweepStatus = 'pending' | 'no_bom' | 'extracted' | 'error';
+export type SweepStatus = 'pending' | 'no_bom' | 'extracted' | 'error' | 'held';
 
 export type SweepManual = {
   manual_id: number;
@@ -64,14 +64,14 @@ export function clampBatchSize(size: number | null | undefined): number {
 }
 
 /**
- * Pending and errored manuals. manuals.id 9 blocks every other manual, including
- * another priority-0 row. The 37 Section 4 files block the library until each is
- * extracted or marked no_line_items.
+ * Pending and errored manuals. manuals.id 9 blocks every other manual.
+ * The 37 Section 4 paths are required evidence. Omitting them, or passing an
+ * empty or partial list, does not release the rest of the library.
  */
 export function planSweepBatch(
   manuals: SweepProgress[],
   batchSize = SWEEP_BATCH_DEFAULT,
-  files?: { status: SourceFileStatus }[],
+  files?: { storage_path?: string; status?: SourceFileStatus | string | null }[] | null,
 ): SweepProgress[] {
   const size = clampBatchSize(batchSize);
   const eligible = manuals
@@ -79,8 +79,7 @@ export function planSweepBatch(
     .map((row) => ({ ...row, priority: row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId ? 0 : (row.priority ?? sweepPriority(row)) }))
     .sort((a, b) => a.priority - b.priority || a.manual_id - b.manual_id);
   const nineOpen = eligible.some((row) => row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId);
-  const filesOpen = files ? manualNineBlocksLibrary(files) : false;
-  if (nineOpen || filesOpen) {
+  if (nineOpen || !manualNineCoverage(files).complete) {
     return eligible.filter((row) => row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId).slice(0, size);
   }
   return eligible.slice(0, size);
@@ -96,7 +95,7 @@ export function ingestManualNineSource(sourcePath: string, text: string, evidenc
     return {
       accepted: [],
       rejected: [{ mpn: '', description: '', source_path: sourcePath }],
-      plan: { persisted: false as const, assignments: [] as SystemLine[], unassigned: [] as string[] },
+      plan: { persisted: false as const, candidates: [] as SystemLine[], sourceVerified: [] as SystemLine[], unassigned: [] as string[] },
     };
   }
   const extracted = extractBomLines(text);
@@ -120,8 +119,9 @@ export function ingestManualNineSource(sourcePath: string, text: string, evidenc
     rejected: gate.rejected,
     plan: {
       persisted: false as const,
-      assignments: planned.filter((row) => row.assembly_confidence === 'evidenced'),
-      unassigned: planned.filter((row) => row.assembly_confidence !== 'evidenced').map((row) => row.mpn),
+      candidates: planned.filter((row) => row.provenance_kind === 'candidate'),
+      sourceVerified: planned.filter((row) => row.provenance_kind === 'source-verified'),
+      unassigned: planned.filter((row) => row.provenance_kind !== 'candidate').map((row) => row.mpn),
     },
   };
 }

@@ -1,6 +1,10 @@
 -- 000951: org parts inventory, shared catalog identity, device BOM, manual sweep queue.
 --
--- Not applied by this change. Run only after Larry's yes.
+-- Not applied by this change. Run only after Larry's yes, and only after the
+-- read-only preflight below can establish the price privacy guarantee.
+-- A leftover grant, an owner view, or a realtime publication that still
+-- carries a price column aborts the transaction. This file does not revoke
+-- unrelated roles and does not rewrite a FOR ALL TABLES publication.
 --
 -- Shared catalog stays public.parts_catalog (MPN, description, specs).
 -- This file does not add price columns there. Legacy sale_price and
@@ -22,6 +26,111 @@
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
+
+-- Preflight. Abort the whole transaction when shared price privacy cannot be
+-- established from the privileges, views, and publication that already exist.
+-- Revokes below name only PUBLIC, anon, and authenticated. A grant to any other
+-- ordinary role, including one that authenticated inherits, is left in place
+-- and this migration stops. Review
+-- web/supabase/oneoff/20261105_000951_price_lock_preflight.sql
+-- and change that grant in a separate reviewed step. Do not broaden this
+-- revoke list to "every role".
+DO $$
+DECLARE
+  v_hits text;
+  v_owner text;
+  v_view record;
+BEGIN
+  IF to_regclass('public.parts_catalog') IS NULL OR to_regclass('public.part_vendors') IS NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: parts_catalog or part_vendors is missing';
+  END IF;
+
+  SELECT string_agg(DISTINCT format('%s %s %s.%s', role_name, privilege_type, relname, attname), '; ' ORDER BY format('%s %s %s.%s', role_name, privilege_type, relname, attname))
+    INTO v_hits
+  FROM (
+    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname AS role_name, c.relowner, gr.oid AS role_oid, gr.rolsuper, gr.rolbypassrls
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+      CROSS JOIN LATERAL aclexplode(c.relacl) acl
+      JOIN pg_roles gr ON gr.oid = acl.grantee
+     WHERE c.relacl IS NOT NULL
+       AND acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE')
+       AND (
+         (c.relname = 'parts_catalog' AND a.attname = 'sale_price')
+         OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
+       )
+    UNION ALL
+    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname, c.relowner, gr.oid, gr.rolsuper, gr.rolbypassrls
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
+      CROSS JOIN LATERAL aclexplode(a.attacl) acl
+      JOIN pg_roles gr ON gr.oid = acl.grantee
+     WHERE acl.privilege_type IN ('SELECT', 'INSERT', 'UPDATE')
+       AND (
+         (c.relname = 'parts_catalog' AND a.attname = 'sale_price')
+         OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
+       )
+  ) g
+  WHERE g.role_name NOT IN ('anon', 'authenticated', 'service_role')
+    AND NOT g.rolsuper
+    AND NOT g.rolbypassrls
+    AND g.role_oid <> g.relowner;
+
+  IF v_hits IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: price privilege remains for %. Named revokes of anon and authenticated do not remove grants inherited from another role. This migration does not revoke that role. Run the read-only audit and remove the grant in a reviewed change.', v_hits;
+  END IF;
+
+  SELECT string_agg(DISTINCT format('%s owns %s', own.rolname, c.relname), '; ')
+    INTO v_owner
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+    JOIN pg_roles own ON own.oid = c.relowner
+   WHERE c.relname IN ('parts_catalog', 'part_vendors')
+     AND NOT own.rolsuper
+     AND NOT own.rolbypassrls
+     AND own.rolname NOT IN ('postgres', 'supabase_admin', 'service_role');
+  IF v_owner IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: table owner can read price columns and this migration will not change ownership (%).', v_owner;
+  END IF;
+
+  FOR v_view IN
+    SELECT n.nspname, c.relname, c.reloptions, pg_get_viewdef(c.oid, true) AS def
+      FROM pg_class c
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE c.relkind = 'v'
+       AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+  LOOP
+    IF (
+      (v_view.def ILIKE '%parts_catalog%' AND v_view.def ILIKE '%sale_price%')
+      OR (v_view.def ILIKE '%part_vendors%' AND (v_view.def ILIKE '%unit_cost%' OR v_view.def ILIKE '%currency%'))
+    ) AND coalesce(array_to_string(v_view.reloptions, ','), '') NOT ILIKE '%security_invoker=true%'
+      AND coalesce(array_to_string(v_view.reloptions, ','), '') NOT ILIKE '%security_invoker=on%' THEN
+      RAISE EXCEPTION '000951 preflight abort: owner view %.% reads a shared price column. This migration does not drop views.', v_view.nspname, v_view.relname;
+    END IF;
+  END LOOP;
+
+  IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime' AND puballtables) THEN
+    RAISE EXCEPTION '000951 preflight abort: supabase_realtime is FOR ALL TABLES. A price column would stay in the replication stream. This migration will not rewrite that publication.';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+      FROM pg_publication_rel pr
+      JOIN pg_publication p ON p.oid = pr.prpubid
+      JOIN pg_class c ON c.oid = pr.prrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
+      JOIN pg_attribute a ON a.attrelid = c.oid AND NOT a.attisdropped
+     WHERE p.pubname = 'supabase_realtime'
+       AND (
+         (c.relname = 'parts_catalog' AND a.attname = 'sale_price')
+         OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
+       )
+       AND (pr.prattrs IS NULL OR a.attnum = ANY (pr.prattrs))
+  ) THEN
+    RAISE EXCEPTION '000951 preflight abort: supabase_realtime still publishes a shared price column. Narrow that publication in a reviewed change. This migration will not drop unrelated tables from it.';
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.normalize_mpn(raw text)
 RETURNS text
@@ -251,7 +360,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS device_bom_model_part_line_uidx
   );
 
 COMMENT ON TABLE public.device_bom IS
-  '000951: one bill of materials per device model (laser_models), not per serial. No prices. parent_mpn stays null until a manual-9 source quote names the parent. This migration does not assign parents.';
+  '000951: one bill of materials per device model (laser_models), not per serial. No prices. Seed parent_mpn stays null. A quote match is an unpersisted candidate, not a source-verified parent.';
 
 ALTER TABLE public.device_bom
   ADD COLUMN IF NOT EXISTS parent_mpn text,
@@ -264,9 +373,9 @@ ALTER TABLE public.device_bom
   CHECK (assembly_confidence IN ('unassigned', 'evidenced'));
 
 COMMENT ON COLUMN public.device_bom.parent_mpn IS
-  '000951: set only from a manual-9 file quote that names this part and the parent. Seed rows stay null.';
+  '000951: null in this seed. A quote match is a provenance candidate only. It is not source-verified and is not written here.';
 COMMENT ON COLUMN public.device_bom.assembly_confidence IS
-  '000951: unassigned unless parent_mpn was stored from manual evidence. Not inferred from the family-tree section label.';
+  '000951: seed rows stay unassigned. evidenced is reserved for a source-verified parent, which this migration does not claim.';
 
 ALTER TABLE public.device_bom ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS device_bom_read ON public.device_bom;
@@ -291,11 +400,11 @@ CREATE TABLE IF NOT EXISTS public.manual_bom_sweep (
   last_finished_at timestamptz,
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT manual_bom_sweep_status_check
-    CHECK (status IN ('pending', 'no_bom', 'extracted', 'error'))
+    CHECK (status IN ('pending', 'no_bom', 'extracted', 'error', 'held'))
 );
 
 COMMENT ON TABLE public.manual_bom_sweep IS
-  '000951: resumable manuals BOM sweep. priority 0 = Mini GentleYAG / VP YAG, 10 = other Candela, 100 = the rest. Batch size 50-100.';
+  '000951: resumable manuals BOM sweep. priority 0 = manuals.id 9. Other manuals are inserted held and cannot become pending until all 37 manual-9 source files are recorded extracted or no_line_items and manual 9 itself is extracted or no_bom.';
 
 ALTER TABLE public.manual_bom_sweep ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.manual_bom_sweep FROM PUBLIC, anon;
@@ -306,6 +415,141 @@ CREATE POLICY manual_bom_sweep_read ON public.manual_bom_sweep
 
 GRANT SELECT ON public.manual_bom_sweep TO authenticated;
 GRANT ALL ON public.manual_bom_sweep TO service_role;
+
+-- Durable inventory of the 37 manual-9 files. Seeded pending. Paths cannot be
+-- swapped and rows cannot be deleted, so a runner cannot replace this list
+-- with a shorter one. Status is the only field a later runner may change.
+CREATE TABLE IF NOT EXISTS public.manual_nine_source (
+  storage_path text PRIMARY KEY,
+  role text NOT NULL,
+  title text NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  CONSTRAINT manual_nine_source_status_check
+    CHECK (status IN ('pending', 'extracted', 'no_line_items', 'error'))
+);
+
+COMMENT ON TABLE public.manual_nine_source IS
+  '000951: the 37 Section 4 files for manuals.id 9. Other manuals stay held until every row is extracted or no_line_items. This seed does not mark any file complete.';
+
+INSERT INTO public.manual_nine_source (storage_path, role, title)
+VALUES
+  ('shared/candela/VPYag/Sect 4/7122-00-3287_F.pdf', 'parts_list', 'Fluid Section Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3306_F.pdf', 'parts_list', 'DCD Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3348_C.pdf', 'parts_list', 'DI Pump Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3441_C.pdf', 'parts_list', 'Calport Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3449_C.pdf', 'parts_list', '6/8/10mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3450_B.pdf', 'parts_list', '6/8/10mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3451_B.pdf', 'parts_list', '12/15/18mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3452_A.pdf', 'parts_list', '12/15/18mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3470_B.pdf', 'parts_list', 'Dump Resistor Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3471_C.pdf', 'parts_list', 'AC Input Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3484_03.pdf', 'parts_list', '6/8/10mm Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3487_02.pdf', 'parts_list', '12/15/18mm Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3520_01.pdf', 'parts_list', 'Display Bezel Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3542_B.pdf', 'parts_list', '10/12/15mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3558_B.pdf', 'parts_list', '1.5/3mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3599_A.pdf', 'parts_list', 'Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3615_02.pdf', 'parts_list', '8mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3616_02.pdf', 'parts_list', '8mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3617_02.pdf', 'parts_list', '8mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3618_02.pdf', 'parts_list', '12mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3619_02.pdf', 'parts_list', '12mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3620_02.pdf', 'parts_list', '12mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3621_03.pdf', 'parts_list', '3mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3623_02.pdf', 'parts_list', '3mm Fiber Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3629_02.pdf', 'parts_list', '3mm Delivery Cable with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-3630_03.pdf', 'parts_list', '3mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7475_A.pdf', 'parts_list', 'Aperture Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7478_03.pdf', 'parts_list', 'Beam Blocker Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7482_B.pdf', 'parts_list', '10/12/15mm Delivery System with DCD'),
+  ('shared/candela/VPYag/Sect 4/7122-00-7484_A.pdf', 'parts_list', '10/12/15mm Delivery System without DCD'),
+  ('shared/candela/VPYag/Sect 4/9914-00-0950_C.pdf', 'parts_list', 'Laser System, Shipping Assembly'),
+  ('shared/candela/VPYag/Sect 4/7122-99-3446_04.pdf', 'assembly_drawing', 'Laser Rail'),
+  ('shared/candela/VPYag/Sect 4/7122-99-3497_01.pdf', 'assembly_drawing', 'Laser Head'),
+  ('shared/candela/VPYag/Sect 4/7122-99-3476_04.pdf', 'assembly_drawing', 'Aiming Beam'),
+  ('shared/candela/VPYag/Sect 4/7122-99-7476_01.pdf', 'assembly_drawing', 'Focus Lens Housing'),
+  ('shared/candela/VPYag/Sect 4/7122-99-7477_B.pdf', 'assembly_drawing', 'Fiber Receptacle'),
+  ('shared/candela/VPYag/Sect 4/7122-99-7479_02.pdf', 'assembly_drawing', 'Head Detector')
+ON CONFLICT (storage_path) DO NOTHING;
+
+DO $$
+DECLARE
+  v_count integer;
+BEGIN
+  SELECT count(*) INTO v_count FROM public.manual_nine_source;
+  IF v_count <> 37 THEN
+    RAISE EXCEPTION '000951: manual 9 source inventory must be the 37 required files, found %', v_count;
+  END IF;
+END $$;
+
+CREATE OR REPLACE FUNCTION public.manual_nine_source_guard()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND NEW.storage_path IS DISTINCT FROM OLD.storage_path) THEN
+    RAISE EXCEPTION '000951: manual 9 source paths are fixed. Status may change. Paths may not.';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    RAISE EXCEPTION '000951: manual 9 source inventory is the 37 seeded files. Refusing an extra path.';
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS manual_nine_source_guard ON public.manual_nine_source;
+CREATE TRIGGER manual_nine_source_guard
+  BEFORE INSERT OR UPDATE OR DELETE ON public.manual_nine_source
+  FOR EACH ROW
+  EXECUTE FUNCTION public.manual_nine_source_guard();
+
+CREATE OR REPLACE FUNCTION public.manual_bom_sweep_hold()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  v_ready boolean;
+BEGIN
+  IF NEW.manual_id IS NOT DISTINCT FROM 9 THEN
+    RETURN NEW;
+  END IF;
+  IF NEW.status IS NULL OR NEW.status NOT IN ('pending', 'error') THEN
+    RETURN NEW;
+  END IF;
+  SELECT count(*) = 37 AND coalesce(bool_and(status IN ('extracted', 'no_line_items')), false)
+    INTO v_ready
+    FROM public.manual_nine_source;
+  IF NOT v_ready THEN
+    RAISE EXCEPTION '000951: refusing to queue manual % until all 37 Mini GentleYAG source files are recorded extracted or no_line_items', NEW.manual_id;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.manual_bom_sweep
+     WHERE manual_id = 9 AND status IN ('extracted', 'no_bom')
+  ) THEN
+    RAISE EXCEPTION '000951: refusing to queue manual % until manuals.id 9 is extracted or no_bom', NEW.manual_id;
+  END IF;
+  RETURN NEW;
+END $$;
+
+DROP TRIGGER IF EXISTS manual_bom_sweep_hold ON public.manual_bom_sweep;
+CREATE TRIGGER manual_bom_sweep_hold
+  BEFORE INSERT OR UPDATE ON public.manual_bom_sweep
+  FOR EACH ROW
+  EXECUTE FUNCTION public.manual_bom_sweep_hold();
+
+ALTER TABLE public.manual_nine_source ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS manual_nine_source_read ON public.manual_nine_source;
+CREATE POLICY manual_nine_source_read ON public.manual_nine_source
+  FOR SELECT TO authenticated
+  USING (true);
+REVOKE ALL ON public.manual_nine_source FROM PUBLIC, anon, authenticated;
+GRANT SELECT ON public.manual_nine_source TO authenticated;
+GRANT ALL ON public.manual_nine_source TO service_role;
+REVOKE ALL ON FUNCTION public.manual_nine_source_guard() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.manual_bom_sweep_hold() FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.manual_nine_source_guard() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.manual_bom_sweep_hold() TO authenticated, service_role;
 
 INSERT INTO public.manufacturers (name)
 VALUES ('Candela')
@@ -327,11 +571,12 @@ SELECT 'VPYag', 'Mini GentleYAG (VPYag)', m.id, 'laser'
         )
    );
 
--- Queue every library manual. Only manuals.id 9 (Mini GentleYAG service folder) is priority 0.
--- Other Candela titles, including other VP YAG strings, wait at priority 10.
+-- Queue every library manual. Only manuals.id 9 is pending. Every other manual
+-- is held. The hold trigger rejects pending or error on those rows until the
+-- 37 source files are recorded complete and manual 9 is extracted or no_bom.
 INSERT INTO public.manual_bom_sweep (manual_id, status, priority)
 SELECT m.id,
-       'pending',
+       CASE WHEN m.id = 9 THEN 'pending' ELSE 'held' END,
        CASE
          WHEN m.id = 9 THEN 0
          WHEN lower(coalesce(m.brand, '')) = 'candela' THEN 10
@@ -846,52 +1091,13 @@ BEGIN
   GRANT INSERT (part_id, created_by) ON TABLE public.part_vendors TO authenticated;
 END $$;
 
--- Column SELECT is what PostgREST enforces. If supabase_realtime lists these
--- tables specifically, drop the price columns from that publication too.
--- A FOR ALL TABLES publication is left alone: rewriting it would drop every
--- other table. That case is not a live audit.
-DO $$
-DECLARE
-  v_cols text;
-  v_all boolean;
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN
-    RETURN;
-  END IF;
-  SELECT puballtables INTO v_all FROM pg_publication WHERE pubname = 'supabase_realtime';
-  IF v_all THEN
-    RAISE NOTICE '000951: supabase_realtime is FOR ALL TABLES; price columns stay out of PostgREST via column privileges.';
-    RETURN;
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM pg_publication_rel pr
-    JOIN pg_class c ON c.oid = pr.prrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE pr.prpubid = (SELECT oid FROM pg_publication WHERE pubname = 'supabase_realtime')
-      AND n.nspname = 'public' AND c.relname = 'parts_catalog'
-  ) THEN
-    SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
-      FROM pg_catalog.pg_attribute a
-     WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
-       AND a.attname <> 'sale_price';
-    EXECUTE 'ALTER PUBLICATION supabase_realtime DROP TABLE public.parts_catalog';
-    EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.parts_catalog (%s)', v_cols);
-  END IF;
-  IF EXISTS (
-    SELECT 1 FROM pg_publication_rel pr
-    JOIN pg_class c ON c.oid = pr.prrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE pr.prpubid = (SELECT oid FROM pg_publication WHERE pubname = 'supabase_realtime')
-      AND n.nspname = 'public' AND c.relname = 'part_vendors'
-  ) THEN
-    SELECT string_agg(quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
-      FROM pg_catalog.pg_attribute a
-     WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
-       AND a.attname <> ALL (ARRAY['unit_cost', 'currency']);
-    EXECUTE 'ALTER PUBLICATION supabase_realtime DROP TABLE public.part_vendors';
-    EXECUTE format('ALTER PUBLICATION supabase_realtime ADD TABLE public.part_vendors (%s)', v_cols);
-  END IF;
-END $$;
+-- 000700 granted table DELETE and 000800 kept RLS policy part_vendors_delete_owner
+-- (vendor creator, catalog creator, or caller_is_part_creator_admin). REVOKE ALL
+-- above removed that DELETE privilege, so the part page delete returned 42501
+-- even for an authorized row. Restore DELETE for authenticated only. The
+-- existing policy still decides which rows. anon and PUBLIC do not get DELETE.
+-- parts_catalog stays without DELETE; parts are archived.
+GRANT DELETE ON TABLE public.part_vendors TO authenticated;
 
 COMMIT;
 
