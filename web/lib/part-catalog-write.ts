@@ -11,7 +11,6 @@ const EDIT_KEYS = [
   'compatible_models',
   'is_consumable',
   'is_active',
-  'sale_price',
   'quantity_on_hand',
   'in_stock',
   'image_url',
@@ -52,17 +51,14 @@ export function vendorInsertPatch(
 ): Record<string, unknown> | null {
   const vendor_name = String(body.vendor_name || '').trim();
   if (!vendor_name || !userId) return null;
-  const cost = body.unit_cost;
   const lead = body.lead_time_days;
   return {
     vendor_name,
     vendor_part_number: String(body.vendor_part_number || '').trim() || null,
-    unit_cost: cost == null || cost === '' || Number.isNaN(Number(cost)) ? null : Number(cost),
     lead_time_days: lead == null || lead === '' || Number.isNaN(Number(lead)) ? null : Math.floor(Number(lead)),
     url: String(body.url || '').trim() || null,
     notes: String(body.notes || '').trim() || null,
     is_preferred: Boolean(body.is_preferred),
-    currency: 'USD',
     is_active: true,
     created_by: userId,
   };

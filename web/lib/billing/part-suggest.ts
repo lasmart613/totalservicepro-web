@@ -22,15 +22,12 @@ export function fromCatalogRow(row: {
   const pn = String(row.part_number || '').trim();
   const desc = String(row.name || row.description || '').trim();
   if (!pn && !desc) return null;
-  const cost = Number(row.unit_cost);
-  const sale = Number(row.sale_price);
-  const price = Number.isFinite(cost) && cost > 0 ? cost : Number.isFinite(sale) && sale > 0 ? sale : null;
   const brand = String(row.brand || '').trim();
   return {
     key: `cat-${row.id ?? (pn || desc)}`,
     part_number: pn || desc.slice(0, 48),
     description: [brand, desc].filter(Boolean).join(' · ') || pn,
-    unit_price: price,
+    unit_price: null,
     source: 'catalog',
   };
 }

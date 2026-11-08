@@ -23,6 +23,23 @@ export const PARTS_CATALOG_COLUMNS = [
   'quantity_on_hand',
 ] as const;
 
+/** Client reads. sale_price stays in the table but is not selected on shared screens. */
+export const PARTS_CATALOG_PUBLIC_COLUMNS = PARTS_CATALOG_COLUMNS.filter((column) => column !== 'sale_price');
+
+export const PART_VENDORS_PUBLIC_COLUMNS = [
+  'id',
+  'part_id',
+  'vendor_name',
+  'vendor_part_number',
+  'lead_time_days',
+  'url',
+  'notes',
+  'is_preferred',
+  'is_active',
+  'created_at',
+  'updated_at',
+] as const;
+
 /** Live parts_catalog_category_check. Stored option values must match these strings. */
 export const PARTS_CATALOG_CATEGORIES = [
   'Handpiece Components',
@@ -109,7 +126,6 @@ export function partsCatalogWritePayload(input: PartsCatalogWriteInput): Record<
   if (input.created_by !== undefined) row.created_by = input.created_by;
   if (imageUrl !== undefined) row.image_url = imageUrl;
   if (input.is_consumable !== undefined) row.is_consumable = input.is_consumable;
-  if (input.sale_price !== undefined) row.sale_price = input.sale_price;
   if (input.in_stock !== undefined) row.in_stock = input.in_stock;
   if (input.quantity_on_hand !== undefined) row.quantity_on_hand = input.quantity_on_hand;
   if (input.updated_at !== undefined) row.updated_at = input.updated_at;

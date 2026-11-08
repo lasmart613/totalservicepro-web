@@ -5,6 +5,9 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMiniGentleYag, isStockedBomPart, rankPartsForDevice, sectionForDescription, type PartPick } from './bom.ts';
 import { searchCrossReference } from './cross-ref.ts';
+import { planMpnDedup } from './dedup-plan.ts';
+import { manualNineBlocksLibrary, acceptEvidenceLines, manualNineQueue } from './manual-nine.ts';
+import { reattachSystemLines } from './reattach.ts';
 import { normalizeMpn } from './mpn.ts';
 import {
   catalogInsertFromOrg,
@@ -160,14 +163,69 @@ test('the sweep runs Mini GentleYAG first, then other Candela, in batches of 50-
     { manual_id: 8, brand: 'Candela', model: 'vpyag', title: 'already done', status: 'extracted', priority: 0 },
   ];
   const batch = planSweepBatch(manuals, 75);
-  assert.deepEqual(batch.map((row) => row.manual_id), [9, 24, 500]);
+  assert.deepEqual(batch.map((row) => row.manual_id), [9]);
   const again = applySweepOutcome(batch[0], { lines: loadMiniGentleYagSeed() });
   assert.equal(again.status, 'extracted');
   const rest = manuals.filter((row) => row.manual_id !== 9);
-  assert.equal(planSweepBatch([again, ...rest], 75).some((row) => row.manual_id === 9), false);
-  const failed = applySweepOutcome(batch[1], { lines: [], error: 'unreadable page' });
+  const after = planSweepBatch([again, ...rest], 75);
+  assert.equal(after.some((row) => row.manual_id === 9), false);
+  assert.deepEqual(after.map((row) => row.manual_id), [24, 500]);
+  const failed = applySweepOutcome(manuals[1], { lines: [], error: 'unreadable page' });
   assert.equal(failed.status, 'error');
-  assert.equal(planSweepBatch([failed], 50)[0]?.manual_id, 24);
+  assert.equal(planSweepBatch([again, failed, manuals[0]], 50)[0]?.manual_id, 24);
+});
+
+test('System lines stay unassigned unless a manual quote names the parent', () => {
+  const lines = [
+    { mpn: '2846-30-0806', description: 'SCR,SEMS', section: 'System', provenance: 'family-tree-ocr', parent_mpn: null, assembly_confidence: 'unassigned' as const },
+  ];
+  const untouched = reattachSystemLines(lines, []);
+  assert.equal(untouched[0]?.section, 'System');
+  assert.equal(untouched[0]?.assembly_confidence, 'unassigned');
+  const moved = reattachSystemLines(lines, [{
+    child_mpn: '2846-30-0806',
+    parent_mpn: '7122-00-3446',
+    source_path: 'shared/candela/VPYag/Sect 4/7122-99-3446_04.pdf',
+    quote: 'Item 4 screw 2846-30-0806 on laser rail assembly 7122-00-3446',
+  }]);
+  assert.equal(moved[0]?.assembly_confidence, 'evidenced');
+  assert.equal(moved[0]?.parent_mpn, '7122-00-3446');
+  assert.match(moved[0]?.provenance || '', /7122-99-3446_04/);
+});
+
+test('duplicate MPNs merge only inside one manufacturer and flag conflicting text', () => {
+  const plans = planMpnDedup([
+    { id: 2, brand: 'Candela', mpn_normalized: '7122003497', description: 'Laser head' },
+    { id: 5, brand: 'Candela', mpn_normalized: '7122003497', description: 'Laser head' },
+    { id: 9, brand: 'Lumenis', mpn_normalized: '7122003497', description: 'Different maker' },
+    { id: 3, brand: 'Candela', mpn_normalized: 'AAA', description: 'Short' },
+    { id: 4, brand: 'Candela', mpn_normalized: 'AAA', description: 'A longer conflicting description' },
+  ]);
+  const same = plans.find((plan) => plan.brand === 'candela' && plan.mpn_normalized === '7122003497');
+  assert.equal(same?.action, 'merge_ready');
+  assert.equal(same?.keeper_id, 2);
+  assert.deepEqual(same?.loser_ids, [5]);
+  assert.ok(same?.remap.some((row) => row.table === 'device_bom' && row.from_id === 5 && row.to_id === 2));
+  const other = plans.find((plan) => plan.brand === 'lumenis');
+  assert.equal(other?.action, 'keep');
+  const conflict = plans.find((plan) => plan.mpn_normalized === 'AAA');
+  assert.equal(conflict?.action, 'review');
+  assert.equal(conflict?.remap.length, 0);
+});
+
+test('manual 9 parts lists and head/rail drawings block the rest of the library', () => {
+  const queue = manualNineQueue();
+  assert.ok(queue.some((file) => file.storage_path.endsWith('7122-99-3497_01.pdf')));
+  assert.ok(queue.some((file) => file.storage_path.endsWith('7122-99-3446_04.pdf')));
+  assert.equal(manualNineBlocksLibrary(queue), true);
+  const done = queue.map((file) => ({ ...file, status: 'no_line_items' as const }));
+  assert.equal(manualNineBlocksLibrary(done), false);
+  const imported = acceptEvidenceLines([
+    { mpn: '7122-00-3497', description: 'Laser head', source_path: queue[0].storage_path },
+    { mpn: 'MADE-UP', description: 'not in a file', source_path: 'notes/guess.pdf' },
+  ]);
+  assert.equal(imported.accepted.length, 1);
+  assert.equal(imported.rejected.length, 1);
 });
 
 test('migration keeps prices on the org table and queues the sweep without applying it', () => {
@@ -191,5 +249,12 @@ test('migration keeps prices on the org table and queues the sweep without apply
   assert.match(sql, /vendor_pn_normalized/);
   assert.doesNotMatch(sql.slice(sql.indexOf('part_catalog_availability'), sql.indexOf('organization_parts')), /unit_cost|sell_price/);
   assert.match(rollback, /DROP TABLE IF EXISTS public\.organization_parts/);
-  assert.match(rollback, /000951-vpyag/);
+  assert.match(sql, /REVOKE SELECT, UPDATE ON public.parts_catalog/);
+  assert.match(sql, /a.attname <> 'sale_price'/);
+  assert.match(sql, /unit_cost', 'currency'/);
+  const fixture = readFileSync(join(here, '../../supabase/fixtures/20261105_qa2655_sample_qty.sql'), 'utf8');
+  assert.match(fixture, /organization_id = 2655/);
+  assert.doesNotMatch(fixture, /organization_id = (1005|5509|2616|4|5515)/);
+  const dedupSql = readFileSync(join(here, '../../supabase/oneoff/20261105_000951_mpn_dedup_dry_run.sql'), 'utf8');
+  assert.doesNotMatch(dedupSql, /\b(UPDATE|DELETE|INSERT)\b/i);
 });

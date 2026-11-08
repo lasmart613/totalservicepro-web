@@ -782,6 +782,32 @@ SELECT lm.id, p.id, man.id, v.section, v.mpn, v.qty, '8501-01-1769 Rev B', 'manu
       AND coalesce(d.line_ref, '') = v.mpn
  );
 
+-- Shared sell price and vendor cost stay in the columns (data is not deleted)
+-- but anon/authenticated can no longer read or write them. Org prices live on
+-- organization_parts. Service role can still read the legacy values.
+REVOKE SELECT, UPDATE ON public.parts_catalog FROM anon, authenticated;
+REVOKE SELECT, UPDATE ON public.part_vendors FROM anon, authenticated;
+DO $$
+DECLARE
+  v_cols text;
+BEGIN
+  SELECT string_agg(pg_catalog.quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid = 'public.parts_catalog'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+     AND a.attname <> 'sale_price';
+  EXECUTE pg_catalog.format('GRANT SELECT (%s) ON public.parts_catalog TO anon, authenticated', v_cols);
+  EXECUTE pg_catalog.format('GRANT UPDATE (%s) ON public.parts_catalog TO authenticated', v_cols);
+
+  SELECT string_agg(pg_catalog.quote_ident(a.attname), ', ' ORDER BY a.attnum) INTO v_cols
+    FROM pg_catalog.pg_attribute a
+   WHERE a.attrelid = 'public.part_vendors'::regclass AND a.attnum > 0 AND NOT a.attisdropped
+     AND a.attname <> ALL (ARRAY['unit_cost', 'currency']);
+  EXECUTE pg_catalog.format('GRANT SELECT (%s) ON public.part_vendors TO anon, authenticated', v_cols);
+  EXECUTE pg_catalog.format('GRANT UPDATE (%s) ON public.part_vendors TO authenticated', v_cols);
+END $$;
+REVOKE INSERT (sale_price) ON public.parts_catalog FROM anon, authenticated;
+REVOKE INSERT (unit_cost, currency) ON public.part_vendors FROM anon, authenticated;
+
 COMMIT;
 
 

@@ -7,7 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { AddPartModal } from '@/components/AddPartModal';
 import { StorageImage } from '@/components/StorageImage';
-import { partsCatalogManufacturerLabel } from '@/lib/parts-catalog-columns';
+import { PARTS_CATALOG_PUBLIC_COLUMNS, PART_VENDORS_PUBLIC_COLUMNS, partsCatalogManufacturerLabel } from '@/lib/parts-catalog-columns';
 import { chunkIds } from '@/lib/supabase/paginate';
 
 type CatalogPart = {
@@ -21,8 +21,6 @@ type CatalogPart = {
   description?: string | null;
   image_url?: string | null;
   compatible_models?: string[] | null;
-  unit_cost?: number | string | null;
-  sale_price?: number | string | null;
   category?: string | null;
 };
 
@@ -31,7 +29,6 @@ type PartVendor = {
   part_id: number | string;
   vendor_name: string;
   vendor_part_number?: string | null;
-  unit_cost?: number | string | null;
   lead_time_days?: number | null;
   url?: string | null;
   is_preferred?: boolean | null;
@@ -39,13 +36,6 @@ type PartVendor = {
 
 function partImage(part: CatalogPart): string | null {
   return part.image_url || (part as any).photo_url || (part as any).thumbnail_url || null;
-}
-
-function money(n: number | string | null | undefined): string | null {
-  if (n == null || n === '') return null;
-  const v = Number(n);
-  if (!Number.isFinite(v)) return null;
-  return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export default function PartsCatalog() {
@@ -64,7 +54,7 @@ export default function PartsCatalog() {
     try {
       const { data, error } = await supabase
         .from('parts_catalog')
-        .select('*')
+        .select(PARTS_CATALOG_PUBLIC_COLUMNS.join(', '))
         .or('is_active.eq.true,is_active.is.null')
         .order('name', { ascending: true });
       if (error) throw error;
@@ -77,7 +67,7 @@ export default function PartsCatalog() {
       if (ids.length) {
         const map: Record<string, PartVendor[]> = {};
         for (const chunk of chunkIds(ids)) {
-          const { data: vrows } = await supabase.from('part_vendors').select('*').in('part_id', chunk);
+          const { data: vrows } = await supabase.from('part_vendors').select(PART_VENDORS_PUBLIC_COLUMNS.join(', ')).in('part_id', chunk);
           for (const v of vrows || []) {
             const key = String(v.part_id);
             if (!map[key]) map[key] = [];
@@ -116,10 +106,6 @@ export default function PartsCatalog() {
   }, [searchTerm, selectedBrand, parts]);
 
   const brands = [...new Set(parts.map((p) => p.brand).filter(Boolean))].sort() as string[];
-
-  function salePriceOf(part: CatalogPart): string | null {
-    return money(part.sale_price ?? part.unit_cost);
-  }
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -189,7 +175,6 @@ export default function PartsCatalog() {
             {filteredParts.map((part) => {
               const vendors = vendorsByPart[String(part.id)] || [];
               const img = partImage(part);
-              const sale = salePriceOf(part);
               return (
                 <Link
                   href={`/parts/${part.id}`}
@@ -222,14 +207,14 @@ export default function PartsCatalog() {
                     )}
                     <div className="flex justify-between items-center text-sm gap-2">
                       <span className="text-xs text-[var(--gold)]">View details</span>
-                      {sale ? <span className="font-medium text-[var(--gold)]">{sale}</span> : null}
+                      <span className="text-xs text-[var(--text3)]">Prices stay in your inventory</span>
                     </div>
                     {showVendors && vendors.length > 0 && (
                       <div className="mt-2 text-xs text-[var(--text3)] space-y-1">
                         {vendors.slice(0, 3).map((v) => (
-                          <div key={String(v.id)} className="flex justify-between gap-2">
-                            <span className="truncate">{v.is_preferred ? '⭐ ' : ''}{v.vendor_name}</span>
-                            <span className="shrink-0">{money(v.unit_cost) || '—'}</span>
+                          <div key={String(v.id)} className="truncate">
+                            {v.is_preferred ? '⭐ ' : ''}{v.vendor_name}
+                            {v.vendor_part_number ? ` · ${v.vendor_part_number}` : ''}
                           </div>
                         ))}
                       </div>

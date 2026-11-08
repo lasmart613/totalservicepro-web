@@ -68,14 +68,15 @@ export function clampBatchSize(size: number | null | undefined): number {
   return Math.min(SWEEP_BATCH_MAX, Math.max(SWEEP_BATCH_MIN, Math.trunc(n)));
 }
 
-/** Pending and errored manuals, Mini GentleYAG first, then other Candela. */
+/** Pending and errored manuals. Manual 9 (Mini GentleYAG) blocks every other manual until it is extracted or marked no BOM. */
 export function planSweepBatch(manuals: SweepProgress[], batchSize = SWEEP_BATCH_DEFAULT): SweepProgress[] {
   const size = clampBatchSize(batchSize);
-  return manuals
+  const eligible = manuals
     .filter((row) => row.status === 'pending' || row.status === 'error')
     .map((row) => ({ ...row, priority: row.priority ?? sweepPriority(row) }))
-    .sort((a, b) => a.priority - b.priority || a.manual_id - b.manual_id)
-    .slice(0, size);
+    .sort((a, b) => a.priority - b.priority || a.manual_id - b.manual_id);
+  const gate = eligible.filter((row) => row.priority === 0 || row.manual_id === MINI_GENTLEYAG_MANUAL.libraryId);
+  return (gate.length ? gate : eligible).slice(0, size);
 }
 
 export function scoreBomText(text: string): { score: number; hasBom: boolean } {

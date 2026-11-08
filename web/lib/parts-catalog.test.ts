@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-test('parts catalog can add a part with photo, price, and multiple vendors', () => {
+test('parts catalog can add a part with photo and multiple vendors', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const page = readFileSync(join(here, '../app/parts/page.tsx'), 'utf8');
   const modal = readFileSync(join(here, '../components/AddPartModal.tsx'), 'utf8');
@@ -12,11 +12,12 @@ test('parts catalog can add a part with photo, price, and multiple vendors', () 
   assert.match(page, /AddPartModal/);
   assert.match(page, /part_vendors/);
   assert.match(modal, /type="file"/);
-  assert.match(modal, /Sale price/);
+  assert.match(modal, /Parts inventory/);
   assert.match(modal, /\+ Add vendor/);
   assert.match(modal, /from\('parts_catalog'\)/);
   assert.match(modal, /\/api\/parts\/vendors/);
   assert.match(modal, /\/api\/parts\/photos/);
+  assert.doesNotMatch(modal, /sale_price:/);
 });
 
 test('catalog cards open a part detail page that can edit the record', () => {
@@ -49,14 +50,13 @@ test('sale price is shown; vendor names and costs stay hidden until revealed', (
   assert.match(page, /Show vendors/);
   assert.match(page, /showVendors/);
   assert.match(page, /useState\(false\)/);
-  assert.match(page, /sale \? <span className="font-medium text-\[var\(--gold\)\]">\{sale\}<\/span>/);
+  assert.match(page, /Prices stay in your inventory/);
   assert.match(detail, /Show vendors/);
   assert.match(detail, /showVendors/);
-  assert.match(detail, /Names and costs are hidden/);
-  assert.match(detail, /Sale price/);
-  assert.match(modal, /sale_price:/);
-  assert.match(modal, /Vendor cost/);
-  assert.doesNotMatch(page, /Sale hidden/);
-  assert.doesNotMatch(detail, /Sale price hidden/);
-  assert.doesNotMatch(modal, /unit_cost:\s*salePrice/);
+  assert.match(detail, /Names are hidden/);
+  assert.match(detail, /Parts inventory/);
+  assert.doesNotMatch(modal, /sale_price:/);
+  assert.doesNotMatch(modal, /Vendor cost/);
+  assert.doesNotMatch(page, /sale_price/);
+  assert.doesNotMatch(detail, /unit_cost/);
 });

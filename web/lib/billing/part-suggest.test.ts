@@ -22,7 +22,7 @@ test('catalog and marketplace rows become suggest hits', () => {
     unit_cost: 400,
   });
   assert.equal(cat?.part_number, 'HP-1');
-  assert.equal(cat?.unit_price, 400);
+  assert.equal(cat?.unit_price, null);
   assert.equal(cat?.source, 'catalog');
   const mkt = fromMarketplaceRow({
     id: 'abc',
@@ -43,7 +43,7 @@ test('same part number prefers catalog over marketplace', () => {
   ]);
   assert.equal(merged.length, 1);
   assert.equal(merged[0].source, 'catalog');
-  assert.equal(merged[0].unit_price, 40);
+  assert.equal(merged[0].unit_price, null);
 });
 
 test('device BOM hits stay ahead of the catalog', () => {

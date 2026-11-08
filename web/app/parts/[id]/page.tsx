@@ -20,7 +20,7 @@ import {
   changedRowCount,
   postPartsJson,
 } from '@/lib/part-catalog-manage';
-import { partCatalogSaveMessage, partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
+import { PARTS_CATALOG_PUBLIC_COLUMNS, PART_VENDORS_PUBLIC_COLUMNS, partCatalogSaveMessage, partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
 import { StorageImage } from '@/components/StorageImage';
 
 type PartRow = Record<string, any>;
@@ -29,19 +29,11 @@ type VendorRow = {
   part_id?: number | string;
   vendor_name?: string | null;
   vendor_part_number?: string | null;
-  unit_cost?: number | string | null;
   lead_time_days?: number | null;
   url?: string | null;
   notes?: string | null;
   is_preferred?: boolean | null;
 };
-
-function money(n: number | string | null | undefined): string {
-  if (n == null || n === '') return '—';
-  const v = Number(n);
-  if (!Number.isFinite(v)) return '—';
-  return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
 
 function stockQty(n: unknown): number {
   const v = Number(n);
@@ -84,7 +76,7 @@ export default function PartDetailPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('parts_catalog').select('*').eq('id', partId).maybeSingle();
+      const { data, error } = await supabase.from('parts_catalog').select(PARTS_CATALOG_PUBLIC_COLUMNS.join(', ')).eq('id', partId).maybeSingle();
       if (error) throw error;
       setPart(data);
       setForm(data || {});
@@ -92,7 +84,7 @@ export default function PartDetailPage() {
       if (data?.id != null) {
         const { data: vrows } = await supabase
           .from('part_vendors')
-          .select('*')
+          .select(PART_VENDORS_PUBLIC_COLUMNS.join(', '))
           .eq('part_id', data.id)
           .order('is_preferred', { ascending: false });
         setVendors((vrows || []) as VendorRow[]);
@@ -195,7 +187,6 @@ export default function PartDetailPage() {
         compatible_models: modelsRaw.length ? modelsRaw : null,
         is_consumable: !!form.is_consumable,
         is_active: form.is_active !== false,
-        sale_price: form.sale_price === '' || form.sale_price == null ? null : Number(form.sale_price),
         quantity_on_hand: stockQty(form.quantity_on_hand),
         in_stock: !!form.in_stock || stockQty(form.quantity_on_hand) > 0,
         image_url: images[0] || null,
@@ -414,10 +405,8 @@ export default function PartDetailPage() {
             {!editing ? (
               <>
                 <div>
-                  <div className="text-xs text-[var(--text3)]">Sale price</div>
-                  <div className="text-2xl font-extrabold text-[var(--gold)]">
-                    {money(part.sale_price ?? part.unit_cost)}
-                  </div>
+                  <div className="text-xs text-[var(--text3)]">Sell price</div>
+                  <div className="text-sm">Kept in Parts inventory for your organization. Not shown on the shared catalog.</div>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{part.description || 'No description yet.'}</p>
                 {canArchive && (
@@ -519,15 +508,8 @@ export default function PartDetailPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="label">Sale price</label>
-                    <input
-                      className="input"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={form.sale_price ?? form.unit_cost ?? ''}
-                      onChange={(e) => setField('sale_price', e.target.value)}
-                    />
+                    <label className="label">Sell price</label>
+                    <p className="text-sm text-[var(--text3)]">Set cost and sell price in Parts inventory. This shared record does not store a price.</p>
                   </div>
                 </div>
                 <div>
@@ -609,7 +591,7 @@ export default function PartDetailPage() {
             <p className="text-sm text-[var(--text3)]">No vendors yet. Add every source you buy this from.</p>
           ) : !showVendors ? (
             <p className="text-sm text-[var(--text3)]">
-              {vendors.length} vendor{vendors.length === 1 ? '' : 's'} on file. Names and costs are hidden.
+              {vendors.length} vendor{vendors.length === 1 ? '' : 's'} on file. Names are hidden. Costs are not on this shared catalog.
             </p>
           ) : (
             <div className="overflow-x-auto">
@@ -618,7 +600,6 @@ export default function PartDetailPage() {
                   <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
                     <th className="py-2 pr-3">Vendor</th>
                     <th className="py-2 pr-3">P/N</th>
-                    <th className="py-2 pr-3">Vendor cost</th>
                     <th className="py-2 pr-3">Lead</th>
                     <th className="py-2 pr-3" />
                   </tr>
@@ -637,7 +618,6 @@ export default function PartDetailPage() {
                         )}
                       </td>
                       <td className="py-2 pr-3 font-mono text-xs">{v.vendor_part_number || '—'}</td>
-                      <td className="py-2 pr-3 text-[var(--gold)] font-semibold">{money(v.unit_cost)}</td>
                       <td className="py-2 pr-3">{v.lead_time_days != null ? `${v.lead_time_days}d` : '—'}</td>
                       <td className="py-2 text-right whitespace-nowrap">
                         {canArchive && !v.is_preferred && (

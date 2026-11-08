@@ -23,6 +23,11 @@ DROP INDEX IF EXISTS public.parts_catalog_brand_mpn_idx;
 
 DROP FUNCTION IF EXISTS public.normalize_mpn(text);
 
+GRANT SELECT, UPDATE ON public.parts_catalog TO anon, authenticated;
+GRANT SELECT, UPDATE ON public.part_vendors TO anon, authenticated;
+GRANT INSERT (sale_price) ON public.parts_catalog TO authenticated;
+GRANT INSERT (unit_cost, currency) ON public.part_vendors TO authenticated;
+
 COMMIT;
 
 NOTIFY pgrst, 'reload schema';

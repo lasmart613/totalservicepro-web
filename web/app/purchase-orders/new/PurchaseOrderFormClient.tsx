@@ -11,7 +11,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso } from '@/lib/org-timezone';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
-import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
+import { fetchAllPages } from '@/lib/supabase/paginate';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -136,33 +136,19 @@ export default function PurchaseOrderFormClient() {
     try {
       let cat = await supabase
         .from('parts_catalog')
-        .select('id, part_number, name, description, brand, sale_price')
+        .select('id, part_number, name, description, brand')
         .eq('is_active', true)
         .order('part_number')
         .limit(800);
       if (cat.error) {
         cat = await supabase
           .from('parts_catalog')
-          .select('id, part_number, name, description, brand, sale_price')
+          .select('id, part_number, name, description, brand')
           .limit(800);
       }
       const rows = cat.data || [];
-      const costByPart: Record<string, number> = {};
-      const ids = rows.map((r: { id?: string | number }) => r.id).filter(Boolean);
-      for (const chunk of chunkIds(ids)) {
-        const { data: vrows } = await supabase
-          .from('part_vendors')
-          .select('part_id, unit_cost, is_preferred')
-          .in('part_id', chunk);
-        for (const v of vrows || []) {
-          const key = String(v.part_id);
-          const cost = Number(v.unit_cost);
-          if (!Number.isFinite(cost) || cost <= 0) continue;
-          if (v.is_preferred || costByPart[key] == null) costByPart[key] = cost;
-        }
-      }
       for (const r of rows) {
-        const hit = fromCatalogRow({ ...r, unit_cost: costByPart[String(r.id)] ?? null });
+        const hit = fromCatalogRow(r);
         if (hit) hits.push(hit);
       }
     } catch (e) {
