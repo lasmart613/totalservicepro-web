@@ -27,19 +27,22 @@ BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
--- Preflight. Abort the whole transaction when shared price privacy cannot be
--- established from the privileges, views, and publication that already exist.
+-- Preflight. Abort the whole transaction when a listed price path is visible.
+-- This is not a privacy proof and it does not clear production. A human audit
+-- of the real database is mandatory and has not been performed. Source and
+-- dependency scans do not prove that dynamic SQL, obfuscated names, or
+-- functions in other languages are safe. Passing this block only means the
+-- listed checks found nothing.
 -- Revokes below name only PUBLIC, anon, and authenticated. A grant to any other
--- ordinary role, including one that authenticated inherits, is left in place
--- and this migration stops. Review
--- web/supabase/oneoff/20261105_000951_price_lock_preflight.sql
--- and change that grant in a separate reviewed step. Do not broaden this
--- revoke list to "every role".
+-- ordinary role, including a BYPASSRLS role and a role that authenticated
+-- inherits, is left in place and this migration stops. service_role is the
+-- only named exception, because a later backfill may read the stored prices.
+-- This file does not revoke other roles and does not drop functions or views.
+-- PREFLIGHT_CHECK_BEGIN
 DO $$
 DECLARE
   v_hits text;
   v_owner text;
-  v_view record;
 BEGIN
   IF to_regclass('public.parts_catalog') IS NULL OR to_regclass('public.part_vendors') IS NULL THEN
     RAISE EXCEPTION '000951 preflight abort: parts_catalog or part_vendors is missing';
@@ -48,7 +51,7 @@ BEGIN
   SELECT string_agg(DISTINCT format('%s %s %s.%s', role_name, privilege_type, relname, attname), '; ' ORDER BY format('%s %s %s.%s', role_name, privilege_type, relname, attname))
     INTO v_hits
   FROM (
-    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname AS role_name, c.relowner, gr.oid AS role_oid, gr.rolsuper, gr.rolbypassrls
+    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname AS role_name, c.relowner, gr.oid AS role_oid, gr.rolsuper
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
@@ -61,7 +64,7 @@ BEGIN
          OR (c.relname = 'part_vendors' AND a.attname IN ('unit_cost', 'currency'))
        )
     UNION ALL
-    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname, c.relowner, gr.oid, gr.rolsuper, gr.rolbypassrls
+    SELECT c.relname, a.attname, acl.privilege_type, gr.rolname, c.relowner, gr.oid, gr.rolsuper
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = 'public'
       JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped AND a.attacl IS NOT NULL
@@ -75,7 +78,6 @@ BEGIN
   ) g
   WHERE g.role_name NOT IN ('anon', 'authenticated', 'service_role')
     AND NOT g.rolsuper
-    AND NOT g.rolbypassrls
     AND g.role_oid <> g.relowner;
 
   IF v_hits IS NOT NULL THEN
@@ -89,27 +91,108 @@ BEGIN
     JOIN pg_roles own ON own.oid = c.relowner
    WHERE c.relname IN ('parts_catalog', 'part_vendors')
      AND NOT own.rolsuper
-     AND NOT own.rolbypassrls
      AND own.rolname NOT IN ('postgres', 'supabase_admin', 'service_role');
   IF v_owner IS NOT NULL THEN
     RAISE EXCEPTION '000951 preflight abort: table owner can read price columns and this migration will not change ownership (%).', v_owner;
   END IF;
 
-  FOR v_view IN
-    SELECT n.nspname, c.relname, c.reloptions, pg_get_viewdef(c.oid, true) AS def
-      FROM pg_class c
-      JOIN pg_namespace n ON n.oid = c.relnamespace
-     WHERE c.relkind = 'v'
-       AND n.nspname NOT IN ('pg_catalog', 'information_schema')
-  LOOP
-    IF (
-      (v_view.def ILIKE '%parts_catalog%' AND v_view.def ILIKE '%sale_price%')
-      OR (v_view.def ILIKE '%part_vendors%' AND (v_view.def ILIKE '%unit_cost%' OR v_view.def ILIKE '%currency%'))
-    ) AND coalesce(array_to_string(v_view.reloptions, ','), '') NOT ILIKE '%security_invoker=true%'
-      AND coalesce(array_to_string(v_view.reloptions, ','), '') NOT ILIKE '%security_invoker=on%' THEN
-      RAISE EXCEPTION '000951 preflight abort: owner view %.% reads a shared price column. This migration does not drop views.', v_view.nspname, v_view.relname;
-    END IF;
-  END LOOP;
+  SELECT string_agg(DISTINCT format('%s inherits %s', who_name, inherits_name), '; ' ORDER BY format('%s inherits %s', who_name, inherits_name))
+    INTO v_hits
+  FROM (
+    WITH RECURSIVE chain AS (
+      SELECT am.member AS who, am.roleid AS inherits, 1 AS depth
+        FROM pg_auth_members am
+      UNION ALL
+      SELECT c.who, am.roleid, c.depth + 1
+        FROM chain c
+        JOIN pg_auth_members am ON am.member = c.inherits
+       WHERE c.depth < 8
+    )
+    SELECT who.rolname AS who_name, inherits.rolname AS inherits_name
+      FROM chain c
+      JOIN pg_roles who ON who.oid = c.who
+      JOIN pg_roles inherits ON inherits.oid = c.inherits
+     WHERE who.rolname IN ('anon', 'authenticated')
+       AND inherits.rolname NOT IN ('anon', 'authenticated')
+       AND (
+         has_column_privilege(inherits.oid, 'public.parts_catalog'::regclass, 'sale_price'::text, 'SELECT')
+         OR has_column_privilege(inherits.oid, 'public.parts_catalog'::regclass, 'sale_price'::text, 'INSERT')
+         OR has_column_privilege(inherits.oid, 'public.part_vendors'::regclass, 'unit_cost'::text, 'SELECT')
+         OR has_column_privilege(inherits.oid, 'public.part_vendors'::regclass, 'unit_cost'::text, 'INSERT')
+       )
+  ) inherited;
+  IF v_hits IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: anon or authenticated inherits a price grant through %. This migration does not revoke that role. A human audit is required. Passing this preflight does not clear production.', v_hits;
+  END IF;
+
+  -- Views, materialized views, and security-definer functions. A view that
+  -- only calls a function is included through pg_depend. This text scan does
+  -- not prove dynamic SQL is safe.
+  SELECT string_agg(DISTINCT item, '; ' ORDER BY item)
+    INTO v_hits
+  FROM (
+    WITH RECURSIVE direct AS (
+      SELECT c.oid, n.nspname, c.relname, c.relkind, pg_get_viewdef(c.oid, true) AS def,
+             coalesce(array_to_string(c.reloptions, ','), '') AS opts
+        FROM pg_class c
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE c.relkind IN ('v', 'm')
+         AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    ), price_fn AS (
+      SELECT p.oid, n.nspname, p.proname
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE p.prosecdef
+         AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+         AND (
+           (pg_get_functiondef(p.oid) ILIKE '%parts_catalog%'
+             AND (pg_get_functiondef(p.oid) ILIKE '%sale_price%' OR pg_get_functiondef(p.oid) ~* 'select[[:space:]]+\*'))
+           OR (pg_get_functiondef(p.oid) ILIKE '%part_vendors%'
+             AND (pg_get_functiondef(p.oid) ILIKE '%unit_cost%'
+               OR pg_get_functiondef(p.oid) ILIKE '%currency%'
+               OR pg_get_functiondef(p.oid) ~* 'select[[:space:]]+\*'))
+         )
+    ), seed AS (
+      SELECT format('materialized view %I.%I', nspname, relname) AS item, oid AS rel_oid, NULL::oid AS fn_oid
+        FROM direct
+       WHERE relkind = 'm'
+         AND (
+           (def ILIKE '%parts_catalog%' AND def ILIKE '%sale_price%')
+           OR (def ILIKE '%part_vendors%' AND (def ILIKE '%unit_cost%' OR def ILIKE '%currency%'))
+         )
+      UNION ALL
+      SELECT format('owner view %I.%I', nspname, relname), oid, NULL::oid
+        FROM direct
+       WHERE relkind = 'v'
+         AND opts NOT ILIKE '%security_invoker=true%'
+         AND opts NOT ILIKE '%security_invoker=on%'
+         AND (
+           (def ILIKE '%parts_catalog%' AND def ILIKE '%sale_price%')
+           OR (def ILIKE '%part_vendors%' AND (def ILIKE '%unit_cost%' OR def ILIKE '%currency%'))
+         )
+      UNION ALL
+      SELECT format('security definer function %I.%I', nspname, proname), NULL::oid, oid
+        FROM price_fn
+    ), walk AS (
+      SELECT item, rel_oid, fn_oid FROM seed
+      UNION
+      SELECT format('dependent view %I.%I', n.nspname, c.relname), c.oid, NULL::oid
+        FROM walk w
+        JOIN pg_rewrite rw ON true
+        JOIN pg_depend d ON d.objid = rw.oid
+        JOIN pg_class c ON c.oid = rw.ev_class AND c.relkind IN ('v', 'm')
+        JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+         AND (
+           (w.rel_oid IS NOT NULL AND d.refclassid = 'pg_class'::regclass AND d.refobjid = w.rel_oid AND c.oid <> w.rel_oid)
+           OR (w.fn_oid IS NOT NULL AND d.refclassid = 'pg_proc'::regclass AND d.refobjid = w.fn_oid)
+         )
+    )
+    SELECT item FROM walk
+  ) exposed;
+  IF v_hits IS NOT NULL THEN
+    RAISE EXCEPTION '000951 preflight abort: shared price read path %. This migration does not drop functions or views. A source scan cannot prove dynamic SQL is safe. A human audit of the real database is required and has not been done. Passing this preflight does not clear production.', v_hits;
+  END IF;
 
   IF EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime' AND puballtables) THEN
     RAISE EXCEPTION '000951 preflight abort: supabase_realtime is FOR ALL TABLES. A price column would stay in the replication stream. This migration will not rewrite that publication.';
@@ -130,7 +213,9 @@ BEGIN
   ) THEN
     RAISE EXCEPTION '000951 preflight abort: supabase_realtime still publishes a shared price column. Narrow that publication in a reviewed change. This migration will not drop unrelated tables from it.';
   END IF;
+  RAISE NOTICE '000951 preflight: listed checks found nothing. This does not clear production. Dynamic SQL is not proved safe. A human audit of the real database is still required.';
 END $$;
+-- PREFLIGHT_CHECK_END
 
 CREATE OR REPLACE FUNCTION public.normalize_mpn(raw text)
 RETURNS text
@@ -387,6 +472,7 @@ GRANT SELECT ON public.device_bom TO anon, authenticated;
 GRANT ALL ON public.device_bom TO service_role;
 GRANT USAGE, SELECT ON SEQUENCE public.device_bom_id_seq TO service_role;
 
+-- HOLD_OBJECTS_BEGIN
 CREATE TABLE IF NOT EXISTS public.manual_bom_sweep (
   manual_id bigint PRIMARY KEY REFERENCES public.manuals (id) ON DELETE CASCADE,
   status text NOT NULL DEFAULT 'pending',
@@ -514,9 +600,19 @@ BEGIN
   IF NEW.manual_id IS NOT DISTINCT FROM 9 THEN
     RETURN NEW;
   END IF;
-  IF NEW.status IS NULL OR NEW.status NOT IN ('pending', 'error') THEN
+  IF TG_OP = 'INSERT' AND NEW.status = 'held' THEN
     RETURN NEW;
   END IF;
+  IF TG_OP = 'UPDATE' AND OLD.status = 'held' AND NEW.status = 'held' THEN
+    RETURN NEW;
+  END IF;
+  IF TG_OP = 'UPDATE'
+     AND OLD.status IN ('extracted', 'no_bom')
+     AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NEW;
+  END IF;
+  -- pending, error, extracted, no_bom, and any other status for another manual
+  -- stay closed until manual 9 and all 37 source files are recorded complete.
   SELECT count(*) = 37 AND coalesce(bool_and(status IN ('extracted', 'no_line_items')), false)
     INTO v_ready
     FROM public.manual_nine_source;
@@ -550,6 +646,7 @@ REVOKE ALL ON FUNCTION public.manual_nine_source_guard() FROM PUBLIC;
 REVOKE ALL ON FUNCTION public.manual_bom_sweep_hold() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.manual_nine_source_guard() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.manual_bom_sweep_hold() TO authenticated, service_role;
+-- HOLD_OBJECTS_END
 
 INSERT INTO public.manufacturers (name)
 VALUES ('Candela')

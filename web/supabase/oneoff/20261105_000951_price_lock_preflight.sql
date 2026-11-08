@@ -21,11 +21,18 @@
 -- 4. Table owner and superuser still read every column. That is not a
 --    PostgREST client grant. If an ordinary role owns the table, 000951 aborts
 --    instead of changing ownership.
--- 5. service_role is expected to keep access for a later backfill. It is not
---    a client role.
+-- 5. service_role is a named exception for a later backfill. It is not a client
+--    role. Other BYPASSRLS roles are not exempt. A grant to one of them is a hold.
+-- 6. Security-definer functions, materialized views, owner views, and views
+--    that depend on those objects. A scan of function source and pg_depend
+--    cannot prove that dynamic SQL or obfuscated names are safe.
 --
--- A row in any of the result sets below, other than anon / authenticated /
--- service_role / superuser / bypassrls / table owner, is a release hold.
+-- Passing every query below with no unexpected row does not clear production.
+-- A human audit of the real database is mandatory and has not been performed
+-- by writing this file.
+--
+-- A row in the grant list, other than anon / authenticated / service_role /
+-- superuser / table owner, is a release hold. BYPASSRLS is not an exemption.
 
 SELECT c.relname AS table_name,
        a.attname AS column_name,
@@ -102,3 +109,58 @@ SELECT p.pubname, p.puballtables, n.nspname, c.relname, a.attname,
 SELECT p.pubname, p.puballtables
   FROM pg_publication p
  WHERE p.pubname = 'supabase_realtime';
+
+-- BYPASSRLS is listed, not skipped. service_role is the only named exception.
+SELECT r.rolname, r.rolbypassrls, r.rolsuper
+  FROM pg_roles r
+ WHERE r.rolbypassrls
+    OR r.rolsuper
+ ORDER BY r.rolname;
+
+WITH RECURSIVE chain AS (
+  SELECT am.member AS who, am.roleid AS inherits, 1 AS depth
+    FROM pg_auth_members am
+  UNION ALL
+  SELECT c.who, am.roleid, c.depth + 1
+    FROM chain c
+    JOIN pg_auth_members am ON am.member = c.inherits
+   WHERE c.depth < 8
+)
+SELECT who.rolname AS member_name, inherits.rolname AS inherited_role, inherits.rolbypassrls
+  FROM chain c
+  JOIN pg_roles who ON who.oid = c.who
+  JOIN pg_roles inherits ON inherits.oid = c.inherits
+ WHERE who.rolname IN ('anon', 'authenticated')
+ ORDER BY 1, 2;
+
+SELECT n.nspname, p.proname, pg_get_userbyid(p.proowner) AS owner, p.prosecdef,
+       pg_get_function_identity_arguments(p.oid) AS args
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+ WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND (
+     p.prosecdef
+     OR has_function_privilege('anon', p.oid, 'EXECUTE')
+     OR has_function_privilege('authenticated', p.oid, 'EXECUTE')
+     OR has_function_privilege('public', p.oid, 'EXECUTE')
+   )
+   AND (
+     pg_get_functiondef(p.oid) ILIKE '%parts_catalog%'
+     OR pg_get_functiondef(p.oid) ILIKE '%part_vendors%'
+     OR pg_get_functiondef(p.oid) ILIKE '%sale_price%'
+     OR pg_get_functiondef(p.oid) ILIKE '%unit_cost%'
+   )
+ ORDER BY 1, 2;
+
+SELECT n.nspname, c.relname, c.relkind, pg_get_userbyid(c.relowner) AS owner, c.reloptions
+  FROM pg_class c
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE c.relkind = 'm'
+   AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+   AND (
+     pg_get_viewdef(c.oid, true) ILIKE '%sale_price%'
+     OR pg_get_viewdef(c.oid, true) ILIKE '%unit_cost%'
+     OR pg_get_viewdef(c.oid, true) ILIKE '%parts_catalog%'
+     OR pg_get_viewdef(c.oid, true) ILIKE '%part_vendors%'
+   )
+ ORDER BY 1, 2;
