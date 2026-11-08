@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useT } from '@/lib/fa/locale';
+import { INVOICE_STRIPE_PAY_ONLINE_MESSAGE } from '@/lib/billing/invoice-connect-copy';
 import { toast } from 'sonner';
 
 type Prompt = {
@@ -28,7 +29,18 @@ type Status = {
  * In-app Stripe Connect prompt for service shops and parts suppliers.
  * Hides itself for clinics and signed-out visitors. Never invents a partner URL.
  */
-export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string }) {
+export function StripeConnectCard({
+  returnTo = '/company',
+  whenConnected,
+}: {
+  returnTo?: string;
+  /**
+   * Invoice new, edit, and view share this card. When Connect can charge,
+   * the setup button is replaced with the pay-online note. Other pages keep
+   * the generic connected-account status.
+   */
+  whenConnected?: 'invoice';
+}) {
   const t = useT();
   const [status, setStatus] = useState<Status | null>(null);
   const [busy, setBusy] = useState(false);
@@ -101,6 +113,13 @@ export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string
   }
 
   if (status.connected) {
+    if (whenConnected === 'invoice') {
+      return (
+        <div className="card p-4 border border-green-700/40 text-left">
+          <p className="text-sm text-[var(--text2)]">{t(INVOICE_STRIPE_PAY_ONLINE_MESSAGE)}</p>
+        </div>
+      );
+    }
     return (
       <div className="card p-4 border border-green-700/40 text-left">
         <h3 className="font-bold mb-1">Card payments</h3>

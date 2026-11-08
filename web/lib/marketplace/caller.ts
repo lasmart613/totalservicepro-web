@@ -4,6 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import type { NextRequest } from 'next/server';
+import { getSupabaseAnonKey, getSupabaseUrl } from '../supabase/client.ts';
 import type { ListingActor } from './ownership.ts';
 
 export type MarketplaceCaller = ListingActor & {
@@ -12,8 +13,8 @@ export type MarketplaceCaller = ListingActor & {
 };
 
 function supabasePublicEnv(): { url: string; anon: string } | null {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
-  const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || '';
+  const url = getSupabaseUrl();
+  const anon = getSupabaseAnonKey();
   if (!url || !anon) return null;
   return { url, anon };
 }
@@ -22,6 +23,25 @@ export function bearerToken(req: NextRequest): string | null {
   const auth = req.headers.get('authorization') || '';
   const token = auth.replace(/^Bearer\s+/i, '').trim();
   return token || null;
+}
+
+/** Anon client for public marketplace reads. No user Authorization header. */
+export function createMarketplaceAnonClient() {
+  const env = supabasePublicEnv();
+  if (!env) return null;
+  return createClient(env.url, env.anon, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
+
+/** User-scoped client so marketplace writes run as the caller and hit RLS. */
+export function createMarketplaceUserClient(token: string) {
+  const env = supabasePublicEnv();
+  if (!env || !token) return null;
+  return createClient(env.url, env.anon, {
+    global: { headers: { Authorization: `Bearer ${token}` } },
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
 }
 
 export async function getMarketplaceCaller(req: NextRequest): Promise<MarketplaceCaller | null> {

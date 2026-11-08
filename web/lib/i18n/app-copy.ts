@@ -5,6 +5,7 @@
  */
 import { GAP_STRINGS } from './gap-copy.ts';
 import { MANUAL_LIBRARY_STRINGS } from './manual-library-copy.ts';
+import { WANTED_STRINGS } from './wanted-copy.ts';
 import type { PublicLocale } from './locales.ts';
 
 type Loc = Exclude<PublicLocale, 'en'>;
@@ -1256,6 +1257,10 @@ for (const [key, value] of Object.entries(MANUAL_LIBRARY_STRINGS)) {
 }
 
 for (const [key, value] of Object.entries(GAP_STRINGS)) {
+  if (!TABLE[key]) TABLE[key] = value;
+}
+
+for (const [key, value] of Object.entries(WANTED_STRINGS)) {
   if (!TABLE[key]) TABLE[key] = value;
 }
 

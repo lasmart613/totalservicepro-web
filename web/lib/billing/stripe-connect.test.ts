@@ -12,6 +12,7 @@ import {
   decideSellerChargeRoute,
   invoicePayoutRecord,
   isStripeConnectExemptOrg,
+  isStripeConnectReady,
   listingQuantityAfterSale,
   normalizeStripeAccountId,
   partOrderFromCheckoutSession,
@@ -39,6 +40,7 @@ import {
   StripeConnectApiError,
 } from './stripe-connect-api.ts';
 import { appStrings } from '../i18n/app-copy.ts';
+import { INVOICE_STRIPE_PAY_ONLINE_MESSAGE } from './invoice-connect-copy.ts';
 import { runStripeConnectGet, runStripeConnectPost } from './stripe-connect-access.ts';
 import { buildPartCheckoutSessionFields } from './stripe-marketplace.ts';
 import {
@@ -459,6 +461,68 @@ test('stripe columns are not re-granted and are not written from the browser', (
     assert.doesNotMatch(src, /stripe_account_id|stripe_charges_enabled|stripe_payouts_enabled|stripe_details_submitted/);
   }
   assert.match(card, /eligible === false/);
+});
+
+test('invoice new/edit/view replace Connect Stripe once the org can charge', () => {
+  const readyAccount = {
+    accountId: 'acct_shop123',
+    chargesEnabled: true,
+    payoutsEnabled: false,
+    detailsSubmitted: true,
+  };
+  assert.equal(isStripeConnectReady(readyAccount), true);
+  assert.equal(isStripeConnectReady({ ...readyAccount, chargesEnabled: false, payoutsEnabled: true }), false);
+  assert.equal(isStripeConnectReady({ ...readyAccount, accountId: 'not-an-account' }), false);
+  assert.equal(isStripeConnectReady(emptyPayoutAccount()), false);
+  assert.equal(isStripeConnectReady(null), false);
+
+  const caller = {
+    userId: 'admin',
+    email: null,
+    role: 'company_admin',
+    orgId: 9,
+    orgType: 'service_company',
+    orgName: 'Shop',
+    orgEmail: null,
+    account: readyAccount,
+    schemaReady: true,
+  };
+  const ready = connectStatusPayload(caller);
+  assert.equal(ready.connected, true);
+  assert.equal(ready.chargesEnabled, true);
+  assert.equal(ready.payoutsEnabled, false);
+  assert.equal(ready.prompt, null);
+
+  const unfinished = connectStatusPayload({
+    ...caller,
+    account: { ...readyAccount, chargesEnabled: false, payoutsEnabled: false },
+  });
+  assert.equal(unfinished.connected, false);
+  assert.equal(unfinished.hasAccount, true);
+  assert.ok(unfinished.prompt);
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const invoice = readFileSync(join(here, '../../app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
+  const estimate = readFileSync(join(here, '../../app/estimates/new/EstimateFormClient.tsx'), 'utf8');
+  const card = readFileSync(join(here, '../../components/StripeConnectCard.tsx'), 'utf8');
+  const company = readFileSync(join(here, '../../app/company/page.tsx'), 'utf8');
+  assert.match(invoice, /<StripeConnectCard returnTo="\/invoices\/new" whenConnected="invoice" \/>/);
+  assert.match(card, /whenConnected === 'invoice'/);
+  assert.match(card, /INVOICE_STRIPE_PAY_ONLINE_MESSAGE/);
+  assert.match(card, /status\.connected/);
+  assert.match(card, /'Connect Stripe'/);
+  assert.doesNotMatch(card, /stripe_account_id/);
+  assert.doesNotMatch(estimate, /StripeConnectCard/);
+  assert.doesNotMatch(company, /whenConnected/);
+
+  for (const loc of ['es', 'de', 'ar', 'fa', 'fr', 'he', 'it', 'pt'] as const) {
+    const translated = appStrings(loc)[INVOICE_STRIPE_PAY_ONLINE_MESSAGE];
+    assert.ok(translated, loc);
+    assert.notEqual(translated, INVOICE_STRIPE_PAY_ONLINE_MESSAGE, loc);
+  }
+  assert.match(appStrings('es')[INVOICE_STRIPE_PAY_ONLINE_MESSAGE], /pagar en línea/);
+  assert.match(appStrings('de')[INVOICE_STRIPE_PAY_ONLINE_MESSAGE], /Stripe-Konto/);
+  assert.match(appStrings('ar')[INVOICE_STRIPE_PAY_ONLINE_MESSAGE], /[\u0600-\u06FF]/);
 });
 
 function mainInvoiceParams(input: {

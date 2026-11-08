@@ -7,10 +7,15 @@ export function SystemParameterFields({
   params,
   values,
   onChange,
+  onRemove,
+  removeLabel = 'Remove parameter',
 }: {
   params: ModelParam[];
   values: Record<string, any>;
   onChange: (key: string, value: string) => void;
+  /** When set, each row gets an × so the tech can drop it for this job. */
+  onRemove?: (key: string) => void;
+  removeLabel?: string;
 }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -20,9 +25,23 @@ export function SystemParameterFields({
         const mode = paramInputMode(param);
         return (
           <div key={key}>
-            <label className="text-xs font-semibold text-[var(--text2)]" htmlFor={`param-${slug(key)}`}>
-              {label}
-            </label>
+            <div className="flex items-center justify-between gap-2">
+              <label className="text-xs font-semibold text-[var(--text2)]" htmlFor={`param-${slug(key)}`}>
+                {label}
+              </label>
+              {onRemove && (
+                <button
+                  type="button"
+                  className="text-xs text-[var(--text3)] hover:text-red-500 px-1"
+                  data-testid={`param-remove-${slug(key)}`}
+                  aria-label={`${removeLabel}: ${label}`}
+                  title={removeLabel}
+                  onClick={() => onRemove(key)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
             <input
               id={`param-${slug(key)}`}
               className="input"

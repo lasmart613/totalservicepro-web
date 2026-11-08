@@ -10,7 +10,7 @@
  *   (measuredFluence − setFluence) / setFluence × 100
  */
 
-import { pulseModeDisplay } from './laser-pulse-modes.ts';
+import { pulseModeDisplay, wavelengthLabel } from './laser-pulse-modes.ts';
 
 export const SPOT_SIZE_OTHER = 'other';
 
@@ -54,6 +54,24 @@ export const SET_UNITS: Record<MeasuredQuantity, readonly string[]> = {
 export const QUANTITY_UNITS = SET_UNITS;
 
 /** Fluence and Irradiance use the spot size; Energy and Power do not. */
+/** What the meter reading physically is, from its unit (drives the highlighted chip). */
+export function readingKind(mode: MeasuredQuantity, measuredUnit: unknown): MeasuredQuantity {
+  return UNIT_INFO[measuredUnitFor(mode, measuredUnit)]?.kind ?? mode;
+}
+
+/** Set units offered for a reading kind. Picking one from another kind switches the test type. */
+export const SET_UNITS_FOR_READING: Record<MeasuredQuantity, readonly string[]> = {
+  energy: ['J/cm²', 'J', 'mJ'],
+  fluence: ['J/cm²'],
+  power: ['W', 'mW', 'W/cm²', 'mW/cm²'],
+  irradiance: ['W/cm²', 'mW/cm²'],
+};
+
+/** Test type implied by a set unit. */
+export function modeForSetUnit(unit: unknown): MeasuredQuantity | null {
+  return UNIT_INFO[String(unit)]?.kind ?? null;
+}
+
 export function usesSpot(mode: MeasuredQuantity): boolean {
   return mode === 'fluence' || mode === 'irradiance';
 }
@@ -174,6 +192,12 @@ export type MeasurementView = {
   result: string;
   error: string;
   pass: boolean | null;
+  /** What the meter read (energy for a fluence test read in J/mJ). */
+  readingKind?: MeasuredQuantity;
+  /** Test type (unit of the set value). */
+  testKind?: MeasuredQuantity;
+  /** '±10%' */
+  tolerance?: string;
 };
 
 export function parseNum(value: unknown): number | null {
@@ -335,9 +359,38 @@ export function withFluenceCalculations<T extends Record<string, any>>(input: T)
 const FLUENCE_EDIT_KEYS = ['setFluence', 'measuredValue', 'measuredMode', 'measuredUnit', 'setUnit', 'spotSizeMm', 'spotSizeOtherMm'];
 
 /** Apply one field edit and recompute fluence rows. Legacy rows keep set / measured / unit. */
+function findWl(model: SpotModel, value: unknown) {
+  const label = wavelengthLabel(value);
+  return model?.wavelengths?.find((item) => item.name === value) ??
+    model?.wavelengths?.find((item) => wavelengthLabel(item.name) === label);
+}
+
+/**
+ * Apply one field edit and recompute. Extra pseudo-key 'readingKind' (the chip): picks what
+ * the meter reads. Energy while the test is Fluence keeps the fluence test and reads J;
+ * Power while the test is Irradiance reads W. Otherwise the test type follows the chip.
+ */
 export function applyMeasurementEdit(row: any, key: string, value: any, model?: SpotModel): any {
   const prevRow = row || {};
-  const next: any = { ...prevRow, [key]: value };
+  if (key === 'readingKind') {
+    const kind = normalizeMode(value);
+    const mode = normalizeMode(prevRow.measuredMode);
+    if (kind === 'energy' && mode === 'fluence') return applyMeasurementEdit(prevRow, 'measuredUnit', 'J', model);
+    if (kind === 'power' && mode === 'irradiance') return applyMeasurementEdit(prevRow, 'measuredUnit', 'W', model);
+    const r = applyMeasurementEdit(prevRow, 'measuredMode', kind, model);
+    return applyMeasurementEdit(r, 'measuredUnit', MEASURED_UNITS[kind][0], model);
+  }
+  if (key === 'setUnit') {
+    const target = modeForSetUnit(value);
+    const mode = normalizeMode(prevRow.measuredMode);
+    if (target && target !== mode) {
+      const keepUnit = prevRow.measuredUnit;
+      const switched: any = { ...prevRow, measuredMode: target, setUnit: value };
+      switched.measuredUnit = measuredUnitFor(target, keepUnit);
+      return withFluenceCalculations(switched);
+    }
+  }
+  const next: any = { ...prevRow, [key]: key === 'wavelength' ? wavelengthLabel(value) : value };
   if (key === 'measuredMode') {
     const mode = normalizeMode(value);
     next.measuredMode = mode;
@@ -347,8 +400,8 @@ export function applyMeasurementEdit(row: any, key: string, value: any, model?: 
     next.setUnit = setUnitFor(mode, prevRow.setUnit);
   }
   if (key === 'wavelength' && (isFluenceMeasurement(next) || isFluenceMeasurement(prevRow))) {
-    const prevWl = model?.wavelengths?.find((item) => item.name === prevRow.wavelength);
-    const nextWl = model?.wavelengths?.find((item) => item.name === value);
+    const prevWl = findWl(model, prevRow.wavelength);
+    const nextWl = findWl(model, value);
     const prevDefault = prevWl?.spotMm != null ? String(prevWl.spotMm) : '';
     const untouched = !prevRow.spotSizeMm || String(prevRow.spotSizeMm) === prevDefault;
     if (untouched && nextWl?.spotMm) next.spotSizeMm = String(nextWl.spotMm);
@@ -410,7 +463,7 @@ export function seedMeasurementForWavelength(
 ) {
   if (wavelength.unit === 'J/cm²') {
     return newFluenceMeasurement({
-      wavelength: wavelength.name || '',
+      wavelength: wavelengthLabel(wavelength.name),
       spotSizeMm: defaultSpotChoice(
         model || { wavelengths: [wavelength] },
         wavelength.name
@@ -420,7 +473,7 @@ export function seedMeasurementForWavelength(
     });
   }
   return {
-    wavelength: wavelength.name || '',
+    wavelength: wavelengthLabel(wavelength.name),
     setting: wavelength.sets?.[0] != null ? String(wavelength.sets[0]) : '',
     measured: '',
     unit: wavelength.unit || 'W',
@@ -435,7 +488,7 @@ export function hydrateMeasurement(raw: any) {
   const pm = normalizeLegacyMode(raw);
   if (!isFluenceMeasurement(pm)) {
     return {
-      wavelength: pm.wavelength || pm.name || '',
+      wavelength: wavelengthLabel(pm.wavelength || pm.name),
       setting: pm.setting ?? pm.set ?? '',
       measured: pm.measured ?? pm.actual ?? '',
       unit: pm.unit || 'W',
@@ -453,7 +506,7 @@ export function hydrateMeasurement(raw: any) {
   const measuredMode = normalizeMode(pm.measuredMode ?? pm.measured_mode);
   const measuredValue = pm.measuredValue ?? pm.measured_value ?? pm.measured ?? pm.actual ?? '';
   return withFluenceCalculations({
-    wavelength: pm.wavelength || pm.name || '',
+    wavelength: wavelengthLabel(pm.wavelength || pm.name),
     setting: pm.setting ?? pm.set ?? '',
     measured: pm.measured ?? pm.actual ?? '',
     unit: pm.unit || 'J/cm²',
@@ -485,7 +538,7 @@ function passOf(row: any): boolean | null {
 }
 
 export function viewMeasurement(row: any): MeasurementView {
-  const wavelength = String(row?.wavelength || row?.name || '—') || '—';
+  const wavelength = wavelengthLabel(row?.wavelength || row?.name) || '—';
   if (!isFluenceMeasurement(row)) {
     const set = row?.set ?? row?.setting ?? '—';
     const unit = row?.unit ? ` ${row.unit}` : '';
@@ -534,5 +587,8 @@ export function viewMeasurement(row: any): MeasurementView {
     result: computed.resultFluence == null ? '—' : formatValue(computed.resultFluence, setUnit),
     error: computed.errorPercent == null ? '—' : formatErrorPercent(computed.errorPercent),
     pass,
+    readingKind: readingKind(mode, measuredUnit),
+    testKind: mode,
+    tolerance: `±${FLUENCE_TOLERANCE_PERCENT}%`,
   };
 }

@@ -41,7 +41,13 @@ import {
   estimatePartsDeposit,
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
-import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
+import { invoiceDataForSave, loadStoredInvoiceData } from '@/lib/billing/invoice-form-data';
+import {
+  applyInvoiceStatusGuard,
+  invoiceDraftLockedHint,
+  invoiceStatusBlocksDraftDowngrade,
+  resolveInvoiceSaveStatus,
+} from '@/lib/billing/invoice-status-guard';
 import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
@@ -584,7 +590,7 @@ export default function InvoiceFormClient() {
 
   async function saveInvoice(
     nextStatus: string,
-    opts?: { quiet?: boolean; deferredReleased?: boolean }
+    opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -662,6 +668,16 @@ export default function InvoiceFormClient() {
         custContact,
       };
 
+      // Save changes on a finalized invoice uses the draft-downgrade guard so
+      // status is omitted from the write. The button itself is not Save Draft.
+      const requestedStatus =
+        opts?.preserveStatus && invoiceStatusBlocksDraftDowngrade(status) ? 'draft' : nextStatus;
+      const statusDecision = resolveInvoiceSaveStatus(status, requestedStatus);
+      const previousInvoiceData =
+        statusDecision.downgradeBlocked && existingId
+          ? await loadStoredInvoiceData(supabase, existingId)
+          : undefined;
+
       const payload: Record<string, any> = {
         customer_name: name,
         organization_id: userOrgId || null,
@@ -689,10 +705,13 @@ export default function InvoiceFormClient() {
         payload.created_at = new Date().toISOString();
       }
 
+      // A draft request after send keeps the stored status. Field edits still write.
+      const guarded = applyInvoiceStatusGuard(payload, status, requestedStatus, previousInvoiceData);
+
       const result = await writeWithColumnRetry(
         supabase,
         'service_invoices',
-        payload,
+        guarded.payload,
         existingId
       );
       if (result.error) throw result.error;
@@ -700,7 +719,7 @@ export default function InvoiceFormClient() {
       if (result.id) {
         savedIdRef.current = result.id;
         setSavedId(result.id);
-        setStatus(nextStatus);
+        setStatus(guarded.status);
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('id', String(result.id));
@@ -728,7 +747,8 @@ export default function InvoiceFormClient() {
       }
 
       if (!opts?.quiet) {
-        if (nextStatus === 'draft') toast.success('Invoice draft saved!');
+        if (guarded.downgradeBlocked) toast.success(t('Invoice saved.'));
+        else if (nextStatus === 'draft') toast.success('Invoice draft saved!');
         else if (nextStatus === 'sent')
           toast.success('Invoice marked as sent (no email sent).');
         else if (nextStatus === 'paid') toast.success('Invoice marked as paid.');
@@ -805,12 +825,13 @@ export default function InvoiceFormClient() {
     preview.document.close();
   }
 
-  /** Save draft, email via Resend, only set status=sent when email actually delivered. */
+  /** Save, email via Resend, only set status=sent when email actually delivered. */
   async function finalizeAndEmail() {
     if (!custEmail.trim() && !customerOrgId) {
       toast.error('Add a customer email on the form or CRM profile before emailing.');
       return;
     }
+    const alreadyFinal = invoiceStatusBlocksDraftDowngrade(status);
     setEmailing(true);
     try {
       const id = await saveInvoice('draft', { quiet: true });
@@ -846,7 +867,9 @@ export default function InvoiceFormClient() {
       if (!result.emailSent) {
         toast.error(
           result.error ||
-            'Email was not sent. Invoice remains a draft. Fix email/Resend domain or use “Mark sent without email”.'
+            (alreadyFinal
+              ? t('Email was not sent. The invoice status was not changed.')
+              : 'Email was not sent. Invoice remains a draft. Fix email/Resend domain or use “Mark sent without email”.')
         );
         if (result.needsConfig) {
           toast.message(
@@ -969,6 +992,8 @@ export default function InvoiceFormClient() {
   }
 
   const voided = isVoidInvoiceStatus(status);
+  const draftLocked = invoiceStatusBlocksDraftDowngrade(status);
+  const draftLockedHint = draftLocked ? invoiceDraftLockedHint(status) : '';
   const voidable =
     Boolean(savedId) && canVoidInvoice({ status, amount_paid: received, role: callerRole }).ok;
 
@@ -1493,7 +1518,7 @@ export default function InvoiceFormClient() {
         </section>
 
         <div className="mb-4">
-          <StripeConnectCard returnTo="/invoices/new" />
+          <StripeConnectCard returnTo="/invoices/new" whenConnected="invoice" />
         </div>
 
         {voided && (
@@ -1505,7 +1530,7 @@ export default function InvoiceFormClient() {
 
         <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
-          {!voided && (
+          {!draftLocked && (
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
@@ -1513,6 +1538,31 @@ export default function InvoiceFormClient() {
             onClick={() => saveInvoice('draft')}
           >
             {saving ? t('Saving…') : t('Save Draft')}
+          </button>
+          )}
+          {draftLocked && (
+          <span className="inline-flex" title={t(draftLockedHint)}>
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[100px]"
+              disabled
+              aria-disabled="true"
+              title={t(draftLockedHint)}
+              aria-label={t(draftLockedHint)}
+              aria-describedby="invoice-draft-locked-hint"
+            >
+              {t('Save Draft')}
+            </button>
+          </span>
+          )}
+          {draftLocked && !voided && (
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[120px]"
+            disabled={saving || emailing}
+            onClick={() => saveInvoice(status, { preserveStatus: true })}
+          >
+            {saving ? t('Saving…') : t('Save changes')}
           </button>
           )}
           <button
@@ -1619,6 +1669,11 @@ export default function InvoiceFormClient() {
               </div>
             </div>
           </div>
+        )}
+        {draftLocked && (
+          <p id="invoice-draft-locked-hint" className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
+            {t(draftLockedHint)}
+          </p>
         )}
         <p className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
           {t('Finalize & Email only sets status to sent after Resend accepts the message. Requires customer email and a verified From domain.')}
