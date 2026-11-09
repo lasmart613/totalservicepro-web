@@ -408,4 +408,68 @@ describe('send invoice', { concurrency: false }, () => {
       fetchLog.restore();
     }
   });
+
+  test('personal payee changes the invoice name and not the Stripe destination', async () => {
+    resetDocumentSendRateLimit();
+    const personal = invoiceRow();
+    personal.invoice_data = {
+      custEmail: CLINIC,
+      line_items: [{ description: 'Handpiece service', qty: 1, unit_price: 120, ext: 120 }],
+      payee_kind: 'personal',
+      payee_name: 'Larry Smart',
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [personal],
+    });
+    const checkout = checkoutSpy();
+    const original = globalThis.fetch;
+    let mailed: { from?: string; subject?: string; html?: string; reply_to?: string } | null = null;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      const target = String(url);
+      if (!target.includes('api.resend.com')) throw new Error(`unexpected fetch ${target}`);
+      mailed = JSON.parse(String(init?.body || '{}'));
+      return new Response(JSON.stringify({ id: 'msg-personal' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(
+          request({
+            invoice_id: 42,
+            include_payment_link: true,
+            company_name: 'Forged Shop',
+            html: '<p>Forged body</p>',
+          }),
+          {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: checkout.createCheckout as never,
+          }
+        );
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(checkout.calls.length, 1);
+        assert.equal(checkout.calls[0].companyName, 'Larry Smart');
+        assert.equal(checkout.calls[0].destinationAccountId, undefined);
+        assert.equal(checkout.calls[0].legacyPlatformCharge, true);
+        assert.equal(checkout.calls[0].organizationId, undefined);
+        assert.ok(mailed);
+        assert.equal(mailed.subject, 'Invoice INV-100 from Larry Smart');
+        assert.match(mailed.from || '', /Total Service Pro|contact@medicalrepairnetwork.com/);
+        assert.equal(mailed.reply_to, 'shop@cedar.test');
+        assert.match(mailed.html || '', /Make checks payable to Larry Smart\./);
+        assert.match(mailed.html || '', /Thank you for choosing Larry Smart!/);
+        assert.match(mailed.html || '', /1 Main/);
+        assert.doesNotMatch(mailed.html || '', /Forged Shop|Forged body/);
+        assert.doesNotMatch(mailed.html || '', /Cedar Laser Service/);
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

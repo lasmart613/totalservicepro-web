@@ -42,6 +42,7 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
+import { companyWithPayeeName, invoiceIssuerName } from '@/lib/billing/invoice-payee';
 
 /** Same body for a missing invoice and an invoice owned by another shop. */
 const INVOICE_NOT_FOUND = 'Invoice not found.';
@@ -247,7 +248,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
                 invoiceId,
                 invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
                 customerEmail: recipient.email,
-                companyName: company.company_name || null,
+                companyName: invoiceIssuerName(inv, company.company_name) || null,
                 paymentKind: collectable.paymentKind,
                 ...(decision.mode === 'destination'
                   ? {
@@ -312,7 +313,12 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
       }
     }
 
-    const subject = ownedDocumentSubject('invoice', inv.invoice_number, company.company_name, mailLocale);
+    const subject = ownedDocumentSubject(
+      'invoice',
+      inv.invoice_number,
+      invoiceIssuerName(inv, company.company_name),
+      mailLocale
+    );
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
     const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
     const sitePayUrl =
@@ -321,7 +327,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         : paymentUrl;
     const html = buildOwnedInvoiceMessage({
       row: inv,
-      company,
+      company: companyWithPayeeName(company, invoiceIssuerName(inv, company.company_name)),
       theme,
       paymentUrl: sitePayUrl,
       moneyPrefs,

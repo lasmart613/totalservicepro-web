@@ -554,6 +554,11 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         `<div style="font-size:10px;color:#666;margin-top:8px;">${tr('Secure card payment · Powered by Stripe')}</div>` +
         `</div>`
       : '') +
+    (String(input.company.company_name || '').trim()
+      ? `${docFill(input.locale, 'Make checks payable to {name}.', {
+          name: esc(input.company.company_name || ''),
+        })}<br>`
+      : '') +
     `<!--tsp-thanks-->${docFill(input.locale, 'Thank you for choosing {shop}!', {
       shop: esc(input.company.company_name || 'Total Service Pro'),
     })}` +
