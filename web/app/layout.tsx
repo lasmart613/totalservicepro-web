@@ -10,6 +10,7 @@ import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { ThemeScript } from "@/components/ThemeScript";
 import { ThemeSync } from "@/components/ThemeSync";
+import { RECOVERY_BOOT_SCRIPT } from "@/lib/auth-link-route";
 import { rootMetadata } from "@/lib/seo";
 
 // Geist sans, latin variable (wght 100–900, includes 400/500/600/700/800).
@@ -77,6 +78,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <head>
+        <script dangerouslySetInnerHTML={{ __html: RECOVERY_BOOT_SCRIPT }} />
         <link rel="preconnect" href="https://www.googletagmanager.com" />
         <script
           dangerouslySetInnerHTML={{

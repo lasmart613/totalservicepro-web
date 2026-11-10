@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { customerInviteLoginUrl, customerInviteSignupUrl } from './customer-invite.ts';
 import { teamInviteLoginUrl } from './team-invite.ts';
 import {
@@ -12,6 +13,9 @@ import {
   decideAuthCallback,
   destinationAfterAuthLink,
   loginMagicLinkRedirect,
+  passwordRecoveryEventHref,
+  RECOVERY_BOOT_SCRIPT,
+  recoveryLandingHref,
   recoveryRedirect,
   resolveSetPasswordFlow,
   setPasswordSubtitle,
@@ -46,8 +50,11 @@ test('recovery links go to set-password without the team invite heading', () => 
   assert.equal(resolveSetPasswordFlow({ type: 'recovery', flow: 'invite' }), 'reset');
   assert.notEqual(RESET_PASSWORD_HEADING, TEAM_INVITE_PASSWORD_HEADING);
   const redirect = recoveryRedirect(ORIGIN);
-  assert.match(redirect, /next=%2Fauth%2Fset-password/);
-  assert.match(redirect, /flow=reset/);
+  assert.equal(redirect, `${ORIGIN}/auth/set-password`);
+  assert.equal(recoveryRedirect(`${ORIGIN}/`), `${ORIGIN}/auth/set-password`);
+  assert.equal(setupLinkRedirect(ORIGIN, 'reset'), `${ORIGIN}/auth/set-password`);
+  assert.equal(setupLinkRedirect(ORIGIN, 'recovery'), `${ORIGIN}/auth/set-password`);
+  assert.doesNotMatch(redirect, /[?#]/);
   assert.doesNotMatch(redirect, /flow=invite/);
 });
 
@@ -214,12 +221,84 @@ test('callback, set-password, and email callers use the link-type router', () =>
   assert.doesNotMatch(setPassword, />Team invite — set your password</);
 
   assert.match(login, /loginMagicLinkRedirect/);
-  assert.match(login, /recoveryRedirect/);
-  assert.match(forgot, /recoveryRedirect/);
+  assert.match(login, /resetPasswordForEmail\(cleanEmail,\s*\{[\s\S]*?redirectTo: recoveryRedirect\(origin\)/);
+  assert.match(forgot, /resetPasswordForEmail\(cleanEmail,\s*\{[\s\S]*?redirectTo: recoveryRedirect\(origin\)/);
   assert.match(invite, /setupLinkRedirect\(base, 'invite'\)/);
   assert.match(invite, /setupLinkRedirect\(base, linkType\)/);
   assert.doesNotMatch(invite, /recovery/);
   assert.doesNotMatch(invite, /magiclink/);
   assert.doesNotMatch(invite, /inviteUserByEmail/);
   assert.match(otp, /loginMagicLinkRedirect/);
+
+  const client = readFileSync(join(here, 'supabase/client.ts'), 'utf8');
+  const layout = readFileSync(join(here, '../app/layout.tsx'), 'utf8');
+  assert.match(client, /flowType: 'implicit'/);
+  assert.match(client, /recoveryLandingHref/);
+  assert.match(client, /passwordRecoveryEventHref/);
+  assert.match(client, /detectSessionInUrl: !landing/);
+  assert.match(layout, /RECOVERY_BOOT_SCRIPT/);
+  assert.match(setPassword, /setReady\(true\)/);
+  assert.doesNotMatch(setPassword, /router\.(replace|push)\('\/hub'\)/);
+  assert.match(setPassword, /Keep the form/);
+
+  for (const rel of [
+    '../../app/src/main/assets/index.html',
+    '../../app/src/main/assets/service_hub.html',
+    '../../app/src/main/assets/parts_catalog.html',
+  ]) {
+    const html = readFileSync(join(here, rel), 'utf8');
+    const calls = html.match(/resetPasswordForEmail\([\s\S]*?\);/g) || [];
+    assert.equal(calls.length, 1, rel);
+    assert.match(calls[0], /redirectTo:\s*resetTo/, rel);
+    assert.match(html, /\/auth\/set-password/, rel);
+  }
+});
+
+test('recovery on any page goes to set-password, including when a session already exists', () => {
+  const hash = '#access_token=example&refresh_token=example&type=recovery';
+  assert.equal(recoveryLandingHref({ pathname: '/', search: '', hash }), `/auth/set-password${hash}`);
+  assert.equal(
+    recoveryLandingHref({ pathname: '/hub', search: '?next=/hub', hash }),
+    `/auth/set-password?next=/hub${hash}`
+  );
+  assert.equal(
+    recoveryLandingHref({ pathname: '/auth/set-password', search: '', hash }),
+    null
+  );
+  assert.equal(
+    recoveryLandingHref({ pathname: '/auth/set-password/', search: '', hash: '#type=recovery' }),
+    null
+  );
+  assert.equal(recoveryLandingHref({ pathname: '/', search: '?type=recovery', hash: '' }), '/auth/set-password?type=recovery');
+  assert.equal(recoveryLandingHref({ pathname: '/', search: '?type=signup', hash: '#type=magiclink' }), null);
+  assert.equal(recoveryLandingHref({ pathname: '/login', search: '?code=abc&type=recovery', hash: '' }), '/auth/set-password?code=abc&type=recovery');
+
+  assert.equal(passwordRecoveryEventHref('PASSWORD_RECOVERY', '/'), '/auth/set-password?flow=reset');
+  assert.equal(passwordRecoveryEventHref('PASSWORD_RECOVERY', '/hub'), '/auth/set-password?flow=reset');
+  assert.equal(passwordRecoveryEventHref('PASSWORD_RECOVERY', '/auth/set-password'), null);
+  assert.equal(passwordRecoveryEventHref('SIGNED_IN', '/'), null);
+  assert.equal(passwordRecoveryEventHref('INITIAL_SESSION', '/hub'), null);
+
+  const samples = [
+    { pathname: '/', search: '', hash },
+    { pathname: '/company', search: '', hash: '#type=recovery' },
+    { pathname: '/es/login', search: '?type=recovery', hash: '' },
+    { pathname: '/auth/set-password', search: '?flow=reset', hash },
+    { pathname: '/reset-password', search: '', hash },
+    { pathname: '/', search: '?type=%20recovery', hash: '' },
+    { pathname: '/', search: '?type=invite', hash: '#access_token=example&type=signup' },
+  ];
+  for (const sample of samples) {
+    let replaced: string | null = null;
+    const location = {
+      pathname: sample.pathname,
+      search: sample.search,
+      hash: sample.hash,
+      replace(url: string) {
+        replaced = url;
+      },
+    };
+    vm.runInNewContext(RECOVERY_BOOT_SCRIPT, { location, URLSearchParams });
+    assert.equal(replaced, recoveryLandingHref(sample), JSON.stringify(sample));
+  }
 });

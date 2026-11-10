@@ -9,6 +9,10 @@
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  passwordRecoveryEventHref,
+  recoveryLandingHref,
+} from '@/lib/auth-link-route';
 import { postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
 import { ensureOrganizationMembership } from '@/lib/pending-signup';
 
@@ -29,15 +33,38 @@ let supabaseInstance: SupabaseClient | null = null;
 export function getSupabaseClient(): SupabaseClient {
   if (supabaseInstance) return supabaseInstance;
 
+  // Implicit flow: recovery emails are opened in whatever browser received
+  // them. PKCE would demand the code verifier from the browser that requested
+  // the reset. The set-password page still exchanges a code if one is present.
+  const landing =
+    typeof window !== 'undefined'
+      ? recoveryLandingHref({
+          pathname: window.location.pathname,
+          search: window.location.search,
+          hash: window.location.hash,
+        })
+      : null;
+
   supabaseInstance = createClient(supabaseUrl(), supabaseAnonKey(), {
     auth: {
       persistSession: true,
       storageKey: 'tsp-auth-token',
       storage: typeof window !== 'undefined' ? window.localStorage : undefined,
       autoRefreshToken: true,
-      detectSessionInUrl: true,
+      // Leave type=recovery in the URL until /auth/set-password loads.
+      // Detecting it here signs the user in on the page the email opened.
+      detectSessionInUrl: !landing,
+      flowType: 'implicit',
     },
   });
+
+  if (typeof window !== 'undefined') {
+    if (landing) window.location.replace(landing);
+    supabaseInstance.auth.onAuthStateChange((event) => {
+      const next = passwordRecoveryEventHref(event, window.location.pathname);
+      if (next) window.location.replace(next);
+    });
+  }
 
   return supabaseInstance;
 }
