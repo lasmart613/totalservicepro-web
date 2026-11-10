@@ -259,7 +259,11 @@ export function AccountSecurity() {
                 autoComplete="email"
                 autoCapitalize="off"
                 required
+                aria-describedby="new-login-email-hint"
               />
+              <p id="new-login-email-hint" className="text-[10px] text-[var(--text3)] mt-1">
+                {t('A confirmation link will be emailed to the new address.')}
+              </p>
             </div>
             <div className="flex gap-2">
               <button type="submit" className="btn btn-primary flex-1" disabled={emailSaving || !emailReady}>

@@ -217,6 +217,16 @@ test('callback, set-password, and email callers use the link-type router', () =>
 
   assert.match(setPassword, /setPasswordSubtitle/);
   assert.match(setPassword, /resolveSetPasswordFlow/);
+  const noSessionHelp = setPassword.slice(setPassword.indexOf('noSession ?'), setPassword.indexOf(': ready ?'));
+  assert.match(noSessionHelp, /flow === 'invite'/);
+  assert.match(
+    noSessionHelp,
+    /Enter the same email from the invite\. The reset email lets you choose a password\./
+  );
+  assert.match(
+    noSessionHelp,
+    /Enter the email on your account\. The reset email lets you choose a new password\./
+  );
   assert.match(setPassword, /safeRedirectPath\(searchParams\.get\('next'\), window\.location\.origin, ''\)/);
   assert.match(route, /safeRedirectPath/);
   assert.doesNotMatch(route, /function safeInternal/);

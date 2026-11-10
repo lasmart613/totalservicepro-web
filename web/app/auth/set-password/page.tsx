@@ -7,6 +7,7 @@ import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/clien
 import { destAfterInviteClaim, inviteInPlay, resetTeamClaimDedupeForSignIn } from '@/lib/invite-claim';
 import { profileOrgId } from '@/lib/no-org-route';
 import { resolveSetPasswordFlow, setPasswordSubtitle } from '@/lib/auth-link-route';
+import { useT } from '@/lib/fa/locale';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 
 /**
@@ -34,6 +35,7 @@ function SetPasswordInner() {
   const [saving, setSaving] = useState(false);
   const [noSession, setNoSession] = useState(false);
   const subtitle = setPasswordSubtitle(flow);
+  const t = useT();
 
   useEffect(() => {
     let cancelled = false;
@@ -222,7 +224,9 @@ function SetPasswordInner() {
                 Forgot password
               </Link>
               <p className="text-xs text-[var(--text3)] text-center">
-                Enter the same email from the invite. The reset email lets you choose a password.
+                {flow === 'invite'
+                  ? t('Enter the same email from the invite. The reset email lets you choose a password.')
+                  : t('Enter the email on your account. The reset email lets you choose a new password.')}
               </p>
             </div>
           ) : ready ? (

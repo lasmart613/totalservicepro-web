@@ -92,6 +92,8 @@ test('profile and settings show the auth email and the reauth password form', ()
   assert.match(ui, /Sign-in email/);
   assert.match(ui, /Change password/);
   assert.match(ui, /Account and security/);
+  const emailForm = ui.slice(ui.indexOf('editingEmail ?'), ui.indexOf("t('Send confirmation')"));
+  assert.match(emailForm, /A confirmation link will be emailed to the new address\./);
   assert.match(ui, /requestLoginEmailChange/);
   assert.match(ui, /signOutAndClearIdentity\(supabase, \{ scope: 'others' \}\)/);
   assert.doesNotMatch(ui, /updateUser\(\{ password/);
