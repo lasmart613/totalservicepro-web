@@ -25,6 +25,7 @@ export type SendDocResult = {
   alreadySent?: boolean;
   sentAt?: string | null;
   supplierName?: string | null;
+  cc?: string[];
 };
 
 export function isValidOnFileEmail(e: string | null | undefined): boolean {
@@ -121,6 +122,7 @@ export async function sendBillingDocEmail(opts: {
       alreadySent: !!json.alreadySent,
       sentAt: json.sent_at ?? null,
       supplierName: json.supplierName ?? null,
+      cc: Array.isArray(json.cc) ? json.cc.filter((email: unknown) => typeof email === 'string') : undefined,
     };
   } catch (e: any) {
     return {

@@ -24,6 +24,8 @@ import {
   takeDocumentSendSlot,
   type HeldDocumentSendSlot,
 } from '@/lib/billing/send-rate-limit';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
+import { ccBesidesRecipient, parseDocumentCc } from '@/lib/billing/document-cc';
 
 /** Same body for a missing report and a report owned by another shop. */
 const REPORT_NOT_FOUND = 'Service report not found.';
@@ -91,6 +93,7 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
 
     const raw = await req.json().catch(() => ({}));
     const request = ownedSendRequest(raw, 'report_id');
+    const ccParsed = parseDocumentCc(raw);
     const reportId = request.documentId;
     if (reportId == null) return respond({ error: 'Service report id is required.' }, 400);
 
@@ -139,6 +142,8 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
         400
       );
     }
+    if (!ccParsed.ok) return respond({ error: ccParsed.error }, 400);
+    const ccForSend = ccBesidesRecipient(ccParsed.emails, recipient.email);
 
     const resendKey = process.env.RESEND_API_KEY;
     if (!resendKey) {
@@ -198,21 +203,16 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
 
-    const rr = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(
-        resendMessage({
-          from,
-          to: recipient.email,
-          subject,
-          html: wrapped,
-          replyTo: company.email,
-        })
-      ),
+    const rr = await postResendEmail({
+      apiKey: resendKey,
+      message: resendMessage({
+        from,
+        to: recipient.email,
+        subject,
+        html: wrapped,
+        replyTo: company.email,
+        cc: ccForSend,
+      }),
     });
 
     const result = await rr.json().catch(() => ({}));
@@ -237,11 +237,12 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
         emailSent: true,
         id: result?.id || null,
         to: recipient.email,
+        ...(ccForSend.length ? { cc: ccForSend } : {}),
         emailSource: recipient.source,
         reportId,
       },
       200,
-      [recipient.email]
+      [recipient.email, ...ccForSend]
     );
   } catch (e: any) {
     if (heldSlot) {

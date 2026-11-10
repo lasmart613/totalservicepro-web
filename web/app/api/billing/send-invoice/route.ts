@@ -26,6 +26,8 @@ import {
   type HeldDocumentSendSlot,
 } from '@/lib/billing/send-rate-limit';
 import { stampLangOnEstimateLinks } from '@/lib/share';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
+import { ccBesidesRecipient, parseDocumentCc, rememberDocumentCc } from '@/lib/billing/document-cc';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
   buildOwnedInvoiceMessage,
@@ -111,6 +113,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
 
     const raw = await req.json().catch(() => ({}));
     const request = ownedSendRequest(raw, 'invoice_id');
+    const ccParsed = parseDocumentCc(raw);
     const invoiceId = request.documentId;
     if (invoiceId == null) return respond({ error: 'Invoice id is required.' }, 400);
 
@@ -155,6 +158,8 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         400
       );
     }
+    if (!ccParsed.ok) return respond({ error: ccParsed.error }, 400);
+    const ccForSend = ccBesidesRecipient(ccParsed.emails, recipient.email);
 
     const techName = await readTechName(supabase, user.id);
     const company =
@@ -351,21 +356,16 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
 
-    const rr = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(
-        resendMessage({
-          from,
-          to: recipient.email,
-          subject,
-          html: mailedHtml,
-          replyTo: company.email,
-        })
-      ),
+    const rr = await postResendEmail({
+      apiKey: resendKey,
+      message: resendMessage({
+        from,
+        to: recipient.email,
+        subject,
+        html: mailedHtml,
+        replyTo: company.email,
+        cc: ccForSend,
+      }),
     });
 
     const result = await rr.json().catch(() => ({}));
@@ -388,12 +388,23 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     }
 
     heldSlot = null;
+    if (ccForSend.length) {
+      await rememberDocumentCc({
+        client: admin ?? supabase,
+        table: 'service_invoices',
+        id: invoiceId,
+        dataKey: 'invoice_data',
+        cc: ccForSend,
+        organizationId: callerOrgId,
+      });
+    }
     return respond(
       {
         ok: true,
         emailSent: true,
         id: result?.id || null,
         to: recipient.email,
+        ...(ccForSend.length ? { cc: ccForSend } : {}),
         emailSource: recipient.source,
         invoiceId,
         invoiceLoaded: true,
@@ -404,7 +415,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         stripeConnect,
       },
       200,
-      [recipient.email]
+      [recipient.email, ...ccForSend]
     );
   } catch (e: any) {
     if (heldSlot && !checkoutSessionCreated) {

@@ -5,6 +5,8 @@
  * report contents, other shops' names, or a sign-in-free link.
  */
 
+import { postResendEmail } from './mail/outgoing-mail.ts';
+
 function esc(s: unknown): string {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -140,10 +142,10 @@ export async function sendResendEmail(
   if (!isEmailAddress(msg.to)) return { ok: false, error: 'No valid email' };
   const from =
     process.env.NOTIFY_FROM_EMAIL || process.env.RESEND_FROM || 'Total Service Pro <contact@medicalrepairnetwork.com>';
-  const rr = await fetchImpl('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from, to: [msg.to.trim()], subject: msg.subject, html: msg.html, text: msg.text }),
+  const rr = await postResendEmail({
+    apiKey: key,
+    fetchImpl,
+    message: { from, to: [msg.to.trim()], subject: msg.subject, html: msg.html, text: msg.text },
   });
   if (!rr.ok) {
     const result = await rr.json().catch(() => ({}));

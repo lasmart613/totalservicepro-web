@@ -11,6 +11,7 @@
  */
 import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
 import { handle, logConfigOnce, resetColdStart } from '../functions/register-directory-org/handler.ts'
+import { DEFAULT_OPS_BCC_EMAIL } from '../../web/lib/mail/outgoing-mail.ts'
 import {
   buildReviewNotice,
   checkFormTicket,
@@ -488,6 +489,8 @@ Deno.test('notice: sent once on step-2 completion, escaped, bidi stripped, fixed
   assertEquals(mails.length, 1)
   const m = mails[0].body
   assertEquals(m.to, ['review@example.test'])
+  assertEquals(m.bcc, [DEFAULT_OPS_BCC_EMAIL])
+  assertEquals(m.cc, undefined)
   assertEquals(m.subject, REVIEW_NOTICE_SUBJECT)
   assert(m.html.includes('&lt;b&gt;Evil &amp; Co&lt;/b&gt;gnp'))
   assert(m.html.includes('&lt;script&gt;alert(1)&lt;/script&gt;'))

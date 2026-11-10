@@ -13,6 +13,8 @@ import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildInvoiceHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
 import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
+import { ccValueForDocumentSave, documentCcInputError, formatCcInput, parseDocumentCc } from '@/lib/billing/document-cc';
+import DocumentCcField from '@/components/billing/DocumentCcField';
 import {
   coerceOrgId,
   customerActionFromEstimate,
@@ -131,6 +133,7 @@ export default function InvoiceFormClient() {
   const [custZip, setCustZip] = useState('');
   const [custPhone, setCustPhone] = useState('');
   const [custEmail, setCustEmail] = useState('');
+  const [ccText, setCcText] = useState('');
   const [custContact, setCustContact] = useState('');
 
   const catalog = useEquipmentCatalog(supabase);
@@ -350,6 +353,7 @@ export default function InvoiceFormClient() {
       setStoredPayeeKind(loadedPayee.payee_kind);
       setStoredPayeeName(loadedPayee.payee_name);
       setPayeeTouched(false);
+      setCcText(formatCcInput(idata.cc_emails));
       const lines = idata.line_items || [];
       if (Array.isArray(lines) && lines.length) {
         setLineItems(lines.map((li: unknown, i: number) => lineItemFromStored(li, i)));
@@ -700,7 +704,7 @@ export default function InvoiceFormClient() {
 
   async function saveInvoice(
     nextStatus: string,
-    opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean }
+    opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean; ccEmails?: string[] }
   ): Promise<string | number | null> {
     const picked = invoiceCustomerWrite(customerRef.current);
     const name = picked.customer_name || custSearch.trim();
@@ -779,6 +783,7 @@ export default function InvoiceFormClient() {
         custContact: picked.invoiceData.contact,
         payee_kind: payee.payee_kind,
         payee_name: payee.payee_name,
+        cc_emails: ccValueForDocumentSave(ccText, opts?.ccEmails),
       };
 
       // Save changes on a finalized invoice uses the draft-downgrade guard so
@@ -1058,12 +1063,24 @@ export default function InvoiceFormClient() {
     preview.document.close();
   }
 
+  function ccEmailsForSend(): string[] | null {
+    const problem = documentCcInputError(ccText);
+    if (problem) {
+      toast.error(problem);
+      return null;
+    }
+    const parsed = parseDocumentCc(ccText);
+    return parsed.ok ? parsed.emails : [];
+  }
+
   /** Save, email via Resend, only set status=sent when email actually delivered. */
   async function finalizeAndEmail() {
     if (!custEmail.trim() && !customerOrgId) {
       toast.error('Add a customer email on the form or CRM profile before emailing.');
       return;
     }
+    const ccEmails = ccEmailsForSend();
+    if (!ccEmails) return;
     const alreadyFinal = invoiceStatusBlocksDraftDowngrade(status);
     setEmailing(true);
     try {
@@ -1073,7 +1090,7 @@ export default function InvoiceFormClient() {
         if (!kept) return;
         id = savedIdRef.current;
       } else {
-        id = await saveInvoice('draft', { quiet: true });
+        id = await saveInvoice('draft', { quiet: true, ccEmails });
         if (!id) return;
       }
 
@@ -1101,6 +1118,7 @@ export default function InvoiceFormClient() {
           reply_to: company.email || undefined,
           html,
           include_payment_link: true,
+          cc: ccEmails,
         },
       });
 
@@ -1121,7 +1139,10 @@ export default function InvoiceFormClient() {
       }
 
       // Only now mark sent. An invoice that was already sent keeps its status and amounts.
-      if (!alreadyFinal) await saveInvoice('sent', { quiet: true });
+      // CC on that resend is stored by the send route, not by rewriting the invoice.
+      const storedCc = result.cc ?? ccEmails;
+      if (result.cc) setCcText(result.cc.join(', '));
+      if (!alreadyFinal) await saveInvoice('sent', { quiet: true, ccEmails: storedCc });
       if (result.connectRequired) {
         toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
         toast.message(`Invoice emailed to ${result.to} without a card-payment link.`);
@@ -1143,6 +1164,8 @@ export default function InvoiceFormClient() {
       toast.error('Save the invoice first');
       return;
     }
+    const ccEmails = ccEmailsForSend();
+    if (!ccEmails) return;
     setEmailing(true);
     try {
       const {
@@ -1169,6 +1192,7 @@ export default function InvoiceFormClient() {
           reply_to: company.email || undefined,
           html: buildInvoiceEmailHtml(),
           include_payment_link: true,
+          cc: ccEmails,
         },
       });
       if (!result.emailSent) {
@@ -1176,6 +1200,7 @@ export default function InvoiceFormClient() {
         noteCardPayout(result);
         return;
       }
+      if (result.cc) setCcText(result.cc.join(', '));
       if (result.connectRequired) {
         toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
         toast.message(`Invoice re-sent to ${result.to} without a card-payment link.`);
@@ -1408,6 +1433,7 @@ export default function InvoiceFormClient() {
                 setCustEmail(e.target.value);
               }} />
             </div>
+            <DocumentCcField id="invoice-cc" value={ccText} onChange={setCcText} disabled={emailing} />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('City')}</label>
               <input className="input mt-1" value={custCity} onChange={(e) => {

@@ -11,6 +11,8 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso } from '@/lib/org-timezone';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
+import { ccValueForDocumentSave, documentCcInputError, formatCcInput, parseDocumentCc } from '@/lib/billing/document-cc';
+import DocumentCcField from '@/components/billing/DocumentCcField';
 import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
 import {
   coerceOrgId,
@@ -87,6 +89,7 @@ export default function PurchaseOrderFormClient() {
   const [supZip, setSupZip] = useState('');
   const [supPhone, setSupPhone] = useState('');
   const [supEmail, setSupEmail] = useState('');
+  const [ccText, setCcText] = useState('');
 
   const poDateTouched = useRef(false);
   const orgTodayRef = useRef(orgTodayIso());
@@ -267,6 +270,7 @@ export default function PurchaseOrderFormClient() {
       if (pdata.supState) setSupState(pdata.supState);
       if (pdata.supZip) setSupZip(pdata.supZip);
       if (pdata.supPhone) setSupPhone(pdata.supPhone);
+      setCcText(formatCcInput(pdata.cc_emails));
       const lines = Array.isArray(pdata.line_items) ? pdata.line_items : [];
       if (lines.length) {
         setLineItems(
@@ -350,7 +354,7 @@ export default function PurchaseOrderFormClient() {
 
   async function savePo(
     nextStatus: string,
-    opts?: { quiet?: boolean }
+    opts?: { quiet?: boolean; ccEmails?: string[] }
   ): Promise<string | number | null> {
     const name = supplierName.trim() || supSearch.trim();
     if (!name) {
@@ -401,6 +405,7 @@ export default function PurchaseOrderFormClient() {
           supState,
           supZip,
           supPhone,
+          cc_emails: ccValueForDocumentSave(ccText, opts?.ccEmails),
         },
       };
       if (!savedId) {
@@ -447,9 +452,16 @@ export default function PurchaseOrderFormClient() {
       toast.error('This supplier has no email on their organization profile.');
       return;
     }
+    const ccProblem = documentCcInputError(ccText);
+    if (ccProblem) {
+      toast.error(ccProblem);
+      return;
+    }
+    const ccParsed = parseDocumentCc(ccText);
+    const ccEmails = ccParsed.ok ? ccParsed.emails : [];
     setEmailing(true);
     try {
-      const id = await savePo('draft', { quiet: true });
+      const id = await savePo('draft', { quiet: true, ccEmails });
       if (!id) return;
       const {
         data: { session },
@@ -463,6 +475,7 @@ export default function PurchaseOrderFormClient() {
         accessToken: session.access_token,
         payload: {
           purchase_order_id: id,
+          cc: ccEmails,
         },
       });
       if (!result.emailSent) {
@@ -470,7 +483,7 @@ export default function PurchaseOrderFormClient() {
         return;
       }
       if (!result.sentAt) {
-        await savePo('sent', { quiet: true });
+        await savePo('sent', { quiet: true, ccEmails });
       } else {
         setStatus('sent');
         setSentAt(String(result.sentAt));
@@ -590,6 +603,9 @@ export default function PurchaseOrderFormClient() {
               <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1 opacity-90" readOnly value={supPhone || '—'} />
             </div>
+          </div>
+          <div className="mt-3">
+            <DocumentCcField id="po-cc" value={ccText} onChange={setCcText} disabled={emailing} />
           </div>
         </section>
 

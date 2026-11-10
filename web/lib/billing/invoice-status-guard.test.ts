@@ -37,6 +37,28 @@ function draftPayload(extra: Record<string, unknown> = {}) {
   };
 }
 
+test('a draft save keeps cc_emails from the last send and does not reopen the invoice', () => {
+  const guarded = applyInvoiceStatusGuard(
+    draftPayload({
+      invoice_data: {
+        line_items: [{ description: 'service', qty: 1 }],
+        custEmail: 'clinic@example.com',
+        cc_emails: [],
+      },
+    }),
+    'sent',
+    'draft',
+    { cc_emails: ['office@clinic.test'], sent_at: sentAt, email_sent: true }
+  );
+  assert.equal(guarded.downgradeBlocked, true);
+  assert.equal(guarded.status, 'sent');
+  assert.equal(Object.prototype.hasOwnProperty.call(guarded.payload, 'status'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(guarded.payload, 'total'), true);
+  const data = guarded.payload.invoice_data as Record<string, unknown>;
+  assert.deepEqual(data.cc_emails, ['office@clinic.test']);
+  assert.equal(data.sent_at, sentAt);
+});
+
 test('sent → draft is blocked and sent_at / delivery / email-sent stay', () => {
   const previous = {
     sent_at: sentAt,

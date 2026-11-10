@@ -15,6 +15,8 @@ import { viewMeasurement } from '@/lib/fluence-measurement';
 import { systemParameterRows } from '@/lib/models';
 import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/company-theme';
 import { resolveCustomerEmailOnFile, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
+import { documentCcInputError, parseDocumentCc } from '@/lib/billing/document-cc';
+import DocumentCcField from '@/components/billing/DocumentCcField';
 import { toast } from 'sonner';
 import { displayModelText } from '@/lib/model-display';
 
@@ -42,6 +44,7 @@ export default function ReportDetail() {
   const [loading, setLoading] = useState(true);
   const [emailing, setEmailing] = useState(false);
   const [emailOnFile, setEmailOnFile] = useState('');
+  const [ccText, setCcText] = useState('');
   const [theme, setTheme] = useState<CompanyTheme>(REPAIR_PLANET_THEME);
 
   useEffect(() => {
@@ -157,6 +160,13 @@ export default function ReportDetail() {
       toast.error(t('No email on file for this customer. Add one on the customer/clinic profile or the report.'));
       return;
     }
+    const ccProblem = documentCcInputError(ccText);
+    if (ccProblem) {
+      toast.error(ccProblem);
+      return;
+    }
+    const ccParsed = parseDocumentCc(ccText);
+    const ccEmails = ccParsed.ok ? ccParsed.emails : [];
 
     setEmailing(true);
     try {
@@ -181,6 +191,7 @@ export default function ReportDetail() {
           subject: report.report_number
             ? `Service Report ${report.report_number} from Total Service Pro`
             : 'Service report from Total Service Pro',
+          cc: ccEmails,
         },
       });
       if (result.emailSent) {
@@ -236,6 +247,11 @@ export default function ReportDetail() {
                   : isComplete
                     ? t('No email on file for this customer')
                     : ''}
+              </div>
+            )}
+            {report && (
+              <div className="w-full sm:w-80">
+                <DocumentCcField id="report-cc" value={ccText} onChange={setCcText} disabled={emailing} />
               </div>
             )}
           </div>

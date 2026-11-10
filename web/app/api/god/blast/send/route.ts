@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { requireGodCaller } from '@/lib/god-auth';
@@ -43,13 +44,9 @@ async function sendResend(opts: {
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return { ok: false, error: 'RESEND_API_KEY not configured' };
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const rr = await postResendEmail({
+    apiKey: key,
+    message: {
       from: blastFromAddress(opts.template),
       to: [opts.to],
       reply_to: blastReplyTo(opts.template),
@@ -57,7 +54,7 @@ async function sendResend(opts: {
       html: opts.content.html,
       text: opts.content.text,
       headers: shopInviteResendHeaders(opts.unsubscribeToken),
-    }),
+    },
   });
   const result = await rr.json().catch(() => ({}));
   if (!rr.ok) {

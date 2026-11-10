@@ -5,6 +5,7 @@
  * Soft beta. Not a paid subscription. No ads.
  */
 
+import { postResendEmail } from './mail/outgoing-mail.ts';
 import {
   COMPLIMENTARY_PREMIUM_DAYS,
   clampComplimentaryDays,
@@ -358,20 +359,17 @@ export async function sendComplimentaryPremiumTrialEmail(opts: {
     return { ok: false, error: 'No valid recipient email' };
   }
   const subject = complimentaryPremiumTrialSubject(opts.copy.organizationName);
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const rr = await postResendEmail({
+    apiKey: key,
+    env,
+    message: {
       from: complimentaryPremiumTrialFromAddress(env),
       to: [to],
       reply_to: complimentaryPremiumTrialReplyTo(env),
       subject,
       html: complimentaryPremiumTrialHtml(opts.copy),
       text: complimentaryPremiumTrialText(opts.copy),
-    }),
+    },
   });
   const result = await rr.json().catch(() => ({}));
   if (!rr.ok) {

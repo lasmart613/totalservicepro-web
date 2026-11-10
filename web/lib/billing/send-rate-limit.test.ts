@@ -653,7 +653,7 @@ test('invoice, estimate, purchase order, and report sends use the limiter and an
     const unavailableAt = src.indexOf("scope === 'unavailable'");
     const limitedAt = src.indexOf('rateLimited: true');
     const releaseAt = src.indexOf('await releaseDocumentSendSlot(');
-    const fetchAt = src.indexOf('api.resend.com');
+    const fetchAt = src.indexOf('postResendEmail(');
     assert.ok(
       limitAt >= 0 && unavailableAt > limitAt && limitedAt > unavailableAt && releaseAt > limitedAt && fetchAt > limitAt,
       rel
@@ -682,9 +682,9 @@ test('a 429 invoice send returns before Stripe checkout or an invoice write', ()
   const estimate = readFileSync(join(here, '../../app/api/billing/send-estimate/route.ts'), 'utf8');
   const report = readFileSync(join(here, '../../app/api/billing/send-report/route.ts'), 'utf8');
   assert.ok(estimate.indexOf('rateLimited: true') < estimate.indexOf('persistEstimateActionToken('));
-  assert.ok(estimate.indexOf('rateLimited: true') < estimate.indexOf('api.resend.com'));
+  assert.ok(estimate.indexOf('rateLimited: true') < estimate.indexOf('postResendEmail('));
   assert.match(estimate, /documentType: 'estimate'/);
-  assert.ok(report.indexOf('rateLimited: true') < report.indexOf('api.resend.com'));
+  assert.ok(report.indexOf('rateLimited: true') < report.indexOf('postResendEmail('));
   assert.match(report, /documentType: 'report'/);
 });
 

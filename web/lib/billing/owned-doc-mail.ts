@@ -582,8 +582,17 @@ export function resendMessage(input: {
   html: string;
   text?: string | null;
   replyTo?: string | null;
-}): { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string } {
-  const message: { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string } = {
+  cc?: string[] | null;
+}): { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string; cc?: string[] } {
+  const message: {
+    from: string;
+    to: string[];
+    subject: string;
+    html: string;
+    text?: string;
+    reply_to?: string;
+    cc?: string[];
+  } = {
     from: input.from,
     to: [input.to],
     subject: input.subject,
@@ -593,6 +602,8 @@ export function resendMessage(input: {
   if (text) message.text = text;
   const reply = String(input.replyTo || '').trim();
   if (isMailbox(reply)) message.reply_to = reply;
+  const cc = (input.cc || []).map((email) => String(email || '').trim()).filter((email) => isMailbox(email));
+  if (cc.length) message.cc = cc;
   return message;
 }
 

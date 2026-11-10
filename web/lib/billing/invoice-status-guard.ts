@@ -26,6 +26,7 @@ export const INVOICE_DELIVERY_FIELDS = [
   'last_emailed_at',
   'resend_email_id',
   'email_id',
+  'cc_emails',
 ] as const;
 
 /**

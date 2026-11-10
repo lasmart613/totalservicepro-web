@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { requireGodCaller, type GodCaller } from '@/lib/god-auth';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { publicSiteOrigin } from '@/lib/site-origin';
@@ -39,16 +40,15 @@ function adminRpc(): Rpc {
 }
 
 async function resendSend(key: string, m: Mail): Promise<SendResult> {
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const rr = await postResendEmail({
+    apiKey: key,
+    message: {
       from: process.env.DIRECTORY_EMAIL_FROM || process.env.NOTIFY_FROM_EMAIL || DIRECTORY_EMAIL_FROM_DEFAULT,
       to: m.to,
       subject: m.subject,
       html: m.html,
       text: m.text,
-    }),
+    },
   });
   const j = await rr.json().catch(() => ({}));
   return { ok: rr.ok, status: rr.status, message: j?.message };

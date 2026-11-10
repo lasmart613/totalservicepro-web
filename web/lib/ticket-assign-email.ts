@@ -3,6 +3,8 @@
  * Server-only builders. Do not import from client components.
  */
 
+import { postResendEmail } from './mail/outgoing-mail.ts';
+
 function esc(s: unknown): string {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')
@@ -178,19 +180,15 @@ export async function sendTicketAssignedEmail(opts: {
     process.env.NOTIFY_FROM_EMAIL ||
     process.env.RESEND_FROM ||
     'Total Service Pro <contact@medicalrepairnetwork.com>';
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const rr = await postResendEmail({
+    apiKey: key,
+    message: {
       from,
       to: [to],
       subject,
       html: ticketAssignHtml(opts.copy),
       text: ticketAssignText(opts.copy),
-    }),
+    },
   });
   if (!rr.ok) {
     const result = await rr.json().catch(() => ({}));

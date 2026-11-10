@@ -442,7 +442,7 @@ test('estimate form finalizes by id and the send route marks sent before mail', 
 
   const route = readFileSync(join(here, '../../app/api/billing/send-estimate/route.ts'), 'utf8');
   const claimAt = route.indexOf('finalizeEstimateDelivery');
-  const mailAt = route.indexOf('https://api.resend.com/emails');
+  const mailAt = route.indexOf('postResendEmail(');
   assert.ok(claimAt >= 0 && mailAt > claimAt);
   assert.match(route, /alreadySent/);
   assert.doesNotMatch(route, /\.insert\(/);

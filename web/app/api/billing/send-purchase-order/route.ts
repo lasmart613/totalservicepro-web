@@ -8,6 +8,8 @@ import {
   wrapSupplierFacingDocumentEmail,
 } from '@/lib/customer-invite';
 import { parseMailLocale } from '@/lib/i18n/translate-app';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
+import { ccBesidesRecipient, parseDocumentCc, rememberDocumentCc } from '@/lib/billing/document-cc';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { isSupplierOrgType } from '@/lib/org-types';
 import {
@@ -102,6 +104,7 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
     const record = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
     const poId = parseDocumentId(record.purchase_order_id ?? record.po_id);
     const locale = parseMailLocale(record.locale);
+    const ccParsed = parseDocumentCc(record);
     if (poId == null) return respond({ error: 'Purchase order id is required.' }, 400);
 
     const admin: SupabaseClient | null =
@@ -138,6 +141,8 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
     }
     const supplierName =
       (supplierOrg?.supplier ? supplierOrg.name : '') || storedName || null;
+    if (!ccParsed.ok) return respond({ error: ccParsed.error }, 400);
+    const ccForSend = ccBesidesRecipient(ccParsed.emails, recipient);
 
     const techName = await readTechName(supabase, user.id);
     const company = await loadSenderCompany(supabase, callerOrgId, techName);
@@ -216,15 +221,9 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       html,
       text,
       replyTo: shop.email,
+      cc: ccForSend,
     });
-    const rr = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(message),
-    });
+    const rr = await postResendEmail({ apiKey: resendKey, message });
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
       console.error('Resend purchase order send failed', result);
@@ -265,6 +264,17 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       }
     } catch (e) {
       console.warn('could not mark purchase order sent', e);
+    }
+
+    if (ccForSend.length && admin) {
+      await rememberDocumentCc({
+        client: admin,
+        table: 'purchase_orders',
+        id: poId,
+        dataKey: 'po_data',
+        cc: ccForSend,
+        organizationId: callerOrgId,
+      });
     }
 
     return respond(
