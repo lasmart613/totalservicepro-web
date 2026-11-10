@@ -41,8 +41,12 @@ export function clearBrowserIdentityArtifacts() {
   }
 }
 
-/** 'local': this device's session only. 'global': every session for the user. */
-export type SignOutScope = 'local' | 'global';
+/**
+ * 'local': this device only. 'global': every session, including this one
+ * (Settings' Sign Out Everywhere). 'others': every other session; this device
+ * stays signed in.
+ */
+export type SignOutScope = 'local' | 'global' | 'others';
 
 /** How long sign-out waits for /auth/v1/logout before clearing locally anyway. */
 export const SIGN_OUT_REVOKE_TIMEOUT_MS = 5000;
@@ -59,12 +63,17 @@ export const SIGN_OUT_REVOKE_TIMEOUT_MS = 5000;
  * in. scope 'global' ends every session for the user (Settings' Sign Out
  * Everywhere only). If the revoke fails or stalls (offline), the local
  * session is still dropped and the caller still redirects.
+ *
+ * scope 'others' revokes every session except this one and does not clear
+ * local storage, report cookies, or the refresh timer. A failed revoke leaves
+ * this device signed in.
  */
 export async function signOutAndClearIdentity(
   supabase: SupabaseClient,
   options: { scope?: SignOutScope; revokeTimeoutMs?: number } = {}
-): Promise<void> {
-  const scope: SignOutScope = options.scope === 'global' ? 'global' : 'local';
+): Promise<boolean> {
+  const scope: SignOutScope =
+    options.scope === 'global' || options.scope === 'others' ? options.scope : 'local';
   const revokeTimeoutMs = options.revokeTimeoutMs ?? SIGN_OUT_REVOKE_TIMEOUT_MS;
   let revoked = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -77,10 +86,11 @@ export async function signOutAndClearIdentity(
     ]);
     revoked = !result?.error;
   } catch {
-    /* offline or network error: fall through to the local clear */
+    /* offline or network error. local/global still clear this device; others does not. */
   } finally {
     if (timer) clearTimeout(timer);
   }
+  if (scope === 'others') return revoked;
   if (!revoked) {
     // Retrying signOut would call /auth/v1/logout again and keep the session
     // on a network error, so stop the refresh timer here and let the storage
@@ -106,6 +116,7 @@ export async function signOutAndClearIdentity(
     /* cookie clear is best-effort */
   }
   clearBrowserIdentityArtifacts();
+  return true;
 }
 
 /**

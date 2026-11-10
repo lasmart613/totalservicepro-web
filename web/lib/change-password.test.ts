@@ -91,5 +91,10 @@ test('profile and settings show the auth email and the reauth password form', ()
   assert.match(ui, /readOnly/);
   assert.match(ui, /Sign-in email/);
   assert.match(ui, /Change password/);
+  assert.match(ui, /Account and security/);
+  assert.match(ui, /requestLoginEmailChange/);
+  assert.match(ui, /signOutAndClearIdentity\(supabase, \{ scope: 'others' \}\)/);
   assert.doesNotMatch(ui, /updateUser\(\{ password/);
+  assert.doesNotMatch(ui, /\.auth\.signOut\(/);
+  assert.doesNotMatch(ui, /scope: 'global'/);
 });
