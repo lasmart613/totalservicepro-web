@@ -52,6 +52,9 @@ test('recovery links go to set-password without the team invite heading', () => 
   const redirect = recoveryRedirect(ORIGIN);
   assert.equal(redirect, `${ORIGIN}/auth/set-password`);
   assert.equal(recoveryRedirect(`${ORIGIN}/`), `${ORIGIN}/auth/set-password`);
+  assert.equal(recoveryRedirect(''), `${ORIGIN}/auth/set-password`);
+  assert.notEqual(recoveryRedirect(''), ORIGIN);
+  assert.notEqual(recoveryRedirect(''), `${ORIGIN}/`);
   assert.equal(setupLinkRedirect(ORIGIN, 'reset'), `${ORIGIN}/auth/set-password`);
   assert.equal(setupLinkRedirect(ORIGIN, 'recovery'), `${ORIGIN}/auth/set-password`);
   assert.doesNotMatch(redirect, /[?#]/);
@@ -229,6 +232,10 @@ test('callback, set-password, and email callers use the link-type router', () =>
   assert.doesNotMatch(invite, /magiclink/);
   assert.doesNotMatch(invite, /inviteUserByEmail/);
   assert.match(otp, /loginMagicLinkRedirect/);
+
+  const god = readFileSync(join(here, 'god-crud.ts'), 'utf8');
+  assert.match(god, /updateUserById/);
+  assert.doesNotMatch(god, /resetPasswordForEmail|generateLink/);
 
   const client = readFileSync(join(here, 'supabase/client.ts'), 'utf8');
   const layout = readFileSync(join(here, '../app/layout.tsx'), 'utf8');

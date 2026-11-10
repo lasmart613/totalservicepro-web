@@ -129,18 +129,17 @@ function callbackUrl(origin: string, pairs: Array<[string, string]>): string {
 /**
  * Password-reset redirect. Path only, no query.
  *
- * resetPasswordForEmail puts this in the email as redirect_to. The live
- * message used redirect_to=https://repairplanet.net (the Site URL). This
- * helper was sending /auth/callback with a next and flow query. Auth keeps
- * redirect_to only when it matches the Site URL or an Additional Redirect
- * URL, and otherwise substitutes the Site URL. The implicit-flow client
- * then signed the user in on the home page and the recovery token was spent.
+ * resetPasswordForEmail puts this in the email as redirect_to. Omitting it,
+ * or passing only the site root, makes GoTrue use the Site URL
+ * (https://repairplanet.net). The Additional Redirect URL
+ * https://repairplanet.net/** already covers /auth/set-password, so this
+ * path is kept. The recovery gate still catches a link that lands on the root.
  *
- * Invite links still use the callback (flow=invite). PKCE drops type, and
- * the callback needs that flag. Recovery defaults to the reset form.
+ * Invite links still use the callback (flow=invite). Recovery does not.
  */
 export function recoveryRedirect(origin: string): string {
-  return `${originOf(origin)}/auth/set-password`;
+  const base = originOf(origin) || PRODUCTION_SITE_ORIGIN;
+  return `${base}/auth/set-password`;
 }
 
 /** generateLink redirect. type invite → callback with flow=invite. Any other setup type → recovery page. */
