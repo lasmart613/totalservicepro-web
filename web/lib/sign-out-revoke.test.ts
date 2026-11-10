@@ -100,6 +100,29 @@ test('Sign Out Everywhere (scope global) calls /auth/v1/logout?scope=global, sam
   assert.equal(await revokeOrder('global'), 'POST /auth/v1/logout?scope=global');
 });
 
+test('scope others revokes other sessions and keeps this device signed in', async () => {
+  const { supabase, local, events, signOutAndClearIdentity } = await setup('ok');
+  const ok = await signOutAndClearIdentity(supabase as any, { scope: 'others' });
+  assert.equal(ok, true);
+  const logout = events.find((e) => e.what.startsWith('POST /auth/v1/logout'));
+  assert.equal(logout?.what, 'POST /auth/v1/logout?scope=others');
+  assert.equal(logout?.tokenInStorage, true);
+  assert.notEqual(local.getItem(KEY), null);
+  assert.notEqual(local.getItem('tsp-pending-signup'), null);
+  assert.equal(events.some((e) => e.what.startsWith('DELETE ')), false);
+  const { data } = await supabase.auth.getSession();
+  assert.ok(data.session);
+});
+
+test('scope others leaves this device signed in when the revoke fails', async () => {
+  const { supabase, local, signOutAndClearIdentity } = await setup('error500');
+  const ok = await signOutAndClearIdentity(supabase as any, { scope: 'others' });
+  assert.equal(ok, false);
+  assert.notEqual(local.getItem(KEY), null);
+  const { data } = await supabase.auth.getSession();
+  assert.ok(data.session);
+});
+
 for (const mode of ['offline', 'error500'] as const) {
   test(`sign-out still clears local state when the revoke fails (${mode})`, async () => {
     const { supabase, local, events, signOutAndClearIdentity } = await setup(mode);
@@ -125,7 +148,10 @@ test('helper order: signOut({ scope }) first, then the local clear; default loca
   const fn = src.slice(src.indexOf('export async function signOutAndClearIdentity'), src.indexOf('export async function prepareFreshSignup'));
   const signOut = fn.indexOf('supabase.auth.signOut({ scope })');
   assert.ok(signOut > 0);
-  assert.match(fn, /const scope: SignOutScope = options\.scope === 'global' \? 'global' : 'local';/);
+  assert.match(
+    fn,
+    /const scope: SignOutScope =\n\s*options\.scope === 'global' \|\| options\.scope === 'others' \? options\.scope : 'local';/,
+  );
   assert.ok(fn.indexOf('clearBrowserIdentityArtifacts()') > signOut, 'local clear after signOut');
   assert.equal((fn.match(/clearBrowserIdentityArtifacts\(\)/g) || []).length, 1, 'no clear before the revoke');
   assert.equal((fn.match(/\.auth\.signOut\(/g) || []).length, 1, 'one revoke call, no retry');

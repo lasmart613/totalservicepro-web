@@ -126,18 +126,95 @@ function callbackUrl(origin: string, pairs: Array<[string, string]>): string {
   return `${originOf(origin)}/auth/callback?${qs}`;
 }
 
-/** generateLink redirect. type invite → flow=invite. Any other setup type → flow=reset. */
+/**
+ * Password-reset redirect. Path only, no query.
+ *
+ * resetPasswordForEmail puts this in the email as redirect_to. Omitting it,
+ * or passing only the site root, makes GoTrue use the Site URL
+ * (https://repairplanet.net). The Additional Redirect URL
+ * https://repairplanet.net/** already covers /auth/set-password, so this
+ * path is kept. The recovery gate still catches a link that lands on the root.
+ *
+ * Invite links still use the callback (flow=invite). Recovery does not.
+ */
+export function recoveryRedirect(origin: string): string {
+  const base = originOf(origin) || PRODUCTION_SITE_ORIGIN;
+  return `${base}/auth/set-password`;
+}
+
+/** generateLink redirect. type invite → callback with flow=invite. Any other setup type → recovery page. */
 export function setupLinkRedirect(origin: string, linkType: string): string {
   const invite = String(linkType || '').trim().toLowerCase() === 'invite';
+  if (!invite) return recoveryRedirect(origin);
   return callbackUrl(origin, [
     ['next', safeRedirectPath(SET_PASSWORD, origin, '')],
-    ['flow', invite ? 'invite' : 'reset'],
+    ['flow', 'invite'],
   ]);
 }
 
-export function recoveryRedirect(origin: string): string {
-  return setupLinkRedirect(origin, 'reset');
+function normalizePath(pathname: string): string {
+  let path = String(pathname || '/').split(/[?#]/)[0] || '/';
+  if (path.length > 1 && path.endsWith('/')) path = path.slice(0, -1);
+  return path || '/';
 }
+
+export function isSetPasswordPath(pathname: string | null | undefined): boolean {
+  const path = normalizePath(pathname || '');
+  return path === SET_PASSWORD || path.startsWith(`${SET_PASSWORD}/`);
+}
+
+function paramTypeIsRecovery(raw: string): boolean {
+  const q = String(raw || '').replace(/^[?#]/, '');
+  if (!q) return false;
+  return new URLSearchParams(q).get('type')?.trim().toLowerCase() === 'recovery';
+}
+
+/** True when the hash or query carries Supabase type=recovery. */
+export function urlHasRecoveryType(search: string, hash: string): boolean {
+  return paramTypeIsRecovery(search) || paramTypeIsRecovery(hash);
+}
+
+/**
+ * Where a recovery link should open. Null when this load is already the
+ * set-password page, or the URL is not a recovery callback.
+ * Keeps the hash and query so implicit tokens and a PKCE code survive.
+ */
+export function recoveryLandingHref(loc: {
+  pathname?: string;
+  search?: string;
+  hash?: string;
+}): string | null {
+  if (isSetPasswordPath(loc.pathname)) return null;
+  if (!urlHasRecoveryType(loc.search || '', loc.hash || '')) return null;
+  return `${SET_PASSWORD}${loc.search || ''}${loc.hash || ''}`;
+}
+
+/**
+ * PASSWORD_RECOVERY fires after the client has stored the session and, on
+ * the implicit flow, removed type=recovery from the URL. Send them to the
+ * form even though a session already exists. Null on the form itself.
+ */
+export function passwordRecoveryEventHref(event: string, pathname: string): string | null {
+  if (event !== 'PASSWORD_RECOVERY') return null;
+  if (isSetPasswordPath(pathname)) return null;
+  return `${SET_PASSWORD}?flow=reset`;
+}
+
+/**
+ * Runs from the root document head, before the Supabase client can consume
+ * the hash and before the home page treats the new session as a normal sign-in.
+ * Must stay in lockstep with recoveryLandingHref.
+ */
+export const RECOVERY_BOOT_SCRIPT =
+  '(function(){try{' +
+  'var p=location.pathname||"/";' +
+  'if(p.length>1&&p.charAt(p.length-1)==="/")p=p.slice(0,-1);' +
+  'if(p==="/auth/set-password"||p.indexOf("/auth/set-password/")===0)return;' +
+  'function recovery(raw){var q=String(raw||"").replace(/^[?#]/,"");if(!q)return false;' +
+  'return String(new URLSearchParams(q).get("type")||"").trim().toLowerCase()==="recovery";}' +
+  'if(!recovery(location.search)&&!recovery(location.hash))return;' +
+  'location.replace("/auth/set-password"+(location.search||"")+(location.hash||""));' +
+  '}catch(e){}})();';
 
 /** signInWithOtp / login magic link. Never /auth/set-password. */
 export function loginMagicLinkRedirect(

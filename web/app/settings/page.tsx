@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { AccountSecurity } from '@/components/AccountSecurity';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
@@ -273,7 +274,8 @@ export default function Settings() {
 
           <div>
             <div className="font-semibold mb-2">{t('Account')}</div>
-            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s, { scope: 'global' }); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">{t('Sign Out Everywhere')}</button>
+            <AccountSecurity />
+            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s, { scope: 'global' }); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40 mt-4">{t('Sign Out Everywhere')}</button>
           </div>
 
           <div className="pt-2 border-t border-[var(--border)]">

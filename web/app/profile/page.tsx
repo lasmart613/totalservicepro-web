@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useRef, useState } from 'react';
+import { AccountSecurity } from '@/components/AccountSecurity';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
@@ -198,6 +199,10 @@ export default function Profile() {
       <Header />
       <div className="max-w-lg mx-auto w-full p-6">
         <h1 className="text-xl font-bold mb-4">👤 {t('Your Profile')}</h1>
+
+        <div className="card p-5 mb-4">
+          <AccountSecurity />
+        </div>
 
         <div className="space-y-4 card p-5">
           <div className="grid grid-cols-2 gap-4">

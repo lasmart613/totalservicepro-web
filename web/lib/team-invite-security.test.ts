@@ -963,8 +963,8 @@ test('resend falls forward when invite cannot be reissued, still without returni
     (call) => (call as { options?: { redirectTo?: string } }).options?.redirectTo || ''
   );
   assert.match(followupRedirects[0], /flow=invite/);
-  assert.match(followupRedirects[1], /flow=reset/);
-  assert.match(followupRedirects[1], /set-password/);
+  assert.equal(followupRedirects[1].split('?')[0].endsWith('/auth/set-password'), true);
+  assert.doesNotMatch(followupRedirects[1], /[?#]/);
   assert.doesNotMatch(followupRedirects[1], /flow=invite/);
   assert.equal(result.sent.length, 1);
   assert.deepEqual(result.sent[0].to, [INVITEE]);

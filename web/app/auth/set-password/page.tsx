@@ -90,9 +90,15 @@ function SetPasswordInner() {
         }
 
         if (!cancelled) {
+          // A recovery link signs the user in before this page. Keep the form
+          // up; do not send an existing session to the hub.
           setEmail(user.email || '');
           setReady(true);
-          setMessage('Create a password for your account, then you can sign in anytime.');
+          setMessage(
+            linkFlow === 'invite'
+              ? 'Create a password for your account, then you can sign in anytime.'
+              : 'Choose a new password. Saving it replaces the old one.'
+          );
         }
       } catch (e: any) {
         if (!cancelled) {

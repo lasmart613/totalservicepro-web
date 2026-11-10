@@ -284,7 +284,13 @@
     async function forgotPassword() {
         const email = document.getElementById('email').value.trim();
         if (!email) return (document.getElementById('formMessage').textContent = 'Enter your email first');
-        const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+        var resetTo = 'https://repairplanet.net/auth/set-password';
+        try {
+            if (/^https?:$/.test(location.protocol) && /(^|\.)repairplanet\.net$/i.test(location.hostname)) {
+                resetTo = location.origin.replace(/\/$/, '') + '/auth/set-password';
+            }
+        } catch (e) {}
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email, { redirectTo: resetTo });
         document.getElementById('formMessage').textContent = error ? error.message : 'Reset link sent!';
     }
 
