@@ -43,6 +43,14 @@ import {
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave, loadStoredInvoiceData } from '@/lib/billing/invoice-form-data';
 import {
+  emptyInvoiceCustomerDraft,
+  invoiceCustomerDraftFromHit,
+  invoiceCustomerDraftFromRow,
+  invoiceCustomerWrite,
+  invoiceSaveToast,
+  type InvoiceCustomerDraft,
+} from '@/lib/billing/invoice-customer-save';
+import {
   applyInvoiceStatusGuard,
   invoiceDraftLockedHint,
   invoiceStatusBlocksDraftDowngrade,
@@ -103,6 +111,14 @@ export default function InvoiceFormClient() {
   const [emailing, setEmailing] = useState(false);
 
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
+  const customerRef = useRef<InvoiceCustomerDraft>(emptyInvoiceCustomerDraft());
+  const savedCustomerRef = useRef<InvoiceCustomerDraft>(emptyInvoiceCustomerDraft());
+  const formTouchedRef = useRef(false);
+  const payloadSignatureRef = useRef<string | null>(null);
+  const loadTokenRef = useRef(0);
+  const loadedEditIdRef = useRef<string | null>(null);
+  const routerRef = useRef(router);
+  routerRef.current = router;
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerName, setCustomerName] = useState('');
@@ -239,27 +255,35 @@ export default function InvoiceFormClient() {
     }
   }, [supabase]);
 
+  function showCustomer(draft: InvoiceCustomerDraft) {
+    customerRef.current = draft;
+    setCustomerName(draft.name);
+    setCustomerOrgId(draft.orgId);
+    setCustSearch(draft.name);
+    setCustAddress(draft.address);
+    setCustCity(draft.city);
+    setCustState(draft.state);
+    setCustZip(draft.zip);
+    setCustPhone(draft.phone);
+    setCustEmail(draft.email);
+    setCustContact(draft.contact);
+  }
+
   const applyCustomer = (c: CustomerOpt) => {
-    setCustomerName(c.name);
-    setCustomerOrgId(c.id);
-    setCustSearch(c.name);
-    setCustAddress(c.address || '');
-    setCustCity(c.city || '');
-    setCustState(c.state || '');
-    setCustZip(c.zip || '');
-    setCustPhone(c.phone || '');
-    setCustEmail(c.email || '');
-    setCustContact(c.contact || '');
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    formTouchedRef.current = true;
+    showCustomer(invoiceCustomerDraftFromHit(c));
     setShowCustDrop(false);
   };
 
   const loadInvoice = useCallback(
-    async (id: string) => {
+    async (id: string, token: number) => {
       const { data, error } = await supabase
         .from('service_invoices')
         .select('*')
         .eq('id', id)
         .maybeSingle();
+      if (token !== loadTokenRef.current || formTouchedRef.current) return;
       if (error || !data) {
         toast.error('Could not load invoice');
         return;
@@ -268,9 +292,19 @@ export default function InvoiceFormClient() {
       setSavedId(data.id);
       setStatus(data.status || 'draft');
       setStoredVoidReason(data.void_reason || parseJsonField(data.invoice_data).void_reason || null);
-      setCustomerName(data.customer_name || '');
-      setCustSearch(data.customer_name || '');
-      setCustomerOrgId(data.customer_organization_id || null);
+      const loadedCustomer = invoiceCustomerDraftFromRow(data);
+      customerRef.current = loadedCustomer;
+      savedCustomerRef.current = loadedCustomer;
+      setCustomerName(loadedCustomer.name);
+      setCustSearch(loadedCustomer.name);
+      setCustomerOrgId(loadedCustomer.orgId);
+      setCustAddress(loadedCustomer.address);
+      setCustCity(loadedCustomer.city);
+      setCustState(loadedCustomer.state);
+      setCustZip(loadedCustomer.zip);
+      setCustPhone(loadedCustomer.phone);
+      setCustEmail(loadedCustomer.email);
+      setCustContact(loadedCustomer.contact);
       setSourceEstimateId(data.estimate_id || null);
       invoiceDateTouched.current = true;
       setInvoiceDate(
@@ -309,13 +343,6 @@ export default function InvoiceFormClient() {
         setChargeDepositOnly(true);
       }
       setDeferredReleased(split.deferredReleased);
-      if (idata.custAddress) setCustAddress(idata.custAddress);
-      if (idata.custCity) setCustCity(idata.custCity);
-      if (idata.custState) setCustState(idata.custState);
-      if (idata.custZip) setCustZip(idata.custZip);
-      if (idata.custPhone) setCustPhone(idata.custPhone);
-      if (idata.custEmail) setCustEmail(idata.custEmail);
-      if (idata.custContact) setCustContact(idata.custContact);
       const loadedPayee = storedInvoicePayee(data);
       setPayeeKind(loadedPayee.payee_kind);
       setStoredPayeeKind(loadedPayee.payee_kind);
@@ -369,10 +396,18 @@ export default function InvoiceFormClient() {
         return;
       }
       setSourceEstimateId(data.id);
-      setCustomerName(data.customer_name || '');
-      setCustSearch(data.customer_name || '');
-      setCustomerOrgId(data.customer_organization_id || null);
       const ed = parseJsonField(data.estimate_data);
+      showCustomer({
+        name: data.customer_name || '',
+        orgId: data.customer_organization_id || null,
+        address: ed.custAddress || '',
+        city: ed.custCity || '',
+        state: ed.custState || '',
+        zip: ed.custZip || '',
+        phone: ed.custPhone || '',
+        email: ed.custEmail || '',
+        contact: ed.custContact || '',
+      });
       cascade.hydrate({
         equipmentType: ed.equipment_type || ed.equipmentType,
         manufacturer: ed.manufacturer || '',
@@ -380,13 +415,6 @@ export default function InvoiceFormClient() {
       });
       setSerial(ed.serial || '');
       setPulseCount(ed.pulse_count != null ? String(ed.pulse_count) : '');
-      setCustAddress(ed.custAddress || '');
-      setCustCity(ed.custCity || '');
-      setCustState(ed.custState || '');
-      setCustZip(ed.custZip || '');
-      setCustPhone(ed.custPhone || '');
-      setCustEmail(ed.custEmail || '');
-      setCustContact(ed.custContact || '');
       setTax(Number(ed.tax) || 0);
       if (data.total != null) setTotalOverride(Number(data.total));
       const estDeposit = estimatePartsDeposit(ed, Number(data.total) || Number(ed.total) || undefined);
@@ -478,15 +506,18 @@ export default function InvoiceFormClient() {
         return;
       }
       // Only fill blanks: never overwrite something already typed.
-      setCustomerName((v) => fillIfEmpty(v, p.customerName));
-      setCustSearch((v) => fillIfEmpty(v, p.customerName));
-      setCustomerOrgId((v) => (v != null && v !== '' ? v : p.customerOrganizationId));
-      setCustAddress((v) => fillIfEmpty(v, p.customerAddress));
-      setCustCity((v) => fillIfEmpty(v, p.customerCity));
-      setCustState((v) => fillIfEmpty(v, p.customerState));
-      setCustPhone((v) => fillIfEmpty(v, p.customerPhone));
-      setCustEmail((v) => fillIfEmpty(v, p.customerEmail));
-      setCustContact((v) => fillIfEmpty(v, p.customerContactName));
+      const current = customerRef.current;
+      showCustomer({
+        name: fillIfEmpty(current.name, p.customerName),
+        orgId: current.orgId != null && current.orgId !== '' ? current.orgId : p.customerOrganizationId,
+        address: fillIfEmpty(current.address, p.customerAddress),
+        city: fillIfEmpty(current.city, p.customerCity),
+        state: fillIfEmpty(current.state, p.customerState),
+        zip: current.zip,
+        phone: fillIfEmpty(current.phone, p.customerPhone),
+        email: fillIfEmpty(current.email, p.customerEmail),
+        contact: fillIfEmpty(current.contact, p.customerContactName),
+      });
       if (p.equipmentMake || p.equipmentModel) {
         cascade.hydrate({
           equipmentType: p.equipmentType || undefined,
@@ -521,7 +552,13 @@ export default function InvoiceFormClient() {
 
   useEffect(() => {
     let cancelled = false;
-    const invoiceTask = editIdParam ? loadInvoice(editIdParam) : null;
+    const token = ++loadTokenRef.current;
+    const editKey = editIdParam || '';
+    if (loadedEditIdRef.current !== editKey) {
+      loadedEditIdRef.current = editKey;
+      formTouchedRef.current = false;
+    }
+    const invoiceTask = editIdParam ? loadInvoice(editIdParam, token) : null;
     (async () => {
       setLoading(true);
       try {
@@ -530,10 +567,10 @@ export default function InvoiceFormClient() {
         } = await supabase.auth.getSession();
         const user = session?.user;
         if (!user) {
-          router.push('/login');
+          routerRef.current.push('/login');
           return;
         }
-        if (cancelled) return;
+        if (cancelled || token !== loadTokenRef.current) return;
         setUserId(user.id);
         const { data: profile } = await supabase
           .from('user_profiles')
@@ -542,7 +579,7 @@ export default function InvoiceFormClient() {
           )
           .eq('id', user.id)
           .maybeSingle();
-        if (cancelled) return;
+        if (cancelled || token !== loadTokenRef.current) return;
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
         void getOrgRole(supabase, user.id, orgId)
@@ -583,7 +620,6 @@ export default function InvoiceFormClient() {
           });
         }
         if (orgId) {
-          void refreshCustomers(orgId, '');
           void getCompanyTheme(orgId, supabase)
             .then((theme) => {
               if (!cancelled) setCompanyTheme(theme);
@@ -610,11 +646,13 @@ export default function InvoiceFormClient() {
     })();
     return () => {
       cancelled = true;
+      loadTokenRef.current += 1;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [supabase, router, editIdParam, fromEstimateParam, fromTicketParam, fromReportParam]);
+  }, [supabase, editIdParam, fromEstimateParam, fromTicketParam, fromReportParam]);
 
   function updateLine(id: string, patch: Partial<LineItem>) {
+    formTouchedRef.current = true;
     setTotalOverride(null);
     setLineItems((rows) =>
       rows.map((r) => (r.id === id ? recomputeExt({ ...r, ...patch }) : r))
@@ -662,7 +700,8 @@ export default function InvoiceFormClient() {
     nextStatus: string,
     opts?: { quiet?: boolean; deferredReleased?: boolean; preserveStatus?: boolean }
   ): Promise<string | number | null> {
-    const name = customerName.trim() || custSearch.trim();
+    const picked = invoiceCustomerWrite(customerRef.current);
+    const name = picked.customer_name || custSearch.trim();
     if (!name) {
       toast.error('Customer name is required');
       return null;
@@ -729,13 +768,13 @@ export default function InvoiceFormClient() {
         pulse_count: pulseCount,
         invoice_number: invNum,
         invNumber: invNum,
-        custAddress,
-        custCity,
-        custState,
-        custZip,
-        custPhone,
-        custEmail,
-        custContact,
+        custAddress: picked.invoiceData.address,
+        custCity: picked.invoiceData.city,
+        custState: picked.invoiceData.state,
+        custZip: picked.invoiceData.zip,
+        custPhone: picked.invoiceData.phone,
+        custEmail: picked.invoiceData.email,
+        custContact: picked.invoiceData.contact,
         payee_kind: payee.payee_kind,
         payee_name: payee.payee_name,
       };
@@ -753,7 +792,7 @@ export default function InvoiceFormClient() {
       const payload: Record<string, any> = {
         customer_name: name,
         organization_id: userOrgId || null,
-        customer_organization_id: customerOrgId || null,
+        customer_organization_id: picked.customer_organization_id,
         estimate_id: sourceEstimateId || null,
         invoice_date: invoiceDate || orgTodayRef.current,
         due_date: dueDate || null,
@@ -781,6 +820,11 @@ export default function InvoiceFormClient() {
 
       // A draft request after send keeps the stored status. Field edits still write.
       const guarded = applyInvoiceStatusGuard(payload, status, requestedStatus, previousInvoiceData);
+      const signature = JSON.stringify(guarded.payload);
+      if (payloadSignatureRef.current != null && payloadSignatureRef.current === signature) {
+        if (!opts?.quiet) toast.message('No changes to save.');
+        return existingId;
+      }
 
       const result = await writeWithColumnRetry(
         supabase,
@@ -788,7 +832,12 @@ export default function InvoiceFormClient() {
         guarded.payload,
         existingId
       );
-      if (result.error) throw result.error;
+      const notice = invoiceSaveToast({ unchanged: false, persisted: !result.error && result.persisted });
+      if (notice !== 'saved') {
+        throw result.error || new Error('Could not save invoice.');
+      }
+      payloadSignatureRef.current = signature;
+      savedCustomerRef.current = { ...customerRef.current };
 
       if (result.id) {
         savedIdRef.current = result.id;
@@ -1208,16 +1257,21 @@ export default function InvoiceFormClient() {
               value={custSearch}
               onChange={(e) => {
                 const next = e.target.value;
+                formTouchedRef.current = true;
+                const keepOrg = next.trim() !== '' && next.trim() === customerRef.current.name.trim();
+                customerRef.current = {
+                  ...customerRef.current,
+                  name: next,
+                  orgId: keepOrg ? customerRef.current.orgId : null,
+                };
                 setCustSearch(next);
                 setCustomerName(next);
+                setCustomerOrgId(customerRef.current.orgId);
                 setShowCustDrop(true);
-                if (!next) setCustomerOrgId(null);
-                scheduleCustomerSearch(next);
+                if (next.trim()) scheduleCustomerSearch(next);
+                else if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
               }}
-              onFocus={() => {
-                setShowCustDrop(true);
-                if (!custSearch && customers.length === 0) scheduleCustomerSearch('');
-              }}
+              onFocus={() => setShowCustDrop(true)}
               placeholder={t('Type customer name…')}
               autoComplete="off"
             />
@@ -1243,32 +1297,60 @@ export default function InvoiceFormClient() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Address')}</label>
-              <input className="input mt-1" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} />
+              <input className="input mt-1" value={custAddress} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, address: e.target.value };
+                setCustAddress(e.target.value);
+              }} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Contact')}</label>
-              <input className="input mt-1" value={custContact} onChange={(e) => setCustContact(e.target.value)} />
+              <input className="input mt-1" value={custContact} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, contact: e.target.value };
+                setCustContact(e.target.value);
+              }} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
-              <input className="input mt-1" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} />
+              <input className="input mt-1" value={custPhone} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, phone: e.target.value };
+                setCustPhone(e.target.value);
+              }} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Email')}</label>
-              <input className="input mt-1" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} />
+              <input className="input mt-1" type="email" value={custEmail} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, email: e.target.value };
+                setCustEmail(e.target.value);
+              }} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('City')}</label>
-              <input className="input mt-1" value={custCity} onChange={(e) => setCustCity(e.target.value)} />
+              <input className="input mt-1" value={custCity} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, city: e.target.value };
+                setCustCity(e.target.value);
+              }} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
                 <label className="text-xs text-[var(--text3)]">{t('State')}</label>
-                <input className="input mt-1" maxLength={2} value={custState} onChange={(e) => setCustState(e.target.value)} />
+                <input className="input mt-1" maxLength={2} value={custState} onChange={(e) => {
+                  formTouchedRef.current = true;
+                  customerRef.current = { ...customerRef.current, state: e.target.value };
+                  setCustState(e.target.value);
+                }} />
               </div>
               <div>
                 <label className="text-xs text-[var(--text3)]">{t('ZIP')}</label>
-                <input className="input mt-1" value={custZip} onChange={(e) => setCustZip(e.target.value)} />
+                <input className="input mt-1" value={custZip} onChange={(e) => {
+                  formTouchedRef.current = true;
+                  customerRef.current = { ...customerRef.current, zip: e.target.value };
+                  setCustZip(e.target.value);
+                }} />
               </div>
             </div>
           </div>

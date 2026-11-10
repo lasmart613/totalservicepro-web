@@ -364,9 +364,9 @@ test('invoice editor searches linked customers and does not wait on the full dir
   assert.match(src, /filterLinkedCustomers/);
   assert.doesNotMatch(src, /loadLinkedCustomerOrgs|loadLinkedCustomers\(/);
   assert.doesNotMatch(init, /await refreshCustomers|await searchLinkedCustomers|await loadParts|await getOrgRole|await getCompanyTheme/);
-  const invoiceAt = init.indexOf('loadInvoice(editIdParam)');
+  const invoiceAt = init.indexOf('loadInvoice(editIdParam, token)');
   const sessionAt = init.indexOf('auth.getSession');
-  assert.ok(invoiceAt > 0 && sessionAt > invoiceAt, 'the invoice read starts before the session read');
+  assert.ok(invoiceAt >= 0 && sessionAt > invoiceAt, 'the invoice read starts before the session read');
 });
 
 function searchClient(opts: {
