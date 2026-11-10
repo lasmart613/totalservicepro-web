@@ -144,8 +144,9 @@ export default function InvoicesListPage() {
       const sessionWasStale = await ensureFreshInvoiceSession();
       if (gen !== initGen.current) return;
       const {
-        data: { user },
-      } = await supabase.auth.getUser();
+        data: { session },
+      } = await supabase.auth.getSession();
+      const user = session?.user;
       if (!user) {
         router.push('/login');
         return;
@@ -190,27 +191,34 @@ export default function InvoicesListPage() {
     opts: { sessionWasStale: boolean; gen: number; preserveOnError?: boolean }
   ) {
     const run = async () => {
-      const errors: string[] = [];
-      const batches: InvoiceRow[][] = [];
+      const jobs: Array<{ label: string; query: PromiseLike<{ data: InvoiceRow[] | null; error: { message?: string } | null }> }> = [];
       if (isValidOrgId(orgId)) {
-        const q1 = await supabase
+        jobs.push({
+          label: 'Could not load company invoices',
+          query: supabase
+            .from('service_invoices')
+            .select('*')
+            .eq('organization_id', orgId)
+            .order('created_at', { ascending: false })
+            .limit(150),
+        });
+      }
+      jobs.push({
+        label: 'Could not load your invoices',
+        query: supabase
           .from('service_invoices')
           .select('*')
-          .eq('organization_id', orgId)
+          .eq('created_by', userId)
           .order('created_at', { ascending: false })
-          .limit(150);
-        if (q1.error) errors.push(q1.error.message || 'Could not load company invoices');
-        else batches.push((q1.data || []) as InvoiceRow[]);
-      }
-
-      const q2 = await supabase
-        .from('service_invoices')
-        .select('*')
-        .eq('created_by', userId)
-        .order('created_at', { ascending: false })
-        .limit(100);
-      if (q2.error) errors.push(q2.error.message || 'Could not load your invoices');
-      else batches.push((q2.data || []) as InvoiceRow[]);
+          .limit(100),
+      });
+      const results = await Promise.all(jobs.map((job) => job.query));
+      const errors: string[] = [];
+      const batches: InvoiceRow[][] = [];
+      results.forEach((result, i) => {
+        if (result.error) errors.push(result.error.message || jobs[i].label);
+        else batches.push((result.data || []) as InvoiceRow[]);
+      });
       return { rows: mergeInvoiceRows(batches), errors };
     };
 

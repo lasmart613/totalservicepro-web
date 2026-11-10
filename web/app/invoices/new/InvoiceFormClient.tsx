@@ -35,7 +35,7 @@ import { AddToOrgCheckbox } from '@/components/CustomerEquipmentPicker';
 import { useCustomerEquipment } from '@/lib/use-customer-equipment';
 import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
 import { NEW_EQUIPMENT_VALUE } from '@/lib/customer-equipment';
-import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
+import { filterLinkedCustomers, searchLinkedCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
   collectableInvoiceDataFields,
   estimatePartsDeposit,
@@ -191,17 +191,31 @@ export default function InvoiceFormClient() {
     () => filterLinkedCustomers(customers, custSearch, 12),
     [customers, custSearch]
   );
+  const customerSearchGen = useRef(0);
+  const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const loadCustomers = useCallback(
-    async (orgId: string | number) => {
+  const refreshCustomers = useCallback(
+    async (orgId: string | number, query: string) => {
+      const gen = ++customerSearchGen.current;
       try {
-        setCustomers(await loadLinkedCustomerOrgs(supabase, orgId));
+        const rows = await searchLinkedCustomers(supabase, orgId, query);
+        if (gen !== customerSearchGen.current) return;
+        setCustomers(rows);
       } catch {
-        setCustomers([]);
+        if (gen === customerSearchGen.current) setCustomers([]);
       }
     },
     [supabase]
   );
+
+  function scheduleCustomerSearch(query: string) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    if (!isValidOrgId(userOrgId)) return;
+    const orgId = userOrgId;
+    customerSearchTimer.current = setTimeout(() => {
+      void refreshCustomers(orgId, query);
+    }, 180);
+  }
 
   const loadParts = useCallback(async () => {
     try {
@@ -506,40 +520,43 @@ export default function InvoiceFormClient() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const invoiceTask = editIdParam ? loadInvoice(editIdParam) : null;
     (async () => {
       setLoading(true);
       try {
         const {
-          data: { user },
-        } = await supabase.auth.getUser();
+          data: { session },
+        } = await supabase.auth.getSession();
+        const user = session?.user;
         if (!user) {
           router.push('/login');
           return;
         }
+        if (cancelled) return;
         setUserId(user.id);
         const { data: profile } = await supabase
           .from('user_profiles')
           .select(
-            'role, organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+            'role, organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan, timezone)'
           )
           .eq('id', user.id)
           .maybeSingle();
+        if (cancelled) return;
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
-        const looked = await getOrgRole(supabase, user.id, orgId);
-        setCallerRole(looked.ok ? voidInvoiceRole(looked) : '');
-        let storedZone: string | null = null;
-        if (orgId) {
-          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
-          if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
-          else if (zoneRow.data?.timezone) {
-            storedZone = String(zoneRow.data.timezone);
-            setOrgTimeZone(storedZone);
-          }
-        }
+        void getOrgRole(supabase, user.id, orgId)
+          .then((looked) => {
+            if (!cancelled) setCallerRole(looked.ok ? voidInvoiceRole(looked) : '');
+          })
+          .catch(() => {
+            if (!cancelled) setCallerRole('');
+          });
         const org = Array.isArray((profile as any)?.organizations)
           ? (profile as any).organizations[0]
           : (profile as any)?.organizations;
+        const storedZone = org?.timezone ? String(org.timezone) : null;
+        if (storedZone) setOrgTimeZone(storedZone);
         orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
         if (!editIdParam && !invoiceDateTouched.current) setInvoiceDate(orgTodayRef.current);
         const meta = (user.user_metadata || {}) as Record<string, unknown>;
@@ -566,17 +583,19 @@ export default function InvoiceFormClient() {
           });
         }
         if (orgId) {
-          await loadCustomers(orgId);
-          try {
-            setCompanyTheme(await getCompanyTheme(orgId, supabase));
-          } catch (themeErr) {
-            console.warn('company theme', themeErr);
-          }
+          void refreshCustomers(orgId, '');
+          void getCompanyTheme(orgId, supabase)
+            .then((theme) => {
+              if (!cancelled) setCompanyTheme(theme);
+            })
+            .catch((themeErr) => {
+              console.warn('company theme', themeErr);
+            });
         }
-        await loadParts();
+        void loadParts();
 
-        if (editIdParam) {
-          await loadInvoice(editIdParam);
+        if (invoiceTask) {
+          await invoiceTask;
         } else if (fromEstimateParam) {
           await prefillFromEstimate(fromEstimateParam);
         } else if (fromTicketParam || fromReportParam) {
@@ -586,9 +605,12 @@ export default function InvoiceFormClient() {
       } catch (e) {
         console.error(e);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [supabase, router, editIdParam, fromEstimateParam, fromTicketParam, fromReportParam]);
 
@@ -1185,12 +1207,17 @@ export default function InvoiceFormClient() {
               className="input mt-1"
               value={custSearch}
               onChange={(e) => {
-                setCustSearch(e.target.value);
-                setCustomerName(e.target.value);
+                const next = e.target.value;
+                setCustSearch(next);
+                setCustomerName(next);
                 setShowCustDrop(true);
-                if (!e.target.value) setCustomerOrgId(null);
+                if (!next) setCustomerOrgId(null);
+                scheduleCustomerSearch(next);
               }}
-              onFocus={() => setShowCustDrop(true)}
+              onFocus={() => {
+                setShowCustDrop(true);
+                if (!custSearch && customers.length === 0) scheduleCustomerSearch('');
+              }}
               placeholder={t('Type customer name…')}
               autoComplete="off"
             />

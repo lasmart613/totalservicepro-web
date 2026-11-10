@@ -672,6 +672,138 @@ export async function loadLinkedCustomers(
 /** Alias used by estimate / invoice / report company pickers. */
 export const loadLinkedCustomerOrgs = loadLinkedCustomers;
 
+/**
+ * Strip characters that change a PostgREST ilike or split an or() filter.
+ * Spaces stay, so "oak park" still matches a name.
+ */
+export function sanitizeCustomerSearch(raw: string): string {
+  return String(raw || '')
+    .replace(/[%_\\,().]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80);
+}
+
+const LINKED_CUSTOMER_SEARCH_SELECT = [
+  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name, type, directory_contacts)',
+  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name, type)',
+] as const;
+
+function missingDirectoryContactsColumn(error: { message?: string } | null | undefined): boolean {
+  const message = String(error?.message || '');
+  return /directory_contacts/i.test(message) && /column|schema cache|does not exist|42703|PGRST204/i.test(message);
+}
+
+function linkedCustomerFromEmbed(row: {
+  created_at?: string | null;
+  organizations?: unknown;
+}): LinkedCustomerOpt | null {
+  const embedded = row?.organizations;
+  const org = (Array.isArray(embedded) ? embedded[0] : embedded) as
+    | {
+        id?: string | number;
+        name?: string | null;
+        address?: string | null;
+        city?: string | null;
+        state?: string | null;
+        zip?: string | null;
+        phone?: string | null;
+        email?: string | null;
+        contact_name?: string | null;
+        type?: string | null;
+        directory_contacts?: unknown;
+      }
+    | null
+    | undefined;
+  if (!org?.id || !String(org.name || '').trim()) return null;
+  const type = String(org.type || '').trim().toLowerCase();
+  if (type && !(LINKED_CUSTOMER_TYPES as readonly string[]).includes(type)) return null;
+  const applied = applyDirectoryContactToLinked({
+    contact_name: org.contact_name,
+    email: org.email,
+    phone: org.phone,
+    directory_contacts: org.directory_contacts,
+    contactRows: [],
+  });
+  return {
+    id: org.id,
+    name: String(org.name || '').trim(),
+    address: org.address,
+    city: org.city,
+    state: org.state,
+    zip: org.zip,
+    phone: applied.phone,
+    email: applied.email,
+    contact: applied.contact,
+    contactRole: applied.contactRole,
+    officePhone: org.phone,
+    linkedAt: row.created_at || null,
+  };
+}
+
+/**
+ * One request for the invoice customer box.
+ * An empty query is the most recently linked clinics. A typed query matches
+ * name, city, state, phone, email, or contact on those same links.
+ * The directory_contacts column is tried once. A missing-column error is the
+ * only reason for a second request.
+ */
+export async function searchLinkedCustomers(
+  supabase: { from: (table: string) => any },
+  serviceOrgId: string | number,
+  query: string
+): Promise<LinkedCustomerOpt[]> {
+  const term = sanitizeCustomerSearch(query);
+  let data: unknown[] | null = null;
+  for (let i = 0; i < LINKED_CUSTOMER_SEARCH_SELECT.length; i++) {
+    let req = supabase
+      .from('organization_customers')
+      .select(LINKED_CUSTOMER_SEARCH_SELECT[i])
+      .eq('service_organization_id', serviceOrgId);
+    if (!term) {
+      req = req.order('created_at', { ascending: false }).limit(LINKED_CUSTOMER_DROPDOWN_LIMIT);
+    } else {
+      const pattern = `%${term}%`;
+      req = req
+        .or(
+          [
+            `name.ilike.${pattern}`,
+            `city.ilike.${pattern}`,
+            `state.ilike.${pattern}`,
+            `phone.ilike.${pattern}`,
+            `email.ilike.${pattern}`,
+            `contact_name.ilike.${pattern}`,
+          ].join(','),
+          { referencedTable: 'organizations' }
+        )
+        .limit(LINKED_CUSTOMER_DROPDOWN_LIMIT);
+    }
+    const res = await req;
+    if (!res?.error) {
+      data = Array.isArray(res?.data) ? res.data : [];
+      break;
+    }
+    if (i === 0 && missingDirectoryContactsColumn(res.error)) continue;
+    console.warn('linked customer search', res.error);
+    return [];
+  }
+
+  const seen = new Set<string>();
+  const out: LinkedCustomerOpt[] = [];
+  for (const row of data || []) {
+    const opt = linkedCustomerFromEmbed(row as { created_at?: string | null; organizations?: unknown });
+    if (!opt) continue;
+    const key = String(opt.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(opt);
+  }
+  if (term) {
+    out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  }
+  return out;
+}
+
 export function filterLinkedCustomers(
   customers: LinkedCustomerOpt[],
   query: string,

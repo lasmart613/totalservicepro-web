@@ -13,6 +13,8 @@ import {
   filterLinkedCustomers,
   loadLinkedCustomerOrgs,
   matchLinkedCustomer,
+  sanitizeCustomerSearch,
+  searchLinkedCustomers,
   stripOverflowingAddressFields,
 } from './customer-form.ts';
 
@@ -337,11 +339,10 @@ test('loadLinkedCustomerOrgs pages every organization_customers row then chunks 
   assert.deepEqual(linkQuery.filters[0], ['eq', 'service_organization_id', 4]);
 });
 
-test('estimate/invoice/report pickers page all linked customers and do not cap at 500', () => {
+test('estimate and report pickers page all linked customers and do not cap at 500', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   for (const rel of [
     '../app/estimates/new/EstimateFormClient.tsx',
-    '../app/invoices/new/InvoiceFormClient.tsx',
     '../app/reports/new/NewServiceReportClient.tsx',
   ]) {
     const src = readFileSync(join(here, rel), 'utf8');
@@ -353,6 +354,135 @@ test('estimate/invoice/report pickers page all linked customers and do not cap a
       rel
     );
   }
+});
+
+test('invoice editor searches linked customers and does not wait on the full directory', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
+  const init = src.slice(src.indexOf('const invoiceTask = editIdParam'), src.indexOf('function updateLine'));
+  assert.match(src, /searchLinkedCustomers/);
+  assert.match(src, /filterLinkedCustomers/);
+  assert.doesNotMatch(src, /loadLinkedCustomerOrgs|loadLinkedCustomers\(/);
+  assert.doesNotMatch(init, /await refreshCustomers|await searchLinkedCustomers|await loadParts|await getOrgRole|await getCompanyTheme/);
+  const invoiceAt = init.indexOf('loadInvoice(editIdParam)');
+  const sessionAt = init.indexOf('auth.getSession');
+  assert.ok(invoiceAt > 0 && sessionAt > invoiceAt, 'the invoice read starts before the session read');
+});
+
+function searchClient(opts: {
+  failDirectory?: boolean;
+  otherError?: boolean;
+  rows?: unknown[];
+}) {
+  const calls: Array<{ select: string; limit?: number; or?: unknown; order?: unknown; eq?: unknown }> = [];
+  const client = {
+    calls,
+    from() {
+      const q: Record<string, unknown> & { then: (resolve: (v: unknown) => void) => void } = {
+        select(cols: string) {
+          q.cols = cols;
+          return q;
+        },
+        eq(col: string, val: unknown) {
+          q.eqArgs = [col, val];
+          return q;
+        },
+        order(col: string, opt: unknown) {
+          q.orderArgs = [col, opt];
+          return q;
+        },
+        limit(n: number) {
+          q.limitArg = n;
+          return q;
+        },
+        or(expr: string, opt: unknown) {
+          q.orArgs = [expr, opt];
+          return q;
+        },
+        then(resolve: (v: unknown) => void) {
+          const select = String(q.cols || '');
+          calls.push({
+            select,
+            limit: q.limitArg as number | undefined,
+            or: q.orArgs,
+            order: q.orderArgs,
+            eq: q.eqArgs,
+          });
+          const missing = Boolean(opts.failDirectory) && /directory_contacts/.test(select);
+          resolve({
+            data: missing || opts.otherError ? null : opts.rows || [],
+            error: missing
+              ? { message: "Could not find the 'directory_contacts' column of 'organizations' in the schema cache" }
+              : opts.otherError
+                ? { message: 'permission denied' }
+                : null,
+          });
+        },
+      };
+      return q;
+    },
+  };
+  return client;
+}
+
+test('searchLinkedCustomers is one limited request and keeps recent order', async () => {
+  const client = searchClient({
+    rows: [
+      {
+        created_at: '2026-11-01T00:00:00Z',
+        organizations: {
+          id: 10,
+          name: 'Oak Park Dermatology',
+          city: 'Oak Park',
+          state: 'IL',
+          type: 'laser_clinic',
+          phone: '555',
+          email: 'a@b.c',
+          contact_name: 'Pat',
+        },
+      },
+      {
+        created_at: '2026-10-01T00:00:00Z',
+        organizations: { id: 11, name: 'Service Co', type: 'service_company' },
+      },
+    ],
+  });
+  const rows = await searchLinkedCustomers(client as never, 2639, '');
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].limit, 12);
+  assert.match(client.calls[0].select, /directory_contacts/);
+  assert.deepEqual(client.calls[0].eq, ['service_organization_id', 2639]);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, 'Oak Park Dermatology');
+  assert.equal(rows[0].linkedAt, '2026-11-01T00:00:00Z');
+  assert.equal(rows[0].contact, 'Pat');
+});
+
+test('a typed customer search does not page and does not retry when the first select works', async () => {
+  const client = searchClient({ rows: [] });
+  await searchLinkedCustomers(client as never, 2639, 'Oak Park%');
+  assert.equal(client.calls.length, 1);
+  const or = client.calls[0].or as [string, { referencedTable: string }];
+  assert.match(or[0], /name\.ilike\.%Oak Park%/);
+  assert.doesNotMatch(or[0], /%%/);
+  assert.equal(or[1].referencedTable, 'organizations');
+  assert.equal(client.calls[0].order, undefined);
+});
+
+test('directory_contacts missing retries once; any other error does not', async () => {
+  const missing = searchClient({ failDirectory: true, rows: [] });
+  await searchLinkedCustomers(missing as never, 2639, '');
+  assert.equal(missing.calls.length, 2);
+  assert.doesNotMatch(missing.calls[1].select, /directory_contacts/);
+
+  const denied = searchClient({ otherError: true });
+  const rows = await searchLinkedCustomers(denied as never, 2639, 'clinic');
+  assert.equal(denied.calls.length, 1);
+  assert.deepEqual(rows, []);
+});
+
+test('sanitizeCustomerSearch strips ilike wildcards and or() separators', () => {
+  assert.equal(sanitizeCustomerSearch('  Oak_Park%, (Dr.)  '), 'Oak Park Dr');
 });
 
 test('Android estimate/invoice/report pickers search organization_customers instead of dumping all orgs', () => {
