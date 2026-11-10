@@ -48,6 +48,14 @@ import {
   invoiceStatusBlocksDraftDowngrade,
   resolveInvoiceSaveStatus,
 } from '@/lib/billing/invoice-status-guard';
+import {
+  companyWithPayeeName,
+  invoicePayeeWrite,
+  profileDisplayName,
+  sentInvoicePayeePatch,
+  storedInvoicePayee,
+  type InvoicePayeeKind,
+} from '@/lib/billing/invoice-payee';
 import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
@@ -86,6 +94,11 @@ export default function InvoiceFormClient() {
   const [voiding, setVoiding] = useState(false);
   const [storedVoidReason, setStoredVoidReason] = useState<string | null>(null);
   const [company, setCompany] = useState<DocCompany>({});
+  const [personalName, setPersonalName] = useState('');
+  const [payeeKind, setPayeeKind] = useState<InvoicePayeeKind>('organization');
+  const [storedPayeeKind, setStoredPayeeKind] = useState<InvoicePayeeKind>('organization');
+  const [storedPayeeName, setStoredPayeeName] = useState('');
+  const [payeeTouched, setPayeeTouched] = useState(false);
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
 
@@ -289,6 +302,11 @@ export default function InvoiceFormClient() {
       if (idata.custPhone) setCustPhone(idata.custPhone);
       if (idata.custEmail) setCustEmail(idata.custEmail);
       if (idata.custContact) setCustContact(idata.custContact);
+      const loadedPayee = storedInvoicePayee(data);
+      setPayeeKind(loadedPayee.payee_kind);
+      setStoredPayeeKind(loadedPayee.payee_kind);
+      setStoredPayeeName(loadedPayee.payee_name);
+      setPayeeTouched(false);
       const lines = idata.line_items || [];
       if (Array.isArray(lines) && lines.length) {
         setLineItems(lines.map((li: unknown, i: number) => lineItemFromStored(li, i)));
@@ -524,7 +542,14 @@ export default function InvoiceFormClient() {
           : (profile as any)?.organizations;
         orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
         if (!editIdParam && !invoiceDateTouched.current) setInvoiceDate(orgTodayRef.current);
-        const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
+        const meta = (user.user_metadata || {}) as Record<string, unknown>;
+        const techName = profileDisplayName({
+          first_name: profile?.first_name || (typeof meta.first_name === 'string' ? meta.first_name : ''),
+          last_name: profile?.last_name || (typeof meta.last_name === 'string' ? meta.last_name : ''),
+          full_name: typeof meta.full_name === 'string' ? meta.full_name : '',
+          name: typeof meta.name === 'string' ? meta.name : '',
+        });
+        setPersonalName(techName);
         if (org || techName) {
           setCompany({
             company_name: org?.name || '',
@@ -586,6 +611,29 @@ export default function InvoiceFormClient() {
           .includes(s)
       )
       .slice(0, 8);
+  }
+
+  const organizationName = String(company.company_name || '').trim();
+  const payee = invoicePayeeWrite({
+    kind: payeeKind,
+    organizationName,
+    personalName,
+    storedKind: storedPayeeKind,
+    storedPayeeName,
+    touched: payeeTouched,
+  });
+  const issuerCompany = companyWithPayeeName(company, payee.payee_name);
+  const storedPayeeDiffers =
+    payeeKind === 'personal' &&
+    !payeeTouched &&
+    storedPayeeKind === 'personal' &&
+    Boolean(storedPayeeName) &&
+    storedPayeeName !== personalName;
+
+  function choosePayee(kind: InvoicePayeeKind) {
+    if (kind === 'personal' && !personalName) return;
+    setPayeeTouched(true);
+    setPayeeKind(kind);
   }
 
   async function saveInvoice(
@@ -666,6 +714,8 @@ export default function InvoiceFormClient() {
         custPhone,
         custEmail,
         custContact,
+        payee_kind: payee.payee_kind,
+        payee_name: payee.payee_name,
       };
 
       // Save changes on a finalized invoice uses the draft-downgrade guard so
@@ -697,6 +747,8 @@ export default function InvoiceFormClient() {
         paid_at: nextStatus === 'paid' ? new Date().toISOString() : null,
         payment_method: depositMethod || null,
         invoice_number: invNum,
+        payee_kind: payee.payee_kind,
+        payee_name: payee.payee_name,
         invoice_data: await invoiceDataForSave(supabase, existingId, formInvoiceData),
       };
 
@@ -771,9 +823,38 @@ export default function InvoiceFormClient() {
     }
   }
 
+  /** Sent invoices can change the payee for a resend. Money columns stay off the write. */
+  async function persistSentPayee(): Promise<boolean> {
+    const existingId = savedIdRef.current;
+    if (existingId == null || existingId === '') return false;
+    if (payee.payee_kind === 'personal' && !payee.payee_name) {
+      toast.error(t('Add your first and last name on your profile to send an invoice in your name.'));
+      return false;
+    }
+    const stored = await loadStoredInvoiceData(supabase, existingId);
+    const patch = sentInvoicePayeePatch({
+      existingStatus: status,
+      storedInvoiceData: stored,
+      payee,
+    });
+    if (!patch) {
+      toast.error(t('Could not update the payable name without changing this invoice.'));
+      return false;
+    }
+    const result = await writeWithColumnRetry(supabase, 'service_invoices', patch, existingId);
+    if (result.error) {
+      toast.error(result.error.message || t('Could not update the payable name without changing this invoice.'));
+      return false;
+    }
+    setStoredPayeeKind(payee.payee_kind);
+    setStoredPayeeName(payee.payee_name);
+    setPayeeTouched(false);
+    return true;
+  }
+
   function buildInvoiceEmailHtml(themeScope: DocThemeScope = 'email') {
     return buildInvoiceHtml({
-      company,
+      company: issuerCompany,
       customer: {
         name: customerName.trim() || custSearch.trim(),
         address: custAddress,
@@ -788,7 +869,7 @@ export default function InvoiceFormClient() {
       invoiceDate: invoiceDate || orgTodayRef.current,
       dueDate: dueDate || undefined,
       description: description || undefined,
-      preparedBy: company.tech_name,
+      preparedBy: issuerCompany.tech_name,
       fromEstimateId: sourceEstimateId,
       lines: lineItems,
       subtotal,
@@ -834,8 +915,15 @@ export default function InvoiceFormClient() {
     const alreadyFinal = invoiceStatusBlocksDraftDowngrade(status);
     setEmailing(true);
     try {
-      const id = await saveInvoice('draft', { quiet: true });
-      if (!id) return;
+      let id: string | number | null = savedIdRef.current;
+      if (alreadyFinal) {
+        const kept = await persistSentPayee();
+        if (!kept) return;
+        id = savedIdRef.current;
+      } else {
+        id = await saveInvoice('draft', { quiet: true });
+        if (!id) return;
+      }
 
       const {
         data: { session },
@@ -857,7 +945,7 @@ export default function InvoiceFormClient() {
           due_now: collectable.stripeAmount,
           total,
           customer_organization_id: customerOrgId,
-          company_name: company.company_name,
+          company_name: payee.payee_name,
           reply_to: company.email || undefined,
           html,
           include_payment_link: true,
@@ -880,8 +968,8 @@ export default function InvoiceFormClient() {
         return;
       }
 
-      // Only now mark sent
-      await saveInvoice('sent', { quiet: true });
+      // Only now mark sent. An invoice that was already sent keeps its status and amounts.
+      if (!alreadyFinal) await saveInvoice('sent', { quiet: true });
       if (result.connectRequired) {
         toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
         toast.message(`Invoice emailed to ${result.to} without a card-payment link.`);
@@ -912,6 +1000,8 @@ export default function InvoiceFormClient() {
         toast.error('Session expired — sign in again');
         return;
       }
+      const kept = await persistSentPayee();
+      if (!kept) return;
       const result = await sendBillingDocEmail({
         kind: 'invoice',
         accessToken: session.access_token,
@@ -923,7 +1013,7 @@ export default function InvoiceFormClient() {
           due_now: collectable.stripeAmount,
           total,
           customer_organization_id: customerOrgId,
-          company_name: company.company_name,
+          company_name: payee.payee_name,
           reply_to: company.email || undefined,
           html: buildInvoiceEmailHtml(),
           include_payment_link: true,
@@ -1200,6 +1290,68 @@ export default function InvoiceFormClient() {
 
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Invoice Details')}</h2>
+          <fieldset className="mb-4 rounded-lg border border-[var(--border2)] p-3">
+            <legend className="px-1 text-sm font-bold text-[var(--gold)]">{t('Checks payable to')}</legend>
+            <p className="text-xs text-[var(--text3)] mb-3">
+              {t(
+                'Choose the name on this invoice. The customer writes the check to that name. It is also the name in the email subject and on the card payment page. Card payments still go to the Stripe account connected to this shop.'
+              )}
+            </p>
+            <div className="grid gap-2" role="radiogroup" aria-label={t('Checks payable to')}>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="invoice-payee"
+                  className="mt-1"
+                  checked={payeeKind === 'organization'}
+                  onChange={() => choosePayee('organization')}
+                />
+                <span>
+                  <span className="font-semibold">{t('Company')}</span>
+                  {organizationName ? (
+                    <span dir="auto">
+                      {' '}
+                      — <bdi>{organizationName}</bdi>
+                    </span>
+                  ) : null}
+                </span>
+              </label>
+              <label className={`flex items-start gap-2 text-sm ${personalName ? '' : 'opacity-70'}`}>
+                <input
+                  type="radio"
+                  name="invoice-payee"
+                  className="mt-1"
+                  checked={payeeKind === 'personal'}
+                  disabled={!personalName}
+                  onChange={() => choosePayee('personal')}
+                />
+                <span>
+                  <span className="font-semibold">{t('My name')}</span>
+                  <span dir="auto">
+                    {' '}
+                    —{' '}
+                    <bdi>
+                      {personalName ||
+                        t('Add your first and last name on your profile to send an invoice in your name.')}
+                    </bdi>
+                  </span>
+                </span>
+              </label>
+            </div>
+            {storedPayeeDiffers ? (
+              <p className="text-xs text-[var(--text3)] mt-2" dir="auto">
+                {t('This invoice is still payable to {name} until you choose a name again and save or resend.').replace(
+                  '{name}',
+                  storedPayeeName
+                )}
+              </p>
+            ) : null}
+            {draftLocked ? (
+              <p className="text-xs text-[var(--text3)] mt-2">
+                {t('Resending a sent invoice updates this name only. Amounts stay as stored.')}
+              </p>
+            ) : null}
+          </fieldset>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Invoice date')}</label>
