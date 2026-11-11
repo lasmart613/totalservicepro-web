@@ -144,6 +144,10 @@ test('filters match modality, condition, and text', () => {
 test('migration is free, RLS-locked, and rolls back without touching other tables', () => {
   const up = read('supabase/migrations/20261105_000953_marketplace_wanted.sql');
   const down = read('supabase/migrations/20261105_000953_marketplace_wanted_rollback.sql');
+  assert.match(up, /obj_description\(to_regclass\('public\.marketplace_wanted'\), 'pg_class'\)/);
+  assert.match(up, /obj_description\(to_regclass\('public\.marketplace_wanted_messages'\), 'pg_class'\)/);
+  assert.doesNotMatch(up, /marketplace_wanted'::regclass/);
+  assert.doesNotMatch(up, /marketplace_wanted_messages'::regclass/);
   assert.match(up, /ENABLE ROW LEVEL SECURITY/);
   assert.match(up, /is_active_org_member/);
   assert.match(up, /status IN \('open', 'filled', 'closed'\)/);
