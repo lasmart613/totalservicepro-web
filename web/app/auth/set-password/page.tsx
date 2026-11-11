@@ -81,11 +81,8 @@ function SetPasswordInner() {
             setMessage('');
             setError(
               linkFlow === 'invite'
-                ? 'This invite link is missing a session (expired, already used, or redirected incorrectly). ' +
-                    'Use “Forgot password” on the login page with your invite email to set a password, ' +
-                    'or ask your admin to resend the invite.'
-                : 'This reset link is missing a session (expired or already used). ' +
-                    'Use “Forgot password” on the login page to send a new one.'
+                ? 'This invite link is missing a session (expired, already used, or redirected incorrectly). Use “Forgot password” on the login page with your invite email to set a password, or ask your admin to resend the invite.'
+                : 'This reset link is missing a session (expired or already used). Use “Forgot password” on the login page to send a new one.'
             );
           }
           return;
@@ -204,24 +201,24 @@ function SetPasswordInner() {
               Total Service Pro
             </span>
           </Link>
-          <p className="text-[var(--text3)] mt-1 text-sm">{subtitle}</p>
+          <p className="text-[var(--text3)] mt-1 text-sm">{t(subtitle)}</p>
         </div>
 
         <div className="card p-8">
           <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--gold)' }}>
-            Set your password
+            {t('Set your password')}
           </h1>
           {message && !error && (
             <p className="text-sm text-[var(--text2)] mb-4">{message}</p>
           )}
           {error && (
-            <div className="mb-4 p-3 rounded text-sm bg-red-900/30 text-red-400">{error}</div>
+            <div className="mb-4 p-3 rounded text-sm bg-red-900/30 text-red-400">{t(error)}</div>
           )}
 
           {noSession ? (
             <div className="space-y-3 text-sm">
               <Link href="/forgot-password" className="btn btn-primary w-full justify-center">
-                Forgot password
+                {t('Forgot password')}
               </Link>
               <p className="text-xs text-[var(--text3)] text-center">
                 {flow === 'invite'

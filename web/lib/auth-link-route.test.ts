@@ -217,6 +217,10 @@ test('callback, set-password, and email callers use the link-type router', () =>
 
   assert.match(setPassword, /setPasswordSubtitle/);
   assert.match(setPassword, /resolveSetPasswordFlow/);
+  assert.match(setPassword, /\{t\(subtitle\)\}/);
+  assert.match(setPassword, /t\('Set your password'\)/);
+  assert.match(setPassword, /t\('Forgot password'\)/);
+  assert.match(setPassword, /\{t\(error\)\}/);
   const noSessionHelp = setPassword.slice(setPassword.indexOf('noSession ?'), setPassword.indexOf(': ready ?'));
   assert.match(noSessionHelp, /flow === 'invite'/);
   assert.match(
