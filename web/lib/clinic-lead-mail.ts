@@ -3,6 +3,8 @@
  * DNS failure or timeout comes back as { ok: false } so the caller's claim
  * release always runs.
  */
+import { postResendEmail } from './mail/outgoing-mail.ts';
+
 /** Per send. Two sends (team + confirmation) must fit inside Netlify's sync function limit. */
 export const CLINIC_LEAD_EMAIL_TIMEOUT_MS = 5_000;
 
@@ -33,10 +35,10 @@ export async function sendResendEmail(
   if (opts.replyTo) body.reply_to = opts.replyTo;
   const doFetch = cfg.fetchImpl ?? globalThis.fetch;
   try {
-    const rr = await doFetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+    const rr = await postResendEmail({
+      apiKey: key,
+      message: body,
+      fetchImpl: doFetch,
       signal: AbortSignal.timeout(cfg.timeoutMs ?? CLINIC_LEAD_EMAIL_TIMEOUT_MS),
     });
     if (!rr.ok) {

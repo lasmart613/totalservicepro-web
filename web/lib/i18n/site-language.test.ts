@@ -28,6 +28,7 @@ const ALLOW_SAME = new Set([
   'PDF',
   'URL',
   'ID',
+  'CC',
   // Medical loanwords spelled the same as English in these locales.
   'Defibrillator',
   'Endoscope',

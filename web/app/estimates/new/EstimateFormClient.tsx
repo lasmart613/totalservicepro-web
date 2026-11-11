@@ -20,6 +20,8 @@ import {
 } from '@/lib/billing/estimate-display';
 import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
+import { ccValueForDocumentSave, documentCcInputError, formatCcInput, parseDocumentCc } from '@/lib/billing/document-cc';
+import DocumentCcField from '@/components/billing/DocumentCcField';
 import {
   canConvertEstimateToInvoice,
   estimateWritePayload,
@@ -90,6 +92,7 @@ export default function EstimateFormClient() {
   const [custZip, setCustZip] = useState('');
   const [custPhone, setCustPhone] = useState('');
   const [custEmail, setCustEmail] = useState('');
+  const [ccText, setCcText] = useState('');
   const [custContact, setCustContact] = useState('');
 
   // Equipment — live manufacturers + laser_models, static MODELS as fallback
@@ -288,6 +291,7 @@ export default function EstimateFormClient() {
       setCustState(ed.custState || ed.state || '');
       setCustZip(ed.custZip || ed.zip || '');
       setCustPhone(ed.custPhone || ed.phone || '');
+      setCcText(formatCcInput(ed.cc_emails));
       setCustEmail(ed.custEmail || ed.email || '');
       setCustContact(ed.custContact || ed.contact || '');
       let svcs = data.services;
@@ -525,7 +529,7 @@ export default function EstimateFormClient() {
 
   async function saveEstimate(
     nextStatus: string,
-    opts?: { quiet?: boolean; preserveStatus?: boolean }
+    opts?: { quiet?: boolean; preserveStatus?: boolean; ccEmails?: string[] }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -685,6 +689,7 @@ export default function EstimateFormClient() {
           custPhone,
           custEmail,
           custContact,
+          cc_emails: ccValueForDocumentSave(ccText, opts?.ccEmails),
           estimate_number: estNum,
           estNumber: estNum,
         },
@@ -849,9 +854,16 @@ export default function EstimateFormClient() {
       toast.error('Add a customer email on the form or CRM profile before emailing.');
       return;
     }
+    const ccProblem = documentCcInputError(ccText);
+    if (ccProblem) {
+      toast.error(ccProblem);
+      return;
+    }
+    const ccParsed = parseDocumentCc(ccText);
+    const ccEmails = ccParsed.ok ? ccParsed.emails : [];
     setEmailing(true);
     try {
-      const id = await saveEstimate('draft', { quiet: true, preserveStatus: true });
+      const id = await saveEstimate('draft', { quiet: true, preserveStatus: true, ccEmails });
       if (!id) return;
       const {
         data: { session },
@@ -873,6 +885,7 @@ export default function EstimateFormClient() {
           customer_organization_id: customerOrgId,
           reply_to: company.email || undefined,
           html: buildEstimateEmailHtml(),
+          cc: ccEmails,
         },
       });
       if (!result.emailSent && !result.alreadySent) {
@@ -1045,6 +1058,7 @@ export default function EstimateFormClient() {
               <label className="text-xs text-[var(--text3)]">{t('Email')}</label>
               <input className="input mt-1" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} />
             </div>
+            <DocumentCcField id="estimate-cc" value={ccText} onChange={setCcText} disabled={emailing} />
           </div>
         </section>
 

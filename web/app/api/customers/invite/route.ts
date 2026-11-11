@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { emailsMatch, normalizeLookupEmail } from '@/lib/email-match';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
@@ -394,19 +395,15 @@ export async function runCustomerInvite(
     const sent = deps.sendEmail
       ? await deps.sendEmail({ to: [toEmail], subject, html, text })
       : await (async () => {
-          const rr = await fetch('https://api.resend.com/emails', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${resendKey}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
+          const rr = await postResendEmail({
+            apiKey: resendKey,
+            message: {
               from,
               to: [toEmail],
               subject,
               html,
               text,
-            }),
+            },
           });
           const result = await rr.json().catch(() => ({}));
           return {

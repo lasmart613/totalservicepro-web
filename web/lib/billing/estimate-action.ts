@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { customerLinkLang, estimateDocumentLocale } from '@/lib/i18n/stored-org-language';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
@@ -340,19 +341,15 @@ export async function sendResendHtml(opts: {
   </div>
 </body></html>`;
 
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${resendKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const rr = await postResendEmail({
+    apiKey: resendKey,
+    message: {
       from,
       to: opts.to,
       subject: opts.subject,
       html: wrapped,
       reply_to: opts.replyTo || undefined,
-    }),
+    },
   });
   if (!rr.ok) {
     const result = await rr.json().catch(() => ({}));

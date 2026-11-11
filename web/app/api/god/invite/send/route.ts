@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { requireGodCaller } from '@/lib/god-auth';
 import { assembleGodOrgs, selectedOrgIds, type GodMember, type GodOrgSource } from '@/lib/god-orgs';
@@ -65,13 +66,9 @@ async function sendResend(
     process.env.NOTIFY_FROM_EMAIL ||
     process.env.RESEND_FROM ||
     'Total Service Pro <contact@medicalrepairnetwork.com>';
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
+  const rr = await postResendEmail({
+    apiKey: key,
+    message: {
       from,
       to: [to],
       reply_to: 'contact@medicalrepairnetwork.com',
@@ -79,7 +76,7 @@ async function sendResend(
       html: shopInviteHtml(),
       text: shopInviteText(),
       headers: shopInviteResendHeaders(unsubscribeToken),
-    }),
+    },
   });
   const result = await rr.json().catch(() => ({}));
   if (!rr.ok) {

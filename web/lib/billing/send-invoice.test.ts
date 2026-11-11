@@ -3,6 +3,7 @@ import test, { describe } from 'node:test';
 import { NextRequest } from 'next/server';
 import { DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR, resetDocumentSendRateLimit } from './send-rate-limit.ts';
 import { runSendInvoice } from '../../app/api/billing/send-invoice/route.ts';
+import { DEFAULT_OPS_BCC_EMAIL } from '../mail/outgoing-mail.ts';
 
 const CLINIC = 'clinic@cedar.test';
 const SHOP = 'Cedar Laser Service';
@@ -425,7 +426,17 @@ describe('send invoice', { concurrency: false }, () => {
     });
     const checkout = checkoutSpy();
     const original = globalThis.fetch;
-    let mailed: { from?: string; subject?: string; html?: string; reply_to?: string } | null = null;
+    const previousBcc = process.env.APP_MAIL_BCC;
+    delete process.env.APP_MAIL_BCC;
+    let mailed: {
+      from?: string;
+      to?: string[];
+      cc?: string[];
+      bcc?: string[];
+      subject?: string;
+      html?: string;
+      reply_to?: string;
+    } | null = null;
     globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
       const target = String(url);
       if (!target.includes('api.resend.com')) throw new Error(`unexpected fetch ${target}`);
@@ -461,6 +472,9 @@ describe('send invoice', { concurrency: false }, () => {
         assert.ok(mailed);
         assert.equal(mailed.subject, 'Invoice INV-100 from Cedar Laser Service');
         assert.match(mailed.from || '', /Total Service Pro|contact@medicalrepairnetwork.com/);
+        assert.deepEqual(mailed.to, [CLINIC]);
+        assert.equal(mailed.cc, undefined);
+        assert.deepEqual(mailed.bcc, [DEFAULT_OPS_BCC_EMAIL]);
         assert.equal(mailed.reply_to, 'shop@cedar.test');
         const html = mailed.html || '';
         const header = html.slice(0, html.indexOf('Customer / Bill To'));
@@ -474,9 +488,97 @@ describe('send invoice', { concurrency: false }, () => {
         assert.match(html, /Prepared by/);
         assert.match(html, /Ada Lovelace/);
         assert.doesNotMatch(html, /Forged Shop|Forged body|Larry Smart/);
+        assert.equal(db.updates.length, 1);
+        const data = db.updates[0].patch.invoice_data as Record<string, unknown>;
+        assert.equal(data.payee_kind, 'personal');
+        assert.equal(data.payee_name, 'Priya Shah');
       });
     } finally {
       globalThis.fetch = original;
+      if (previousBcc == null) delete process.env.APP_MAIL_BCC;
+      else process.env.APP_MAIL_BCC = previousBcc;
+    }
+  });
+
+  test('cc is sent and stored without changing the To recipient, status, amounts, or payee', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payee_kind: 'personal',
+      payee_name: 'Priya Shah',
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const sent: Record<string, unknown>[] = [];
+    const original = globalThis.fetch;
+    const previousBcc = process.env.APP_MAIL_BCC;
+    delete process.env.APP_MAIL_BCC;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      if (!String(url).includes('api.resend.com')) throw new Error(`unexpected fetch ${String(url)}`);
+      sent.push(JSON.parse(String(init?.body || '{}')) as Record<string, unknown>);
+      return new Response(JSON.stringify({ id: 'msg-cc' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await withEnv({ resend: 'resend-test', stripe: null }, async () => {
+        const bad = await runSendInvoice(
+          request({ invoice_id: 42, include_payment_link: false, cc: ['not-an-email', 'office@clinic.test'], to_email: 'attacker@evil.test' }),
+          { userClient: db as never, adminClient: null }
+        );
+        const badJson = await bad.json();
+        assert.equal(bad.status, 400);
+        assert.match(badJson.error, /valid CC email/);
+        assert.equal(sent.length, 0);
+        assert.equal(db.updates.length, 0);
+
+        const res = await runSendInvoice(
+          request({
+            invoice_id: 42,
+            include_payment_link: false,
+            cc: [' Office@Clinic.test ', CLINIC, 'boss@clinic.test', 'office@clinic.test'],
+            to: 'attacker@evil.test',
+            reply_to: 'attacker@evil.test',
+          }),
+          { userClient: db as never, adminClient: null }
+        );
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.to, CLINIC);
+        assert.deepEqual(json.cc, ['Office@Clinic.test', 'boss@clinic.test']);
+        assert.equal(JSON.stringify(json).includes(DEFAULT_OPS_BCC_EMAIL), false);
+        assert.equal(sent.length, 1);
+        const message = sent[0];
+        assert.deepEqual(message.to, [CLINIC]);
+        assert.deepEqual(message.cc, ['Office@Clinic.test', 'boss@clinic.test']);
+        assert.deepEqual(message.bcc, [DEFAULT_OPS_BCC_EMAIL]);
+        assert.equal(message.reply_to, 'shop@cedar.test');
+        assert.equal(String(message.from).includes(DEFAULT_OPS_BCC_EMAIL), false);
+        assert.equal(db.updates.length, 1);
+        const patch = db.updates[0].patch;
+        assert.deepEqual(Object.keys(patch), ['invoice_data']);
+        const data = patch.invoice_data as Record<string, unknown>;
+        assert.deepEqual(data.cc_emails, ['Office@Clinic.test', 'boss@clinic.test']);
+        assert.equal(data.custEmail, CLINIC);
+        assert.equal(data.payee_kind, 'personal');
+        assert.equal(data.payee_name, 'Priya Shah');
+        assert.equal(patch.status, undefined);
+        assert.equal(patch.total, undefined);
+        assert.equal(patch.amount_paid, undefined);
+        assert.equal(patch.sent_at, undefined);
+        assert.equal(patch.payee_kind, undefined);
+        assert.equal(patch.payee_name, undefined);
+      });
+    } finally {
+      globalThis.fetch = original;
+      if (previousBcc == null) delete process.env.APP_MAIL_BCC;
+      else process.env.APP_MAIL_BCC = previousBcc;
     }
   });
 });

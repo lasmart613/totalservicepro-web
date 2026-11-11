@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { clinicLeadClientIp } from '@/lib/clinic-lead-confirmation';
@@ -84,14 +85,7 @@ async function sendResendEmail(opts: {
     text: opts.text,
   };
   if (opts.replyTo) body.reply_to = opts.replyTo;
-  const rr = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${key}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  const rr = await postResendEmail({ apiKey: key, message: body });
   if (!rr.ok) {
     const result = await rr.json().catch(() => ({}));
     return { ok: false, error: result?.message || `Email provider error (${rr.status})` };

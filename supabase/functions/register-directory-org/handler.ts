@@ -1,3 +1,4 @@
+import { withOpsBcc } from '../../../web/lib/mail/outgoing-mail.ts'
 import {
   checkFormTicket,
   checkStep2Token,
@@ -60,10 +61,14 @@ async function sendReviewNotice(env: Env, fx: Fetch, rid: string): Promise<void>
     const n = await rpc(env, fx, 'directory_registration_take_notice', { p_registration_id: rid })
     if (n.ok !== true) return
     const mail = buildReviewNotice(n, env('DIRECTORY_REVIEW_URL') || DEFAULT_REVIEW_URL)
+    const message = withOpsBcc(
+      { from: env('DIRECTORY_NOTICE_FROM') || DEFAULT_NOTICE_FROM, to: [to], ...mail },
+      { APP_MAIL_BCC: env('APP_MAIL_BCC') },
+    )
     const r = await fx('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: env('DIRECTORY_NOTICE_FROM') || DEFAULT_NOTICE_FROM, to: [to], ...mail }),
+      body: JSON.stringify(message),
     })
     if (!r.ok) console.error('register-directory-org notice', r.status)
   } catch (e) {

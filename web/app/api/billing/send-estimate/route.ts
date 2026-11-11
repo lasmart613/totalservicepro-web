@@ -40,6 +40,8 @@ import {
   takeDocumentSendSlot,
   type HeldDocumentSendSlot,
 } from '@/lib/billing/send-rate-limit';
+import { postResendEmail } from '@/lib/mail/outgoing-mail';
+import { ccBesidesRecipient, parseDocumentCc, rememberDocumentCc } from '@/lib/billing/document-cc';
 
 /** Same body for a missing estimate and an estimate owned by another shop. */
 const ESTIMATE_NOT_FOUND = 'Estimate not found.';
@@ -111,6 +113,7 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
 
     const raw = await req.json().catch(() => ({}));
     const request = ownedSendRequest(raw, 'estimate_id');
+    const ccParsed = parseDocumentCc(raw);
     const estimateId = request.documentId;
     if (estimateId == null) return respond({ error: 'Estimate id is required.' }, 400);
 
@@ -175,6 +178,8 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
         [recipient.email]
       );
     }
+    if (!ccParsed.ok) return respond({ error: ccParsed.error }, 400);
+    const ccForSend = ccBesidesRecipient(ccParsed.emails, recipient.email);
 
     const resendKey = process.env.RESEND_API_KEY;
     if (!resendKey) {
@@ -277,22 +282,17 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
       estimateId,
       row: est,
       send: async () => {
-        const rr = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${resendKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(
-            resendMessage({
-              from,
-              to: recipient.email,
-              subject,
-              html: mailedHtml,
-              text,
-              replyTo: company.email,
-            })
-          ),
+        const rr = await postResendEmail({
+          apiKey: resendKey,
+          message: resendMessage({
+            from,
+            to: recipient.email,
+            subject,
+            html: mailedHtml,
+            text,
+            replyTo: company.email,
+            cc: ccForSend,
+          }),
         });
         const result = await rr.json().catch(() => ({}));
         if (!rr.ok) {
@@ -322,6 +322,16 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
       } catch (e) {
         console.warn('could not stamp estimate document locale', e);
       }
+      if (ccForSend.length) {
+        await rememberDocumentCc({
+          client: writer,
+          table: 'service_estimates',
+          id: estimateId,
+          dataKey: 'estimate_data',
+          cc: ccForSend,
+          organizationId: callerOrgId,
+        });
+      }
     }
 
     heldSlot = null;
@@ -332,11 +342,12 @@ export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps =
         alreadySent: delivery.alreadySent,
         id: delivery.providerId,
         to: recipient.email,
+        ...(delivery.emailed && ccForSend.length ? { cc: ccForSend } : {}),
         emailSource: recipient.source,
         estimateId,
       },
       200,
-      [recipient.email]
+      [recipient.email, ...ccForSend]
     );
   } catch (e: any) {
     if (heldSlot) {
