@@ -4,13 +4,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInvoiceHtml } from './doc-html.ts';
-import { ownedDocumentSubject } from './owned-doc-mail.ts';
+import { buildOwnedInvoiceMessage, ownedDocumentSubject } from './owned-doc-mail.ts';
 import { buildInvoiceCheckoutParams } from './stripe-pay.ts';
 import { appStrings } from '../i18n/app-copy.ts';
 import {
   cleanPayeeName,
-  companyWithPayeeName,
-  invoiceIssuerName,
+  invoiceChecksPayableName,
   invoicePayeeWrite,
   mergePayeeIntoInvoiceData,
   profileDisplayName,
@@ -84,26 +83,26 @@ test('an untouched personal invoice keeps the stored name when someone else is s
   assert.equal(switched.payee_name, 'Casey Tech');
 });
 
-test('stored invoices without a choice still issue under the organization', () => {
-  assert.equal(invoiceIssuerName({ invoice_data: { line_items: [] } }, 'Luxor Photonix'), 'Luxor Photonix');
-  assert.equal(invoiceIssuerName({}, 'Luxor Photonix'), 'Luxor Photonix');
+test('stored invoices without a choice still make checks payable to the organization', () => {
+  assert.equal(invoiceChecksPayableName({ invoice_data: { line_items: [] } }, 'Luxor Photonix'), 'Luxor Photonix');
+  assert.equal(invoiceChecksPayableName({}, 'Luxor Photonix'), 'Luxor Photonix');
   assert.equal(
-    invoiceIssuerName(
+    invoiceChecksPayableName(
       { payee_kind: 'personal', payee_name: 'Larry Smart', invoice_data: { payee_kind: 'organization' } },
       'Luxor Photonix'
     ),
     'Larry Smart'
   );
   assert.equal(
-    invoiceIssuerName({ invoice_data: { payee_kind: 'personal', payee_name: 'Larry Smart' } }, 'Luxor Photonix'),
+    invoiceChecksPayableName({ invoice_data: { payee_kind: 'personal', payee_name: 'Larry Smart' } }, 'Luxor Photonix'),
     'Larry Smart'
   );
   assert.equal(
-    invoiceIssuerName({ invoice_data: { payee_kind: 'personal', payee_name: '' } }, 'Luxor Photonix'),
+    invoiceChecksPayableName({ invoice_data: { payee_kind: 'personal', payee_name: '' } }, 'Luxor Photonix'),
     'Luxor Photonix'
   );
   assert.equal(
-    invoiceIssuerName(
+    invoiceChecksPayableName(
       {
         payee_kind: 'organization',
         payee_name: null,
@@ -114,7 +113,7 @@ test('stored invoices without a choice still issue under the organization', () =
     'Larry Smart'
   );
   assert.equal(
-    invoiceIssuerName(
+    invoiceChecksPayableName(
       {
         payee_kind: 'organization',
         payee_name: 'Luxor Photonix',
@@ -126,69 +125,142 @@ test('stored invoices without a choice still issue under the organization', () =
   );
 });
 
-test('invoice HTML, subject, and Stripe copy use the payee and leave the payout account alone', () => {
-  const shop = {
-    company_name: 'Luxor Photonix',
-    address: '9 Remit St',
-    city: 'Austin',
-    state: 'TX',
-    zip: '78701',
-    email: 'shop@luxor.test',
-    tech_name: 'Larry Smart',
-  };
-  const personal = companyWithPayeeName(shop, 'Larry Smart');
-  assert.equal(personal.company_name, 'Larry Smart');
-  assert.equal(personal.address, '9 Remit St');
-  assert.equal(personal.email, 'shop@luxor.test');
-  assert.equal(companyWithPayeeName(shop, 'Luxor Photonix'), shop);
+function invoiceHeader(html: string): string {
+  const at = html.indexOf('Customer / Bill To');
+  return at >= 0 ? html.slice(0, at) : html;
+}
 
+function invoiceThanks(html: string): string {
+  const at = html.lastIndexOf('<!--tsp-thanks-->');
+  return at >= 0 ? html.slice(at) : '';
+}
+
+test('a personal payee changes only the check line for any user and any organization', () => {
+  const org = 'Harbor Beam Works';
+  const person = profileDisplayName({ first_name: 'Priya', last_name: 'Shah' });
+  assert.equal(person, 'Priya Shah');
+  assert.notEqual(person, 'Larry Smart');
+  assert.notEqual(org, 'Luxor Photonix');
+
+  const choice = invoicePayeeWrite({
+    kind: 'personal',
+    organizationName: org,
+    personalName: person,
+    touched: true,
+  });
+  assert.deepEqual(choice, { payee_kind: 'personal', payee_name: 'Priya Shah' });
+
+  const company = {
+    company_name: org,
+    address: '4 Dock St',
+    city: 'Seattle',
+    state: 'WA',
+    zip: '98101',
+    email: 'shop@harbor.test',
+    tech_name: 'Casey Tech',
+  };
   const html = buildInvoiceHtml({
-    company: personal,
+    company,
+    checksPayableTo: choice.payee_name,
     customer: { name: 'Clinic' },
     invNumber: 'INV-9',
-    invoiceDate: '2026-11-09',
+    invoiceDate: '2026-11-11',
+    preparedBy: company.tech_name,
     lines: [{ description: 'Service', qty: 1, unit_price: 80, ext: 80 }],
     subtotal: 80,
     tax: 0,
     total: 80,
   });
-  assert.match(html, /Larry Smart/);
-  assert.match(html, /Make checks payable to Larry Smart\./);
-  assert.match(html, /Thank you for choosing Larry Smart!/);
-  assert.match(html, /9 Remit St/);
-  assert.doesNotMatch(html, /Luxor Photonix/);
+  const header = invoiceHeader(html);
+  const thanks = invoiceThanks(html);
+  assert.match(header, /Harbor Beam Works/);
+  assert.doesNotMatch(header, /Priya Shah|Casey Tech|Larry Smart/);
+  assert.match(html, /Make checks payable to Priya Shah\./);
+  assert.match(thanks, /Thank you for choosing Harbor Beam Works!/);
+  assert.doesNotMatch(thanks, /Priya Shah|Larry Smart/);
+  assert.match(html, /Casey Tech/);
+  assert.match(html, /4 Dock St/);
+  assert.equal(html.indexOf('Harbor Beam Works'), header.indexOf('Harbor Beam Works'));
+
+  const mailed = buildOwnedInvoiceMessage({
+    row: {
+      customer_name: 'Clinic',
+      invoice_number: 'INV-9',
+      total: 80,
+      subtotal: 80,
+      tax: 0,
+      invoice_data: { line_items: [], payee_kind: 'personal', payee_name: person },
+    },
+    company,
+    theme: null,
+  });
+  assert.match(invoiceHeader(mailed), /Harbor Beam Works/);
+  assert.doesNotMatch(invoiceHeader(mailed), /Priya Shah/);
+  assert.match(mailed, /Make checks payable to Priya Shah\./);
+  assert.match(invoiceThanks(mailed), /Thank you for choosing Harbor Beam Works!/);
+  assert.doesNotMatch(invoiceThanks(mailed), /Priya Shah/);
+  assert.equal(ownedDocumentSubject('invoice', 'INV-9', org), 'Invoice INV-9 from Harbor Beam Works');
 
   const hostile = buildInvoiceHtml({
-    company: companyWithPayeeName(shop, cleanPayeeName('<Larry>')),
+    company,
+    checksPayableTo: cleanPayeeName('<Priya>'),
     customer: { name: 'Clinic' },
     invNumber: 'INV-9',
-    invoiceDate: '2026-11-09',
+    invoiceDate: '2026-11-11',
     lines: [],
     subtotal: 0,
     tax: 0,
     total: 0,
   });
-  assert.match(hostile, /Make checks payable to &lt;Larry&gt;\./);
-  assert.doesNotMatch(hostile, /Make checks payable to <Larry>/);
+  assert.match(invoiceHeader(hostile), /Harbor Beam Works/);
+  assert.doesNotMatch(invoiceHeader(hostile), /Priya/);
+  assert.match(hostile, /Make checks payable to &lt;Priya&gt;\./);
+  assert.doesNotMatch(hostile, /Make checks payable to <Priya>/);
+  assert.match(invoiceThanks(hostile), /Thank you for choosing Harbor Beam Works!/);
 
   const orgHtml = buildInvoiceHtml({
-    company: shop,
+    company,
+    checksPayableTo: org,
     customer: { name: 'Clinic' },
     invNumber: 'INV-9',
-    invoiceDate: '2026-11-09',
+    invoiceDate: '2026-11-11',
     lines: [],
     subtotal: 0,
     tax: 0,
     total: 0,
   });
-  assert.match(orgHtml, /Make checks payable to Luxor Photonix\./);
-  assert.match(orgHtml, /Thank you for choosing Luxor Photonix!/);
+  assert.match(invoiceHeader(orgHtml), /Harbor Beam Works/);
+  assert.match(orgHtml, /Make checks payable to Harbor Beam Works\./);
+  assert.match(orgHtml, /Thank you for choosing Harbor Beam Works!/);
+  assert.doesNotMatch(orgHtml, /Priya Shah/);
 
-  assert.equal(ownedDocumentSubject('invoice', 'INV-9', 'Larry Smart'), 'Invoice INV-9 from Larry Smart');
-  assert.equal(
-    ownedDocumentSubject('invoice', 'INV-9', 'Luxor Photonix'),
-    'Invoice INV-9 from Luxor Photonix'
-  );
+  const omitted = buildInvoiceHtml({
+    company,
+    customer: { name: 'Clinic' },
+    invNumber: 'INV-9',
+    invoiceDate: '2026-11-11',
+    lines: [],
+    subtotal: 0,
+    tax: 0,
+    total: 0,
+  });
+  assert.match(omitted, /Make checks payable to Harbor Beam Works\./);
+  assert.match(omitted, /Thank you for choosing Harbor Beam Works!/);
+
+  const storedOrg = buildOwnedInvoiceMessage({
+    row: {
+      customer_name: 'Clinic',
+      invoice_number: 'INV-8',
+      total: 10,
+      invoice_data: { line_items: [], payee_kind: 'organization', payee_name: org },
+    },
+    company,
+    theme: null,
+  });
+  assert.match(invoiceHeader(storedOrg), /Harbor Beam Works/);
+  assert.match(storedOrg, /Make checks payable to Harbor Beam Works\./);
+  assert.match(invoiceThanks(storedOrg), /Thank you for choosing Harbor Beam Works!/);
+  assert.doesNotMatch(storedOrg, /Priya Shah/);
 
   const destination = {
     destinationAccountId: 'acct_shop123',
@@ -200,20 +272,21 @@ test('invoice HTML, subject, and Stripe copy use the payee and leave the payout 
     invoiceId: 9,
     invoiceNumber: 'INV-9',
   };
-  const personalParams = buildInvoiceCheckoutParams({ ...destination, companyName: 'Larry Smart' });
-  const orgParams = buildInvoiceCheckoutParams({ ...destination, companyName: 'Luxor Photonix' });
+  const personalParams = buildInvoiceCheckoutParams({ ...destination, companyName: person });
+  const orgParams = buildInvoiceCheckoutParams({ ...destination, companyName: org });
   assert.ok(personalParams && orgParams);
   assert.equal(
     personalParams.get('line_items[0][price_data][product_data][description]'),
-    'Payment to Larry Smart'
+    'Payment to Priya Shah'
   );
   assert.equal(
     orgParams.get('line_items[0][price_data][product_data][description]'),
-    'Payment to Luxor Photonix'
+    'Payment to Harbor Beam Works'
   );
   assert.equal(personalParams.get('payment_intent_data[transfer_data][destination]'), 'acct_shop123');
   assert.equal(orgParams.get('payment_intent_data[transfer_data][destination]'), 'acct_shop123');
   assert.equal(personalParams.get('payment_intent_data[on_behalf_of]'), 'acct_shop123');
+  assert.equal(orgParams.get('payment_intent_data[on_behalf_of]'), 'acct_shop123');
   assert.equal(
     personalParams.get('metadata[seller_organization_id]'),
     orgParams.get('metadata[seller_organization_id]')
@@ -294,8 +367,21 @@ test('invoice form offers company and personal names and does not hardcode a sho
   assert.match(src, /if \(alreadyFinal\)/);
   assert.match(src, /persistSentPayee\(/);
   assert.match(src, /if \(!alreadyFinal\) await saveInvoice\('sent'/);
-  assert.match(src, /company: issuerCompany/);
-  assert.doesNotMatch(src, /Larry Smart|Luxor Photonix/);
+  assert.match(src, /company,/);
+  assert.match(src, /checksPayableTo: payee\.payee_name/);
+  assert.match(src, /company_name: organizationName/);
+  assert.match(src, /Choose who checks are written to/);
+  assert.doesNotMatch(src, /companyWithPayeeName|issuerCompany|invoiceIssuerName/);
+  assert.doesNotMatch(src, /Larry Smart|Luxor Photonix|Priya Shah|Harbor Beam Works/);
+
+  const route = readFileSync(join(here, '../../app/api/billing/send-invoice/route.ts'), 'utf8');
+  assert.match(route, /ownedDocumentSubject\(\s*'invoice',\s*inv\.invoice_number,\s*company\.company_name/);
+  assert.match(route, /companyName: invoiceChecksPayableName\(inv, company\.company_name\)/);
+  assert.doesNotMatch(route, /companyWithPayeeName|invoiceIssuerName/);
+  const messageAt = route.indexOf('buildOwnedInvoiceMessage({');
+  const message = route.slice(messageAt, route.indexOf('});', messageAt));
+  assert.match(message, /\bcompany,/);
+  assert.doesNotMatch(message, /payee|checksPayable/);
 
   const saveStart = src.indexOf('async function saveInvoice');
   const saveEnd = src.indexOf('function buildInvoiceEmailHtml');
@@ -328,6 +414,7 @@ test('payee migration defaults to the organization and does not rewrite rows', (
     'Company',
     'My name',
     'Resending a sent invoice updates this name only. Amounts stay as stored.',
+    'Choose who checks are written to. The invoice header, the thank-you line, and the email subject use the company name. The check line and the card payment description use this choice. Card payments still go to the Stripe account connected to this shop.',
   ]) {
     for (const loc of ['es', 'de', 'ar', 'fa', 'fr', 'he', 'it', 'pt'] as const) {
       const translated = appStrings(loc)[key];

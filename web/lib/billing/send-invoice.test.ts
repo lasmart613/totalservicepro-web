@@ -409,14 +409,14 @@ describe('send invoice', { concurrency: false }, () => {
     }
   });
 
-  test('personal payee changes the invoice name and not the Stripe destination', async () => {
+  test('personal payee changes the check line and not the shop name or Stripe destination', async () => {
     resetDocumentSendRateLimit();
     const personal = invoiceRow();
     personal.invoice_data = {
       custEmail: CLINIC,
       line_items: [{ description: 'Handpiece service', qty: 1, unit_price: 120, ext: 120 }],
       payee_kind: 'personal',
-      payee_name: 'Larry Smart',
+      payee_name: 'Priya Shah',
     };
     const db = memoryClient({
       user_profiles: [profile],
@@ -454,19 +454,26 @@ describe('send invoice', { concurrency: false }, () => {
         assert.equal(res.status, 200);
         assert.equal(json.emailSent, true);
         assert.equal(checkout.calls.length, 1);
-        assert.equal(checkout.calls[0].companyName, 'Larry Smart');
+        assert.equal(checkout.calls[0].companyName, 'Priya Shah');
         assert.equal(checkout.calls[0].destinationAccountId, undefined);
         assert.equal(checkout.calls[0].legacyPlatformCharge, true);
         assert.equal(checkout.calls[0].organizationId, undefined);
         assert.ok(mailed);
-        assert.equal(mailed.subject, 'Invoice INV-100 from Larry Smart');
+        assert.equal(mailed.subject, 'Invoice INV-100 from Cedar Laser Service');
         assert.match(mailed.from || '', /Total Service Pro|contact@medicalrepairnetwork.com/);
         assert.equal(mailed.reply_to, 'shop@cedar.test');
-        assert.match(mailed.html || '', /Make checks payable to Larry Smart\./);
-        assert.match(mailed.html || '', /Thank you for choosing Larry Smart!/);
-        assert.match(mailed.html || '', /1 Main/);
-        assert.doesNotMatch(mailed.html || '', /Forged Shop|Forged body/);
-        assert.doesNotMatch(mailed.html || '', /Cedar Laser Service/);
+        const html = mailed.html || '';
+        const header = html.slice(0, html.indexOf('Customer / Bill To'));
+        const thanks = html.slice(html.lastIndexOf('<!--tsp-thanks-->'));
+        assert.match(header, /Cedar Laser Service/);
+        assert.doesNotMatch(header, /Priya Shah|Ada Lovelace/);
+        assert.match(html, /Make checks payable to Priya Shah\./);
+        assert.match(thanks, /Thank you for choosing Cedar Laser Service!/);
+        assert.doesNotMatch(thanks, /Priya Shah|Ada Lovelace/);
+        assert.match(html, /1 Main/);
+        assert.match(html, /Prepared by/);
+        assert.match(html, /Ada Lovelace/);
+        assert.doesNotMatch(html, /Forged Shop|Forged body|Larry Smart/);
       });
     } finally {
       globalThis.fetch = original;

@@ -1,13 +1,16 @@
 /**
- * Who an invoice is payable to.
+ * Who a check for an invoice is payable to.
  *
- * organization (default) prints the shop name, the same as before.
- * personal prints the signed-in user's profile name (first + last, then a
- * display/legal full name). The choice is stored on the invoice so a later
- * PDF, email, or resend does not follow whoever is signed in now.
+ * organization (default) uses the shop name on the check line, the same as before.
+ * personal uses the issuing user's profile name (first + last, then a
+ * display/legal full name) on the check line only. The choice is stored on
+ * the invoice so a later PDF, email, or resend does not follow whoever is
+ * signed in now.
  *
- * Card payments still settle on the shop's Stripe account. This name is
- * document and Checkout copy only.
+ * The document header, the thank-you line, and the email subject always use
+ * the organization's stored name. Card payments still settle on the shop's
+ * Stripe account. Checkout's "Payment to …" description names this payee.
+ * That description is not the charge destination.
  */
 
 import { parseJsonField } from './save-helpers.ts';
@@ -113,18 +116,19 @@ export function invoicePayeeWrite(input: {
   return { payee_kind: INVOICE_PAYEE_ORGANIZATION, payee_name: organizationName };
 }
 
-/** Name printed for a stored invoice. Organization, or a missing choice, stays the shop name. */
-export function invoiceIssuerName(row: Record<string, unknown> | null | undefined, organizationName: unknown): string {
+/**
+ * Name on "Make checks payable to" and the Checkout "Payment to" description.
+ * Organization, or a missing choice, stays the shop name. This is not the
+ * name in the invoice header or the thank-you line.
+ */
+export function invoiceChecksPayableName(
+  row: Record<string, unknown> | null | undefined,
+  organizationName: unknown
+): string {
   const stored = storedInvoicePayee(row);
   const org = cleanPayeeName(organizationName);
   if (stored.payee_kind === INVOICE_PAYEE_PERSONAL && stored.payee_name) return stored.payee_name;
   return org;
-}
-
-export function companyWithPayeeName<T extends { company_name?: string }>(company: T, payeeName: string): T {
-  const name = cleanPayeeName(payeeName);
-  if (!name || name === cleanPayeeName(company.company_name)) return company;
-  return { ...company, company_name: name };
 }
 
 export function mergePayeeIntoInvoiceData(existing: unknown, payee: InvoicePayeeChoice): Record<string, unknown> {

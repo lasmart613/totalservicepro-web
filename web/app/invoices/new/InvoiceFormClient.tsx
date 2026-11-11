@@ -57,7 +57,6 @@ import {
   resolveInvoiceSaveStatus,
 } from '@/lib/billing/invoice-status-guard';
 import {
-  companyWithPayeeName,
   invoicePayeeWrite,
   profileDisplayName,
   sentInvoicePayeePatch,
@@ -682,7 +681,6 @@ export default function InvoiceFormClient() {
     storedPayeeName,
     touched: payeeTouched,
   });
-  const issuerCompany = companyWithPayeeName(company, payee.payee_name);
   const storedPayeeDiffers =
     payeeKind === 'personal' &&
     !payeeTouched &&
@@ -925,7 +923,7 @@ export default function InvoiceFormClient() {
 
   function buildInvoiceEmailHtml(themeScope: DocThemeScope = 'email') {
     return buildInvoiceHtml({
-      company: issuerCompany,
+      company,
       customer: {
         name: customerName.trim() || custSearch.trim(),
         address: custAddress,
@@ -940,7 +938,8 @@ export default function InvoiceFormClient() {
       invoiceDate: invoiceDate || orgTodayRef.current,
       dueDate: dueDate || undefined,
       description: description || undefined,
-      preparedBy: issuerCompany.tech_name,
+      preparedBy: company.tech_name,
+      checksPayableTo: payee.payee_name,
       fromEstimateId: sourceEstimateId,
       lines: lineItems,
       subtotal,
@@ -1016,7 +1015,7 @@ export default function InvoiceFormClient() {
           due_now: collectable.stripeAmount,
           total,
           customer_organization_id: customerOrgId,
-          company_name: payee.payee_name,
+          company_name: organizationName,
           reply_to: company.email || undefined,
           html,
           include_payment_link: true,
@@ -1084,7 +1083,7 @@ export default function InvoiceFormClient() {
           due_now: collectable.stripeAmount,
           total,
           customer_organization_id: customerOrgId,
-          company_name: payee.payee_name,
+          company_name: organizationName,
           reply_to: company.email || undefined,
           html: buildInvoiceEmailHtml(),
           include_payment_link: true,
@@ -1403,7 +1402,7 @@ export default function InvoiceFormClient() {
             <legend className="px-1 text-sm font-bold text-[var(--gold)]">{t('Checks payable to')}</legend>
             <p className="text-xs text-[var(--text3)] mb-3">
               {t(
-                'Choose the name on this invoice. The customer writes the check to that name. It is also the name in the email subject and on the card payment page. Card payments still go to the Stripe account connected to this shop.'
+                'Choose who checks are written to. The invoice header, the thank-you line, and the email subject use the company name. The check line and the card payment description use this choice. Card payments still go to the Stripe account connected to this shop.'
               )}
             </p>
             <div className="grid gap-2" role="radiogroup" aria-label={t('Checks payable to')}>
