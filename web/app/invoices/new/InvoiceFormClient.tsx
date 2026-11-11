@@ -704,6 +704,7 @@ export default function InvoiceFormClient() {
       toast.error('Customer name is required');
       return null;
     }
+    let unchangedSave = false;
     setSaving(true);
     try {
       const existingIdBefore = savedIdRef.current;
@@ -820,7 +821,7 @@ export default function InvoiceFormClient() {
       const guarded = applyInvoiceStatusGuard(payload, status, requestedStatus, previousInvoiceData);
       const signature = JSON.stringify(guarded.payload);
       if (payloadSignatureRef.current != null && payloadSignatureRef.current === signature) {
-        if (!opts?.quiet) toast.message('No changes to save.');
+        unchangedSave = !opts?.quiet;
         return existingId;
       }
 
@@ -889,6 +890,7 @@ export default function InvoiceFormClient() {
       return null;
     } finally {
       setSaving(false);
+      if (unchangedSave) toast.info('No changes to save.');
     }
   }
 

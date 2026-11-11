@@ -89,6 +89,14 @@ export function setPasswordSubtitle(flow: string | null | undefined): string {
     : RESET_PASSWORD_HEADING;
 }
 
+/** Shown when the set-password page has no session and points at Forgot password. */
+export function setPasswordNoSessionHint(flow: string | null | undefined): string {
+  if (String(flow || '').trim().toLowerCase() === 'invite') {
+    return 'Enter the same email from the invite. The reset email lets you choose a password.';
+  }
+  return 'Enter the email on your account. The reset email lets you choose a password.';
+}
+
 /**
  * Link type → page. Sign-in goes to the claim flow when a team invite or
  * clinic claim token is pending, otherwise the usual home/dashboard.
