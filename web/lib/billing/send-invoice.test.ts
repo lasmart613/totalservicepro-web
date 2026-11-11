@@ -479,4 +479,120 @@ describe('send invoice', { concurrency: false }, () => {
       globalThis.fetch = original;
     }
   });
+
+  test('finalize email keeps its body and adds an Invoice PDF attachment', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.estimate_id = 77;
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const checkout = checkoutSpy();
+    const original = globalThis.fetch;
+    let mailed: {
+      subject?: string;
+      html?: string;
+      to?: string[];
+      attachments?: { filename?: string; content?: string; content_type?: string }[];
+    } | null = null;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      const target = String(url);
+      if (!target.includes('api.resend.com')) throw new Error(`unexpected fetch ${target}`);
+      mailed = JSON.parse(String(init?.body || '{}'));
+      return new Response(JSON.stringify({ id: 'msg-pdf' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(
+          request({
+            invoice_id: 42,
+            include_payment_link: true,
+            html: '<p>Forged body</p>',
+            to_email: 'forged@example.com',
+          }),
+          {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: checkout.createCheckout as never,
+          }
+        );
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.pdfAttached, true);
+        assert.equal(json.pdfSkipped, undefined);
+        assert.equal(mailed?.subject, 'Invoice INV-100 from Cedar Laser Service');
+        assert.equal(mailed?.to?.[0], CLINIC);
+        const html = mailed?.html || '';
+        assert.match(html, /Handpiece service/);
+        assert.match(html, /Pay .* securely with Stripe|securely with Stripe/);
+        assert.doesNotMatch(html, /From estimate/);
+        assert.doesNotMatch(html, /Forged body/);
+        const file = mailed?.attachments?.[0];
+        assert.equal(mailed?.attachments?.length, 1);
+        assert.equal(file?.filename, 'Invoice-INV-100.pdf');
+        assert.equal(file?.content_type, 'application/pdf');
+        const bytes = Buffer.from(String(file?.content || ''), 'base64');
+        assert.equal(bytes.subarray(0, 4).toString(), '%PDF');
+        const { extractPdfPages } = await import('../manual-pdf-text.ts');
+        const text = (await extractPdfPages(bytes)).map((page) => page.text).join('\n');
+        assert.match(text, /INV-100/);
+        assert.match(text, /Handpiece service/);
+        assert.match(text, /Cedar Clinic/);
+        assert.match(text, /77/);
+        assert.doesNotMatch(text, /securely with Stripe/);
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test('a PDF failure still sends the invoice email without an attachment', async () => {
+    resetDocumentSendRateLimit();
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [invoiceRow()],
+    });
+    const checkout = checkoutSpy();
+    const original = globalThis.fetch;
+    let mailed: { subject?: string; html?: string; attachments?: unknown } | null = null;
+    globalThis.fetch = (async (url: unknown, init?: RequestInit) => {
+      const target = String(url);
+      if (!target.includes('api.resend.com')) throw new Error(`unexpected fetch ${target}`);
+      mailed = JSON.parse(String(init?.body || '{}'));
+      return new Response(JSON.stringify({ id: 'msg-nopdf' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: false }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          renderInvoicePdf: async () => {
+            throw new Error('pdf engine down');
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.pdfAttached, false);
+        assert.equal(json.pdfSkipped, 'render_failed');
+        assert.equal(mailed?.subject, 'Invoice INV-100 from Cedar Laser Service');
+        assert.match(mailed?.html || '', /Handpiece service/);
+        assert.equal(mailed?.attachments, undefined);
+        assert.equal(json.error, undefined);
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
 });

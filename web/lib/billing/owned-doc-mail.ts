@@ -16,7 +16,9 @@ import {
   buildPurchaseOrderHtml,
   buildPurchaseOrderPlainText,
   type DocCompany,
+  type DocThemeScope,
   type EstimateHtmlInput,
+  type InvoiceHtmlInput,
   type PurchaseOrderHtmlInput,
 } from './doc-html.ts';
 import {
@@ -220,7 +222,7 @@ export async function loadSenderCompany(
   return senderCompanyFromOrg(null, techName);
 }
 
-export function buildOwnedInvoiceMessage(input: {
+export function ownedInvoiceHtmlInput(input: {
   row: Record<string, unknown>;
   company: DocCompany;
   theme: CompanyTheme | null;
@@ -228,7 +230,10 @@ export function buildOwnedInvoiceMessage(input: {
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
   timeZone?: string | null;
-}): string {
+  /** Email keeps the gold body rules. The PDF uses document so it matches Preview. */
+  themeScope?: DocThemeScope;
+  fromEstimateId?: unknown;
+}): InvoiceHtmlInput {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
   const collectable = resolveInvoiceCollectable({
@@ -244,7 +249,14 @@ export function buildOwnedInvoiceMessage(input: {
   const subtotal = num(input.row.subtotal ?? data.subtotal) || lineSum;
   const tax = num(input.row.tax ?? data.tax);
   const total = num(input.row.total ?? data.total) || subtotal + tax;
-  return buildInvoiceHtml({
+  const estimateId = input.fromEstimateId;
+  const fromEstimateId =
+    typeof estimateId === 'number' && Number.isFinite(estimateId)
+      ? estimateId
+      : typeof estimateId === 'string' && estimateId.trim()
+        ? estimateId.trim()
+        : undefined;
+  return {
     company: input.company,
     customer: {
       name: String(input.row.customer_name || ''),
@@ -276,11 +288,24 @@ export function buildOwnedInvoiceMessage(input: {
     paymentUrl: input.paymentUrl || null,
     checksPayableTo: invoiceChecksPayableName(input.row, input.company.company_name),
     theme: input.theme,
-    themeScope: 'email',
+    themeScope: input.themeScope ?? 'email',
     moneyPrefs: input.moneyPrefs,
     locale: input.locale,
     timeZone: input.timeZone,
-  });
+    ...(fromEstimateId != null ? { fromEstimateId } : {}),
+  };
+}
+
+export function buildOwnedInvoiceMessage(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  theme: CompanyTheme | null;
+  paymentUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
+}): string {
+  return buildInvoiceHtml(ownedInvoiceHtmlInput(input));
 }
 
 export function buildOwnedEstimateMessage(input: {
@@ -575,6 +600,13 @@ export function buildOwnedReportMessage(
   });
 }
 
+export type ResendAttachment = {
+  filename: string;
+  /** Base64 file bytes. Resend's REST API expects this field, not a Buffer. */
+  content: string;
+  content_type: string;
+};
+
 export function resendMessage(input: {
   from: string;
   to: string;
@@ -582,8 +614,25 @@ export function resendMessage(input: {
   html: string;
   text?: string | null;
   replyTo?: string | null;
-}): { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string } {
-  const message: { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string } = {
+  attachments?: ResendAttachment[] | null;
+}): {
+  from: string;
+  to: string[];
+  subject: string;
+  html: string;
+  text?: string;
+  reply_to?: string;
+  attachments?: ResendAttachment[];
+} {
+  const message: {
+    from: string;
+    to: string[];
+    subject: string;
+    html: string;
+    text?: string;
+    reply_to?: string;
+    attachments?: ResendAttachment[];
+  } = {
     from: input.from,
     to: [input.to],
     subject: input.subject,
@@ -593,6 +642,8 @@ export function resendMessage(input: {
   if (text) message.text = text;
   const reply = String(input.replyTo || '').trim();
   if (isMailbox(reply)) message.reply_to = reply;
+  const attachments = (input.attachments || []).filter((file) => file?.filename && file.content);
+  if (attachments.length) message.attachments = attachments;
   return message;
 }
 
