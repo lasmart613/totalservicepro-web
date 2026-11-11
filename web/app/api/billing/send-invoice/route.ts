@@ -29,6 +29,7 @@ import { stampLangOnEstimateLinks } from '@/lib/share';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
   buildOwnedInvoiceMessage,
+  ownedInvoiceHtmlInput,
   documentAccountLinks,
   documentCustomerOrgId,
   documentOwnedByOrganization,
@@ -43,6 +44,14 @@ import {
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
 import { invoiceChecksPayableName } from '@/lib/billing/invoice-payee';
+import {
+  INVOICE_PDF_MAX_BYTES,
+  invoicePdfFilename,
+  renderInvoicePdf as defaultRenderInvoicePdf,
+  toResendPdfAttachment,
+  type InvoicePdfAttachment,
+} from '@/lib/billing/invoice-pdf';
+import type { InvoiceHtmlInput } from '@/lib/billing/doc-html';
 
 /** Same body for a missing invoice and an invoice owned by another shop. */
 const INVOICE_NOT_FOUND = 'Invoice not found.';
@@ -58,6 +67,8 @@ type SendInvoiceDeps = {
   userClient?: SupabaseClient;
   adminClient?: SupabaseClient | null;
   createCheckout?: (input: InvoicePayLinkInput) => Promise<InvoiceCheckoutOutcome>;
+  /** Tests pass a stub. Production draws the Preview document. */
+  renderInvoicePdf?: (input: InvoiceHtmlInput) => Promise<Uint8Array>;
 };
 
 export async function POST(req: NextRequest) {
@@ -69,6 +80,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
   let limitClient: SupabaseClient | null = null;
   let checkoutSessionCreated = false;
   const createInvoiceCheckoutSession = deps.createCheckout ?? defaultCreateInvoiceCheckoutSession;
+  const renderInvoicePdf = deps.renderInvoicePdf ?? defaultRenderInvoicePdf;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -346,6 +358,36 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     });
     const mailedHtml = stampLangOnEstimateLinks(wrapped, mailLocale);
 
+    let attachments: InvoicePdfAttachment[] | undefined;
+    let pdfAttached = false;
+    let pdfSkipped: 'render_failed' | 'too_large' | 'invalid_pdf' | null = null;
+    try {
+      const pdfInput = ownedInvoiceHtmlInput({
+        row: inv,
+        company,
+        theme,
+        paymentUrl: null,
+        moneyPrefs,
+        locale: mailLocale,
+        timeZone: zone.timeZone,
+        themeScope: 'document',
+        fromEstimateId: inv.estimate_id,
+      });
+      const bytes = await renderInvoicePdf(pdfInput);
+      const file = toResendPdfAttachment(bytes, invoicePdfFilename(inv.invoice_number));
+      if (file) {
+        attachments = [file];
+        pdfAttached = true;
+      } else {
+        pdfSkipped = bytes.byteLength > INVOICE_PDF_MAX_BYTES ? 'too_large' : 'invalid_pdf';
+        console.error('send-invoice: PDF attachment skipped', { invoiceId, reason: pdfSkipped, bytes: bytes.byteLength });
+      }
+    } catch (err) {
+      pdfSkipped = 'render_failed';
+      const message = err instanceof Error ? err.message : 'render failed';
+      console.error('send-invoice: PDF attachment skipped', { invoiceId, reason: pdfSkipped, message });
+    }
+
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
@@ -364,6 +406,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
           subject,
           html: mailedHtml,
           replyTo: company.email,
+          attachments,
         })
       ),
     });
@@ -402,6 +445,8 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         stripeSkippedReason: paymentUrl ? null : stripeSkippedReason,
         connectRequired,
         stripeConnect,
+        pdfAttached,
+        ...(pdfSkipped ? { pdfSkipped } : {}),
       },
       200,
       [recipient.email]

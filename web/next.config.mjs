@@ -27,7 +27,7 @@ const nextConfig = {
   outputFileTracingRoot: path.join(__dirname),
   // pdf.js legacy build resolves its worker, cmaps, and standard fonts from
   // node_modules at runtime (manual reindex). Do not bundle it.
-  serverExternalPackages: ['pdfjs-dist'],
+  serverExternalPackages: ['pdfjs-dist', 'pdf-lib', '@pdf-lib/fontkit', 'bidi-js'],
   outputFileTracingIncludes: {
     '/api/god/manuals/**': [
       './node_modules/pdfjs-dist/legacy/build/**',
