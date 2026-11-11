@@ -88,16 +88,29 @@ export function lineItemsSubtotal(items: LineItem[]): number {
   return Math.round(items.reduce((s, i) => s + (Number(i.ext) || 0), 0) * 100) / 100;
 }
 
+function writtenRowId(data: unknown): string | number | null {
+  if (Array.isArray(data)) {
+    const id = data[0] && typeof data[0] === 'object' ? (data[0] as { id?: string | number }).id : null;
+    return id == null || id === '' ? null : id;
+  }
+  if (data && typeof data === 'object' && 'id' in data) {
+    const id = (data as { id?: string | number | null }).id;
+    return id == null || id === '' ? null : id;
+  }
+  return null;
+}
+
 /**
  * Insert/update with retry stripping columns PostgREST reports as missing.
  * Matches NewServiceReportClient / Android stripOptionalCols pattern.
+ * persisted is false when PostgREST returns no row (the write did not stick).
  */
 export async function writeWithColumnRetry(
   supabase: { from: (t: string) => any },
   table: string,
   payload: Record<string, any>,
   existingId: string | number | null
-): Promise<{ id: string | number | null; error: any }> {
+): Promise<{ id: string | number | null; error: any; persisted: boolean }> {
   let body = { ...payload };
   for (let attempt = 0; attempt < 8; attempt++) {
     if (existingId != null && existingId !== '') {
@@ -107,11 +120,8 @@ export async function writeWithColumnRetry(
         .eq('id', existingId)
         .select('id');
       if (!error) {
-        const rid =
-          (Array.isArray(data) && data[0]?.id) ||
-          (data as any)?.id ||
-          existingId;
-        return { id: rid, error: null };
+        const written = writtenRowId(data);
+        return { id: written || existingId, error: null, persisted: written != null };
       }
       const m = String(error.message || '');
       const col =
@@ -166,14 +176,13 @@ export async function writeWithColumnRetry(
       if (stripped || /column|schema cache/i.test(m)) {
         if (stripped) continue;
       }
-      return { id: existingId, error };
+      return { id: existingId, error, persisted: false };
     }
 
     const { data, error } = await supabase.from(table).insert(body).select('id');
     if (!error) {
-      const rid =
-        (Array.isArray(data) && data[0]?.id) || (data as any)?.id || null;
-      return { id: rid, error: null };
+      const written = writtenRowId(data);
+      return { id: written, error: null, persisted: written != null };
     }
     const m = String(error.message || '');
     const col =
@@ -220,9 +229,9 @@ export async function writeWithColumnRetry(
       stripped = true;
     }
     if (stripped) continue;
-    return { id: null, error };
+    return { id: null, error, persisted: false };
   }
-  return { id: null, error: new Error(`Could not save ${table} after schema retries`) };
+  return { id: null, error: new Error(`Could not save ${table} after schema retries`), persisted: false };
 }
 
 export const SERVICE_TYPES = [

@@ -218,6 +218,11 @@ test('invoice list page surfaces query errors, retries, and does not block on ro
   assert.match(initSrc, /void resolveNumberingTimeZone\(/);
   assert.doesNotMatch(initSrc, /await getOrgRole\(/);
   assert.doesNotMatch(initSrc, /await resolveNumberingTimeZone\(/);
+  assert.match(initSrc, /auth\.getSession\(\)/);
+  assert.doesNotMatch(initSrc, /auth\.getUser\(\)/);
+  const loadFn = page.slice(page.indexOf('async function loadInvoices'), page.indexOf('function applyFilters'));
+  assert.match(loadFn, /Promise\.all\(/);
+  assert.doesNotMatch(loadFn, /await supabase/);
   const roleAt = initSrc.indexOf('void getOrgRole');
   const loadAt = initSrc.indexOf('await loadInvoices');
   assert.ok(roleAt > 0 && loadAt > roleAt);
