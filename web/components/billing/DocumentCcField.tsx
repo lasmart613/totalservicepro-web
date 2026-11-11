@@ -30,7 +30,7 @@ export default function DocumentCcField({
         inputMode="email"
         autoComplete="off"
         data-field="document-cc"
-        placeholder={t('billing@clinic.com, office@clinic.com')}
+        placeholder="billing@clinic.com, office@clinic.com"
         value={value}
         disabled={disabled}
         aria-describedby={hintId}
