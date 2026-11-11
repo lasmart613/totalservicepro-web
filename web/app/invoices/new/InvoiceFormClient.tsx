@@ -42,6 +42,7 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave, loadStoredInvoiceData } from '@/lib/billing/invoice-form-data';
+import { duplicateInvoiceDraft, resolveDuplicateInvoiceOrg } from '@/lib/billing/duplicate-invoice';
 import {
   emptyInvoiceCustomerDraft,
   invoiceCustomerDraftFromHit,
@@ -108,6 +109,8 @@ export default function InvoiceFormClient() {
   const [payeeTouched, setPayeeTouched] = useState(false);
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
+  const [duplicating, setDuplicating] = useState(false);
+  const duplicatingRef = useRef(false);
 
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const customerRef = useRef<InvoiceCustomerDraft>(emptyInvoiceCustomerDraft());
@@ -690,6 +693,7 @@ export default function InvoiceFormClient() {
 
   function choosePayee(kind: InvoicePayeeKind) {
     if (kind === 'personal' && !personalName) return;
+    formTouchedRef.current = true;
     setPayeeTouched(true);
     setPayeeKind(kind);
   }
@@ -820,6 +824,7 @@ export default function InvoiceFormClient() {
       const guarded = applyInvoiceStatusGuard(payload, status, requestedStatus, previousInvoiceData);
       const signature = JSON.stringify(guarded.payload);
       if (payloadSignatureRef.current != null && payloadSignatureRef.current === signature) {
+        formTouchedRef.current = false;
         if (!opts?.quiet) toast.message('No changes to save.');
         return existingId;
       }
@@ -835,6 +840,7 @@ export default function InvoiceFormClient() {
         throw result.error || new Error('Could not save invoice.');
       }
       payloadSignatureRef.current = signature;
+      formTouchedRef.current = false;
       savedCustomerRef.current = { ...customerRef.current };
 
       if (result.id) {
@@ -919,6 +925,82 @@ export default function InvoiceFormClient() {
     setStoredPayeeName(payee.payee_name);
     setPayeeTouched(false);
     return true;
+  }
+
+  /**
+   * New draft from the saved row. Unsaved editor edits are refused — saving
+   * them first would write a sent, paid, or void invoice. No email, no Stripe.
+   */
+  async function duplicateCurrentInvoice() {
+    const existingId = savedIdRef.current;
+    if (existingId == null || existingId === '') {
+      toast.error(t('Save the invoice first'));
+      return;
+    }
+    if (formTouchedRef.current) {
+      toast.error(t('Save this invoice before duplicating it. Unsaved edits are not copied.'));
+      return;
+    }
+    if (duplicatingRef.current) return;
+    duplicatingRef.current = true;
+    setDuplicating(true);
+    try {
+      const { data, error } = await supabase
+        .from('service_invoices')
+        .select('*')
+        .eq('id', existingId)
+        .maybeSingle();
+      if (error || !data) {
+        toast.error(t('Could not duplicate this invoice.'));
+        return;
+      }
+      const org = resolveDuplicateInvoiceOrg(data, userOrgId);
+      if (!org.ok) {
+        toast.error(t('This invoice belongs to another organization.'));
+        return;
+      }
+      const today = orgTodayIso({ stored: orgTimeZone, state: company.state });
+      const invNum = await allocateDocNumber(supabase, {
+        orgId: org.organizationId,
+        kind: 'INV',
+        date: today,
+      });
+      if (!invNum) {
+        toast.error(t('Could not duplicate this invoice.'));
+        return;
+      }
+      const draft = duplicateInvoiceDraft({
+        source: data,
+        invoiceNumber: invNum,
+        invoiceDate: today,
+        callerOrgId: userOrgId,
+        createdBy: userId,
+      });
+      if (!draft.ok) {
+        toast.error(
+          t(
+            draft.reason === 'org_mismatch'
+              ? 'This invoice belongs to another organization.'
+              : 'Could not duplicate this invoice.'
+          )
+        );
+        return;
+      }
+      const result = await writeWithColumnRetry(supabase, 'service_invoices', draft.payload, null);
+      if (result.error || !result.persisted || result.id == null || result.id === '') {
+        toast.error(t('Could not duplicate this invoice.'));
+        return;
+      }
+      toast.success(t('Invoice duplicated as a draft.'));
+      formTouchedRef.current = false;
+      router.push(`/invoices/new?id=${encodeURIComponent(String(result.id))}`);
+    } catch (err) {
+      console.error('duplicate invoice', err);
+      toast.error(t('Could not duplicate this invoice.'));
+    } finally {
+      duplicatingRef.current = false;
+      setDuplicating(false);
+    }
   }
 
   function buildInvoiceEmailHtml(themeScope: DocThemeScope = 'email') {
@@ -1366,14 +1448,27 @@ export default function InvoiceFormClient() {
               value={customerEquipment.selectedId === NEW_EQUIPMENT_VALUE ? '' : customerEquipment.selectedId}
               equipment={customerEquipment.list}
               reload={customerEquipment.reload}
-              onSelect={customerEquipment.selectRow}
+              onSelect={(row) => {
+                formTouchedRef.current = true;
+                customerEquipment.selectRow(row);
+              }}
               t={t}
               idPrefix="inv-eq-cust"
             />
-            <EquipmentCascadeFields cascade={cascade} t={t} idPrefix="inv-eq" />
+            <EquipmentCascadeFields
+              cascade={cascade}
+              t={t}
+              idPrefix="inv-eq"
+              onEdit={() => {
+                formTouchedRef.current = true;
+              }}
+            />
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
-              <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
+              <input className="input mt-1" value={serial} onChange={(e) => {
+                formTouchedRef.current = true;
+                setSerial(e.target.value);
+              }} />
             </div>
             {customerEquipment.offerAdd && (
               <AddToOrgCheckbox
@@ -1390,7 +1485,10 @@ export default function InvoiceFormClient() {
                 type="number"
                 min={0}
                 value={pulseCount}
-                onChange={(e) => setPulseCount(e.target.value)}
+                onChange={(e) => {
+                  formTouchedRef.current = true;
+                  setPulseCount(e.target.value);
+                }}
               />
             </div>
           </div>
@@ -1468,6 +1566,7 @@ export default function InvoiceFormClient() {
                 type="date"
                 value={invoiceDate}
                 onChange={(e) => {
+                  formTouchedRef.current = true;
                   invoiceDateTouched.current = true;
                   setInvoiceDate(e.target.value);
                 }}
@@ -1480,6 +1579,7 @@ export default function InvoiceFormClient() {
                 type="date"
                 value={dueDate}
                 onChange={(e) => {
+                  formTouchedRef.current = true;
                   dueDateTouched.current = true;
                   setDueDate(e.target.value);
                 }}
@@ -1492,7 +1592,10 @@ export default function InvoiceFormClient() {
               className="input mt-1"
               rows={2}
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
+              onChange={(e) => {
+                formTouchedRef.current = true;
+                setDescription(e.target.value);
+              }}
               placeholder={t('Optional notes (service summary, PO #, etc.)')}
             />
           </div>
@@ -1596,13 +1699,14 @@ export default function InvoiceFormClient() {
                       <button
                         type="button"
                         className="text-red-400 text-lg px-1"
-                        onClick={() =>
+                        onClick={() => {
+                          formTouchedRef.current = true;
                           setLineItems((rows) =>
                             rows.length <= 1
                               ? [emptyLineItem('LI')]
                               : rows.filter((r) => r.id !== li.id)
-                          )
-                        }
+                          );
+                        }}
                       >
                         ×
                       </button>
@@ -1615,7 +1719,10 @@ export default function InvoiceFormClient() {
           <button
             type="button"
             className="btn btn-secondary text-sm mt-2"
-            onClick={() => setLineItems((r) => [...r, emptyLineItem('LI')])}
+            onClick={() => {
+              formTouchedRef.current = true;
+              setLineItems((r) => [...r, emptyLineItem('LI')]);
+            }}
           >
             + {t('Add line item')}
           </button>
@@ -1633,7 +1740,10 @@ export default function InvoiceFormClient() {
                 step="0.01"
                 min={0}
                 value={tax}
-                onChange={(e) => setTax(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  formTouchedRef.current = true;
+                  setTax(parseFloat(e.target.value) || 0);
+                }}
               />
             </div>
           </div>
@@ -1647,6 +1757,7 @@ export default function InvoiceFormClient() {
                 checked={chargeDepositOnly && dueNowAmount != null && dueNowAmount > 0}
                 disabled={deferredReleased}
                 onChange={(e) => {
+                  formTouchedRef.current = true;
                   setChargeDepositOnly(e.target.checked);
                   if (!e.target.checked) setDeferredReleased(false);
                 }}
@@ -1669,7 +1780,10 @@ export default function InvoiceFormClient() {
                   min={0}
                   value={dueNowAmount ?? collectable.dueNowOriginal}
                   disabled={deferredReleased}
-                  onChange={(e) => setDueNowAmount(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => {
+                    formTouchedRef.current = true;
+                    setDueNowAmount(parseFloat(e.target.value) || 0);
+                  }}
                 />
               </div>
               <div>
@@ -1714,7 +1828,10 @@ export default function InvoiceFormClient() {
                 step="0.01"
                 min={0}
                 value={deposit}
-                onChange={(e) => setDeposit(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  formTouchedRef.current = true;
+                  setDeposit(parseFloat(e.target.value) || 0);
+                }}
               />
             </div>
             <div>
@@ -1723,7 +1840,10 @@ export default function InvoiceFormClient() {
                 className="input mt-1"
                 type="date"
                 value={depositDate}
-                onChange={(e) => setDepositDate(e.target.value)}
+                onChange={(e) => {
+                  formTouchedRef.current = true;
+                  setDepositDate(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -1731,7 +1851,10 @@ export default function InvoiceFormClient() {
               <select
                 className="input select mt-1"
                 value={depositMethod}
-                onChange={(e) => setDepositMethod(e.target.value)}
+                onChange={(e) => {
+                  formTouchedRef.current = true;
+                  setDepositMethod(e.target.value);
+                }}
               >
                 <option value="">{t('— Select —')}</option>
                 <option value="Cash">{t('Cash')}</option>
@@ -1757,7 +1880,10 @@ export default function InvoiceFormClient() {
                 type="number"
                 step="0.01"
                 value={total}
-                onChange={(e) => setTotalOverride(parseFloat(e.target.value) || 0)}
+                onChange={(e) => {
+                  formTouchedRef.current = true;
+                  setTotalOverride(parseFloat(e.target.value) || 0);
+                }}
               />
             </div>
             <div>
@@ -1794,7 +1920,7 @@ export default function InvoiceFormClient() {
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
-            disabled={saving || emailing}
+            disabled={saving || emailing || duplicating}
             onClick={() => saveInvoice('draft')}
           >
             {saving ? t('Saving…') : t('Save Draft')}
@@ -1819,7 +1945,7 @@ export default function InvoiceFormClient() {
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
-            disabled={saving || emailing}
+            disabled={saving || emailing || duplicating}
             onClick={() => saveInvoice(status, { preserveStatus: true })}
           >
             {saving ? t('Saving…') : t('Save changes')}
@@ -1830,12 +1956,21 @@ export default function InvoiceFormClient() {
             className="btn btn-secondary min-w-[120px]"
             onClick={openInvoicePreview}
           >{t('Preview / PDF')}</button>
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[140px]"
+            disabled={saving || emailing || duplicating || savedId == null || savedId === ''}
+            title={savedId == null || savedId === '' ? t('Save the invoice first') : undefined}
+            onClick={() => duplicateCurrentInvoice()}
+          >
+            {duplicating ? t('Duplicating…') : t('Duplicate invoice')}
+          </button>
           {!voided && (
           <>
           <button
             type="button"
             className="btn btn-primary min-w-[140px]"
-            disabled={saving || emailing}
+            disabled={saving || emailing || duplicating}
             onClick={() => finalizeAndEmail()}
           >
             {emailing ? t('Emailing…') : t('Finalize & Email')}
@@ -1844,7 +1979,7 @@ export default function InvoiceFormClient() {
             <button
               type="button"
               className="btn btn-secondary min-w-[110px]"
-              disabled={saving || emailing}
+              disabled={saving || emailing || duplicating}
               onClick={() => resendEmail()}
             >
               {t('Resend Email')}
@@ -1853,7 +1988,7 @@ export default function InvoiceFormClient() {
           <button
             type="button"
             className="btn btn-secondary min-w-[100px] text-xs"
-            disabled={saving || emailing}
+            disabled={saving || emailing || duplicating}
             onClick={() => markSentWithoutEmail()}
             aria-label={t('Mark sent (no email)')}
             title={t('Sets status to sent without calling Resend')}
@@ -1862,7 +1997,7 @@ export default function InvoiceFormClient() {
             <button
               type="button"
               className="btn btn-secondary min-w-[150px] text-xs"
-              disabled={saving || emailing}
+              disabled={saving || emailing || duplicating}
               onClick={() => collectRemainingBalance()}
             >
               {t('Collect remaining balance')}
@@ -1871,7 +2006,7 @@ export default function InvoiceFormClient() {
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
-            disabled={saving || emailing}
+            disabled={saving || emailing || duplicating}
             onClick={() => {
               const rec = received;
               const tot = Number(total) || 0;
@@ -1887,7 +2022,7 @@ export default function InvoiceFormClient() {
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
-            disabled={saving || emailing}
+            disabled={saving || emailing || duplicating}
             onClick={() => saveInvoice('paid')}
           >
             {t('Mark paid')}
@@ -1896,7 +2031,7 @@ export default function InvoiceFormClient() {
             <button
               type="button"
               className="btn btn-secondary min-w-[120px]"
-              disabled={saving || emailing || voiding}
+              disabled={saving || emailing || duplicating || voiding}
               onClick={() => setVoidOpen(true)}
             >
               {t('Void invoice')}

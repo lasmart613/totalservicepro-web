@@ -11,6 +11,8 @@ type Props = {
   hideType?: boolean;
   labelClassName?: string;
   idPrefix?: string;
+  /** Fired when the user changes type, manufacturer, or model. */
+  onEdit?: () => void;
 };
 
 /** Shared Equipment type → Manufacturer → Model selects with Other + free text. */
@@ -20,8 +22,13 @@ export default function EquipmentCascadeFields({
   hideType = false,
   labelClassName = 'text-xs text-[var(--text3)]',
   idPrefix = 'eq',
+  onEdit,
 }: Props) {
   const { state } = cascade;
+  const edit = (apply: () => void) => {
+    onEdit?.();
+    apply();
+  };
   return (
     <>
       {!hideType && (
@@ -34,7 +41,7 @@ export default function EquipmentCascadeFields({
             data-testid="cascade-type"
             className="input select mt-1"
             value={state.equipmentType}
-            onChange={(e) => cascade.setEquipmentType(e.target.value)}
+            onChange={(e) => edit(() => cascade.setEquipmentType(e.target.value))}
           >
             {EQUIPMENT_TYPES.map((item) => (
               <option key={item.value} value={item.value}>
@@ -53,7 +60,7 @@ export default function EquipmentCascadeFields({
           data-testid="cascade-manufacturer"
           className="input select mt-1"
           value={state.manufacturer}
-          onChange={(e) => cascade.setManufacturer(e.target.value)}
+          onChange={(e) => edit(() => cascade.setManufacturer(e.target.value))}
         >
           <option value="">{t('— Select —')}</option>
           {cascade.manufacturerChoices.map((m) => (
@@ -69,7 +76,7 @@ export default function EquipmentCascadeFields({
             data-testid="cascade-manufacturer-custom"
             placeholder={t('Manufacturer')}
             value={state.customManufacturer}
-            onChange={(e) => cascade.setCustomManufacturer(e.target.value)}
+            onChange={(e) => edit(() => cascade.setCustomManufacturer(e.target.value))}
           />
         )}
       </div>
@@ -83,7 +90,7 @@ export default function EquipmentCascadeFields({
           className="input select mt-1"
           value={state.model}
           disabled={!state.manufacturer}
-          onChange={(e) => cascade.setModel(e.target.value)}
+          onChange={(e) => edit(() => cascade.setModel(e.target.value))}
         >
           <option value="">{t('— Select —')}</option>
           {cascade.modelChoices.map((m) => (
@@ -99,7 +106,7 @@ export default function EquipmentCascadeFields({
             data-testid="cascade-model-custom"
             placeholder={t('Custom model name')}
             value={state.customModel}
-            onChange={(e) => cascade.setCustomModel(e.target.value)}
+            onChange={(e) => edit(() => cascade.setCustomModel(e.target.value))}
           />
         )}
       </div>
