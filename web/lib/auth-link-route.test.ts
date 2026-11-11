@@ -18,6 +18,7 @@ import {
   recoveryLandingHref,
   recoveryRedirect,
   resolveSetPasswordFlow,
+  setPasswordNoSessionHint,
   setPasswordSubtitle,
   setupLinkRedirect,
 } from './auth-link-route.ts';
@@ -47,6 +48,9 @@ test('recovery links go to set-password without the team invite heading', () => 
   );
   assert.equal(setPasswordSubtitle('reset'), RESET_PASSWORD_HEADING);
   assert.equal(setPasswordSubtitle('recovery'), RESET_PASSWORD_HEADING);
+  assert.match(setPasswordNoSessionHint('invite'), /invite/);
+  assert.doesNotMatch(setPasswordNoSessionHint('reset'), /invite/i);
+  assert.doesNotMatch(setPasswordNoSessionHint('recovery'), /invite/i);
   assert.equal(resolveSetPasswordFlow({ type: 'recovery', flow: 'invite' }), 'reset');
   assert.notEqual(RESET_PASSWORD_HEADING, TEAM_INVITE_PASSWORD_HEADING);
   const redirect = recoveryRedirect(ORIGIN);
@@ -216,6 +220,8 @@ test('callback, set-password, and email callers use the link-type router', () =>
   assert.doesNotMatch(callback, /router\.replace\('\/auth\/set-password'\)/);
 
   assert.match(setPassword, /setPasswordSubtitle/);
+  assert.match(setPassword, /setPasswordNoSessionHint\(flow\)/);
+  assert.doesNotMatch(setPassword, /Enter the same email from the invite/);
   assert.match(setPassword, /resolveSetPasswordFlow/);
   assert.match(setPassword, /safeRedirectPath\(searchParams\.get\('next'\), window\.location\.origin, ''\)/);
   assert.match(route, /safeRedirectPath/);

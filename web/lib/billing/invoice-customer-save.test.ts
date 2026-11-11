@@ -54,4 +54,13 @@ test('the invoice editor does not load the org customer list, and save reads the
   const noticeAt = src.indexOf('invoiceSaveToast(');
   const savedToastAt = src.indexOf("toast.success('Invoice draft saved!')");
   assert.ok(noticeAt > 0 && savedToastAt > noticeAt);
+  const save = src.slice(src.indexOf('async function saveInvoice'), src.indexOf('async function persistSentPayee'));
+  const matchAt = save.indexOf('payloadSignatureRef.current === signature');
+  const flagAt = save.indexOf('unchangedSave = !opts?.quiet');
+  const writeAt = save.indexOf('writeWithColumnRetry');
+  const clearAt = save.lastIndexOf('setSaving(false)');
+  const infoAt = save.lastIndexOf("toast.info('No changes to save.')");
+  assert.ok(matchAt > 0 && flagAt > matchAt && writeAt > flagAt, 'no-change returns before the invoice write');
+  assert.ok(clearAt > 0 && infoAt > clearAt, 'the no-change toast runs after saving is cleared');
+  assert.doesNotMatch(save, /toast\.message\('No changes to save\.'\)/);
 });

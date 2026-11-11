@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { destAfterInviteClaim, inviteInPlay, resetTeamClaimDedupeForSignIn } from '@/lib/invite-claim';
 import { profileOrgId } from '@/lib/no-org-route';
-import { resolveSetPasswordFlow, setPasswordSubtitle } from '@/lib/auth-link-route';
+import { resolveSetPasswordFlow, setPasswordNoSessionHint, setPasswordSubtitle } from '@/lib/auth-link-route';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 
 /**
@@ -221,9 +221,7 @@ function SetPasswordInner() {
               <Link href="/forgot-password" className="btn btn-primary w-full justify-center">
                 Forgot password
               </Link>
-              <p className="text-xs text-[var(--text3)] text-center">
-                Enter the same email from the invite. The reset email lets you choose a password.
-              </p>
+              <p className="text-xs text-[var(--text3)] text-center">{setPasswordNoSessionHint(flow)}</p>
             </div>
           ) : ready ? (
             <form onSubmit={handleSave} className="space-y-4">
