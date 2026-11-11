@@ -24,6 +24,7 @@ import {
   printableEstimateDeposit,
 } from './estimate-deposit.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
+import { invoiceChecksPayableName } from './invoice-payee.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
 
@@ -273,6 +274,7 @@ export function buildOwnedInvoiceMessage(input: {
     deferredReleased: collectable.deferredReleased,
     collectableAmount: collectable.stripeAmount,
     paymentUrl: input.paymentUrl || null,
+    checksPayableTo: invoiceChecksPayableName(input.row, input.company.company_name),
     theme: input.theme,
     themeScope: 'email',
     moneyPrefs: input.moneyPrefs,

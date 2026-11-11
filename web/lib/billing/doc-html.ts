@@ -386,6 +386,12 @@ export type InvoiceHtmlInput = {
   locale?: string | null;
   /** IANA zone for the fallback "today" date. Date-only invoice dates are not shifted. */
   timeZone?: string | null;
+  /**
+   * Remit name for "Make checks payable to".
+   * Omitted, or blank, uses the company name. The header and thank-you line
+   * always use company.company_name.
+   */
+  checksPayableTo?: string | null;
 };
 
 function docZone(timeZone: string | null | undefined): string {
@@ -455,6 +461,8 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         : hasSplit
           ? Math.max(0, dueNow - deposit)
           : balance;
+  const shopName = String(input.company.company_name || '').trim();
+  const payableName = String(input.checksPayableTo ?? '').trim() || shopName;
 
   return withDocDirection(
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
@@ -554,13 +562,13 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         `<div style="font-size:10px;color:#666;margin-top:8px;">${tr('Secure card payment · Powered by Stripe')}</div>` +
         `</div>`
       : '') +
-    (String(input.company.company_name || '').trim()
+    (payableName
       ? `${docFill(input.locale, 'Make checks payable to {name}.', {
-          name: esc(input.company.company_name || ''),
+          name: esc(payableName),
         })}<br>`
       : '') +
     `<!--tsp-thanks-->${docFill(input.locale, 'Thank you for choosing {shop}!', {
-      shop: esc(input.company.company_name || 'Total Service Pro'),
+      shop: esc(shopName || 'Total Service Pro'),
     })}` +
     `</div></div>`
   , input.locale);
