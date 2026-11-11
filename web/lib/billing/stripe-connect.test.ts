@@ -1252,6 +1252,31 @@ test('parts_supplier Connect is their own supplier org, and other callers stay p
     });
     const ownerShopStart = await runStripeConnectPost(connectRequest('POST'), ownerShop.deps);
     assert.equal(ownerShopStart.status, 403);
+
+    const bareAdmin = connectClients({
+      profileOrgId: 4,
+      profileRole: 'admin',
+      memberships: [],
+      orgs: [serviceOrg],
+    });
+    const bareStart = await runStripeConnectPost(connectRequest('POST'), bareAdmin.deps);
+    assert.equal(bareStart.status, 403);
+    assert.equal(bareAdmin.writes(), 0);
+    const bareStatus = await runStripeConnectGet(connectRequest('GET'), bareAdmin.deps);
+    assert.equal(bareStatus.status, 200);
+    const bareBody = (await bareStatus.json()) as { eligible?: boolean; canStart?: boolean };
+    assert.equal(bareBody.eligible, false);
+    assert.equal(bareBody.canStart, false);
+
+    const platformTech = connectClients({
+      profileOrgId: 4,
+      profileRole: 'admin',
+      memberships: [{ organization_id: 4, role: 'fse' }],
+      orgs: [serviceOrg],
+    });
+    const platformTechStart = await runStripeConnectPost(connectRequest('POST'), platformTech.deps);
+    assert.equal(platformTechStart.status, 403);
+    assert.equal(platformTech.writes(), 0);
   } finally {
     for (const key of STRIPE_SECRET_ENV) {
       const value = previous.get(key);

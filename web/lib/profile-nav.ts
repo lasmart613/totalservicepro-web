@@ -58,10 +58,8 @@ export function adminPortalNavVisible(nav: OrgNavState): boolean {
 
 /**
  * Business Management for the current org.
- * orgPowerRole is shopAdminRole(): membership role, or admin for platform
- * admin. isAdmin matches the financial reporting and job costing gate
- * (membership admin/company_admin, or platform admin). The CRM links also
- * allow the lead roles above, from that same membership role.
+ * orgPowerRole is shopAdminRole(): the membership role only. A profile role
+ * of admin does not open it. The CRM links use that same membership role.
  * Hidden while the lookup is pending or failed.
  */
 export function businessManagementNavVisible(nav: OrgNavState): boolean {

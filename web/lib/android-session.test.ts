@@ -6,8 +6,10 @@ import { fileURLToPath } from 'node:url';
 import {
   ANDROID_AUTH_HOST,
   ANDROID_AUTH_SCHEME,
+  ANDROID_APP_PACKAGE,
   buildAndroidHandoff,
   googleOAuthRedirectTo,
+  isOfficialAndroidAppUrl,
   isTspAndroidWebView,
   normalizeAndroidSession,
   persistableAndroidSession,
@@ -22,10 +24,15 @@ test('TSP Android user agent is detected and auth callback skips in-app handoff'
   assert.equal(isTspAndroidWebView('Mozilla/5.0 (Linux; Android 14) Chrome/120'), false);
   assert.equal(ANDROID_AUTH_SCHEME, 'totalservicepro');
   assert.equal(ANDROID_AUTH_HOST, 'auth-callback');
+  assert.equal(ANDROID_APP_PACKAGE, 'com.photometrytools');
 
   const callback = readFileSync(join(here, '../app/auth/callback/page.tsx'), 'utf8');
   assert.match(callback, /isTspAndroidWebView/);
-  assert.match(callback, /totalservicepro:\/\/auth-callback/);
+  assert.match(callback, /confirmAndroidHandoffNonce/);
+  assert.match(callback, /\/api\/auth\/android-handoff/);
+  assert.match(callback, /issuedForSession/);
+  assert.match(callback, /isOfficialAndroidAppUrl/);
+  assert.doesNotMatch(callback, /totalservicepro:\/\/auth-callback/);
   const bridge = readFileSync(join(here, '../components/AndroidSessionBridge.tsx'), 'utf8');
   assert.match(bridge, /Android\.saveSession|saveSession/);
   assert.match(bridge, /clearSession/);
@@ -107,78 +114,37 @@ test('Google return URL carries app=1 and a 32-hex tsp_nonce', () => {
   assert.match(login, /googleOAuthRedirectTo/);
 });
 
-test('callback hands off only a fresh sign-in with a valid nonce', () => {
-  assert.equal(
-    buildAndroidHandoff({
-      completedSignIn: false,
-      appRequested: true,
-      nonce: NONCE,
-      accessToken: 'existing-access',
-      refreshToken: 'existing-refresh',
-      dest: '/',
-    }),
-    null
-  );
-  assert.equal(
-    buildAndroidHandoff({
-      completedSignIn: true,
-      appRequested: true,
-      nonce: 'short',
-      accessToken: 'fresh-access',
-      refreshToken: 'fresh-refresh',
-      dest: '/hub',
-    }),
-    null
-  );
-  assert.equal(
-    buildAndroidHandoff({
-      completedSignIn: true,
-      appRequested: true,
-      nonce: '0123456789ABCDEF0123456789ABCDEF',
-      accessToken: 'fresh-access',
-      refreshToken: 'r',
-      dest: '/',
-    }),
-    null
-  );
-  const handoff = buildAndroidHandoff({
+test('callback hands off only a fresh sign-in with a nonce this session issued', () => {
+  const base = {
     completedSignIn: true,
     appRequested: true,
+    issuedForSession: true,
     nonce: NONCE,
-    state: 'abc',
     accessToken: 'fresh-access',
     refreshToken: 'fresh-refresh',
     dest: '/hub',
-  });
+  };
+  assert.equal(buildAndroidHandoff({ ...base, completedSignIn: false, accessToken: 'existing-access' }), null);
+  assert.equal(buildAndroidHandoff({ ...base, nonce: 'short' }), null);
+  assert.equal(buildAndroidHandoff({ ...base, nonce: '0123456789ABCDEF0123456789ABCDEF' }), null);
+  assert.equal(buildAndroidHandoff({ ...base, issuedForSession: false }), null);
+  const handoff = buildAndroidHandoff({ ...base, state: 'abc' });
   assert.ok(handoff);
   assert.match(handoff.httpsUrl, /^https:\/\/repairplanet\.net\/auth\/callback\?app=1&tsp_nonce=/);
   assert.match(handoff.httpsUrl, new RegExp(`tsp_nonce=${NONCE}`));
   assert.match(handoff.httpsUrl, /#access_token=fresh-access/);
   assert.match(handoff.httpsUrl, /state=abc/);
-  assert.match(handoff.customSchemeUrl, /^totalservicepro:\/\/auth-callback#/);
-  assert.match(handoff.customSchemeUrl, /tsp_nonce=/);
+  assert.equal(isOfficialAndroidAppUrl(handoff.appUrl), true);
+  assert.match(handoff.appUrl, /^intent:\/\/auth-callback\?/);
+  assert.match(handoff.appUrl, /package=com\.photometrytools;/);
+  assert.match(handoff.appUrl, /scheme=totalservicepro;/);
+  assert.match(handoff.appUrl, /access_token=fresh-access/);
+  assert.match(handoff.appUrl, new RegExp(`tsp_nonce=${NONCE}`));
+  assert.doesNotMatch(handoff.appUrl, /totalservicepro:\/\//);
+  assert.equal(isOfficialAndroidAppUrl(`totalservicepro://auth-callback#access_token=x&tsp_nonce=${NONCE}`), false);
   const longState = 'x'.repeat(512);
-  const trimmed = buildAndroidHandoff({
-    completedSignIn: true,
-    appRequested: true,
-    nonce: NONCE,
-    state: longState,
-    accessToken: 'fresh-access',
-    refreshToken: 'r',
-    dest: '/',
-  });
+  const trimmed = buildAndroidHandoff({ ...base, state: longState, dest: '/' });
   assert.ok(trimmed);
   assert.doesNotMatch(trimmed.httpsUrl, /state=/);
-  assert.equal(
-    buildAndroidHandoff({
-      completedSignIn: true,
-      appRequested: true,
-      nonce: NONCE,
-      accessToken: 'fresh-access',
-      refreshToken: 'r',
-      dest: '/',
-      inWebView: true,
-    }),
-    null
-  );
+  assert.equal(buildAndroidHandoff({ ...base, inWebView: true, dest: '/' }), null);
 });
