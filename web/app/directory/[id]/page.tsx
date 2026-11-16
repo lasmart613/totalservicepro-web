@@ -2,7 +2,7 @@
 
 /**
  * Public company profile for a listed organization.
- * Logged-out directory cards still go to signup. This page is the direct
+ * Logged-out directory cards open this page. It is the direct
  * profile: name, place, average, and visible reviews. Contact details stay
  * off this page.
  */
@@ -15,7 +15,7 @@ import { PublicLink, useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { orgTypeLabel } from '@/lib/labels';
 import type { PublicOrgProfile, PublicReview } from '@/lib/reviews';
-import { REVIEW_EDIT_WINDOW_DAYS } from '@/lib/reviews';
+import { replyEditOpen, REVIEW_EDIT_WINDOW_DAYS } from '@/lib/reviews';
 
 type EligibleJob = {
   customer_organization_id: number;
@@ -309,7 +309,7 @@ export default function DirectoryOrgProfile() {
                           {review.reply_body}
                         </p>
                       ) : null}
-                      {canReply ? (
+                      {canReply && replyEditOpen(review.reply_at) ? (
                         <div className="mt-3">
                           <label className="block text-sm">
                             <span className="font-bold">{t('Reply to this review')}</span>

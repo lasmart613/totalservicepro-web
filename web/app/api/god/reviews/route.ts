@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireGodCaller } from '@/lib/god-auth';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { validateHideReview } from '@/lib/reviews';
+import { UNSHARED_CACHE_HEADERS, validateHideReview } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,8 +22,10 @@ export async function GET(req: NextRequest) {
     .select(REVIEW_COLUMNS)
     .order('created_at', { ascending: false })
     .limit(100);
-  if (error) return NextResponse.json({ error: 'Directory unavailable' }, { status: 503 });
-  return NextResponse.json({ reviews: data || [] });
+  if (error) {
+    return NextResponse.json({ error: 'Directory unavailable' }, { status: 503, headers: UNSHARED_CACHE_HEADERS });
+  }
+  return NextResponse.json({ reviews: data || [] }, { headers: UNSHARED_CACHE_HEADERS });
 }
 
 export async function POST(req: NextRequest) {
@@ -32,9 +34,12 @@ export async function POST(req: NextRequest) {
   if (!hasServiceRole()) return NextResponse.json({ error: 'Directory unavailable' }, { status: 503 });
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const id = typeof body.id === 'string' ? body.id.trim() : '';
+  if (!id) {
+    return NextResponse.json({ error: 'That review was not found.' }, { status: 404, headers: UNSHARED_CACHE_HEADERS });
+  }
   const decision = validateHideReview({ hidden: body.hidden, reason: body.reason });
-  if (!id || !decision.ok) {
-    return NextResponse.json({ error: decision.ok ? 'A reason is required to hide a review.' : decision.error }, { status: 400 });
+  if (!decision.ok) {
+    return NextResponse.json({ error: decision.error }, { status: 400, headers: UNSHARED_CACHE_HEADERS });
   }
   const admin = getSupabaseAdmin();
   const { data, error } = await admin
@@ -46,8 +51,14 @@ export async function POST(req: NextRequest) {
     })
     .eq('id', id)
     .select('id');
-  if (error || !data?.length) {
-    return NextResponse.json({ error: 'A reason is required to hide a review.' }, { status: 403 });
+  if (!error && !data?.length) {
+    return NextResponse.json({ error: 'That review was not found.' }, { status: 404, headers: UNSHARED_CACHE_HEADERS });
   }
-  return NextResponse.json({ ok: true, hidden: decision.hidden });
+  if (error || !data?.length) {
+    return NextResponse.json(
+      { error: 'A reason is required to hide a review.' },
+      { status: 403, headers: UNSHARED_CACHE_HEADERS }
+    );
+  }
+  return NextResponse.json({ ok: true, hidden: decision.hidden }, { headers: UNSHARED_CACHE_HEADERS });
 }

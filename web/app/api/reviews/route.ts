@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, userScopedClient } from '@/lib/reviews-server';
-import { mapReviewWriteError, validateReviewTarget, validateReviewWrite } from '@/lib/reviews';
+import { mapReviewWriteError, UNSHARED_CACHE_HEADERS, validateReviewTarget, validateReviewWrite } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,7 +11,9 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   const token = bearerToken(req.headers.get('authorization'));
-  if (!token) return NextResponse.json({ error: 'Sign in to rate this company.' }, { status: 401 });
+  if (!token) {
+    return NextResponse.json({ error: 'Sign in to rate this company.' }, { status: 401, headers: UNSHARED_CACHE_HEADERS });
+  }
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const stars = validateReviewWrite({ stars: body.stars, body: body.body });
@@ -68,5 +70,5 @@ export async function POST(req: NextRequest) {
   if (!write.data?.length) {
     return NextResponse.json({ error: 'Could not save the rating.' }, { status: 403 });
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { headers: UNSHARED_CACHE_HEADERS });
 }

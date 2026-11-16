@@ -10,6 +10,8 @@ import {
   canReplyToReview,
   formatOrgRating,
   formatOrgRatingLine,
+  replyEditOpen,
+  UNSHARED_CACHE_HEADERS,
   mapReviewWriteError,
   publicProfileFromRpc,
   publicReviewsFromRpc,
@@ -124,6 +126,15 @@ test('public reads keep prices, contact details, and hidden reasons out', () => 
   assert.equal(formatOrgRating(4), '4.0');
   assert.equal(formatOrgRatingLine(4.7, 3), '4.7 ★ (3)');
   assert.equal(formatOrgRatingLine(5, 1), '5.0 ★ (1)');
+  const day = 24 * 60 * 60 * 1000;
+  const now = Date.parse('2026-11-16T00:00:00Z');
+  assert.equal(replyEditOpen(null, now), true);
+  assert.equal(replyEditOpen('2026-11-01T00:00:00Z', now), true);
+  assert.equal(replyEditOpen('2026-10-01T00:00:00Z', now), false);
+  assert.equal(now - Date.parse('2026-10-01T00:00:00Z') > 30 * day, true);
+  assert.equal(UNSHARED_CACHE_HEADERS['Cache-Control'], 'private, no-store');
+  assert.equal(UNSHARED_CACHE_HEADERS['Netlify-CDN-Cache-Control'], 'no-store');
+  assert.equal('max-age' in UNSHARED_CACHE_HEADERS, false);
   assert.match(mapReviewWriteError('duplicate key value violates unique constraint job_key'), /already rated/);
   assert.equal(REVIEW_EDIT_WINDOW_DAYS, 30);
 });
@@ -150,8 +161,28 @@ test('000957 requires stars in the database and checks membership, not profile r
   assert.doesNotMatch(`${up}\n${down}\n${proof}`, /organization_id\s*=\s*(4|153|154|1005|2616|5509|5515)\b/);
   const profileRoute = readFileSync(join(here, '../app/api/directory/profile/route.ts'), 'utf8');
   assert.match(profileRoute, /public_service_org_profile/);
+  assert.match(profileRoute, /UNSHARED_CACHE_HEADERS/);
+  assert.doesNotMatch(profileRoute, /max-age|Cache-Control': 'public/);
   assert.doesNotMatch(profileRoute, /getSupabaseAdmin|SERVICE_ROLE|user_profiles/);
+  for (const rel of [
+    '../app/api/directory/route.ts',
+    '../app/api/directory/listed/route.ts',
+    '../app/api/reviews/route.ts',
+    '../app/api/reviews/context/route.ts',
+    '../app/api/reviews/reply/route.ts',
+    '../app/api/god/reviews/route.ts',
+  ]) {
+    const src = readFileSync(join(here, rel), 'utf8');
+    assert.match(src, /UNSHARED_CACHE_HEADERS/, rel);
+    assert.doesNotMatch(src, /public, max-age/, rel);
+  }
+  const link = readFileSync(join(here, '../supabase/migrations/20261116_000958_service_org_review_job_link.sql'), 'utf8');
+  assert.match(link, /ticket_number/);
+  assert.match(link, /estimate_id/);
+  assert.match(link, /ticket_id \(uuid\) is not a ticket id/);
+  assert.doesNotMatch(link, /organization_id\s*=\s*(4|153|154|1005|2616|5509|5515)\b/);
   const godRoute = readFileSync(join(here, '../app/api/god/reviews/route.ts'), 'utf8');
+  assert.match(godRoute, /That review was not found/);
   assert.match(godRoute, /requireGodCaller/);
   assert.doesNotMatch(godRoute, /user_profiles/);
   const writeRoute = readFileSync(join(here, '../app/api/reviews/route.ts'), 'utf8');

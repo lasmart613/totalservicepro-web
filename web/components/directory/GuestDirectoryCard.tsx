@@ -14,9 +14,8 @@ import {
 } from '@/lib/directory/guest';
 
 /**
- * Logged-out listing card. Every clickable surface — logo, name, pin,
- * address, phone, email, website chrome — is the same /signup link.
- * No tel:/mailto:/maps/website hrefs. No org detail path.
+ * Logged-out listing card. The card opens the public company profile.
+ * Name, phone, and email on the card stay redacted. No tel:/mailto:/maps links.
  */
 export function GuestDirectoryCard({
   signedIn,

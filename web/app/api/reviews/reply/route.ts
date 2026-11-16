@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, userScopedClient } from '@/lib/reviews-server';
-import { mapReviewWriteError, validateReviewReply } from '@/lib/reviews';
+import { mapReviewWriteError, UNSHARED_CACHE_HEADERS, validateReviewReply } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,5 +36,5 @@ export async function POST(req: NextRequest) {
       { status: 403 }
     );
   }
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true }, { headers: UNSHARED_CACHE_HEADERS });
 }

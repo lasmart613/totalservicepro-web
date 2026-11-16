@@ -407,6 +407,16 @@ export const REVIEW_STRINGS: Record<string, Record<Loc, string>> = {
     'Esta empresa não está no diretório público.',
     'هذه الشركة ليست في الدليل العام.',
   ),
+  'That review was not found.': row(
+    'این نظر پیدا نشد.',
+    'No se encontró esa reseña.',
+    'Cet avis est introuvable.',
+    'הביקורת לא נמצאה.',
+    'Recensione non trovata.',
+    'Diese Bewertung wurde nicht gefunden.',
+    'Essa avaliação não foi encontrada.',
+    'لم يتم العثور على هذه المراجعة.',
+  ),
   'Directory unavailable': row(
     'فهرست در دسترس نیست',
     'Directorio no disponible',

@@ -11,9 +11,16 @@ import { GUEST_SIGNUP_HREF } from '../marketplace/guest.ts';
 
 export { GUEST_SIGNUP_HREF };
 
-/** Logged-out directory clicks go to register, never an org detail page. */
+/**
+ * Logged-out directory cards open the public company profile (/directory/<id>).
+ * Larry approved that page for logged-out visitors. Other guest clicks still
+ * go to signup. Names on the card itself stay redacted.
+ */
 export function directoryHref(signedIn: boolean, href: string): string {
-  return signedIn ? href : GUEST_SIGNUP_HREF;
+  if (signedIn) return href;
+  const path = href.split('?')[0].split('#')[0];
+  if (/^\/directory\/[^/]+$/.test(path)) return path;
+  return GUEST_SIGNUP_HREF;
 }
 
 export const GUEST_NAME_PLACEHOLDER = '••••••••';
