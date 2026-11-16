@@ -534,8 +534,8 @@ export const AR_COPY: Record<string, string> = {
   'Rental companies': 'شركات التأجير',
   'Parts Suppliers': 'مورّدو القطع',
   'My Clinics': 'عياداتي',
-  'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
-    'تبقى الأسماء والعناوين وبيانات الاتصال مخفية إلى أن تنشئوا حسابًا مجانيًا. البطاقات في الأسفل مؤسسات حقيقية موجودة أصلًا في Total Service Pro.',
+  'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
+    'تبقى بيانات الاتصال (الهاتف والبريد الإلكتروني والعنوان) مخفية إلى أن تنشئوا حسابًا مجانيًا. البطاقات في الأسفل مؤسسات حقيقية موجودة أصلًا في Total Service Pro.',
   'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.':
     'تنضم المؤسسات إلى الدليل مجانًا أثناء الإعداد أو من ملف الشركة. تعرض العيادات العملاء المرتبطين بشركة الإصلاح فقط.',
   'Could not load directory. Sign in and try again.':

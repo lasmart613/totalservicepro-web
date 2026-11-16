@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { loadSignedInDirectory } from '@/lib/directory/listed';
-import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC, UNSHARED_CACHE_HEADERS } from '@/lib/reviews';
+import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC } from '@/lib/reviews';
+import { noStoreJson } from '@/lib/reviews-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,7 +17,7 @@ export const dynamic = 'force-dynamic';
 export async function GET(req: NextRequest) {
   const auth = req.headers.get('authorization') || '';
   const token = auth.toLowerCase().startsWith('bearer ') ? auth.slice(7).trim() : '';
-  if (!token) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+  if (!token) return noStoreJson({ error: 'Sign in required' }, 401);
   try {
     const anon = createClient(getSupabaseUrl(), getSupabaseAnonKey(), {
       auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
@@ -25,12 +26,12 @@ export async function GET(req: NextRequest) {
       data: { user },
       error: userErr,
     } = await anon.auth.getUser(token);
-    if (userErr || !user) return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-    if (!hasServiceRole()) return NextResponse.json({ error: 'Directory unavailable' }, { status: 503 });
+    if (userErr || !user) return noStoreJson({ error: 'Invalid session' }, 401);
+    if (!hasServiceRole()) return noStoreJson({ error: 'Directory unavailable' }, 503);
 
     const admin = getSupabaseAdmin();
     const result = await loadSignedInDirectory(admin);
-    if (!result.ok) return NextResponse.json({ error: 'Directory unavailable' }, { status: 503 });
+    if (!result.ok) return noStoreJson({ error: 'Directory unavailable' }, 503);
     const ids = result.listings
       .map((row) => Number(row.id))
       .filter((id) => Number.isInteger(id) && id > 0)
@@ -40,12 +41,9 @@ export async function GET(req: NextRequest) {
       const rated = await admin.rpc(ORG_RATING_SUMMARY_RPC, { p_org_ids: ids });
       if (!rated.error) summaries = rated.data;
     }
-    return NextResponse.json(
-      { listings: attachRatingSummaries(result.listings, summaries), total: result.total },
-      { headers: UNSHARED_CACHE_HEADERS }
-    );
+    return noStoreJson({ listings: attachRatingSummaries(result.listings, summaries), total: result.total });
   } catch (e: unknown) {
     console.error('[directory listed]', e instanceof Error ? e.message : e);
-    return NextResponse.json({ error: 'Directory unavailable' }, { status: 500 });
+    return noStoreJson({ error: 'Directory unavailable' }, 500);
   }
 }

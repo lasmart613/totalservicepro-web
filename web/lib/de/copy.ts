@@ -533,8 +533,8 @@ export const DE_COPY: Record<string, string> = {
   'Rental companies': 'Vermieter',
   'Parts Suppliers': 'Teilelieferanten',
   'My Clinics': 'Meine Kliniken',
-  'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
-    'Namen, Adressen und Kontaktdaten bleiben verborgen, bis Sie ein kostenloses Konto anlegen. Die Karten unten sind echte Organisationen, die schon bei Total Service Pro sind.',
+  'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
+    'Kontaktdaten (Telefon, E-Mail und Adresse) bleiben verborgen, bis Sie ein kostenloses Konto anlegen. Die Karten unten sind echte Organisationen, die schon bei Total Service Pro sind.',
   'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.':
     'Organisationen tragen sich während der Einrichtung oder im Betriebsprofil kostenlos ein. Kliniken zeigt nur Kunden, die mit Ihrem Reparaturbetrieb verbunden sind.',
   'Could not load directory. Sign in and try again.':

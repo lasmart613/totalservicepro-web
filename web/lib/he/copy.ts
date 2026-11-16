@@ -533,8 +533,8 @@ export const HE_COPY: Record<string, string> = {
   'Rental companies': 'חברות השכרה',
   'Parts Suppliers': 'ספקי חלקים',
   'My Clinics': 'המרפאות שלי',
-  'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
-    'שמות, כתובות ופרטי קשר מוסתרים עד שפותחים חשבון חינם. הכרטיסים למטה הם ארגונים אמיתיים שכבר נמצאים ב-Total Service Pro.',
+  'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
+    'פרטי הקשר (טלפון, דוא״ל וכתובת) מוסתרים עד שפותחים חשבון חינם. הכרטיסים למטה הם ארגונים אמיתיים שכבר נמצאים ב-Total Service Pro.',
   'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.':
     'ארגונים נכנסים למדריך בחינם בזמן ההקמה או מפרופיל החברה. מרפאות מציג רק לקוחות שמקושרים לחברת התיקונים שלכם.',
   'Could not load directory. Sign in and try again.':

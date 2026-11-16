@@ -211,7 +211,7 @@ export default function DirectoryPage() {
           applyGuestPayload(json, append);
           setGuestPage(page);
           setNote(
-            'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.'
+            'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.'
           );
           return;
         }
