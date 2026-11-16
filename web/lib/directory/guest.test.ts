@@ -135,7 +135,8 @@ test('logged-out directory redacts PII and sends card clicks to signup', () => {
   assert.doesNotMatch(card, /maps\.google|google\.com\/maps/);
   assert.doesNotMatch(card, /websiteHref/);
   assert.doesNotMatch(card, /target="_blank"/);
-  assert.match(deep, /useGuestSignupRedirect/);
+  assert.match(deep, /\/api\/directory\/profile/);
+  assert.doesNotMatch(deep, /tel:|mailto:/);
 });
 
 test('signed-in directory labels do not read the auth hint during render', () => {

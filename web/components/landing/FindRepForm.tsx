@@ -9,7 +9,7 @@ import {
   CLINIC_LEAD_URGENCY,
   SERVICE_REQUEST_TYPES,
 } from '@/lib/clinic-service-lead';
-import { useT } from '@/lib/fa/locale';
+import { PublicLink, useT } from '@/lib/fa/locale';
 
 export function FindRepForm({
   id = 'find-rep-form',
@@ -129,6 +129,10 @@ export function FindRepForm({
           : t(
               'Tell us the equipment and what is going on. No Total Service Pro account required — RepairPlanet posts a service request for a nearby biomedical shop. Medical devices — lasers, lithotriptors, and C-arms first.',
             )}
+      </p>
+      <p className="lp-modal-lede">
+        <PublicLink href="/directory?filter=service">{t('Browse repair companies')}</PublicLink>
+        . {t('See star ratings on repair companies in the directory.')}
       </p>
       <form onSubmit={submit} className="lp-lead-form">
         <label className="lp-field lp-hp" aria-hidden="true">
