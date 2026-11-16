@@ -182,7 +182,14 @@ DO $$ DECLARE msg text; BEGIN
   IF (public.public_service_org_profile(88022) ->> 'name') IS DISTINCT FROM 'QA Repair Co' THEN
     RAISE EXCEPTION 'FAIL profile name';
   END IF;
-  RAISE NOTICE 'PASS anon: no insert, no table read, profile has no phone or email';
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_object_keys(public.public_service_org_profile(88022)) AS k
+    WHERE k IN ('phone', 'email', 'notes', 'address', 'zip', 'total', 'amount_paid', 'customer_rating', 'hidden_reason')
+  ) THEN
+    RAISE EXCEPTION 'FAIL anon profile keys %', public.public_service_org_profile(88022);
+  END IF;
+  RAISE NOTICE 'PASS anon: no insert, no table read, profile has name and no contact or price fields';
 END $$;
 RESET ROLE;
 
@@ -324,6 +331,43 @@ DO $$ DECLARE msg text; n int; avg numeric; pub jsonb; jobs jsonb; BEGIN
   END IF;
   RAISE NOTICE 'PASS one rating per job, paid invoice alone, public aggregate hides prices';
 END $$;
+RESET ROLE;
+
+-- anon payload is the safe functions only: name and reviews, never contact or money
+SET ROLE anon;
+SELECT pg_temp.as_user(NULL, 'anon');
+DO $$ DECLARE profile jsonb; pub jsonb; keys text; BEGIN
+  profile := public.public_service_org_profile(88022);
+  pub := public.service_org_reviews_public(88022, 20, 0);
+  IF profile ->> 'name' IS DISTINCT FROM 'QA Repair Co' THEN
+    RAISE EXCEPTION 'FAIL anon name';
+  END IF;
+  IF profile::text ILIKE '%shop-secret%' OR profile::text ILIKE '%214-555%'
+     OR profile::text ILIKE '%SECRET%' OR profile::text ILIKE '%99999%' OR profile::text ILIKE '%88888%' THEN
+    RAISE EXCEPTION 'FAIL anon profile leaked %', profile;
+  END IF;
+  SELECT string_agg(k, ',') INTO keys FROM jsonb_object_keys(profile) AS k;
+  IF keys LIKE '%phone%' OR keys LIKE '%email%' OR keys LIKE '%total%' OR keys LIKE '%amount%' OR keys LIKE '%notes%' THEN
+    RAISE EXCEPTION 'FAIL anon profile keys %', keys;
+  END IF;
+  IF pub::text ILIKE '%SECRET%' OR pub::text ILIKE '%99999%' OR pub::text ILIKE '%shop-secret%' THEN
+    RAISE EXCEPTION 'FAIL anon reviews leaked %', pub;
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements(pub) AS e, jsonb_object_keys(e) AS k
+    WHERE k NOT IN ('id', 'stars', 'body', 'created_at', 'reply_body', 'reply_at')
+  ) THEN
+    RAISE EXCEPTION 'FAIL anon review keys %', pub;
+  END IF;
+  IF (SELECT review_count FROM public.service_org_rating_summaries(ARRAY[88022]::bigint[])) IS DISTINCT FROM 3 THEN
+    RAISE EXCEPTION 'FAIL anon summary';
+  END IF;
+  RAISE NOTICE 'PASS anon profile and reviews exclude contact fields and prices';
+END $$;
+RESET ROLE;
+SET ROLE authenticated;
+SELECT pg_temp.as_user('11111111-1111-4111-8111-111111111111', 'authenticated');
 
 -- reply: tech and outsider refused, owner accepted once
 SELECT pg_temp.as_user('33333333-3333-4333-8333-333333333333', 'authenticated');
@@ -337,9 +381,11 @@ DO $$ DECLARE rid uuid; BEGIN
 END $$;
 
 SELECT pg_temp.as_user('22222222-2222-4222-8222-222222222222', 'authenticated');
-DO $$ DECLARE rid uuid; BEGIN
+DO $$ DECLARE rid uuid; posted timestamptz; BEGIN
   SELECT id INTO rid FROM public.service_org_reviews WHERE job_key = 'ticket:501';
   UPDATE public.service_org_reviews SET reply_body = 'Thank you' WHERE id = rid;
+  SELECT reply_at INTO posted FROM public.service_org_reviews WHERE id = rid;
+  IF posted IS NULL THEN RAISE EXCEPTION 'FAIL reply_at not stamped'; END IF;
   UPDATE public.service_org_reviews SET reply_body = 'Thank you — updated' WHERE id = rid;
   IF (SELECT count(*) FROM public.service_org_reviews WHERE job_key = 'ticket:501') IS DISTINCT FROM 1 THEN
     RAISE EXCEPTION 'FAIL reply created a second row';
@@ -347,10 +393,54 @@ DO $$ DECLARE rid uuid; BEGIN
   IF (SELECT reply_body FROM public.service_org_reviews WHERE id = rid) IS DISTINCT FROM 'Thank you — updated' THEN
     RAISE EXCEPTION 'FAIL reply text';
   END IF;
+  IF (SELECT reply_at FROM public.service_org_reviews WHERE id = rid) IS DISTINCT FROM posted THEN
+    RAISE EXCEPTION 'FAIL reply edit moved the window start';
+  END IF;
   IF public.service_org_reviews_public(88022, 20, 0)::text NOT LIKE '%Thank you%' THEN
     RAISE EXCEPTION 'FAIL public reply missing';
   END IF;
-  RAISE NOTICE 'PASS owner membership can post the one public reply';
+  RAISE NOTICE 'PASS owner can post and edit the one reply inside 30 days of the first post';
+END $$;
+
+-- A late first reply is allowed. Edits after 30 days from that first post are not.
+-- The window is reply_at, not the review's created_at.
+RESET ROLE;
+ALTER TABLE public.service_org_reviews DISABLE TRIGGER service_org_reviews_guard_trg;
+UPDATE public.service_org_reviews
+  SET created_at = now() - interval '40 days'
+  WHERE job_key = 'report:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3';
+ALTER TABLE public.service_org_reviews ENABLE TRIGGER service_org_reviews_guard_trg;
+SET ROLE authenticated;
+SELECT pg_temp.as_user('22222222-2222-4222-8222-222222222222', 'authenticated');
+DO $$ DECLARE rid uuid; msg text; BEGIN
+  SELECT id INTO rid FROM public.service_org_reviews WHERE job_key = 'report:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3';
+  UPDATE public.service_org_reviews SET reply_body = 'Late but first' WHERE id = rid;
+  IF (SELECT reply_body FROM public.service_org_reviews WHERE id = rid) IS DISTINCT FROM 'Late but first' THEN
+    RAISE EXCEPTION 'FAIL first reply on an old review';
+  END IF;
+  RAISE NOTICE 'PASS first reply is not limited by the review created_at';
+END $$;
+RESET ROLE;
+ALTER TABLE public.service_org_reviews DISABLE TRIGGER service_org_reviews_guard_trg;
+UPDATE public.service_org_reviews
+  SET reply_at = now() - interval '31 days'
+  WHERE job_key = 'ticket:501';
+ALTER TABLE public.service_org_reviews ENABLE TRIGGER service_org_reviews_guard_trg;
+SET ROLE authenticated;
+SELECT pg_temp.as_user('22222222-2222-4222-8222-222222222222', 'authenticated');
+DO $$ DECLARE rid uuid; msg text; BEGIN
+  SELECT id INTO rid FROM public.service_org_reviews WHERE job_key = 'ticket:501';
+  msg := pg_temp.try_sql(format(
+    'UPDATE public.service_org_reviews SET reply_body = %L WHERE id = %L',
+    'too late', rid
+  ));
+  IF msg = 'ok' OR msg NOT LIKE '%reply edit window%' THEN
+    RAISE EXCEPTION 'FAIL reply edit after 30 days: %', msg;
+  END IF;
+  IF (SELECT reply_body FROM public.service_org_reviews WHERE id = rid) IS DISTINCT FROM 'Thank you — updated' THEN
+    RAISE EXCEPTION 'FAIL expired reply was changed';
+  END IF;
+  RAISE NOTICE 'PASS reply edits close 30 days after the first post';
 END $$;
 
 -- hide: spoofed jwt role fails; service_role requires a reason; hidden drops out of the average

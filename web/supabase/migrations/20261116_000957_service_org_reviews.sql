@@ -3,7 +3,9 @@
 -- A signed-in member of the customer clinic/facility org may leave exactly
 -- one rating per job: stars are required (1-5, NOT NULL) and the written
 -- review is optional. Text without stars cannot be stored. The same author
--- may edit stars and text for 30 days (service_org_review_edit_window).
+-- may edit stars and text for 30 days from created_at. A company may post
+-- its one reply at any time; edits to that reply last 30 days from reply_at,
+-- which is stamped once on the first post and does not move (service_org_review_edit_window).
 --
 -- A job is eligible when it ties those two orgs and at least one of these
 -- is true: the ticket status is completed or closed (not cancelled), the
@@ -125,7 +127,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.service_org_review_edit_window() IS
-  '000957: authors may change their own stars and review text until this interval after created_at. Replies and hides are not limited by it.';
+  '000957: 30 days. Authors: from created_at. Company reply edits: from reply_at, the first time the reply was posted. The first reply itself is not limited by this window. Hides are not limited by it.';
 
 REVOKE ALL ON FUNCTION public.service_org_review_edit_window() FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.service_org_review_edit_window() TO authenticated, service_role;
@@ -454,8 +456,17 @@ BEGIN
     IF v_stars THEN
       RAISE EXCEPTION 'a reply cannot change the star rating' USING ERRCODE = '42501';
     END IF;
+    -- reply_at is the first post. Later edits keep it so the window cannot be extended.
+    IF OLD.reply_at IS NOT NULL
+       AND OLD.reply_at < pg_catalog.now() - public.service_org_review_edit_window() THEN
+      RAISE EXCEPTION 'the reply edit window has closed' USING ERRCODE = '42501';
+    END IF;
     NEW.reply_by := auth.uid();
-    NEW.reply_at := CASE WHEN NEW.reply_body IS NULL THEN NULL ELSE pg_catalog.now() END;
+    IF OLD.reply_at IS NULL AND NEW.reply_body IS NOT NULL THEN
+      NEW.reply_at := pg_catalog.now();
+    ELSE
+      NEW.reply_at := OLD.reply_at;
+    END IF;
   ELSIF v_stars THEN
     IF current_user IS DISTINCT FROM 'authenticated'
        OR auth.uid() IS DISTINCT FROM OLD.author_user_id

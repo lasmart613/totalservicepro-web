@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { loadSignedInDirectory } from '@/lib/directory/listed';
-import { attachRatingSummaries } from '@/lib/reviews';
+import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +37,7 @@ export async function GET(req: NextRequest) {
       .slice(0, 200);
     let summaries: unknown = null;
     if (ids.length) {
-      const rated = await admin.rpc('service_org_rating_summaries', { p_org_ids: ids });
+      const rated = await admin.rpc(ORG_RATING_SUMMARY_RPC, { p_org_ids: ids });
       if (!rated.error) summaries = rated.data;
     }
     return NextResponse.json(

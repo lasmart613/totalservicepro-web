@@ -9,6 +9,7 @@ import {
   attachRatingSummaries,
   canReplyToReview,
   formatOrgRating,
+  formatOrgRatingLine,
   mapReviewWriteError,
   publicProfileFromRpc,
   publicReviewsFromRpc,
@@ -121,6 +122,8 @@ test('public reads keep prices, contact details, and hidden reasons out', () => 
   assert.equal(JSON.stringify(reviews).includes('secret'), false);
   assert.equal(JSON.stringify(reviews).includes('total'), false);
   assert.equal(formatOrgRating(4), '4.0');
+  assert.equal(formatOrgRatingLine(4.7, 3), '4.7 ★ (3)');
+  assert.equal(formatOrgRatingLine(5, 1), '5.0 ★ (1)');
   assert.match(mapReviewWriteError('duplicate key value violates unique constraint job_key'), /already rated/);
   assert.equal(REVIEW_EDIT_WINDOW_DAYS, 30);
 });
@@ -138,6 +141,8 @@ test('000957 requires stars in the database and checks membership, not profile r
   assert.match(up, /you cannot rate an organization you belong to/);
   assert.match(up, /service_org_review_edit_window/);
   assert.match(up, /interval '30 days'/);
+  assert.match(up, /the reply edit window has closed/);
+  assert.match(up, /OLD\.reply_at/);
   assert.match(up, /hidden_at IS NULL/);
   assert.match(down, /DROP TABLE IF EXISTS public\.service_org_reviews/);
   assert.match(proof, /text without stars/i);

@@ -1,9 +1,13 @@
 'use client';
 
 import { useT } from '@/lib/fa/locale';
-import { formatOrgRating, showOrgRating } from '@/lib/reviews';
+import { formatOrgRatingLine, showOrgRating } from '@/lib/reviews';
 
-/** Average and count. Hidden until there is at least one visible review. */
+/**
+ * Average and count, shown from the first visible review as `4.7 ★ (3)`.
+ * Used on signed-in and logged-out directory cards and the public profile.
+ * A future matched-shop list should render this same component.
+ */
 export function OrgRatingBadge({
   count,
   average,
@@ -12,13 +16,11 @@ export function OrgRatingBadge({
   average?: number | null;
 }) {
   const t = useT();
-  if (!showOrgRating(count) || average == null || !Number.isFinite(average)) return null;
-  const label =
-    count === 1 ? t('1 review') : t('{count} reviews').replace('{count}', String(count));
+  if (!showOrgRating(count) || count == null || average == null || !Number.isFinite(average)) return null;
+  const line = formatOrgRatingLine(average, count);
   return (
-    <p className="text-xs font-bold text-[var(--gold)] mt-0.5" aria-label={t('Average rating')}>
-      <span aria-hidden="true">★ </span>
-      {formatOrgRating(average)} · {label}
+    <p className="text-xs font-bold text-[var(--gold)] mt-0.5" aria-label={`${t('Average rating')} ${line}`}>
+      {line}
     </p>
   );
 }

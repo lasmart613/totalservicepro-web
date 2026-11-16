@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { loadGuestDirectoryPage } from '@/lib/directory/guest-api';
-import { attachRatingSummaries } from '@/lib/reviews';
+import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,7 +36,8 @@ export async function GET(req: NextRequest) {
       .slice(0, 200);
     let summaries: unknown = null;
     if (ids.length) {
-      const rated = await anon.rpc('service_org_rating_summaries', { p_org_ids: ids });
+      // Same summary a future matched-shop list should call. Counts only; no review text.
+      const rated = await anon.rpc(ORG_RATING_SUMMARY_RPC, { p_org_ids: ids });
       if (!rated.error) summaries = rated.data;
     }
     const { ok: _ok, listings, ...rest } = result;

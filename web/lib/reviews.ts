@@ -8,7 +8,14 @@
  * Eligibility, one-rating-per-job, membership, the 30-day edit window, the
  * single company reply, and hiding are enforced in migration 000957.
  * This module is the UI and API check. It does not grant authority.
+ *
+ * A future matched-shop list should call ORG_RATING_SUMMARY_RPC (or
+ * attachRatingSummaries) and render OrgRatingBadge. It should not read
+ * service_org_reviews. That list is not built here.
  */
+
+/** Public aggregate for directory cards and any future shop-match results. */
+export const ORG_RATING_SUMMARY_RPC = 'service_org_rating_summaries';
 
 export const REVIEW_EDIT_WINDOW_DAYS = 30;
 /** Stars and the count are shown once this many visible reviews exist. */
@@ -29,6 +36,11 @@ export function showOrgRating(count: number | null | undefined): boolean {
 export function formatOrgRating(average: number): string {
   if (!Number.isFinite(average)) return '';
   return average.toFixed(1);
+}
+
+/** Larry: show the count beside the stars from the first visible review, as `4.7 ★ (3)`. */
+export function formatOrgRatingLine(average: number, count: number): string {
+  return `${formatOrgRating(average)} ★ (${count})`;
 }
 
 export type RatingSummaryRow = {
