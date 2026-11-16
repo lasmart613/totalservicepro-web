@@ -533,8 +533,8 @@ export const IT_COPY: Record<string, string> = {
   'Rental companies': 'Società di noleggio',
   'Parts Suppliers': 'Fornitori di ricambi',
   'My Clinics': 'Le mie cliniche',
-  'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
-    'Nomi, indirizzi e recapiti restano nascosti finché non crei un account gratuito. Le schede qui sotto sono organizzazioni vere già presenti su Total Service Pro.',
+  'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
+    'I recapiti (telefono, e-mail e indirizzo) restano nascosti finché non crei un account gratuito. Le schede qui sotto sono organizzazioni vere già presenti su Total Service Pro.',
   'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.':
     'Le organizzazioni entrano gratis nell\'elenco durante la configurazione o dal profilo aziendale. Cliniche mostra solo i clienti collegati alla tua azienda di riparazione.',
   'Could not load directory. Sign in and try again.':

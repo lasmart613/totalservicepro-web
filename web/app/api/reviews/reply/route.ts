@@ -1,8 +1,13 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { bearerToken, userScopedClient } from '@/lib/reviews-server';
-import { mapReviewWriteError, UNSHARED_CACHE_HEADERS, validateReviewReply } from '@/lib/reviews';
+import { NextRequest } from 'next/server';
+import { bearerToken, noStoreJson, userScopedClient } from '@/lib/reviews-server';
+import { mapReviewWriteError, validateReviewReply } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
+
+/** GET is not a reply. 405 stays out of the shared cache. */
+export function GET() {
+  return noStoreJson({ error: 'Method not allowed' }, 405);
+}
 
 /**
  * POST /api/reviews/reply
@@ -11,19 +16,19 @@ export const dynamic = 'force-dynamic';
  */
 export async function POST(req: NextRequest) {
   const token = bearerToken(req.headers.get('authorization'));
-  if (!token) return NextResponse.json({ error: 'Sign in to rate this company.' }, { status: 401 });
+  if (!token) return noStoreJson({ error: 'Sign in to rate this company.' }, 401);
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
   const reply = validateReviewReply(body.body);
-  if (!reply.ok) return NextResponse.json({ error: reply.error }, { status: 400 });
+  if (!reply.ok) return noStoreJson({ error: reply.error }, 400);
   const id = typeof body.id === 'string' ? body.id.trim() : '';
-  if (!id) return NextResponse.json({ error: 'Only an owner or company admin can reply.' }, { status: 400 });
+  if (!id) return noStoreJson({ error: 'Only an owner or company admin can reply.' }, 400);
 
   const supabase = userScopedClient(token);
   const {
     data: { user },
     error: userErr,
   } = await supabase.auth.getUser(token);
-  if (userErr || !user) return NextResponse.json({ error: 'Sign in to rate this company.' }, { status: 401 });
+  if (userErr || !user) return noStoreJson({ error: 'Sign in to rate this company.' }, 401);
 
   const { data, error } = await supabase
     .from('service_org_reviews')
@@ -31,10 +36,10 @@ export async function POST(req: NextRequest) {
     .eq('id', id)
     .select('id');
   if (error || !data?.length) {
-    return NextResponse.json(
+    return noStoreJson(
       { error: error ? mapReviewWriteError(error.message) : 'Only an owner or company admin can reply.' },
-      { status: 403 }
+      403
     );
   }
-  return NextResponse.json({ ok: true }, { headers: UNSHARED_CACHE_HEADERS });
+  return noStoreJson({ ok: true });
 }

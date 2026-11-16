@@ -10,6 +10,7 @@ import {
   canReplyToReview,
   formatOrgRating,
   formatOrgRatingLine,
+  isReviewId,
   replyEditOpen,
   UNSHARED_CACHE_HEADERS,
   mapReviewWriteError,
@@ -131,6 +132,9 @@ test('public reads keep prices, contact details, and hidden reasons out', () => 
   assert.equal(replyEditOpen(null, now), true);
   assert.equal(replyEditOpen('2026-11-01T00:00:00Z', now), true);
   assert.equal(replyEditOpen('2026-10-01T00:00:00Z', now), false);
+  assert.equal(isReviewId('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1'), true);
+  assert.equal(isReviewId('501'), false);
+  assert.equal(isReviewId(''), false);
   assert.equal(now - Date.parse('2026-10-01T00:00:00Z') > 30 * day, true);
   assert.equal(UNSHARED_CACHE_HEADERS['Cache-Control'], 'private, no-store');
   assert.equal(UNSHARED_CACHE_HEADERS['Netlify-CDN-Cache-Control'], 'no-store');
@@ -164,8 +168,10 @@ test('000957 requires stars in the database and checks membership, not profile r
   assert.match(profileRoute, /UNSHARED_CACHE_HEADERS/);
   assert.doesNotMatch(profileRoute, /max-age|Cache-Control': 'public/);
   assert.doesNotMatch(profileRoute, /getSupabaseAdmin|SERVICE_ROLE|user_profiles/);
+  const guestDirectory = readFileSync(join(here, '../app/api/directory/route.ts'), 'utf8');
+  assert.match(guestDirectory, /UNSHARED_CACHE_HEADERS/);
+  assert.doesNotMatch(guestDirectory, /public, max-age/);
   for (const rel of [
-    '../app/api/directory/route.ts',
     '../app/api/directory/listed/route.ts',
     '../app/api/reviews/route.ts',
     '../app/api/reviews/context/route.ts',
@@ -173,9 +179,17 @@ test('000957 requires stars in the database and checks membership, not profile r
     '../app/api/god/reviews/route.ts',
   ]) {
     const src = readFileSync(join(here, rel), 'utf8');
-    assert.match(src, /UNSHARED_CACHE_HEADERS/, rel);
+    assert.match(src, /noStoreJson/, rel);
+    assert.doesNotMatch(src, /NextResponse\.json/, rel);
     assert.doesNotMatch(src, /public, max-age/, rel);
   }
+  const reviewsRoute = readFileSync(join(here, '../app/api/reviews/route.ts'), 'utf8');
+  const replyRoute = readFileSync(join(here, '../app/api/reviews/reply/route.ts'), 'utf8');
+  assert.match(reviewsRoute, /export function GET\(\)[\s\S]*405/);
+  assert.match(replyRoute, /export function GET\(\)[\s\S]*405/);
+  const directoryPage = readFileSync(join(here, '../app/directory/page.tsx'), 'utf8');
+  assert.match(directoryPage, /Contact details \(phone, email, and address\) are hidden/);
+  assert.doesNotMatch(directoryPage, /Names, addresses, and contact details are hidden/);
   const link = readFileSync(join(here, '../supabase/migrations/20261116_000958_service_org_review_job_link.sql'), 'utf8');
   assert.match(link, /ticket_number/);
   assert.match(link, /estimate_id/);

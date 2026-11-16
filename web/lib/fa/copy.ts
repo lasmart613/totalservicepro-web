@@ -547,8 +547,8 @@ export const FA_COPY: Record<string, string> = {
   'Rental companies': 'شرکت‌های اجاره',
   'Parts Suppliers': 'تأمین‌کننده‌های قطعه',
   'My Clinics': 'درمانگاه‌های من',
-  'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
-    'نام، نشانی و راه تماس تا ساخت حساب رایگان پنهان است. کارت‌های پایین سازمان‌های واقعی روی Total Service Pro هستند.',
+  'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.':
+    'جزئیات تماس (تلفن، ایمیل و نشانی) تا ساخت حساب رایگان پنهان است. کارت‌های پایین سازمان‌های واقعی روی Total Service Pro هستند.',
   'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.':
     'سازمان‌ها هنگام راه‌اندازی یا در پروفایل شرکت، رایگان در فهرست می‌آیند.',
   'Could not load directory. Sign in and try again.':

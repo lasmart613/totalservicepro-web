@@ -37,6 +37,11 @@ export const REVIEW_HIDE_REASON_MAX = 500;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Review ids are uuids. A number or other string is not a review. */
+export function isReviewId(value: unknown): value is string {
+  return typeof value === 'string' && UUID_RE.test(value.trim());
+}
+
 export const REVIEW_REPLY_ROLES = ['owner', 'company_admin', 'admin'] as const;
 
 /** First reply is always open. Edits close 30 days after reply_at, the first post. */

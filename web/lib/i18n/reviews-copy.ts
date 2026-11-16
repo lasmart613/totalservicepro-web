@@ -407,6 +407,16 @@ export const REVIEW_STRINGS: Record<string, Record<Loc, string>> = {
     'Esta empresa não está no diretório público.',
     'هذه الشركة ليست في الدليل العام.',
   ),
+  'Contact details (phone, email, and address) are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.': row(
+    'جزئیات تماس (تلفن، ایمیل و نشانی) تا ساخت حساب رایگان پنهان است. کارت‌های پایین سازمان‌های واقعی روی Total Service Pro هستند.',
+    'Los datos de contacto (teléfono, correo y dirección) permanecen ocultos hasta que creas una cuenta gratuita. Las tarjetas de abajo son organizaciones reales que ya están en Total Service Pro.',
+    'Les coordonnées (téléphone, e-mail et adresse) restent masquées tant que vous n’avez pas créé un compte gratuit. Les fiches ci-dessous sont de vraies organisations déjà présentes sur Total Service Pro.',
+    'פרטי הקשר (טלפון, דוא״ל וכתובת) מוסתרים עד שפותחים חשבון חינם. הכרטיסים למטה הם ארגונים אמיתיים שכבר נמצאים ב-Total Service Pro.',
+    'I recapiti (telefono, e-mail e indirizzo) restano nascosti finché non crei un account gratuito. Le schede qui sotto sono organizzazioni vere già presenti su Total Service Pro.',
+    'Kontaktdaten (Telefon, E-Mail und Adresse) bleiben verborgen, bis Sie ein kostenloses Konto anlegen. Die Karten unten sind echte Organisationen, die schon bei Total Service Pro sind.',
+    'Os dados de contato (telefone, e-mail e endereço) ficam ocultos até você criar uma conta gratuita. Os cartões abaixo são organizações reais que já estão no Total Service Pro.',
+    'تبقى بيانات الاتصال (الهاتف والبريد الإلكتروني والعنوان) مخفية إلى أن تنشئوا حسابًا مجانيًا. البطاقات في الأسفل مؤسسات حقيقية موجودة أصلًا في Total Service Pro.',
+  ),
   'That review was not found.': row(
     'این نظر پیدا نشد.',
     'No se encontró esa reseña.',
