@@ -2,6 +2,7 @@
 
 import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { GuestRedactedText } from '@/components/directory/GuestRedactedText';
+import { OrgRatingBadge } from '@/components/directory/OrgRatingBadge';
 import {
   GUEST_ADDRESS_PLACEHOLDER,
   GUEST_EMAIL_PLACEHOLDER,
@@ -46,6 +47,7 @@ export function GuestDirectoryCard({
             />
           </div>
           <div className="text-[11px] font-bold text-[var(--gold)] mt-0.5">{t(card.typeLabel)}</div>
+          <OrgRatingBadge count={card.ratingCount} average={card.ratingAverage} />
           <div className="text-xs text-[var(--text3)] mt-0.5">
             📍{' '}
             {card.region ? (

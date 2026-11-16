@@ -67,6 +67,8 @@ export type GuestDirectoryCard = {
   phone: typeof GUEST_PHONE_PLACEHOLDER | null;
   email: typeof GUEST_EMAIL_PLACEHOLDER | null;
   address: typeof GUEST_ADDRESS_PLACEHOLDER | null;
+  ratingCount?: number | null;
+  ratingAverage?: number | null;
 };
 
 const PII_KEYS = [

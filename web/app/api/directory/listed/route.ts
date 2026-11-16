@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { loadSignedInDirectory } from '@/lib/directory/listed';
+import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,10 +28,20 @@ export async function GET(req: NextRequest) {
     if (userErr || !user) return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     if (!hasServiceRole()) return NextResponse.json({ error: 'Directory unavailable' }, { status: 503 });
 
-    const result = await loadSignedInDirectory(getSupabaseAdmin());
+    const admin = getSupabaseAdmin();
+    const result = await loadSignedInDirectory(admin);
     if (!result.ok) return NextResponse.json({ error: 'Directory unavailable' }, { status: 503 });
+    const ids = result.listings
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isInteger(id) && id > 0)
+      .slice(0, 200);
+    let summaries: unknown = null;
+    if (ids.length) {
+      const rated = await admin.rpc(ORG_RATING_SUMMARY_RPC, { p_org_ids: ids });
+      if (!rated.error) summaries = rated.data;
+    }
     return NextResponse.json(
-      { listings: result.listings, total: result.total },
+      { listings: attachRatingSummaries(result.listings, summaries), total: result.total },
       { headers: { 'Cache-Control': 'private, no-store' } }
     );
   } catch (e: unknown) {

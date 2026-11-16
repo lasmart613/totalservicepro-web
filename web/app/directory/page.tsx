@@ -14,6 +14,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
+import { OrgRatingBadge } from '@/components/directory/OrgRatingBadge';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isServiceOrgType } from '@/lib/org-types';
@@ -38,6 +39,8 @@ type OrgRow = {
   logo_url?: string | null;
   list_in_directory?: boolean | null;
   is_active?: boolean | null;
+  ratingCount?: number | null;
+  ratingAverage?: number | null;
 };
 
 type FilterKey = DirectoryFilterKey;
@@ -89,6 +92,20 @@ export default function DirectoryPage() {
   const [guestTotal, setGuestTotal] = useState<number | null>(null);
   const [guestLoadingMore, setGuestLoadingMore] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
+
+  useEffect(() => {
+    const value = new URLSearchParams(window.location.search).get('filter');
+    if (
+      value === 'all' ||
+      value === 'service' ||
+      value === 'clinics' ||
+      value === 'reseller' ||
+      value === 'rental' ||
+      value === 'supplier'
+    ) {
+      setFilter(value);
+    }
+  }, []);
   const [search, setSearch] = useState('');
   const [note, setNote] = useState(
     'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.'
@@ -387,10 +404,13 @@ export default function DirectoryPage() {
                       )}
                     </div>
                     <div className="min-w-0">
-                      <div className="font-bold text-[15px] truncate">{o.name || 'Organization'}</div>
+                      <PublicLink href={`/directory/${o.id}`} className="font-bold text-[15px] truncate block hover:underline">
+                        {o.name || 'Organization'}
+                      </PublicLink>
                       <div className="text-[11px] font-bold text-[var(--gold)] mt-0.5">
                         {typeLabel(o.type)}
                       </div>
+                      <OrgRatingBadge count={o.ratingCount} average={o.ratingAverage} />
                       <div className="text-xs text-[var(--text3)] mt-0.5">📍 {loc}</div>
                     </div>
                   </div>
