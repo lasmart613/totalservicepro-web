@@ -18,6 +18,16 @@
 export const ORG_RATING_SUMMARY_RPC = 'service_org_rating_summaries';
 
 export const REVIEW_EDIT_WINDOW_DAYS = 30;
+
+/**
+ * Shared CDN cache must not store these responses.
+ * Netlify's cache key ignores the query string, so `Cache-Control: public`
+ * made every /api/directory/profile?id= return the first org fetched.
+ */
+export const UNSHARED_CACHE_HEADERS = {
+  'Cache-Control': 'private, no-store',
+  'Netlify-CDN-Cache-Control': 'no-store',
+} as const;
 /** Stars and the count are shown once this many visible reviews exist. */
 export const MIN_VISIBLE_REVIEWS = 1;
 export const REVIEW_BODY_MAX = 4000;
@@ -28,6 +38,14 @@ export const REVIEW_HIDE_REASON_MAX = 500;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const REVIEW_REPLY_ROLES = ['owner', 'company_admin', 'admin'] as const;
+
+/** First reply is always open. Edits close 30 days after reply_at, the first post. */
+export function replyEditOpen(replyAt: string | null | undefined, now = Date.now()): boolean {
+  if (!replyAt) return true;
+  const posted = Date.parse(replyAt);
+  if (!Number.isFinite(posted)) return true;
+  return now - posted <= REVIEW_EDIT_WINDOW_DAYS * 24 * 60 * 60 * 1000;
+}
 
 export function showOrgRating(count: number | null | undefined): boolean {
   return typeof count === 'number' && Number.isFinite(count) && count >= MIN_VISIBLE_REVIEWS;

@@ -6,8 +6,8 @@
  * Future: optional premium profile / boosting (not implemented).
  *
  * Logged-out visitors see a first page of real Organizations rows with PII
- * replaced (same privacy bar as guest marketplace prices). Card clicks go to
- * /signup. Signed-in viewers keep the existing opted-in listings and details.
+ * replaced (same privacy bar as guest marketplace prices). Card clicks open
+ * the public profile. Signed-in viewers keep the existing opted-in listings.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';

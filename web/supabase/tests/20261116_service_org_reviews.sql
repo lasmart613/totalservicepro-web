@@ -1,4 +1,6 @@
--- Local proof for 20261116_000957_service_org_reviews.sql and its rollback.
+-- Local proof for 20261116_000957_service_org_reviews.sql, 000958, and rollback.
+-- Fixture column types match production: service_reports.ticket_id is uuid
+-- (not the ticket's bigint id) and service_invoices has estimate_id, not ticket_id.
 -- Empty Postgres scratch database only (never production, never the live project).
 -- Synthetic orgs 88021-88024. Does not use 4, 153, 154, 1005, 2616, 5509, or 5515.
 --
@@ -83,7 +85,8 @@ CREATE TABLE public.service_tickets (
   status text,
   ticket_number text,
   service_date date,
-  notes text
+  notes text,
+  estimate_id bigint
 );
 
 CREATE TABLE public.service_reports (
@@ -92,7 +95,8 @@ CREATE TABLE public.service_reports (
   customer_organization_id bigint,
   status text,
   finalized_at timestamptz,
-  ticket_id text,
+  ticket_id uuid,
+  ticket_number text,
   report_number text,
   date_out date,
   comments text
@@ -103,13 +107,28 @@ CREATE TABLE public.service_invoices (
   organization_id bigint,
   customer_organization_id bigint,
   status text,
-  ticket_id bigint,
+  estimate_id bigint,
   invoice_number text,
   total numeric(12,2),
   amount_paid numeric(12,2),
   notes text,
   paid_at timestamptz
 );
+
+DO $$ BEGIN
+  IF (
+    SELECT a.atttypid FROM pg_catalog.pg_attribute a
+    WHERE a.attrelid = 'public.service_reports'::regclass AND a.attname = 'ticket_id'
+  ) IS DISTINCT FROM 'uuid'::regtype THEN
+    RAISE EXCEPTION 'fixture service_reports.ticket_id must be uuid';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_catalog.pg_attribute a
+    WHERE a.attrelid = 'public.service_invoices'::regclass AND a.attname = 'ticket_id' AND NOT a.attisdropped
+  ) THEN
+    RAISE EXCEPTION 'fixture service_invoices must not have ticket_id';
+  END IF;
+END $$;
 
 INSERT INTO public.organizations (id, name, type, city, state, list_in_directory, is_active, notes, phone, email, description)
 VALUES
@@ -126,24 +145,26 @@ INSERT INTO public.organization_memberships (user_id, organization_id, role) VAL
   ('55555555-5555-4555-8555-555555555555', 88022, 'company_admin'),
   ('44444444-4444-4444-8444-444444444444', 88023, 'owner');
 
-INSERT INTO public.service_tickets (id, organization_id, customer_organization_id, status, ticket_number, service_date, notes) VALUES
-  (501, 88022, 88021, 'completed', 'T-501', '2026-11-01', 'SECRET-NOTE'),
-  (502, 88022, 88021, 'open', 'T-502', '2026-11-02', 'SECRET-NOTE'),
-  (503, 88022, 88021, 'cancelled', 'T-503', '2026-11-03', 'SECRET-NOTE'),
-  (510, 88024, 88021, 'completed', 'T-510', '2026-11-04', 'SECRET-NOTE');
+INSERT INTO public.service_tickets (id, organization_id, customer_organization_id, status, ticket_number, service_date, notes, estimate_id) VALUES
+  (501, 88022, 88021, 'completed', 'T-501', '2026-11-01', 'SECRET-NOTE', 9001),
+  (502, 88022, 88021, 'open', 'T-502', '2026-11-02', 'SECRET-NOTE', NULL),
+  (503, 88022, 88021, 'cancelled', 'T-503', '2026-11-03', 'SECRET-NOTE', NULL),
+  (510, 88024, 88021, 'completed', 'T-510', '2026-11-04', 'SECRET-NOTE', NULL);
 
-INSERT INTO public.service_reports (id, organization_id, customer_organization_id, status, finalized_at, ticket_id, report_number, date_out, comments) VALUES
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 88022, 88021, 'complete', now(), '501', 'R-501', '2026-11-01', 'SECRET-REPORT'),
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', 88022, 88021, 'draft', NULL, NULL, 'R-DRAFT', '2026-11-02', 'SECRET-REPORT'),
-  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', 88022, 88021, 'complete', now(), NULL, 'R-SOLO', '2026-11-05', 'SECRET-REPORT');
+INSERT INTO public.service_reports (id, organization_id, customer_organization_id, status, finalized_at, ticket_id, ticket_number, report_number, date_out, comments) VALUES
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', 88022, 88021, 'complete', now(), 'cccccccc-cccc-4ccc-8ccc-ccccccccccc1', 'T-501', 'R-501', '2026-11-01', 'SECRET-REPORT'),
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2', 88022, 88021, 'draft', NULL, NULL, NULL, 'R-DRAFT', '2026-11-02', 'SECRET-REPORT'),
+  ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', 88022, 88021, 'complete', now(), 'dddddddd-dddd-4ddd-8ddd-ddddddddddd1', NULL, 'R-SOLO', '2026-11-05', 'SECRET-REPORT');
 
-INSERT INTO public.service_invoices (id, organization_id, customer_organization_id, status, ticket_id, invoice_number, total, amount_paid, notes, paid_at) VALUES
-  (601, 88022, 88021, 'paid', 501, 'INV-601', 99999.99, 99999.99, 'SECRET-INVOICE', '2026-11-06 12:00:00+00'),
+INSERT INTO public.service_invoices (id, organization_id, customer_organization_id, status, estimate_id, invoice_number, total, amount_paid, notes, paid_at) VALUES
+  (601, 88022, 88021, 'paid', 9001, 'INV-601', 99999.99, 99999.99, 'SECRET-INVOICE', '2026-11-06 12:00:00+00'),
   (602, 88022, 88021, 'sent', NULL, 'INV-602', 111.00, 0, 'SECRET-INVOICE', NULL),
   (603, 88022, 88021, 'paid', NULL, 'INV-603', 88888.88, 88888.88, 'SECRET-INVOICE', '2026-11-07 12:00:00+00');
 
 \ir ../migrations/20261116_000957_service_org_reviews.sql
 \ir ../migrations/20261116_000957_service_org_reviews.sql
+\ir ../migrations/20261116_000958_service_org_review_job_link.sql
+\ir ../migrations/20261116_000958_service_org_review_job_link.sql
 
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 
@@ -289,6 +310,16 @@ END $$;
 -- stars only, then a second anchor of the same job, then a paid invoice alone
 SELECT pg_temp.as_user('11111111-1111-4111-8111-111111111111', 'authenticated');
 DO $$ DECLARE msg text; n int; avg numeric; pub jsonb; jobs jsonb; BEGIN
+  IF (SELECT count(DISTINCT job_key) FROM public.service_org_review_eligible_jobs(88022)) IS DISTINCT FROM 3 THEN
+    RAISE EXCEPTION 'FAIL linked jobs did not collapse';
+  END IF;
+  IF public.service_org_review_resolve(88021, 88022, NULL, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1', NULL)
+       IS DISTINCT FROM 'ticket:501'
+     OR public.service_org_review_resolve(88021, 88022, NULL, NULL, 601) IS DISTINCT FROM 'ticket:501'
+     OR public.service_org_review_resolve(88021, 88022, NULL, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3', NULL)
+       IS DISTINCT FROM 'report:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3' THEN
+    RAISE EXCEPTION 'FAIL production links';
+  END IF;
   INSERT INTO public.service_org_reviews (customer_organization_id, service_organization_id, author_user_id, stars, body, ticket_id)
   VALUES (88021, 88022, '11111111-1111-4111-8111-111111111111', 5, '   ', 501);
   IF (SELECT body FROM public.service_org_reviews WHERE ticket_id = 501) IS NOT NULL THEN

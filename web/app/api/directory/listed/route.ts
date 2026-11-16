@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { loadSignedInDirectory } from '@/lib/directory/listed';
-import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC } from '@/lib/reviews';
+import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC, UNSHARED_CACHE_HEADERS } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     }
     return NextResponse.json(
       { listings: attachRatingSummaries(result.listings, summaries), total: result.total },
-      { headers: { 'Cache-Control': 'private, no-store' } }
+      { headers: UNSHARED_CACHE_HEADERS }
     );
   } catch (e: unknown) {
     console.error('[directory listed]', e instanceof Error ? e.message : e);

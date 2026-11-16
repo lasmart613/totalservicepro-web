@@ -86,9 +86,10 @@ test('guest field helpers never return the real value while logged out', () => {
   assert.equal(GUEST_SIGNUP_HREF, '/signup');
 });
 
-test('logged-out directory clicks go to register, not an org detail page', () => {
-  assert.equal(directoryHref(false, '/directory/42'), GUEST_SIGNUP_HREF);
-  assert.equal(directoryHref(false, '/directory/42?tab=contact'), GUEST_SIGNUP_HREF);
+test('logged-out directory cards open the public profile', () => {
+  assert.equal(directoryHref(false, '/directory/42'), '/directory/42');
+  assert.equal(directoryHref(false, '/directory/42?tab=contact'), '/directory/42');
+  assert.equal(directoryHref(false, '/company'), GUEST_SIGNUP_HREF);
   assert.equal(directoryHref(true, '/directory/42'), '/directory/42');
 });
 
@@ -107,7 +108,7 @@ test('guest directory pages stay in the 24–48 first-page range', () => {
   assert.equal(clampGuestDirectoryPageSize('0'), 1);
 });
 
-test('logged-out directory redacts PII and sends card clicks to signup', () => {
+test('logged-out directory redacts PII and links cards to the public profile', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const page = readFileSync(join(here, '../../app/directory/page.tsx'), 'utf8');
   const api = readFileSync(join(here, '../../app/api/directory/route.ts'), 'utf8');

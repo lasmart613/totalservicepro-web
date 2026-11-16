@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { loadGuestDirectoryPage } from '@/lib/directory/guest-api';
-import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC } from '@/lib/reviews';
+import { attachRatingSummaries, ORG_RATING_SUMMARY_RPC, UNSHARED_CACHE_HEADERS } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +41,10 @@ export async function GET(req: NextRequest) {
       if (!rated.error) summaries = rated.data;
     }
     const { ok: _ok, listings, ...rest } = result;
-    return NextResponse.json({ ...rest, listings: attachRatingSummaries(listings, summaries) });
+    return NextResponse.json(
+      { ...rest, listings: attachRatingSummaries(listings, summaries) },
+      { headers: UNSHARED_CACHE_HEADERS }
+    );
   } catch (e: unknown) {
     console.error('[directory list]', e instanceof Error ? e.message : e);
     return NextResponse.json(

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { bearerToken, userScopedClient } from '@/lib/reviews-server';
-import { canReplyToReview } from '@/lib/reviews';
+import { canReplyToReview, UNSHARED_CACHE_HEADERS } from '@/lib/reviews';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,8 +36,11 @@ export async function GET(req: NextRequest) {
 
   const jobs = Array.isArray(jobsRes.data) ? jobsRes.data : [];
   const role = Array.isArray(memberRes.data) ? memberRes.data[0]?.role : null;
-  return NextResponse.json({
-    jobs,
-    canReply: canReplyToReview(typeof role === 'string' ? role : null),
-  });
+  return NextResponse.json(
+    {
+      jobs,
+      canReply: canReplyToReview(typeof role === 'string' ? role : null),
+    },
+    { headers: UNSHARED_CACHE_HEADERS }
+  );
 }
