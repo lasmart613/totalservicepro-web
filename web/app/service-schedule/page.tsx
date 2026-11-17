@@ -168,10 +168,13 @@ export default function ServiceSchedule() {
   const [formError, setFormError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<LinkedCustomerOpt[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
   const [pickedOfficePhone, setPickedOfficePhone] = useState<string | null>(null);
   const customerSearchGen = useRef(0);
   const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const customerNameRef = useRef('');
+  const explicitPickRef = useRef(false);
+  const pickedNameRef = useRef('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [ticketEquipmentId, setTicketEquipmentId] = useState('');
@@ -413,15 +416,21 @@ export default function ServiceSchedule() {
       const gen = ++customerSearchGen.current;
       setCustomersLoading(true);
       try {
-        const rows = await searchShopCustomers(supabase, oId, query);
+        const result = await searchShopCustomers(supabase, oId, query);
         if (gen !== customerSearchGen.current) return;
-        setCustomers(rows);
-        const match = matchLinkedCustomer(rows, customerNameRef.current);
-        setCustomerOrgId(match?.id || null);
-        setPickedOfficePhone(match?.officePhone ?? null);
+        if (!result.ok) {
+          setCustomerSearchError(true);
+          setCustomers([]);
+          return;
+        }
+        setCustomerSearchError(false);
+        setCustomers(result.customers);
       } catch (e) {
         console.warn('ticket customers', e);
-        if (gen === customerSearchGen.current) setCustomers([]);
+        if (gen === customerSearchGen.current) {
+          setCustomerSearchError(true);
+          setCustomers([]);
+        }
       } finally {
         if (gen === customerSearchGen.current) setCustomersLoading(false);
       }
@@ -489,6 +498,8 @@ export default function ServiceSchedule() {
     if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
     customerSearchGen.current += 1;
     setCustomersLoading(false);
+    explicitPickRef.current = true;
+    pickedNameRef.current = c.name;
     customerNameRef.current = c.name;
     setCustomerOrgId(c.id);
     setPickedOfficePhone(c.officePhone ?? null);
@@ -645,6 +656,9 @@ export default function ServiceSchedule() {
     setAssignedTo(userId || '');
     setPickedOfficePhone(null);
     customerNameRef.current = '';
+    explicitPickRef.current = false;
+    pickedNameRef.current = '';
+    setCustomerSearchError(false);
     setCustomers([]);
     if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
     customerSearchGen.current += 1;
@@ -1393,9 +1407,15 @@ export default function ServiceSchedule() {
                     const value = e.target.value;
                     customerNameRef.current = value;
                     setForm({ ...form, customer_name: value, customer_zip: '' });
-                    const match = matchLinkedCustomer(customers, value);
-                    setCustomerOrgId(match?.id || null);
-                    setPickedOfficePhone(match?.officePhone ?? null);
+                    const stillThePick =
+                      explicitPickRef.current &&
+                      value.trim().toLowerCase() === pickedNameRef.current.trim().toLowerCase();
+                    if (!stillThePick) {
+                      explicitPickRef.current = false;
+                      const match = matchLinkedCustomer(customers, value);
+                      setCustomerOrgId(match?.id || null);
+                      setPickedOfficePhone(match?.officePhone ?? null);
+                    }
                     setCustomerLocations([]);
                     setSelectedLocationId('');
                     setShowCustDrop(true);
@@ -1415,15 +1435,20 @@ export default function ServiceSchedule() {
                 />
                 {showCustDrop && (
                   <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
-                    {customersLoading && filteredCustomers.length === 0 && (
+                    {customerSearchError && (
+                      <div className="px-3 py-2 text-xs text-[var(--text3)]">
+                        {t("Couldn't load customers. Try again.")}
+                      </div>
+                    )}
+                    {!customerSearchError && customersLoading && filteredCustomers.length === 0 && (
                       <div className="px-3 py-2 text-xs text-[var(--text3)]">Searching customers…</div>
                     )}
-                    {!customersLoading && filteredCustomers.length === 0 && !form.customer_name.trim() && (
+                    {!customerSearchError && !customersLoading && filteredCustomers.length === 0 && !form.customer_name.trim() && (
                       <div className="px-3 py-2 text-xs text-[var(--text3)]">
                         No customers assigned to this shop yet.
                       </div>
                     )}
-                    {filteredCustomers.map((c) => (
+                    {!customerSearchError && filteredCustomers.map((c) => (
                       <button
                         key={String(c.id)}
                         type="button"
@@ -1437,6 +1462,7 @@ export default function ServiceSchedule() {
                         </div>
                       </button>
                     ))}
+                    {!customerSearchError && (
                     <button
                       type="button"
                       className="w-full text-left px-3 py-2 border-t border-[var(--border)] text-sm text-[var(--gold)] hover:bg-[var(--surface)]"
@@ -1450,6 +1476,7 @@ export default function ServiceSchedule() {
                         ? `Add “${form.customer_name.trim()}” as a new company`
                         : 'Add a company that’s new to me'}
                     </button>
+                    )}
                   </div>
                 )}
                 <p className="text-[10px] text-[var(--text3)] mt-1">

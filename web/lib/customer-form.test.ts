@@ -60,7 +60,9 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /searchShopCustomers/);
   assert.match(src, /findLinkedCustomerByName/);
   assert.match(src, /customerNameRef/);
-  assert.match(src, /matchLinkedCustomer\(rows, customerNameRef\.current\)/);
+  assert.match(src, /explicitPickRef/);
+  assert.match(src, /Couldn't load customers\. Try again\./);
+  assert.doesNotMatch(src, /matchLinkedCustomer\(rows, customerNameRef/);
   assert.match(src, /if \(!lookup\.ok\)/);
   assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
   assert.match(src, /customerSearchGen/);
@@ -260,6 +262,7 @@ test('ticket editor keeps shop organization_id and writes customer_organization_
   assert.match(src, /customer_organization_id: selectedOrg\.id/);
   assert.match(src, /searchShopCustomers/);
   assert.match(src, /Promise\.all/);
+  assert.match(src, /Couldn't load customers\. Try again\./);
   assert.doesNotMatch(src, /searchLinkedCustomers\(/);
   assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
   assert.match(src, /customerSearchGen/);
@@ -497,11 +500,13 @@ test('000960 sorts linked customers in SQL before the limit and does not add ind
   );
   assert.match(sql, /SECURITY INVOKER/);
   assert.match(sql, /lower\(btrim\(o\.name\)\) = lower\(btrim\(p_name\)\)/);
-  assert.match(sql, /ORDER BY\s+CASE[\s\S]*lower\(m\.org_name\) ASC/);
-  const orderAt = sql.indexOf('lower(m.org_name) ASC');
-  const limitAt = sql.indexOf('LIMIT least');
+  assert.match(sql, /left\(btrim\(coalesce\(p_query, ''\)\), 80\)/);
+  assert.match(sql, /ORDER BY lower\(m\.org_name\) ASC/);
+  const orderAt = sql.lastIndexOf('ORDER BY lower(m.org_name) ASC');
+  const limitAt = sql.indexOf('LIMIT v_limit', orderAt);
   assert.ok(orderAt > 0 && limitAt > orderAt);
   assert.match(sql, /o\.type IS NOT NULL/);
+  assert.match(sql, /COALESCE\(NULLIF\(btrim\(r\.email\), ''\), h\.office_email\)/);
   assert.doesNotMatch(sql, /CREATE INDEX/);
   assert.doesNotMatch(sql, /pg_trgm/);
   assert.match(rollback, /DROP FUNCTION IF EXISTS public.search_linked_customers/);
@@ -533,21 +538,34 @@ test('shop customer search keeps server order for more than 12 matches and sends
     linked_at: '2026-01-01T00:00:00Z',
   }));
   const client = rpcClient(serverOrder);
-  const rows = await searchShopCustomers(client as never, 2655, 'Dr. Smith, Inc.');
+  const found = await searchShopCustomers(client as never, 2655, 'Dr. Smith, Inc.');
   assert.equal(client.calls.length, 1);
   assert.equal(client.calls[0].fn, 'search_linked_customers');
   assert.equal(client.calls[0].args.p_query, 'Dr. Smith, Inc.');
   assert.equal(client.calls[0].args.p_sort, 'name');
   assert.equal(client.calls[0].args.p_limit, 12);
-  assert.equal(rows.length, 15);
-  assert.deepEqual(rows.map((row) => row.name), serverOrder.map((row) => row.name));
-  assert.equal(rows[0].phone, '555-2222');
-  assert.equal(rows[0].contact, 'Larry Smart');
-  assert.equal(rows[0].officePhone, '555-1111');
+  assert.equal(found.ok, true);
+  if (!found.ok) return;
+  assert.equal(found.customers.length, 15);
+  assert.deepEqual(
+    found.customers.map((row) => row.name),
+    serverOrder.map((row) => row.name)
+  );
+  assert.equal(found.customers[0].phone, '555-2222');
+  assert.equal(found.customers[0].contact, 'Larry Smart');
+  assert.equal(found.customers[0].officePhone, '555-1111');
 
   const quoted = rpcClient([]);
   await searchShopCustomers(quoted as never, 2655, 'say "hi": Clinic');
   assert.equal(quoted.calls[0].args.p_query, 'say "hi": Clinic');
+
+  const long = rpcClient([]);
+  await searchShopCustomers(long as never, 2655, `  ${'A'.repeat(90)}  `);
+  assert.equal(String(long.calls[0].args.p_query).length, 80);
+
+  const failed = rpcClient([], { message: 'timeout' });
+  const down = await searchShopCustomers(failed as never, 2655, 'Clinic');
+  assert.deepEqual(down, { ok: false });
 });
 
 test('exact customer name is one RPC and a failed lookup does not look like no match', async () => {

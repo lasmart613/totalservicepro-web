@@ -11022,6 +11022,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'عند إرسال هذه الفاتورة، سيظهر لعميلك زر للدفع عبر الإنترنت من خلال حساب Stripe الخاص بك.',
   ),
   CC: row('رونوشت', 'CC', 'Cc', 'עותק', 'Cc', 'CC', 'Cc', 'نسخة'),
+  "Couldn't load customers. Try again.": row(
+    'مشتری‌ها بارگذاری نشد. دوباره تلاش کنید.',
+    'No se pudieron cargar los clientes. Inténtelo de nuevo.',
+    'Impossible de charger les clients. Réessayez.',
+    'לא ניתן לטעון לקוחות. נסו שוב.',
+    'Impossibile caricare i clienti. Riprova.',
+    'Kunden konnten nicht geladen werden. Erneut versuchen.',
+    'Não foi possível carregar os clientes. Tente de novo.',
+    'تعذر تحميل العملاء. أعد المحاولة.',
+  ),
   'Optional. Separate multiple addresses with commas. They are copied on this email. The To address stays the one on file.': row(
     'اختیاری. چند نشانی را با ویرگول جدا کنید. روی همین ایمیل رونوشت می‌شوند. گیرندهٔ اصلی همان نشانی موجود در پرونده می‌ماند.',
     'Opcional. Separe varias direcciones con comas. Se copian en este correo. El destinatario principal sigue siendo el que está en el expediente.',

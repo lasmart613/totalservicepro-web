@@ -86,6 +86,7 @@ export default function ServiceTicketDetail() {
   const [saving, setSaving] = useState(false);
   const [organizations, setOrganizations] = useState<LinkedCustomerOpt[]>([]);
   const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const shopIdRef = useRef<string | number | null>(null);
@@ -116,11 +117,20 @@ export default function ServiceTicketDetail() {
       const gen = ++customerSearchGen.current;
       setCustomersLoading(true);
       try {
-        const rows = await searchShopCustomers(supabase, orgId, query);
+        const result = await searchShopCustomers(supabase, orgId, query);
         if (gen !== customerSearchGen.current) return;
-        setOrganizations(rows);
+        if (!result.ok) {
+          setCustomerSearchError(true);
+          setOrganizations([]);
+          return;
+        }
+        setCustomerSearchError(false);
+        setOrganizations(result.customers);
       } catch {
-        if (gen === customerSearchGen.current) setOrganizations([]);
+        if (gen === customerSearchGen.current) {
+          setCustomerSearchError(true);
+          setOrganizations([]);
+        }
       } finally {
         if (gen === customerSearchGen.current) setCustomersLoading(false);
       }
@@ -632,12 +642,17 @@ export default function ServiceTicketDetail() {
                     placeholder="Type to find a company assigned to this shop"
                     autoComplete="off"
                   />
-                  {showCustDrop && customersLoading && filteredOrgs.length === 0 && (
+                  {showCustDrop && customerSearchError && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)] shadow-lg">
+                      {t("Couldn't load customers. Try again.")}
+                    </div>
+                  )}
+                  {showCustDrop && !customerSearchError && customersLoading && filteredOrgs.length === 0 && (
                     <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)] shadow-lg">
                       Searching customers…
                     </div>
                   )}
-                  {showCustDrop && filteredOrgs.length > 0 && (
+                  {showCustDrop && !customerSearchError && filteredOrgs.length > 0 && (
                     <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
                       {filteredOrgs.map((org) => (
                         <button

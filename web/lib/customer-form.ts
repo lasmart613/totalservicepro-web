@@ -532,6 +532,13 @@ export const LINKED_CUSTOMER_DROPDOWN_LIMIT = 12;
 /** Pause between keystrokes before a customer-name search hits the network. */
 export const LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS = 180;
 
+/** Search text sent to the database. Trimmed, then cut at 80 characters. */
+export const LINKED_CUSTOMER_SEARCH_MAX_CHARS = 80;
+
+export function clampCustomerSearch(raw: string): string {
+  return String(raw ?? '').trim().slice(0, LINKED_CUSTOMER_SEARCH_MAX_CHARS);
+}
+
 /** `recent` is newest links. `name` is alphabetical on the organization name, before the limit. */
 export type LinkedCustomerSearchSort = 'recent' | 'name';
 
@@ -836,34 +843,40 @@ function optFromSearchRow(row: Record<string, unknown> | null | undefined): Link
   };
 }
 
+export type ShopCustomerSearch =
+  | { ok: true; customers: LinkedCustomerOpt[] }
+  | { ok: false };
+
 /**
  * Ticket and new-call customer box. One RPC. The database sorts A to Z
  * before the limit and matches the combined contact string. The rows come
  * back in that order; this function does not sort or slice them again.
+ * A failed call is { ok: false } so the form can show an error instead of
+ * an empty list that looks like "add a new company".
  */
 export async function searchShopCustomers(
   supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }> },
   serviceOrgId: string | number,
   query: string
-): Promise<LinkedCustomerOpt[]> {
-  const raw = String(query ?? '');
+): Promise<ShopCustomerSearch> {
+  const raw = clampCustomerSearch(query);
   const res = await supabase.rpc('search_linked_customers', {
     p_service_org_id: serviceOrgId,
     p_query: raw,
-    p_sort: raw.trim() ? 'name' : 'recent',
+    p_sort: raw ? 'name' : 'recent',
     p_limit: LINKED_CUSTOMER_DROPDOWN_LIMIT,
   });
   if (res?.error) {
     console.warn('linked customer search', res.error);
-    return [];
+    return { ok: false };
   }
   const rows = Array.isArray(res?.data) ? res.data : [];
-  const out: LinkedCustomerOpt[] = [];
+  const customers: LinkedCustomerOpt[] = [];
   for (const row of rows) {
     const opt = optFromSearchRow(row as Record<string, unknown>);
-    if (opt) out.push(opt);
+    if (opt) customers.push(opt);
   }
-  return out;
+  return { ok: true, customers };
 }
 
 export type LinkedCustomerNameLookup =

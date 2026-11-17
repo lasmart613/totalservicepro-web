@@ -323,11 +323,78 @@ RETURNS TABLE (
   office_phone text,
   linked_at timestamptz
 )
-LANGUAGE sql
+LANGUAGE plpgsql
 STABLE
 SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $fn$
+DECLARE
+  v_limit integer := least(greatest(coalesce(p_limit, 12), 1), 50);
+  v_query text := left(btrim(coalesce(p_query, '')), 80);
+  v_pattern text;
+BEGIN
+  IF v_query = '' THEN
+    -- Newest links first. Resolve the contact only for the rows we return.
+    RETURN QUERY
+    WITH ranked AS (
+      SELECT oc.customer_organization_id, max(oc.created_at) AS created_at
+      FROM public.organization_customers oc
+      WHERE oc.service_organization_id = p_service_org_id
+      GROUP BY oc.customer_organization_id
+    ),
+    picked AS (
+      SELECT r.customer_organization_id, r.created_at
+      FROM ranked r
+      JOIN public.organizations o ON o.id = r.customer_organization_id
+      WHERE o.type IS NOT NULL
+        AND lower(btrim(o.type)) IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
+        AND btrim(coalesce(o.name, '')) <> ''
+      ORDER BY r.created_at DESC NULLS LAST, lower(btrim(o.name)) ASC, o.id ASC
+      LIMIT v_limit
+    )
+    SELECT
+      o.id,
+      btrim(o.name),
+      o.address,
+      o.city,
+      o.state,
+      o.zip,
+      c.phone,
+      COALESCE(NULLIF(btrim(c.email), ''), o.email),
+      c.contact,
+      c.contact_role,
+      o.phone,
+      p.created_at
+    FROM picked p
+    JOIN public.organizations o ON o.id = p.customer_organization_id
+    CROSS JOIN LATERAL public.resolve_linked_customer_contact(
+      o.contact_name,
+      o.email,
+      o.phone,
+      o.directory_contacts,
+      (
+        SELECT jsonb_agg(jsonb_build_object(
+          'first_name', ct.first_name,
+          'last_name', ct.last_name,
+          'title', ct.title,
+          'phone', ct.phone,
+          'email', ct.email,
+          'is_primary', ct.is_primary
+        ))
+        FROM public.contacts ct
+        WHERE ct.organization_id = o.id
+      )
+    ) c
+    ORDER BY p.created_at DESC NULLS LAST, lower(btrim(o.name)) ASC, o.id ASC;
+    RETURN;
+  END IF;
+
+  v_pattern := '%' || replace(replace(replace(lower(v_query), chr(92), chr(92) || chr(92)), '%', chr(92) || '%'), '_', chr(92) || '_') || '%';
+
+  -- Cheap prefilter on organization columns, directory JSON, and contacts.
+  -- The precise combined-string match, then A-to-Z, then the limit, run
+  -- after that. Contact resolution runs only on the rows that passed.
+  RETURN QUERY
   WITH deduped AS (
     SELECT DISTINCT ON (oc.customer_organization_id)
       oc.customer_organization_id,
@@ -336,7 +403,7 @@ AS $fn$
     WHERE oc.service_organization_id = p_service_org_id
     ORDER BY oc.customer_organization_id, oc.created_at DESC NULLS LAST
   ),
-  typed AS (
+  candidates AS (
     SELECT
       d.customer_organization_id,
       d.created_at,
@@ -348,24 +415,45 @@ AS $fn$
       o.phone AS office_phone,
       o.email AS office_email,
       o.contact_name,
-      o.directory_contacts,
-      (
-        SELECT jsonb_agg(jsonb_build_object(
-          'first_name', c.first_name,
-          'last_name', c.last_name,
-          'title', c.title,
-          'phone', c.phone,
-          'email', c.email,
-          'is_primary', c.is_primary
-        ))
-        FROM public.contacts c
-        WHERE c.organization_id = o.id
-      ) AS contact_rows
+      o.directory_contacts
     FROM deduped d
     JOIN public.organizations o ON o.id = d.customer_organization_id
     WHERE o.type IS NOT NULL
       AND lower(btrim(o.type)) IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
       AND btrim(coalesce(o.name, '')) <> ''
+      AND (
+        lower(concat_ws(' ',
+          o.name, o.city, o.state, o.phone, o.email, o.contact_name,
+          o.directory_contacts -> 'roles' -> 'owner' ->> 'first_name',
+          o.directory_contacts -> 'roles' -> 'owner' ->> 'last_name',
+          o.directory_contacts -> 'roles' -> 'owner' ->> 'name',
+          o.directory_contacts -> 'roles' -> 'owner' ->> 'email',
+          o.directory_contacts -> 'roles' -> 'owner' ->> 'phone',
+          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'first_name',
+          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'last_name',
+          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'phone',
+          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'email',
+          o.directory_contacts -> 'roles' -> 'physician' ->> 'first_name',
+          o.directory_contacts -> 'roles' -> 'physician' ->> 'last_name',
+          o.directory_contacts -> 'roles' -> 'physician' ->> 'phone',
+          o.directory_contacts -> 'roles' -> 'physician' ->> 'email',
+          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'first_name',
+          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'last_name',
+          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'phone',
+          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'email',
+          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'first_name',
+          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'last_name',
+          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'phone',
+          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'email'
+        )) LIKE v_pattern ESCAPE chr(92)
+        OR EXISTS (
+          SELECT 1
+          FROM public.contacts c
+          WHERE c.organization_id = o.id
+            AND lower(concat_ws(' ', c.first_name, c.last_name, c.phone, c.email, c.title))
+              LIKE v_pattern ESCAPE chr(92)
+        )
+      )
   ),
   resolved AS (
     SELECT
@@ -377,32 +465,37 @@ AS $fn$
       t.state,
       t.zip,
       t.office_phone,
+      COALESCE(NULLIF(btrim(r.email), ''), t.office_email) AS shown_email,
       r.contact,
       r.phone,
-      r.email,
       r.contact_role,
       array_to_string(ARRAY[
         nullif(btrim(t.org_name), ''),
         CASE WHEN t.city IS NOT NULL AND t.city <> '' THEN t.city END,
         CASE WHEN t.state IS NOT NULL AND t.state <> '' THEN t.state END,
         nullif(btrim(coalesce(r.phone, '')), ''),
-        nullif(btrim(coalesce(r.email, '')), ''),
+        nullif(btrim(coalesce(COALESCE(NULLIF(btrim(r.email), ''), t.office_email), '')), ''),
         nullif(btrim(coalesce(r.contact, '')), '')
       ], ' ') AS haystack
-    FROM typed t
+    FROM candidates t
     CROSS JOIN LATERAL public.resolve_linked_customer_contact(
       t.contact_name,
       t.office_email,
       t.office_phone,
       t.directory_contacts,
-      t.contact_rows
+      (
+        SELECT jsonb_agg(jsonb_build_object(
+          'first_name', c.first_name,
+          'last_name', c.last_name,
+          'title', c.title,
+          'phone', c.phone,
+          'email', c.email,
+          'is_primary', c.is_primary
+        ))
+        FROM public.contacts c
+        WHERE c.organization_id = t.customer_organization_id
+      )
     ) r
-  ),
-  matched AS (
-    SELECT *
-    FROM resolved
-    WHERE btrim(coalesce(p_query, '')) = ''
-      OR lower(haystack) LIKE '%' || replace(replace(replace(lower(btrim(p_query)), chr(92), chr(92) || chr(92)), '%', chr(92) || '%'), '_', chr(92) || '_') || '%' ESCAPE chr(92)
   )
   SELECT
     m.customer_organization_id,
@@ -412,21 +505,16 @@ AS $fn$
     m.state,
     m.zip,
     m.phone,
-    m.email,
+    m.shown_email,
     m.contact,
     m.contact_role,
     m.office_phone,
     m.created_at
-  FROM matched m
-  ORDER BY
-    CASE
-      WHEN btrim(coalesce(p_query, '')) = '' OR lower(coalesce(p_sort, '')) = 'recent'
-        THEN m.created_at
-    END DESC NULLS LAST,
-    lower(m.org_name) ASC,
-    m.org_name ASC,
-    m.customer_organization_id ASC
-  LIMIT least(greatest(coalesce(p_limit, 12), 1), 50);
+  FROM resolved m
+  WHERE lower(m.haystack) LIKE v_pattern ESCAPE chr(92)
+  ORDER BY lower(m.org_name) ASC, m.org_name ASC, m.customer_organization_id ASC
+  LIMIT v_limit;
+END;
 $fn$;
 
 COMMENT ON FUNCTION public.search_linked_customers(bigint, text, text, integer) IS
@@ -508,7 +596,7 @@ AS $fn$
     h.state,
     h.zip,
     r.phone,
-    r.email,
+    COALESCE(NULLIF(btrim(r.email), ''), h.office_email),
     r.contact,
     r.contact_role,
     h.office_phone,

@@ -1,5 +1,5 @@
 -- Rollback 000960. Drops the customer search functions only.
--- Does not drop indexes (those are 000959) and does not change rows.
+-- Does not change rows. There is no index in 000960.
 -- Repo only. Do not run against production from the pull request.
 
 SET LOCAL lock_timeout = '5s';
