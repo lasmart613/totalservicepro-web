@@ -11,6 +11,8 @@ import {
   updateCustomerOrg,
   finalizeOrganizationPayload,
   filterLinkedCustomers,
+  findLinkedCustomerByName,
+  loadLinkedCustomerOpt,
   loadLinkedCustomerOrgs,
   matchLinkedCustomer,
   sanitizeCustomerSearch,
@@ -54,8 +56,11 @@ test('exact name match is used instead of creating a duplicate company', () => {
 test('new service call form autocompletes assigned customers and can add a new company', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const src = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
-  assert.match(src, /loadLinkedCustomers/);
-  assert.match(src, /organization_customers|loadLinkedCustomers/);
+  assert.match(src, /searchLinkedCustomers/);
+  assert.match(src, /findLinkedCustomerByName/);
+  assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
+  assert.match(src, /customerSearchGen/);
+  assert.doesNotMatch(src, /loadLinkedCustomers\(/);
   assert.match(src, /AddCustomerModal/);
   assert.match(src, /createLinkedCustomer/);
   assert.match(src, /Add a company/);
@@ -248,7 +253,12 @@ test('ticket editor keeps shop organization_id and writes customer_organization_
   const src = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
   assert.match(src, /TICKET_SAVE_FIELDS/);
   assert.match(src, /customer_organization_id: selectedOrg\.id/);
-  assert.match(src, /loadLinkedCustomers/);
+  assert.match(src, /searchLinkedCustomers/);
+  assert.match(src, /Promise\.all/);
+  assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
+  assert.match(src, /customerSearchGen/);
+  assert.equal(src.split('listReportsForTicket(').length - 1, 1);
+  assert.doesNotMatch(src, /loadLinkedCustomers\(/);
   assert.doesNotMatch(src, /[^_]organization_id: selectedOrg\.id/);
   assert.doesNotMatch(src, /update\(\{ \.\.\.formData/);
 });
@@ -467,6 +477,68 @@ test('a typed customer search does not page and does not retry when the first se
   assert.doesNotMatch(or[0], /%%/);
   assert.equal(or[1].referencedTable, 'organizations');
   assert.equal(client.calls[0].order, undefined);
+});
+
+test('000959 installs pg_trgm in extensions and indexes the customer search', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261117_000959_ticket_customer_search_indexes.sql'),
+    'utf8'
+  );
+  const rollback = readFileSync(
+    join(here, '../supabase/migrations/20261117_000959_ticket_customer_search_indexes_rollback.sql'),
+    'utf8'
+  );
+  assert.match(sql, /CREATE EXTENSION pg_trgm WITH SCHEMA extensions/);
+  assert.match(sql, /organization_customers_service_created_idx/);
+  assert.match(sql, /organizations_name_trgm_idx/);
+  assert.match(sql, /lock_timeout = '5s'/);
+  assert.match(sql, /CREATE INDEX CONCURRENTLY cannot run/);
+  assert.match(rollback, /DROP INDEX IF EXISTS public.organizations_name_trgm_idx/);
+  assert.match(rollback, /DROP INDEX IF EXISTS public.organization_customers_service_created_idx/);
+  assert.doesNotMatch(rollback, /DROP EXTENSION/);
+});
+
+test('ticket name search orders organizations by name before the 12-row limit', async () => {
+  const client = searchClient({ rows: [] });
+  await searchLinkedCustomers(client as never, 2655, 'oak', 'name');
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].limit, 12);
+  assert.deepEqual(client.calls[0].order, ['name', { referencedTable: 'organizations', ascending: true }]);
+});
+
+test('exact customer name is one request and does not use a substring wildcard', async () => {
+  const client = searchClient({
+    rows: [
+      {
+        created_at: '2026-11-01T00:00:00Z',
+        organizations: { id: 10, name: 'Oak Park Dermatology', type: 'laser_clinic' },
+      },
+    ],
+  });
+  const hit = await findLinkedCustomerByName(client as never, 2655, '  oak park dermatology ');
+  assert.equal(client.calls.length, 1);
+  const or = client.calls[0].or as [string, { referencedTable: string }];
+  assert.match(or[0], /name\.ilike\.oak park dermatology/);
+  assert.doesNotMatch(or[0], /%/);
+  assert.equal(hit?.id, 10);
+  assert.equal(await findLinkedCustomerByName(client as never, 2655, 'Other Clinic'), null);
+});
+
+test('one linked customer is loaded by id without paging the shop', async () => {
+  const client = searchClient({
+    rows: [
+      {
+        created_at: '2026-11-02T00:00:00Z',
+        organizations: { id: 44, name: 'New Clinic', type: 'customer', city: 'Austin' },
+      },
+    ],
+  });
+  const hit = await loadLinkedCustomerOpt(client as never, 2655, 44);
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].limit, 1);
+  assert.equal(hit?.name, 'New Clinic');
+  assert.equal(hit?.city, 'Austin');
 });
 
 test('directory_contacts missing retries once; any other error does not', async () => {
