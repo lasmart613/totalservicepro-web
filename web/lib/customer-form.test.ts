@@ -61,6 +61,7 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /findLinkedCustomerByName/);
   assert.match(src, /customerNameRef/);
   assert.match(src, /explicitPickRef/);
+  assert.match(src, /if \(!explicitPickRef\.current\) \{[\s\S]*?matchLinkedCustomer\(result\.customers, customerNameRef\.current\)/);
   assert.match(src, /Couldn't load customers\. Try again\./);
   assert.doesNotMatch(src, /matchLinkedCustomer\(rows, customerNameRef/);
   assert.match(src, /if \(!lookup\.ok\)/);
@@ -509,8 +510,16 @@ test('000960 sorts linked customers in SQL before the limit and does not add ind
   assert.match(sql, /COALESCE\(NULLIF\(btrim\(r\.email\), ''\), h\.office_email\)/);
   assert.doesNotMatch(sql, /CREATE INDEX/);
   assert.doesNotMatch(sql, /pg_trgm/);
+  assert.match(sql, /normalize_linked_directory/);
+  assert.match(sql, /linked_customer_prefilter_text/);
+  assert.match(sql, /role\.value ->> 'name'/);
+  const findAt = sql.indexOf('CREATE OR REPLACE FUNCTION public.find_linked_customer_by_name');
+  const findBody = sql.slice(findAt, sql.indexOf('COMMENT ON FUNCTION public.find_linked_customer_by_name'));
+  assert.doesNotMatch(findBody, /left\(/);
   assert.match(rollback, /DROP FUNCTION IF EXISTS public.search_linked_customers/);
   assert.match(rollback, /DROP FUNCTION IF EXISTS public.find_linked_customer_by_name/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public.linked_customer_prefilter_text/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public.normalize_linked_directory/);
 });
 
 function rpcClient(rows: unknown[], error?: { message: string } | null) {

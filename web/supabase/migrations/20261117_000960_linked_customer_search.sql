@@ -21,19 +21,60 @@
 -- Does not change rows. Safe to re-run. The migration runner applies this
 -- file as one transaction.
 --
--- No new index. On scratch Postgres 16, with 4,601 links for one shop and
--- 80,000 links for other shops, EXPLAIN ANALYZE of the shop-first join uses
--- the existing idx_org_customers_service_org (bitmap index scan, 3.8 ms for
--- a typed name, 6.7 ms for the newest 12). A (service_organization_id,
--- created_at DESC) index was not chosen. A trigram index is not used because
--- the filter is the combined name/city/state/phone/email/contact string after
--- the shop's links are read. 000959 is not shipped.
+-- No new index. The typed prefilter uses the same directory parser as the
+-- resolver, so a contact name in any role, a flat map, or a JSON string is
+-- not dropped. On scratch Postgres 16 with 4,607 links, EXPLAIN ANALYZE of
+-- search_linked_customers is 125 ms for a typed name and 122 ms for another
+-- typed name. That is slower than the earlier 17 ms prefilter, which missed
+-- those names. A blank query does not call the prefilter. 000959 is not shipped.
 -- Repo only. Do not apply this file to production from the pull request.
 -- Never use orgs 4, 153, 154, 1005, 2616, 5509, or 5515.
 --
 -- Rollback: 20261117_000960_linked_customer_search_rollback.sql
 
 SET LOCAL lock_timeout = '5s';
+
+-- Same directory parse the resolver uses: a JSON string, a {roles, primaryRole}
+-- object, or a flat role map. The search prefilter calls this so it cannot
+-- miss a layout the resolver accepts.
+CREATE OR REPLACE FUNCTION public.normalize_linked_directory(p_directory jsonb)
+RETURNS jsonb
+LANGUAGE plpgsql
+STABLE
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $fn$
+DECLARE
+  v_dir jsonb := p_directory;
+BEGIN
+  IF jsonb_typeof(v_dir) = 'string' THEN
+    BEGIN
+      v_dir := (v_dir #>> '{}')::jsonb;
+    EXCEPTION WHEN others THEN
+      v_dir := NULL;
+    END;
+  END IF;
+  IF jsonb_typeof(v_dir) IS DISTINCT FROM 'object' THEN
+    RETURN NULL;
+  END IF;
+  IF jsonb_typeof(v_dir -> 'roles') = 'object' THEN
+    RETURN jsonb_build_object(
+      'roles', v_dir -> 'roles',
+      'primaryRole', v_dir ->> 'primaryRole'
+    );
+  END IF;
+  RETURN jsonb_build_object(
+    'roles', v_dir,
+    'primaryRole', coalesce(v_dir ->> 'primaryRole', v_dir ->> 'primary_role')
+  );
+END;
+$fn$;
+
+COMMENT ON FUNCTION public.normalize_linked_directory(jsonb) IS
+  '000960: directory_contacts as {roles, primaryRole}. Accepts a JSON string, a nested roles object, or a flat role map.';
+
+REVOKE ALL ON FUNCTION public.normalize_linked_directory(jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.normalize_linked_directory(jsonb) TO authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.resolve_linked_customer_contact(
   p_contact_name text,
@@ -54,7 +95,6 @@ SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $fn$
 DECLARE
-  v_dir jsonb := p_directory;
   v_roles jsonb;
   v_keys text[] := ARRAY['owner', 'medical_director', 'physician', 'laser_technician', 'office_manager'];
   v_labels text[] := ARRAY['Owner', 'Medical Director', 'Physician', 'Laser Technician', 'Office Manager'];
@@ -74,30 +114,18 @@ DECLARE
   v_row jsonb;
   v_title text;
   v_title_key text;
+  v_norm jsonb;
   v_office_email text := btrim(coalesce(p_office_email, ''));
   v_office_phone text := btrim(coalesce(p_office_phone, ''));
   v_legacy text := btrim(coalesce(p_contact_name, ''));
 BEGIN
-  IF jsonb_typeof(v_dir) = 'string' THEN
-    BEGIN
-      v_dir := (v_dir #>> '{}')::jsonb;
-    EXCEPTION WHEN others THEN
-      v_dir := NULL;
-    END;
-  END IF;
-  IF jsonb_typeof(v_dir) IS DISTINCT FROM 'object' THEN
-    v_dir := NULL;
-  END IF;
-
-  IF v_dir IS NOT NULL AND jsonb_typeof(v_dir -> 'roles') = 'object' THEN
-    v_roles := v_dir -> 'roles';
-    v_primary := v_dir ->> 'primaryRole';
-  ELSE
-    v_roles := v_dir;
+  v_norm := public.normalize_linked_directory(p_directory);
+  IF v_norm IS NULL THEN
+    v_roles := NULL;
     v_primary := NULL;
-    IF v_dir IS NOT NULL THEN
-      v_primary := coalesce(v_dir ->> 'primaryRole', v_dir ->> 'primary_role');
-    END IF;
+  ELSE
+    v_roles := v_norm -> 'roles';
+    v_primary := v_norm ->> 'primaryRole';
   END IF;
 
   -- Prefer a filled directory_contacts role. Otherwise take the same role
@@ -303,6 +331,81 @@ COMMENT ON FUNCTION public.resolve_linked_customer_contact(text, text, text, jso
 REVOKE ALL ON FUNCTION public.resolve_linked_customer_contact(text, text, text, jsonb, jsonb) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.resolve_linked_customer_contact(text, text, text, jsonb, jsonb) TO authenticated, service_role;
 
+-- Superset of the final haystack. It starts with the same name / city /
+-- state / resolved phone / resolved email / resolved contact the match uses,
+-- then every role field (including name on every role) from the shared
+-- directory parser, then every contacts row. A row the final match keeps
+-- cannot fail this filter.
+CREATE OR REPLACE FUNCTION public.linked_customer_prefilter_text(
+  p_name text,
+  p_city text,
+  p_state text,
+  p_contact_name text,
+  p_office_email text,
+  p_office_phone text,
+  p_directory jsonb,
+  p_contacts jsonb
+)
+RETURNS text
+LANGUAGE sql
+STABLE
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $fn$
+  SELECT concat_ws(
+    ' ',
+    nullif(btrim(coalesce(p_name, '')), ''),
+    CASE WHEN p_city IS NOT NULL AND p_city <> '' THEN p_city END,
+    CASE WHEN p_state IS NOT NULL AND p_state <> '' THEN p_state END,
+    nullif(btrim(coalesce(r.phone, '')), ''),
+    nullif(btrim(coalesce(COALESCE(NULLIF(btrim(r.email), ''), p_office_email), '')), ''),
+    nullif(btrim(coalesce(r.contact, '')), ''),
+    (
+      SELECT string_agg(
+        concat_ws(
+          ' ',
+          nullif(btrim(coalesce(role.value ->> 'first_name', '')), ''),
+          nullif(btrim(coalesce(role.value ->> 'last_name', '')), ''),
+          nullif(btrim(coalesce(role.value ->> 'name', '')), ''),
+          nullif(btrim(coalesce(role.value ->> 'email', '')), ''),
+          nullif(btrim(coalesce(role.value ->> 'phone', '')), '')
+        ),
+        ' '
+      )
+      FROM jsonb_each(coalesce(public.normalize_linked_directory(p_directory) -> 'roles', '{}'::jsonb)) AS role(key, value)
+      WHERE role.key IN ('owner', 'medical_director', 'physician', 'laser_technician', 'office_manager')
+        AND jsonb_typeof(role.value) = 'object'
+    ),
+    (
+      SELECT string_agg(
+        concat_ws(
+          ' ',
+          nullif(btrim(coalesce(c.value ->> 'first_name', '')), ''),
+          nullif(btrim(coalesce(c.value ->> 'last_name', '')), ''),
+          nullif(btrim(coalesce(c.value ->> 'phone', '')), ''),
+          nullif(btrim(coalesce(c.value ->> 'email', '')), ''),
+          nullif(btrim(coalesce(c.value ->> 'title', '')), '')
+        ),
+        ' '
+      )
+      FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p_contacts) = 'array' THEN p_contacts ELSE '[]'::jsonb END) AS c(value)
+    )
+  )
+  FROM public.resolve_linked_customer_contact(
+    p_contact_name,
+    p_office_email,
+    p_office_phone,
+    p_directory,
+    p_contacts
+  ) r;
+$fn$;
+
+COMMENT ON FUNCTION public.linked_customer_prefilter_text(text, text, text, text, text, text, jsonb, jsonb) IS
+  '000960: search prefilter. Starts with the resolved haystack, then every directory role field and contact row, so it is a superset of the final match.';
+
+REVOKE ALL ON FUNCTION public.linked_customer_prefilter_text(text, text, text, text, text, text, jsonb, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.linked_customer_prefilter_text(text, text, text, text, text, text, jsonb, jsonb) TO authenticated, service_role;
+
 CREATE OR REPLACE FUNCTION public.search_linked_customers(
   p_service_org_id bigint,
   p_query text,
@@ -391,9 +494,9 @@ BEGIN
 
   v_pattern := '%' || replace(replace(replace(lower(v_query), chr(92), chr(92) || chr(92)), '%', chr(92) || '%'), '_', chr(92) || '_') || '%';
 
-  -- Cheap prefilter on organization columns, directory JSON, and contacts.
-  -- The precise combined-string match, then A-to-Z, then the limit, run
-  -- after that. Contact resolution runs only on the rows that passed.
+  -- Prefilter text starts with the resolved haystack, then every role field
+  -- from the shared directory parser. The precise haystack match, A-to-Z,
+  -- and the limit run after that.
   RETURN QUERY
   WITH deduped AS (
     SELECT DISTINCT ON (oc.customer_organization_id)
@@ -403,7 +506,7 @@ BEGIN
     WHERE oc.service_organization_id = p_service_org_id
     ORDER BY oc.customer_organization_id, oc.created_at DESC NULLS LAST
   ),
-  candidates AS (
+  linked AS (
     SELECT
       d.customer_organization_id,
       d.created_at,
@@ -415,45 +518,38 @@ BEGIN
       o.phone AS office_phone,
       o.email AS office_email,
       o.contact_name,
-      o.directory_contacts
+      o.directory_contacts,
+      (
+        SELECT jsonb_agg(jsonb_build_object(
+          'first_name', c.first_name,
+          'last_name', c.last_name,
+          'title', c.title,
+          'phone', c.phone,
+          'email', c.email,
+          'is_primary', c.is_primary
+        ))
+        FROM public.contacts c
+        WHERE c.organization_id = o.id
+      ) AS contact_rows
     FROM deduped d
     JOIN public.organizations o ON o.id = d.customer_organization_id
     WHERE o.type IS NOT NULL
       AND lower(btrim(o.type)) IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
       AND btrim(coalesce(o.name, '')) <> ''
-      AND (
-        lower(concat_ws(' ',
-          o.name, o.city, o.state, o.phone, o.email, o.contact_name,
-          o.directory_contacts -> 'roles' -> 'owner' ->> 'first_name',
-          o.directory_contacts -> 'roles' -> 'owner' ->> 'last_name',
-          o.directory_contacts -> 'roles' -> 'owner' ->> 'name',
-          o.directory_contacts -> 'roles' -> 'owner' ->> 'email',
-          o.directory_contacts -> 'roles' -> 'owner' ->> 'phone',
-          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'first_name',
-          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'last_name',
-          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'phone',
-          o.directory_contacts -> 'roles' -> 'medical_director' ->> 'email',
-          o.directory_contacts -> 'roles' -> 'physician' ->> 'first_name',
-          o.directory_contacts -> 'roles' -> 'physician' ->> 'last_name',
-          o.directory_contacts -> 'roles' -> 'physician' ->> 'phone',
-          o.directory_contacts -> 'roles' -> 'physician' ->> 'email',
-          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'first_name',
-          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'last_name',
-          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'phone',
-          o.directory_contacts -> 'roles' -> 'laser_technician' ->> 'email',
-          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'first_name',
-          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'last_name',
-          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'phone',
-          o.directory_contacts -> 'roles' -> 'office_manager' ->> 'email'
-        )) LIKE v_pattern ESCAPE chr(92)
-        OR EXISTS (
-          SELECT 1
-          FROM public.contacts c
-          WHERE c.organization_id = o.id
-            AND lower(concat_ws(' ', c.first_name, c.last_name, c.phone, c.email, c.title))
-              LIKE v_pattern ESCAPE chr(92)
-        )
-      )
+  ),
+  candidates AS (
+    SELECT *
+    FROM linked t
+    WHERE lower(public.linked_customer_prefilter_text(
+      t.org_name,
+      t.city,
+      t.state,
+      t.contact_name,
+      t.office_email,
+      t.office_phone,
+      t.directory_contacts,
+      t.contact_rows
+    )) LIKE v_pattern ESCAPE chr(92)
   ),
   resolved AS (
     SELECT
@@ -483,18 +579,7 @@ BEGIN
       t.office_email,
       t.office_phone,
       t.directory_contacts,
-      (
-        SELECT jsonb_agg(jsonb_build_object(
-          'first_name', c.first_name,
-          'last_name', c.last_name,
-          'title', c.title,
-          'phone', c.phone,
-          'email', c.email,
-          'is_primary', c.is_primary
-        ))
-        FROM public.contacts c
-        WHERE c.organization_id = t.customer_organization_id
-      )
+      t.contact_rows
     ) r
   )
   SELECT

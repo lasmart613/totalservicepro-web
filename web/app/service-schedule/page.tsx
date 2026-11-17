@@ -425,6 +425,13 @@ export default function ServiceSchedule() {
         }
         setCustomerSearchError(false);
         setCustomers(result.customers);
+        if (!explicitPickRef.current) {
+          const match = matchLinkedCustomer(result.customers, customerNameRef.current);
+          if (match) {
+            setCustomerOrgId(match.id);
+            setPickedOfficePhone(match.officePhone ?? null);
+          }
+        }
       } catch (e) {
         console.warn('ticket customers', e);
         if (gen === customerSearchGen.current) {
