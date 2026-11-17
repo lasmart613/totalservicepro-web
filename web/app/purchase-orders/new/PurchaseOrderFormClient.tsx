@@ -16,10 +16,10 @@ import DocumentCcField from '@/components/billing/DocumentCcField';
 import { chunkIds } from '@/lib/supabase/paginate';
 import { LINKED_CUSTOMER_DROPDOWN_LIMIT, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
 import {
-  exactSupplierByName,
   loadSupplierById,
   mergePinnedSupplier,
   searchSupplierOrgs,
+  supplierPickForCurrentText,
   supplierResultPage,
   type SupplierSearchRow,
 } from '@/lib/supplier-search';
@@ -100,6 +100,7 @@ export default function PurchaseOrderFormClient() {
   const supplierSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explicitSupplierRef = useRef(false);
   const pickedSupplierNameRef = useRef('');
+  const supplierQueryRef = useRef('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierOrgId, setSupplierOrgId] = useState<string | number | null>(null);
   const [supAddress, setSupAddress] = useState('');
@@ -232,12 +233,11 @@ export default function PurchaseOrderFormClient() {
       const merged = mergePinnedSupplier(unique, pinnedSupplierRef.current);
       suppliersRef.current = merged;
       setSuppliers(merged);
-      if (!explicitSupplierRef.current) {
-        const match = exactSupplierByName(unique, query);
-        if (match) {
-          pinnedSupplierRef.current = match;
-          applySupplier(match);
-        }
+      const match = supplierPickForCurrentText(unique, supplierQueryRef.current, explicitSupplierRef.current);
+      if (match) {
+        supplierQueryRef.current = match.name;
+        pinnedSupplierRef.current = match;
+        applySupplier(match);
       }
     } catch (e) {
       console.warn('load suppliers', e);
@@ -264,6 +264,7 @@ export default function PurchaseOrderFormClient() {
   const applySupplier = (s: SupplierOpt) => {
     explicitSupplierRef.current = true;
     pickedSupplierNameRef.current = s.name;
+    supplierQueryRef.current = s.name;
     setSupplierName(s.name);
     setSupplierOrgId(s.id);
     setSupSearch(s.name);
@@ -303,6 +304,7 @@ export default function PurchaseOrderFormClient() {
       setStatus(data.status || 'draft');
       setSentAt(data.sent_at ? String(data.sent_at) : null);
       setSupplierName(data.supplier_name || '');
+      supplierQueryRef.current = data.supplier_name || '';
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
       if (data.supplier_organization_id) {
@@ -612,6 +614,8 @@ export default function PurchaseOrderFormClient() {
               onChange={(e) => {
                 if (supplierLocked) return;
                 const v = e.target.value;
+                supplierQueryRef.current = v;
+                supplierSearchGen.current += 1;
                 setSupSearch(v);
                 setShowSupDrop(true);
                 const still =
@@ -627,6 +631,7 @@ export default function PurchaseOrderFormClient() {
               }}
               onFocus={() => {
                 if (supplierLocked) return;
+                supplierQueryRef.current = supSearch;
                 setShowSupDrop(true);
                 scheduleSupplierSearch(supSearch);
               }}

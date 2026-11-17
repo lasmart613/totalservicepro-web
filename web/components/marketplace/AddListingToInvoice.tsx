@@ -354,6 +354,7 @@ function AddListingToInvoiceDialog({
               value={custSearch}
               onChange={(e) => {
                 const value = e.target.value;
+                customerSearchGen.current += 1;
                 setCustSearch(value);
                 setShowCustDrop(true);
                 const still =

@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { exactSupplierByName, loadSupplierById, mergePinnedSupplier, searchSupplierOrgs, supplierResultPage } from './supplier-search.ts';
+import { exactSupplierByName, loadSupplierById, mergePinnedSupplier, searchSupplierOrgs, supplierPickForCurrentText, supplierResultPage } from './supplier-search.ts';
 import {
   OPTIONAL_ORG_COLUMNS,
   charLimitFromError,
@@ -390,8 +390,10 @@ test('estimate, report, invoice, and listing pickers search instead of paging ev
   assert.match(po, /mergePinnedSupplier/);
   assert.match(po, /Show more suppliers/);
   assert.match(po, /LINKED_CUSTOMER_DROPDOWN_LIMIT \+ 1/);
-  assert.match(po, /exactSupplierByName/);
-  assert.match(po, /if \(!explicitSupplierRef\.current\)/);
+  assert.match(po, /supplierPickForCurrentText\(unique, supplierQueryRef\.current, explicitSupplierRef\.current\)/);
+  const poChange = po.slice(po.indexOf('id="po-supplier-search"'), po.indexOf('placeholder={t(\'Start typing a supplier name'));
+  assert.match(poChange, /supplierQueryRef\.current = v/);
+  assert.ok(poChange.indexOf('supplierSearchGen.current += 1') < poChange.indexOf('scheduleSupplierSearch(v)'));
   assert.match(po, /Couldn't load suppliers\. Try again\./);
   assert.doesNotMatch(po, /Couldn't load customers\. Try again\./);
   assert.match(po, /role="combobox"/);
@@ -510,6 +512,10 @@ test('a saved supplier outside the first page stays selected and the next page i
   assert.equal(extra.shown.length, 12);
   assert.equal(exactSupplierByName(exactPage.shown, '  supplier 2 ')?.id, 2);
   assert.equal(exactSupplierByName([...exactPage.shown, { id: 99, name: 'Supplier 2' }], 'Supplier 2'), null);
+  const acme = [{ id: 1, name: 'Acme' }];
+  assert.equal(supplierPickForCurrentText(acme, 'Acme Parts', false), null);
+  assert.equal(supplierPickForCurrentText(acme, '  acme ', false)?.id, 1);
+  assert.equal(supplierPickForCurrentText(acme, 'Acme', true), null);
 });
 
 function searchClient(opts: {

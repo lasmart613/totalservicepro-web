@@ -64,6 +64,19 @@ export function exactSupplierByName(
   return hits.length === 1 ? hits[0] : null;
 }
 
+/**
+ * Auto-pick uses the text in the box now, not the query that started the request.
+ * A click already made is left alone. "Acme" results must not replace "Acme Parts".
+ */
+export function supplierPickForCurrentText(
+  rows: SupplierSearchRow[],
+  currentText: string,
+  explicitPick: boolean
+): SupplierSearchRow | null {
+  if (explicitPick) return null;
+  return exactSupplierByName(rows, currentText);
+}
+
 export function mergePinnedSupplier(
   rows: SupplierSearchRow[],
   pinned: SupplierSearchRow | null | undefined

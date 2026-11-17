@@ -478,6 +478,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                     value={v.vendor_name}
                     onChange={(e) => {
                       const value = e.target.value;
+                      supplierGen.current += 1;
                       const still =
                         v.supplierOrgId != null &&
                         value.trim().toLowerCase() === v.vendor_name.trim().toLowerCase();

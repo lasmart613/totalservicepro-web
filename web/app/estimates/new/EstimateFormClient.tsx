@@ -1030,6 +1030,7 @@ export default function EstimateFormClient() {
               value={custSearch}
               onChange={(e) => {
                 const value = e.target.value;
+                customerSearchGen.current += 1;
                 setCustSearch(value);
                 setCustomerName(value);
                 setShowCustDrop(true);

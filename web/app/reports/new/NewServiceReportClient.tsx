@@ -2026,6 +2026,7 @@ export default function NewServiceReport() {
                 value={searchTerm}
                 onChange={(e) => {
                   const value = e.target.value;
+                  customerSearchGen.current += 1;
                   setSearchTerm(value);
                   setShowCustDrop(true);
                   const still =

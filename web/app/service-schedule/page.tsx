@@ -1413,6 +1413,7 @@ export default function ServiceSchedule() {
                   onChange={(e) => {
                     const value = e.target.value;
                     customerNameRef.current = value;
+                    customerSearchGen.current += 1;
                     setForm({ ...form, customer_name: value, customer_zip: '' });
                     const stillThePick =
                       explicitPickRef.current &&

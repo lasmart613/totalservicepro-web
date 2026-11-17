@@ -1370,6 +1370,7 @@ export default function InvoiceFormClient() {
               value={custSearch}
               onChange={(e) => {
                 const next = e.target.value;
+                customerSearchGen.current += 1;
                 formTouchedRef.current = true;
                 const keepOrg = next.trim() !== '' && next.trim() === customerRef.current.name.trim();
                 customerRef.current = {
