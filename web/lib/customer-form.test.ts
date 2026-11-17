@@ -359,34 +359,36 @@ test('loadLinkedCustomerOrgs pages every organization_customers row then chunks 
   assert.deepEqual(linkQuery.filters[0], ['eq', 'service_organization_id', 4]);
 });
 
-test('estimate and report pickers page all linked customers and do not cap at 500', () => {
+test('estimate, report, invoice, and listing pickers search instead of paging every customer', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   for (const rel of [
     '../app/estimates/new/EstimateFormClient.tsx',
     '../app/reports/new/NewServiceReportClient.tsx',
+    '../app/invoices/new/InvoiceFormClient.tsx',
+    '../components/marketplace/AddListingToInvoice.tsx',
   ]) {
     const src = readFileSync(join(here, rel), 'utf8');
-    assert.match(src, /loadLinkedCustomerOrgs|loadLinkedCustomers/, rel);
-    assert.match(src, /filterLinkedCustomers/, rel);
-    assert.doesNotMatch(
-      src,
-      /from\('organization_customers'\)[\s\S]{0,400}\.limit\(500\)/,
-      rel
-    );
+    assert.match(src, /searchShopCustomers/, rel);
+    assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/, rel);
+    assert.match(src, /Couldn't load customers\. Try again\./, rel);
+    assert.doesNotMatch(src, /loadLinkedCustomerOrgs|loadLinkedCustomers\(/, rel);
   }
-});
-
-test('invoice editor searches linked customers and does not wait on the full directory', () => {
-  const here = dirname(fileURLToPath(import.meta.url));
-  const src = readFileSync(join(here, '../app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
-  const init = src.slice(src.indexOf('const invoiceTask = editIdParam'), src.indexOf('function updateLine'));
-  assert.match(src, /searchLinkedCustomers/);
-  assert.match(src, /filterLinkedCustomers/);
-  assert.doesNotMatch(src, /loadLinkedCustomerOrgs|loadLinkedCustomers\(/);
-  assert.doesNotMatch(init, /await refreshCustomers|await searchLinkedCustomers|await loadParts|await getOrgRole|await getCompanyTheme/);
+  const invoice = readFileSync(join(here, '../app/invoices/new/InvoiceFormClient.tsx'), 'utf8');
+  const init = invoice.slice(invoice.indexOf('const invoiceTask = editIdParam'), invoice.indexOf('function updateLine'));
+  assert.doesNotMatch(init, /await refreshCustomers|await searchShopCustomers|await searchLinkedCustomers|await loadParts|await getOrgRole|await getCompanyTheme/);
   const invoiceAt = init.indexOf('loadInvoice(editIdParam, token)');
   const sessionAt = init.indexOf('auth.getSession');
   assert.ok(invoiceAt >= 0 && sessionAt > invoiceAt, 'the invoice read starts before the session read');
+  const listing = readFileSync(join(here, '../app/api/billing/listing-invoice/route.ts'), 'utf8');
+  assert.match(listing, /loadLinkedCustomerOpt/);
+  assert.doesNotMatch(listing, /loadLinkedCustomerOrgs|loadLinkedCustomers\(/);
+  const po = readFileSync(join(here, '../app/purchase-orders/new/PurchaseOrderFormClient.tsx'), 'utf8');
+  assert.match(po, /searchSupplierOrgs/);
+  assert.match(po, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
+  assert.doesNotMatch(po, /fetchAllPages/);
+  const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
+  assert.match(company, /findLinkedCustomerByName/);
+  assert.doesNotMatch(company, /loadLinkedCustomers\(/);
 });
 
 function searchClient(opts: {

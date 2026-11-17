@@ -13,7 +13,9 @@ import { orgTodayIso } from '@/lib/org-timezone';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { ccValueForDocumentSave, documentCcInputError, formatCcInput, parseDocumentCc } from '@/lib/billing/document-cc';
 import DocumentCcField from '@/components/billing/DocumentCcField';
-import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
+import { chunkIds } from '@/lib/supabase/paginate';
+import { LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
+import { searchSupplierOrgs } from '@/lib/supplier-search';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -81,6 +83,11 @@ export default function PurchaseOrderFormClient() {
 
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
+  const [supplierSearchError, setSupplierSearchError] = useState(false);
+  const supplierSearchGen = useRef(0);
+  const supplierSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const explicitSupplierRef = useRef(false);
+  const pickedSupplierNameRef = useRef('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierOrgId, setSupplierOrgId] = useState<string | number | null>(null);
   const [supAddress, setSupAddress] = useState('');
@@ -199,21 +206,37 @@ export default function PurchaseOrderFormClient() {
     setPartHits(mergePartSuggests(hits));
   }, [supabase]);
 
-  const loadSuppliers = useCallback(async () => {
-    const { data, error } = await fetchAllPages<SupplierOpt>(async (from, to) => {
-      const res = await supabase
-        .from('organizations')
-        .select('id, name, address, city, state, phone, email')
-        .in('type', ['parts_supplier', 'vendor'])
-        .order('name', { ascending: true })
-        .range(from, to);
-      return { data: (res.data || []) as SupplierOpt[], error: res.error };
-    });
-    if (error) console.warn('load suppliers', error);
-    setSuppliers(data || []);
+  const refreshSuppliers = useCallback(async (query: string) => {
+    const gen = ++supplierSearchGen.current;
+    try {
+      const result = await searchSupplierOrgs(supabase, query);
+      if (gen !== supplierSearchGen.current) return;
+      if (!result.ok) {
+        setSupplierSearchError(true);
+        setSuppliers([]);
+        return;
+      }
+      setSupplierSearchError(false);
+      setSuppliers(result.suppliers);
+    } catch (e) {
+      console.warn('load suppliers', e);
+      if (gen === supplierSearchGen.current) {
+        setSupplierSearchError(true);
+        setSuppliers([]);
+      }
+    }
   }, [supabase]);
 
+  function scheduleSupplierSearch(query: string) {
+    if (supplierSearchTimer.current) clearTimeout(supplierSearchTimer.current);
+    supplierSearchTimer.current = setTimeout(() => {
+      void refreshSuppliers(query);
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
+
   const applySupplier = (s: SupplierOpt) => {
+    explicitSupplierRef.current = true;
+    pickedSupplierNameRef.current = s.name;
     setSupplierName(s.name);
     setSupplierOrgId(s.id);
     setSupSearch(s.name);
@@ -326,7 +349,7 @@ export default function PurchaseOrderFormClient() {
             .join(', ');
           setShipTo((prev) => prev || ship);
         }
-        await loadSuppliers();
+        scheduleSupplierSearch('');
         await loadPartSuggests();
         if (editIdParam && orgId) await loadPo(editIdParam, orgId);
       } catch (e) {
@@ -335,7 +358,7 @@ export default function PurchaseOrderFormClient() {
         setLoading(false);
       }
     })();
-  }, [supabase, router, editIdParam, loadSuppliers, loadPartSuggests, loadPo]);
+  }, [supabase, router, editIdParam, refreshSuppliers, loadPartSuggests, loadPo]);
 
   function updateLine(id: string, patch: Partial<LineItem>) {
     setTotalOverride(null);
@@ -540,11 +563,13 @@ export default function PurchaseOrderFormClient() {
               }}
             >
               <option value="">
-                {suppliers.length
+                {supplierSearchError
+                  ? t("Couldn't load customers. Try again.")
+                  : suppliers.length
                   ? t('Choose a parts supplier ({count} shown)…').replace('{count}', String(filteredSuppliers.length))
                   : t('No parts suppliers found')}
               </option>
-              {filteredSuppliers.map((s) => (
+              {!supplierSearchError && filteredSuppliers.map((s) => (
                 <option key={String(s.id)} value={String(s.id)}>
                   {s.name}
                   {s.city || s.state ? ` — ${[s.city, s.state].filter(Boolean).join(', ')}` : ''}
@@ -562,14 +587,21 @@ export default function PurchaseOrderFormClient() {
                 if (supplierLocked) return;
                 const v = e.target.value;
                 setSupSearch(v);
-                const exact = suppliers.find(
-                  (s) => s.name.toLowerCase() === v.trim().toLowerCase()
-                );
-                if (exact) {
-                  applySupplier(exact);
-                  return;
+                const still =
+                  explicitSupplierRef.current &&
+                  v.trim().toLowerCase() === pickedSupplierNameRef.current.trim().toLowerCase();
+                if (!still) {
+                  explicitSupplierRef.current = false;
+                  const exact = suppliers.find(
+                    (s) => s.name.toLowerCase() === v.trim().toLowerCase()
+                  );
+                  if (exact) {
+                    applySupplier(exact);
+                    return;
+                  }
+                  if (!v.trim()) clearSupplier();
                 }
-                if (!v.trim()) clearSupplier();
+                scheduleSupplierSearch(v);
               }}
               list="po-supplier-autofill"
               placeholder={t('Start typing a supplier name…')}

@@ -26,7 +26,7 @@ import {
   normalizeModelRow,
 } from '@/lib/equipment-dropdown';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
-import { persistCustomerLogo, loadLinkedCustomers } from '@/lib/customer-form';
+import { persistCustomerLogo, findLinkedCustomerByName } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
 import { SeatLimitNudge } from '@/components/SeatLimitNudge';
@@ -188,7 +188,6 @@ function CompanyProfile() {
   };
 
   // CRM state
-  const [customers, setCustomers] = useState<any[]>([]);
   const [newCustomer, setNewCustomer] = useState({
     name: '', contactName: '', contactPhone: '', contactEmail: '', address: '', city: '', state: '', notes: '', 
     selectedEquipment: [] as any[]
@@ -272,7 +271,6 @@ function CompanyProfile() {
           // Team + CRM only for service company admins
           if (isServiceCompany(prof.role, orgData.type) && (isAdmin(prof.role) || prof.role === 'service_manager')) {
             await loadTeamMembers(prof.organization_id);
-            await loadCustomers(prof.organization_id);
           }
           if (isOwnerish(prof.role, orgData.type)) {
             await loadFacilityContacts(prof.organization_id);
@@ -659,16 +657,6 @@ function CompanyProfile() {
     }));
   }
 
-  async function loadCustomers(serviceOrgId?: any) {
-    const sid = serviceOrgId ?? org?.id;
-    if (!sid) {
-      setCustomers([]);
-      return;
-    }
-    // Newest linked customers only — full directory lives on /customers (paginated).
-    setCustomers(await loadLinkedCustomers(supabase, sid));
-  }
-
   async function loadFacilityContacts(orgId?: string | number | null) {
     const id = orgId ?? linkedOrgId ?? org?.id;
     if (!id) {
@@ -728,6 +716,15 @@ function CompanyProfile() {
       // One server-side transaction (000917 create_shop_customer_org): the
       // customer org and its organization_customers link are written together,
       // only for a current manager of this shop. A failed link rolls back the org.
+      const existing = await findLinkedCustomerByName(supabase, org.id, newCustomer.name);
+      if (!existing.ok) {
+        setCustomerMessage("Couldn't load customers. Try again.");
+        return;
+      }
+      if (existing.customer) {
+        setCustomerMessage('That customer is already on your list.');
+        return;
+      }
       const laserModels = newCustomer.selectedEquipment.length
         ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${displayModelName(e.model)}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
         : null;
@@ -745,7 +742,6 @@ function CompanyProfile() {
 
       setCustomerMessage('Customer added successfully.');
       setNewCustomer({ name: '', contactName: '', contactPhone: '', contactEmail: '', address: '', city: '', state: '', notes: '', selectedEquipment: [] });
-      await loadCustomers(org.id);
     } catch (err: any) {
       setCustomerMessage('Failed to add customer: ' + (err.message || err));
     }
