@@ -57,6 +57,7 @@ import type { CustomerEquipment } from '@/lib/customer-equipment';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import {
+  adoptLinkedCustomerOrCreate,
   createShopCustomerOrg,
   findLinkedCustomerByName,
   LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
@@ -1540,16 +1541,22 @@ export default function NewServiceReport() {
 
   async function ensureCustomerOrg() {
     if (selectedCustomer?.id) return selectedCustomer.id;
-    if (!searchTerm.trim()) return null;
-    // create like Android ensureCustomerOrganization (with available contact fields)
-    const { data: exist } = await supabase.from('organizations').select('id').eq('name', searchTerm.trim()).eq('type', 'customer').maybeSingle();
-    if (exist) return exist.id;
-    // Org + link in one transaction (000917/000919); errors reach saveReport's
-    // catch and are shown. Never an unlinked customer org.
-    return createShopCustomerOrg(supabase, {
-      serviceOrgId: currentUserOrgId,
-      name: searchTerm,
-    });
+    const name = searchTerm.trim();
+    if (!name) return null;
+    if (currentUserOrgId == null || currentUserOrgId === '') {
+      throw new Error("Couldn't load customers. Try again.");
+    }
+    // Shop-scoped exact name, including case and punctuation. A failed lookup
+    // throws before the insert, so saveReport never writes a report
+    // or a second organization. Draft and complete both come through here.
+    const adopted = await adoptLinkedCustomerOrCreate(supabase, currentUserOrgId, name, () =>
+      createShopCustomerOrg(supabase, {
+        serviceOrgId: currentUserOrgId,
+        name: searchTerm,
+      })
+    );
+    if (!adopted.ok) throw new Error("Couldn't load customers. Try again.");
+    return adopted.id;
   }
 
   async function ensureLinkedEquipment(orgId: any) {

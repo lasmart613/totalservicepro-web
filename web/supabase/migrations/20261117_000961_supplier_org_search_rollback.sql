@@ -4,4 +4,5 @@
 
 SET LOCAL lock_timeout = '5s';
 
+DROP FUNCTION IF EXISTS public.search_supplier_orgs(text, integer, integer);
 DROP FUNCTION IF EXISTS public.search_supplier_orgs(text, integer);

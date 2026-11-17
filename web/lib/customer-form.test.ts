@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadSupplierById, mergePinnedSupplier, searchSupplierOrgs } from './supplier-search.ts';
 import {
   OPTIONAL_ORG_COLUMNS,
   charLimitFromError,
@@ -11,6 +12,7 @@ import {
   updateCustomerOrg,
   finalizeOrganizationPayload,
   filterLinkedCustomers,
+  adoptLinkedCustomerOrCreate,
   findLinkedCustomerByName,
   loadLinkedCustomerOpt,
   loadLinkedCustomerOrgs,
@@ -384,11 +386,115 @@ test('estimate, report, invoice, and listing pickers search instead of paging ev
   assert.doesNotMatch(listing, /loadLinkedCustomerOrgs|loadLinkedCustomers\(/);
   const po = readFileSync(join(here, '../app/purchase-orders/new/PurchaseOrderFormClient.tsx'), 'utf8');
   assert.match(po, /searchSupplierOrgs/);
-  assert.match(po, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
+  assert.match(po, /loadSupplierById/);
+  assert.match(po, /mergePinnedSupplier/);
+  assert.match(po, /Show more suppliers/);
+  assert.match(po, /Couldn't load suppliers\. Try again\./);
+  assert.doesNotMatch(po, /Couldn't load customers\. Try again\./);
+  assert.match(po, /role="combobox"/);
   assert.doesNotMatch(po, /fetchAllPages/);
+  const part = readFileSync(join(here, '../components/AddPartModal.tsx'), 'utf8');
+  assert.match(part, /searchSupplierOrgs/);
+  assert.match(part, /Couldn't load suppliers\. Try again\./);
+  assert.doesNotMatch(part, /\.limit\(200\)/);
+  const report = readFileSync(join(here, '../app/reports/new/NewServiceReportClient.tsx'), 'utf8');
+  const ensure = report.slice(report.indexOf('async function ensureCustomerOrg'), report.indexOf('async function ensureLinkedEquipment'));
+  assert.match(ensure, /adoptLinkedCustomerOrCreate/);
+  assert.doesNotMatch(ensure, /\.eq\('name'/);
+  const adoptAt = ensure.indexOf('adoptLinkedCustomerOrCreate');
+  const createAt = ensure.indexOf('createShopCustomerOrg');
+  assert.ok(adoptAt >= 0 && createAt > adoptAt);
+  const saveAt = report.indexOf('const custId = await ensureCustomerOrg()');
+  const writeAt = report.indexOf('async function writeReport');
+  assert.ok(saveAt > 0 && writeAt > saveAt);
+  const modal = readFileSync(join(here, '../components/AddCustomerModal.tsx'), 'utf8');
+  assert.match(modal, /adoptLinkedCustomerOrCreate/);
+  const listingUi = readFileSync(join(here, '../components/marketplace/AddListingToInvoice.tsx'), 'utf8');
+  assert.match(listingUi, /catch \(e\)/);
   const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
   assert.match(company, /findLinkedCustomerByName/);
   assert.doesNotMatch(company, /loadLinkedCustomers\(/);
+});
+
+test('exact linked name is reused and a failed lookup creates nothing', async () => {
+  const creates: string[] = [];
+  const create = async () => {
+    creates.push('created');
+    return 99;
+  };
+  const row = { id: 7, name: 'Dr. Smith, Inc.', city: 'Austin', state: 'TX' };
+  const mixed = rpcClient([row]);
+  const reused = await adoptLinkedCustomerOrCreate(mixed as never, 2655, '  dr. SMITH, Inc.  ', create);
+  assert.equal(reused.ok, true);
+  if (reused.ok) {
+    assert.equal(reused.reused, true);
+    assert.equal(reused.id, 7);
+  }
+  assert.deepEqual(mixed.calls[0].args.p_name, '  dr. SMITH, Inc.  ');
+  assert.deepEqual(creates, []);
+
+  const duplicates = rpcClient([
+    row,
+    { id: 8, name: 'Dr. Smith, Inc.', city: 'Dallas', state: 'TX' },
+  ]);
+  const first = await adoptLinkedCustomerOrCreate(duplicates as never, 2655, 'Dr. Smith, Inc.', create);
+  assert.equal(first.ok && first.reused && first.id, 7);
+
+  const missing = rpcClient([], { message: 'function find_linked_customer_by_name does not exist' });
+  const refused = await adoptLinkedCustomerOrCreate(missing as never, 2655, 'Dr. Smith, Inc.', create);
+  assert.deepEqual(refused, { ok: false });
+  const thrown = {
+    rpc: async () => {
+      throw new Error('network down');
+    },
+  };
+  const down = await adoptLinkedCustomerOrCreate(thrown as never, 2655, 'Dr. Smith, Inc.', create);
+  assert.deepEqual(down, { ok: false });
+  assert.deepEqual(creates, []);
+});
+
+test('a saved supplier outside the first page stays selected and the next page is another bounded request', async () => {
+  const page = Array.from({ length: 12 }, (_, i) => ({
+    id: i + 1,
+    name: `Supplier ${String(i + 1).padStart(2, '0')}`,
+  }));
+  const calls: Array<Record<string, unknown>> = [];
+  const client = {
+    async rpc(_fn: string, args: Record<string, unknown>) {
+      calls.push(args);
+      const offset = Number(args.p_offset || 0);
+      return { data: offset === 0 ? page : [{ id: 40, name: 'Supplier 40' }], error: null };
+    },
+  };
+  const first = await searchSupplierOrgs(client as never, '');
+  assert.equal(first.ok, true);
+  if (!first.ok) return;
+  const pinned = { id: 90, name: 'Saved Outside Twelve' };
+  const shown = mergePinnedSupplier(first.suppliers, pinned);
+  assert.equal(shown[0].id, 90);
+  assert.equal(shown.length, 13);
+  const more = await searchSupplierOrgs(client as never, 'Supplier', { offset: 12 });
+  assert.equal(more.ok, true);
+  if (!more.ok) return;
+  assert.equal(more.suppliers[0].name, 'Supplier 40');
+  assert.equal(calls[1].p_offset, 12);
+  assert.equal(calls[0].p_limit, 12);
+  const byId = await loadSupplierById(
+    {
+      from: () => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { id: 90, name: 'Saved Outside Twelve', type: 'parts_supplier', city: 'Austin' },
+              error: null,
+            }),
+          }),
+        }),
+      }),
+    } as never,
+    90
+  );
+  assert.equal(byId.ok && byId.supplier && byId.supplier.id, 90);
 });
 
 function searchClient(opts: {

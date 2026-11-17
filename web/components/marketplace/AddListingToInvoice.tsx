@@ -107,15 +107,22 @@ function AddListingToInvoiceDialog({
     customerSearchTimer.current = setTimeout(() => {
       const gen = ++customerSearchGen.current;
       void (async () => {
-        const result = await searchShopCustomers(supabase, orgId, query);
-        if (gen !== customerSearchGen.current) return;
-        if (!result.ok) {
+        try {
+          const result = await searchShopCustomers(supabase, orgId, query);
+          if (gen !== customerSearchGen.current) return;
+          if (!result.ok) {
+            setCustomerSearchError(true);
+            setCustomers([]);
+            return;
+          }
+          setCustomerSearchError(false);
+          setCustomers(result.customers);
+        } catch (e) {
+          console.warn('listing customer search', e);
+          if (gen !== customerSearchGen.current) return;
           setCustomerSearchError(true);
           setCustomers([]);
-          return;
         }
-        setCustomerSearchError(false);
-        setCustomers(result.customers);
       })();
     }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
   }

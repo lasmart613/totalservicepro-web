@@ -40,21 +40,82 @@ function rowFrom(raw: Record<string, unknown> | null | undefined): SupplierSearc
   };
 }
 
-export async function searchSupplierOrgs(supabase: Rpc, query: string): Promise<SupplierSearch> {
+export const SUPPLIER_ORG_TYPES = ['parts_supplier', 'supplier', 'vendor'] as const;
+
+export function mergePinnedSupplier(
+  rows: SupplierSearchRow[],
+  pinned: SupplierSearchRow | null | undefined
+): SupplierSearchRow[] {
+  if (!pinned || pinned.id == null || !pinned.name.trim()) return rows;
+  if (rows.some((row) => String(row.id) === String(pinned.id))) return rows;
+  return [pinned, ...rows];
+}
+
+export async function searchSupplierOrgs(
+  supabase: Rpc,
+  query: string,
+  opts?: { offset?: number; limit?: number }
+): Promise<SupplierSearch> {
   const raw = clampCustomerSearch(query);
-  const res = await supabase.rpc('search_supplier_orgs', {
-    p_query: raw,
-    p_limit: LINKED_CUSTOMER_DROPDOWN_LIMIT,
-  });
-  if (res?.error) {
-    console.warn('supplier search', res.error);
+  const offset = Math.max(0, Math.floor(opts?.offset ?? 0));
+  const limit = opts?.limit ?? LINKED_CUSTOMER_DROPDOWN_LIMIT;
+  try {
+    const res = await supabase.rpc('search_supplier_orgs', {
+      p_query: raw,
+      p_limit: limit,
+      p_offset: offset,
+    });
+    if (res?.error) {
+      console.warn('supplier search', res.error);
+      return { ok: false };
+    }
+    const rows = Array.isArray(res?.data) ? res.data : [];
+    const suppliers: SupplierSearchRow[] = [];
+    for (const row of rows) {
+      const opt = rowFrom(row as Record<string, unknown>);
+      if (opt) suppliers.push(opt);
+    }
+    return { ok: true, suppliers };
+  } catch (e) {
+    console.warn('supplier search', e);
     return { ok: false };
   }
-  const rows = Array.isArray(res?.data) ? res.data : [];
-  const suppliers: SupplierSearchRow[] = [];
-  for (const row of rows) {
-    const opt = rowFrom(row as Record<string, unknown>);
-    if (opt) suppliers.push(opt);
+}
+
+type OrgRead = {
+  from: (table: string) => {
+    select: (columns: string) => {
+      eq: (column: string, value: unknown) => {
+        maybeSingle: () => Promise<{ data?: Record<string, unknown> | null; error?: { message?: string } | null }>;
+      };
+    };
+  };
+};
+
+/** One supplier row by id. Row security on organizations still applies. */
+export async function loadSupplierById(
+  supabase: OrgRead,
+  id: string | number
+): Promise<{ ok: true; supplier: SupplierSearchRow | null } | { ok: false }> {
+  try {
+    const res = await supabase
+      .from('organizations')
+      .select('id, name, address, city, state, zip, phone, email, type')
+      .eq('id', id)
+      .maybeSingle();
+    if (res?.error) {
+      console.warn('supplier by id', res.error);
+      return { ok: false };
+    }
+    const row = res?.data;
+    if (!row) return { ok: true, supplier: null };
+    const type = String(row.type || '').trim().toLowerCase();
+    if (!SUPPLIER_ORG_TYPES.includes(type as (typeof SUPPLIER_ORG_TYPES)[number])) {
+      return { ok: true, supplier: null };
+    }
+    return { ok: true, supplier: rowFrom(row) };
+  } catch (e) {
+    console.warn('supplier by id', e);
+    return { ok: false };
   }
-  return { ok: true, suppliers };
 }

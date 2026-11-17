@@ -22,9 +22,12 @@
 
 SET LOCAL lock_timeout = '5s';
 
+DROP FUNCTION IF EXISTS public.search_supplier_orgs(text, integer);
+
 CREATE OR REPLACE FUNCTION public.search_supplier_orgs(
   p_query text,
-  p_limit integer DEFAULT 12
+  p_limit integer DEFAULT 12,
+  p_offset integer DEFAULT 0
 )
 RETURNS TABLE (
   id bigint,
@@ -62,18 +65,19 @@ AS $fn$
   FROM public.organizations o
   CROSS JOIN pattern p
   WHERE o.type IS NOT NULL
-    AND lower(btrim(o.type)) IN ('parts_supplier', 'vendor')
+    AND lower(btrim(o.type)) IN ('parts_supplier', 'supplier', 'vendor')
     AND btrim(coalesce(o.name, '')) <> ''
     AND (
       p.q = ''
       OR lower(concat_ws(' ', o.name, o.city, o.state, o.phone, o.email)) LIKE p.pat ESCAPE chr(92)
     )
   ORDER BY lower(btrim(o.name)) ASC, btrim(o.name) ASC, o.id ASC
-  LIMIT least(greatest(coalesce(p_limit, 12), 1), 50);
+  LIMIT least(greatest(coalesce(p_limit, 12), 1), 50)
+  OFFSET least(greatest(coalesce(p_offset, 0), 0), 100000);
 $fn$;
 
-COMMENT ON FUNCTION public.search_supplier_orgs(text, integer) IS
-  '000961: up to p_limit parts suppliers and vendors. Blank query is A to Z. A typed query matches name, city, state, phone, or email and sorts A to Z before the limit.';
+COMMENT ON FUNCTION public.search_supplier_orgs(text, integer, integer) IS
+  '000961: one page of parts suppliers, suppliers, and vendors. Blank query is A to Z. A typed query matches name, city, state, phone, or email and sorts A to Z before the limit. p_offset is the next page.';
 
-REVOKE ALL ON FUNCTION public.search_supplier_orgs(text, integer) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.search_supplier_orgs(text, integer) TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.search_supplier_orgs(text, integer, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.search_supplier_orgs(text, integer, integer) TO authenticated, service_role;

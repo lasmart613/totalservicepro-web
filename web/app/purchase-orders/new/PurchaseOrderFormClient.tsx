@@ -14,8 +14,13 @@ import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-
 import { ccValueForDocumentSave, documentCcInputError, formatCcInput, parseDocumentCc } from '@/lib/billing/document-cc';
 import DocumentCcField from '@/components/billing/DocumentCcField';
 import { chunkIds } from '@/lib/supabase/paginate';
-import { LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
-import { searchSupplierOrgs } from '@/lib/supplier-search';
+import { LINKED_CUSTOMER_DROPDOWN_LIMIT, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
+import {
+  loadSupplierById,
+  mergePinnedSupplier,
+  searchSupplierOrgs,
+  type SupplierSearchRow,
+} from '@/lib/supplier-search';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -84,7 +89,11 @@ export default function PurchaseOrderFormClient() {
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
   const [supplierSearchError, setSupplierSearchError] = useState(false);
+  const [supplierHasMore, setSupplierHasMore] = useState(false);
+  const [showSupDrop, setShowSupDrop] = useState(false);
   const supplierSearchGen = useRef(0);
+  const supplierFetched = useRef(0);
+  const pinnedSupplierRef = useRef<SupplierSearchRow | null>(null);
   const supplierSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explicitSupplierRef = useRef(false);
   const pickedSupplierNameRef = useRef('');
@@ -117,26 +126,7 @@ export default function PurchaseOrderFormClient() {
   );
   const total = totalOverride != null ? totalOverride : computedTotal;
 
-  const filteredSuppliers = useMemo(() => {
-    const q = supSearch.trim().toLowerCase();
-    const list = !q
-      ? suppliers
-      : suppliers.filter((s) =>
-          [s.name, s.city, s.state, s.email, s.phone]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
-            .includes(q)
-        );
-    if (
-      supplierOrgId != null &&
-      !list.some((s) => String(s.id) === String(supplierOrgId))
-    ) {
-      const selected = suppliers.find((s) => String(s.id) === String(supplierOrgId));
-      if (selected) return [selected, ...list];
-    }
-    return list;
-  }, [suppliers, supSearch, supplierOrgId]);
+  const filteredSuppliers = suppliers;
 
   const loadPartSuggests = useCallback(async () => {
     const hits: PartSuggestHit[] = [];
@@ -206,23 +196,37 @@ export default function PurchaseOrderFormClient() {
     setPartHits(mergePartSuggests(hits));
   }, [supabase]);
 
-  const refreshSuppliers = useCallback(async (query: string) => {
+  const refreshSuppliers = useCallback(async (query: string, offset = 0) => {
     const gen = ++supplierSearchGen.current;
     try {
-      const result = await searchSupplierOrgs(supabase, query);
+      const result = await searchSupplierOrgs(supabase, query, { offset });
       if (gen !== supplierSearchGen.current) return;
       if (!result.ok) {
         setSupplierSearchError(true);
-        setSuppliers([]);
+        setSupplierHasMore(false);
+        if (offset === 0) setSuppliers(mergePinnedSupplier([], pinnedSupplierRef.current));
         return;
       }
       setSupplierSearchError(false);
-      setSuppliers(result.suppliers);
+      setSupplierHasMore(result.suppliers.length >= LINKED_CUSTOMER_DROPDOWN_LIMIT);
+      supplierFetched.current = offset + result.suppliers.length;
+      setSuppliers((prev) => {
+        const page = offset === 0 ? result.suppliers : [...prev, ...result.suppliers];
+        const seen = new Set<string>();
+        const unique = page.filter((row) => {
+          const key = String(row.id);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return mergePinnedSupplier(unique, pinnedSupplierRef.current);
+      });
     } catch (e) {
       console.warn('load suppliers', e);
       if (gen === supplierSearchGen.current) {
         setSupplierSearchError(true);
-        setSuppliers([]);
+        setSupplierHasMore(false);
+        if (offset === 0) setSuppliers(mergePinnedSupplier([], pinnedSupplierRef.current));
       }
     }
   }, [supabase]);
@@ -230,7 +234,8 @@ export default function PurchaseOrderFormClient() {
   function scheduleSupplierSearch(query: string) {
     if (supplierSearchTimer.current) clearTimeout(supplierSearchTimer.current);
     supplierSearchTimer.current = setTimeout(() => {
-      void refreshSuppliers(query);
+      supplierFetched.current = 0;
+      void refreshSuppliers(query, 0);
     }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
   }
 
@@ -278,6 +283,23 @@ export default function PurchaseOrderFormClient() {
       setSupplierName(data.supplier_name || '');
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
+      if (data.supplier_organization_id) {
+        const savedId = data.supplier_organization_id;
+        const snapshot: SupplierSearchRow = {
+          id: savedId,
+          name: String(data.supplier_name || '').trim() || 'Saved supplier',
+        };
+        pinnedSupplierRef.current = snapshot;
+        explicitSupplierRef.current = true;
+        pickedSupplierNameRef.current = snapshot.name;
+        setSuppliers((prev) => mergePinnedSupplier(prev, snapshot));
+        const loaded = await loadSupplierById(supabase, savedId);
+        if (loaded.ok && loaded.supplier) {
+          const pinned = { ...loaded.supplier, name: snapshot.name };
+          pinnedSupplierRef.current = pinned;
+          setSuppliers((prev) => mergePinnedSupplier(prev, pinned));
+        }
+      }
       setSupEmail(data.supplier_email || '');
       poDateTouched.current = true;
       setPoDate(data.po_date ? String(data.po_date).slice(0, 10) : orgTodayRef.current);
@@ -544,76 +566,87 @@ export default function PurchaseOrderFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-[var(--gold)] mb-3">{t('Parts supplier')}</h2>
           <div>
-            <label className="text-xs text-[var(--text3)]">{t('Choose a parts supplier')}</label>
-            <select
-              className="input select mt-1"
-              data-field="supplier_organization_id"
-              value={supplierOrgId != null ? String(supplierOrgId) : ''}
-              disabled={supplierLocked}
-              aria-readonly={supplierLocked}
-              onChange={(e) => {
-                if (supplierLocked) return;
-                const id = e.target.value;
-                if (!id) {
-                  clearSupplier();
-                  return;
-                }
-                const s = suppliers.find((x) => String(x.id) === id);
-                if (s) applySupplier(s);
-              }}
-            >
-              <option value="">
-                {supplierSearchError
-                  ? t("Couldn't load customers. Try again.")
-                  : suppliers.length
-                  ? t('Choose a parts supplier ({count} shown)…').replace('{count}', String(filteredSuppliers.length))
-                  : t('No parts suppliers found')}
-              </option>
-              {!supplierSearchError && filteredSuppliers.map((s) => (
-                <option key={String(s.id)} value={String(s.id)}>
-                  {s.name}
-                  {s.city || s.state ? ` — ${[s.city, s.state].filter(Boolean).join(', ')}` : ''}
-                  {s.email ? ` · ${s.email}` : ` · ${t('no email')}`}
-                </option>
-              ))}
-            </select>
-            <label className="text-xs text-[var(--text3)] mt-3 block">{t('Type to filter the list')}</label>
+            <label className="text-xs text-[var(--text3)]" htmlFor="po-supplier-search">{t('Choose a parts supplier')}</label>
+            <input type="hidden" data-field="supplier_organization_id" value={supplierOrgId != null ? String(supplierOrgId) : ''} disabled={supplierLocked} />
             <input
+              id="po-supplier-search"
               className="input mt-1"
+              role="combobox"
+              aria-expanded={showSupDrop && !supplierLocked}
+              aria-controls="po-supplier-listbox"
+              aria-autocomplete="list"
               data-field="supplier_name"
               value={supSearch}
               readOnly={supplierLocked}
+              disabled={supplierLocked}
               onChange={(e) => {
                 if (supplierLocked) return;
                 const v = e.target.value;
                 setSupSearch(v);
+                setShowSupDrop(true);
                 const still =
                   explicitSupplierRef.current &&
                   v.trim().toLowerCase() === pickedSupplierNameRef.current.trim().toLowerCase();
                 if (!still) {
                   explicitSupplierRef.current = false;
-                  const exact = suppliers.find(
-                    (s) => s.name.toLowerCase() === v.trim().toLowerCase()
-                  );
-                  if (exact) {
-                    applySupplier(exact);
-                    return;
-                  }
+                  pinnedSupplierRef.current = null;
                   if (!v.trim()) clearSupplier();
+                  else setSupplierOrgId(null);
                 }
                 scheduleSupplierSearch(v);
               }}
-              list="po-supplier-autofill"
+              onFocus={() => {
+                if (supplierLocked) return;
+                setShowSupDrop(true);
+                scheduleSupplierSearch(supSearch);
+              }}
               placeholder={t('Start typing a supplier name…')}
               autoComplete="off"
             />
-            <datalist id="po-supplier-autofill">
-              {suppliers.map((s) => (
-                <option key={String(s.id)} value={s.name}>
-                  {s.email || [s.city, s.state].filter(Boolean).join(', ')}
-                </option>
-              ))}
-            </datalist>
+            {showSupDrop && !supplierLocked && supplierSearchError && (
+              <div className="mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)]" role="alert">
+                {t("Couldn't load suppliers. Try again.")}
+              </div>
+            )}
+            {showSupDrop && !supplierLocked && !supplierSearchError && (
+              <ul id="po-supplier-listbox" role="listbox" aria-label={t('Choose a parts supplier')} className="mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
+                {filteredSuppliers.length === 0 && (
+                  <li className="px-3 py-2 text-xs text-[var(--text3)]">{t('No parts suppliers found')}</li>
+                )}
+                {filteredSuppliers.map((s) => (
+                  <li key={String(s.id)} role="option" aria-selected={String(s.id) === String(supplierOrgId)}>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        pinnedSupplierRef.current = s;
+                        applySupplier(s);
+                        setShowSupDrop(false);
+                      }}
+                    >
+                      <div className="font-semibold">{s.name}</div>
+                      <div className="text-xs text-[var(--text3)]">
+                        {[s.city, s.state].filter(Boolean).join(', ')}
+                        {s.email ? ` · ${s.email}` : ''}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+                {supplierHasMore && (
+                  <li>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm text-[var(--gold)]"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => void refreshSuppliers(supSearch, supplierFetched.current)}
+                    >
+                      {t('Show more suppliers')}
+                    </button>
+                  </li>
+                )}
+              </ul>
+            )}
             <p className="text-[11px] text-[var(--text3)] mt-1">
               {supplierLocked
                 ? t('Sent purchase orders keep their supplier. Save draft updates the other fields.')
