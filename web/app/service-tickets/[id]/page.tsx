@@ -22,8 +22,7 @@ import { ArrowLeft, Edit2, MapPinCheck, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
-  sanitizeCustomerSearch,
-  searchLinkedCustomers,
+  searchShopCustomers,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
@@ -117,12 +116,7 @@ export default function ServiceTicketDetail() {
       const gen = ++customerSearchGen.current;
       setCustomersLoading(true);
       try {
-        const rows = await searchLinkedCustomers(
-          supabase,
-          orgId,
-          query,
-          sanitizeCustomerSearch(query) ? 'name' : 'recent'
-        );
+        const rows = await searchShopCustomers(supabase, orgId, query);
         if (gen !== customerSearchGen.current) return;
         setOrganizations(rows);
       } catch {

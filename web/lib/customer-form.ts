@@ -718,6 +718,7 @@ function linkedCustomerFromEmbed(row: {
         contact_name?: string | null;
         type?: string | null;
         directory_contacts?: unknown;
+        contacts?: DirectoryContactRow[] | null;
       }
     | null
     | undefined;
@@ -729,7 +730,7 @@ function linkedCustomerFromEmbed(row: {
     email: org.email,
     phone: org.phone,
     directory_contacts: org.directory_contacts,
-    contactRows: [],
+    contactRows: Array.isArray(org.contacts) ? org.contacts : [],
   });
   return {
     id: org.id,
@@ -758,7 +759,7 @@ export async function searchLinkedCustomers(
   supabase: { from: (table: string) => any },
   serviceOrgId: string | number,
   query: string,
-  sort: LinkedCustomerSearchSort = 'recent'
+  _sort: LinkedCustomerSearchSort = 'recent'
 ): Promise<LinkedCustomerOpt[]> {
   const term = sanitizeCustomerSearch(query);
   let data: unknown[] | null = null;
@@ -771,23 +772,20 @@ export async function searchLinkedCustomers(
       req = req.order('created_at', { ascending: false }).limit(LINKED_CUSTOMER_DROPDOWN_LIMIT);
     } else {
       const pattern = `%${term}%`;
-      req = req.or(
-        [
-          `name.ilike.${pattern}`,
-          `city.ilike.${pattern}`,
-          `state.ilike.${pattern}`,
-          `phone.ilike.${pattern}`,
-          `email.ilike.${pattern}`,
-          `contact_name.ilike.${pattern}`,
-        ].join(','),
-        { referencedTable: 'organizations' }
-      );
-      // Name order is applied before the limit so the 12 rows are the
-      // alphabetical matches, matching the in-memory dropdown.
-      if (sort === 'name') {
-        req = req.order('name', { referencedTable: 'organizations', ascending: true });
-      }
-      req = req.limit(LINKED_CUSTOMER_DROPDOWN_LIMIT);
+      req = req
+        .or(
+          [
+            `name.ilike.${pattern}`,
+            `city.ilike.${pattern}`,
+            `state.ilike.${pattern}`,
+            `phone.ilike.${pattern}`,
+            `email.ilike.${pattern}`,
+            `contact_name.ilike.${pattern}`,
+          ].join(','),
+          { referencedTable: 'organizations' }
+        )
+        .limit(LINKED_CUSTOMER_DROPDOWN_LIMIT);
+      void _sort;
     }
     const res = await req;
     if (!res?.error) {
@@ -815,10 +813,68 @@ export async function searchLinkedCustomers(
   return out;
 }
 
+const LINKED_CUSTOMER_BY_ID_SELECT = [
+  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name, type, directory_contacts, contacts(first_name, last_name, title, phone, email, is_primary))',
+  ...LINKED_CUSTOMER_SEARCH_SELECT,
+] as const;
+
+function optFromSearchRow(row: Record<string, unknown> | null | undefined): LinkedCustomerOpt | null {
+  if (!row || row.id == null || !String(row.name || '').trim()) return null;
+  return {
+    id: row.id as string | number,
+    name: String(row.name).trim(),
+    address: (row.address as string | null) ?? null,
+    city: (row.city as string | null) ?? null,
+    state: (row.state as string | null) ?? null,
+    zip: (row.zip as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    email: (row.email as string | null) ?? null,
+    contact: (row.contact as string | null) ?? null,
+    contactRole: (row.contact_role as string | null) ?? null,
+    officePhone: (row.office_phone as string | null) ?? null,
+    linkedAt: (row.linked_at as string | null) ?? null,
+  };
+}
+
+/**
+ * Ticket and new-call customer box. One RPC. The database sorts A to Z
+ * before the limit and matches the combined contact string. The rows come
+ * back in that order; this function does not sort or slice them again.
+ */
+export async function searchShopCustomers(
+  supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }> },
+  serviceOrgId: string | number,
+  query: string
+): Promise<LinkedCustomerOpt[]> {
+  const raw = String(query ?? '');
+  const res = await supabase.rpc('search_linked_customers', {
+    p_service_org_id: serviceOrgId,
+    p_query: raw,
+    p_sort: raw.trim() ? 'name' : 'recent',
+    p_limit: LINKED_CUSTOMER_DROPDOWN_LIMIT,
+  });
+  if (res?.error) {
+    console.warn('linked customer search', res.error);
+    return [];
+  }
+  const rows = Array.isArray(res?.data) ? res.data : [];
+  const out: LinkedCustomerOpt[] = [];
+  for (const row of rows) {
+    const opt = optFromSearchRow(row as Record<string, unknown>);
+    if (opt) out.push(opt);
+  }
+  return out;
+}
+
+export type LinkedCustomerNameLookup =
+  | { ok: true; customer: LinkedCustomerOpt | null }
+  | { ok: false };
+
 /**
  * One request for a clinic just added to this shop.
  * Used after "add a company" so the form can select that row without
- * downloading every link.
+ * downloading every link. Contacts on the organization are included so the
+ * phone and email match the directory.
  */
 export async function loadLinkedCustomerOpt(
   supabase: { from: (table: string) => any },
@@ -826,10 +882,10 @@ export async function loadLinkedCustomerOpt(
   customerOrganizationId: string | number
 ): Promise<LinkedCustomerOpt | null> {
   if (customerOrganizationId == null || customerOrganizationId === '') return null;
-  for (let i = 0; i < LINKED_CUSTOMER_SEARCH_SELECT.length; i++) {
+  for (let i = 0; i < LINKED_CUSTOMER_BY_ID_SELECT.length; i++) {
     const res = await supabase
       .from('organization_customers')
-      .select(LINKED_CUSTOMER_SEARCH_SELECT[i])
+      .select(LINKED_CUSTOMER_BY_ID_SELECT[i])
       .eq('service_organization_id', serviceOrgId)
       .eq('customer_organization_id', customerOrganizationId)
       .limit(1);
@@ -837,7 +893,11 @@ export async function loadLinkedCustomerOpt(
       const row = Array.isArray(res.data) ? res.data[0] : null;
       return row ? linkedCustomerFromEmbed(row) : null;
     }
-    if (i === 0 && missingDirectoryContactsColumn(res.error)) continue;
+    const message = String(res.error?.message || '');
+    const missing =
+      i < LINKED_CUSTOMER_BY_ID_SELECT.length - 1 &&
+      /contacts|directory_contacts|relationship|column|schema cache|does not exist|42703|PGRST200|PGRST204/i.test(message);
+    if (missing) continue;
     console.warn('linked customer by id', res.error);
     return null;
   }
@@ -845,39 +905,28 @@ export async function loadLinkedCustomerOpt(
 }
 
 /**
- * Exact organization name among this shop's links (case-insensitive).
- * One request. Used when a typed name was not chosen from the 12 suggestions,
- * so submit still attaches the existing company instead of creating another.
+ * Exact trimmed name among every customer linked to this shop.
+ * Case-insensitive. Punctuation is part of the name. A failed lookup is
+ * { ok: false } so the caller does not insert a second organization.
  */
 export async function findLinkedCustomerByName(
-  supabase: { from: (table: string) => any },
+  supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }> },
   serviceOrgId: string | number,
   name: string
-): Promise<LinkedCustomerOpt | null> {
-  const term = sanitizeCustomerSearch(name);
-  if (!term) return null;
-  let data: unknown[] | null = null;
-  for (let i = 0; i < LINKED_CUSTOMER_SEARCH_SELECT.length; i++) {
-    const res = await supabase
-      .from('organization_customers')
-      .select(LINKED_CUSTOMER_SEARCH_SELECT[i])
-      .eq('service_organization_id', serviceOrgId)
-      .or(`name.ilike.${term}`, { referencedTable: 'organizations' })
-      .limit(5);
-    if (!res?.error) {
-      data = Array.isArray(res.data) ? res.data : [];
-      break;
-    }
-    if (i === 0 && missingDirectoryContactsColumn(res.error)) continue;
+): Promise<LinkedCustomerNameLookup> {
+  const raw = String(name ?? '');
+  if (!raw.trim()) return { ok: true, customer: null };
+  const res = await supabase.rpc('find_linked_customer_by_name', {
+    p_service_org_id: serviceOrgId,
+    p_name: raw,
+  });
+  if (res?.error) {
     console.warn('linked customer exact name', res.error);
-    return null;
+    return { ok: false };
   }
-  const hits: LinkedCustomerOpt[] = [];
-  for (const row of data || []) {
-    const opt = linkedCustomerFromEmbed(row as { created_at?: string | null; organizations?: unknown });
-    if (opt) hits.push(opt);
-  }
-  return matchLinkedCustomer(hits, name);
+  const rows = Array.isArray(res?.data) ? res.data : res?.data ? [res.data] : [];
+  const customer = optFromSearchRow(rows[0] as Record<string, unknown>);
+  return { ok: true, customer };
 }
 
 export function filterLinkedCustomers(

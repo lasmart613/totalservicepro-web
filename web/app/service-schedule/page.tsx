@@ -45,8 +45,7 @@ import {
   LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
   loadLinkedCustomerOpt,
   matchLinkedCustomer,
-  sanitizeCustomerSearch,
-  searchLinkedCustomers,
+  searchShopCustomers,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
 import { normalizeStateCode } from '@/lib/geo';
@@ -172,6 +171,7 @@ export default function ServiceSchedule() {
   const [pickedOfficePhone, setPickedOfficePhone] = useState<string | null>(null);
   const customerSearchGen = useRef(0);
   const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customerNameRef = useRef('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [ticketEquipmentId, setTicketEquipmentId] = useState('');
@@ -413,14 +413,12 @@ export default function ServiceSchedule() {
       const gen = ++customerSearchGen.current;
       setCustomersLoading(true);
       try {
-        const rows = await searchLinkedCustomers(
-          supabase,
-          oId,
-          query,
-          sanitizeCustomerSearch(query) ? 'name' : 'recent'
-        );
+        const rows = await searchShopCustomers(supabase, oId, query);
         if (gen !== customerSearchGen.current) return;
         setCustomers(rows);
+        const match = matchLinkedCustomer(rows, customerNameRef.current);
+        setCustomerOrgId(match?.id || null);
+        setPickedOfficePhone(match?.officePhone ?? null);
       } catch (e) {
         console.warn('ticket customers', e);
         if (gen === customerSearchGen.current) setCustomers([]);
@@ -491,6 +489,7 @@ export default function ServiceSchedule() {
     if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
     customerSearchGen.current += 1;
     setCustomersLoading(false);
+    customerNameRef.current = c.name;
     setCustomerOrgId(c.id);
     setPickedOfficePhone(c.officePhone ?? null);
     setShowCustDrop(false);
@@ -645,6 +644,7 @@ export default function ServiceSchedule() {
     setShowAddCustomer(false);
     setAssignedTo(userId || '');
     setPickedOfficePhone(null);
+    customerNameRef.current = '';
     setCustomers([]);
     if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
     customerSearchGen.current += 1;
@@ -687,11 +687,12 @@ export default function ServiceSchedule() {
 
       let linkedCustomerId = customerOrgId;
       if (!linkedCustomerId) {
-        const hits = await searchLinkedCustomers(supabase, orgId, customer, 'name');
-        linkedCustomerId =
-          matchLinkedCustomer(hits, customer)?.id ||
-          (await findLinkedCustomerByName(supabase, orgId, customer))?.id ||
-          null;
+        const lookup = await findLinkedCustomerByName(supabase, orgId, customer);
+        if (!lookup.ok) {
+          setFormError('Could not check whether this company is already on your list. Nothing was created.');
+          return;
+        }
+        linkedCustomerId = lookup.customer?.id || null;
       }
       const customerState = normalizeStateCode(form.customer_state);
 
@@ -1390,6 +1391,7 @@ export default function ServiceSchedule() {
                   value={form.customer_name}
                   onChange={(e) => {
                     const value = e.target.value;
+                    customerNameRef.current = value;
                     setForm({ ...form, customer_name: value, customer_zip: '' });
                     const match = matchLinkedCustomer(customers, value);
                     setCustomerOrgId(match?.id || null);
