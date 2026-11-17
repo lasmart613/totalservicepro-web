@@ -42,6 +42,28 @@ function rowFrom(raw: Record<string, unknown> | null | undefined): SupplierSearc
 
 export const SUPPLIER_ORG_TYPES = ['parts_supplier', 'supplier', 'vendor'] as const;
 
+/** One page plus a probe row. The extra row is not shown; it only means another page exists. */
+export function supplierResultPage(
+  rows: SupplierSearchRow[],
+  pageSize = LINKED_CUSTOMER_DROPDOWN_LIMIT
+): { shown: SupplierSearchRow[]; hasMore: boolean } {
+  return {
+    shown: rows.slice(0, pageSize),
+    hasMore: rows.length > pageSize,
+  };
+}
+
+/** The typed name matches exactly one row. Two matches stay unpicked. */
+export function exactSupplierByName(
+  rows: SupplierSearchRow[],
+  typed: string
+): SupplierSearchRow | null {
+  const key = typed.trim().toLowerCase();
+  if (!key) return null;
+  const hits = rows.filter((row) => row.name.trim().toLowerCase() === key);
+  return hits.length === 1 ? hits[0] : null;
+}
+
 export function mergePinnedSupplier(
   rows: SupplierSearchRow[],
   pinned: SupplierSearchRow | null | undefined

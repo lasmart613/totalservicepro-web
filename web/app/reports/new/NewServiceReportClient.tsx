@@ -1546,9 +1546,10 @@ export default function NewServiceReport() {
     if (currentUserOrgId == null || currentUserOrgId === '') {
       throw new Error("Couldn't load customers. Try again.");
     }
-    // Shop-scoped exact name, including case and punctuation. A failed lookup
-    // throws before the insert, so saveReport never writes a report
-    // or a second organization. Draft and complete both come through here.
+    // Shop-scoped exact name. The SQL match is case-insensitive and keeps
+    // punctuation. A failed lookup throws before the insert, so saveReport
+    // never writes a report or a second organization. No match still creates,
+    // the same as the new-ticket submit. Draft and complete both come through here.
     const adopted = await adoptLinkedCustomerOrCreate(supabase, currentUserOrgId, name, () =>
       createShopCustomerOrg(supabase, {
         serviceOrgId: currentUserOrgId,

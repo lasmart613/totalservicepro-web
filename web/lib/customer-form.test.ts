@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadSupplierById, mergePinnedSupplier, searchSupplierOrgs } from './supplier-search.ts';
+import { exactSupplierByName, loadSupplierById, mergePinnedSupplier, searchSupplierOrgs, supplierResultPage } from './supplier-search.ts';
 import {
   OPTIONAL_ORG_COLUMNS,
   charLimitFromError,
@@ -389,6 +389,9 @@ test('estimate, report, invoice, and listing pickers search instead of paging ev
   assert.match(po, /loadSupplierById/);
   assert.match(po, /mergePinnedSupplier/);
   assert.match(po, /Show more suppliers/);
+  assert.match(po, /LINKED_CUSTOMER_DROPDOWN_LIMIT \+ 1/);
+  assert.match(po, /exactSupplierByName/);
+  assert.match(po, /if \(!explicitSupplierRef\.current\)/);
   assert.match(po, /Couldn't load suppliers\. Try again\./);
   assert.doesNotMatch(po, /Couldn't load customers\. Try again\./);
   assert.match(po, /role="combobox"/);
@@ -400,6 +403,8 @@ test('estimate, report, invoice, and listing pickers search instead of paging ev
   const report = readFileSync(join(here, '../app/reports/new/NewServiceReportClient.tsx'), 'utf8');
   const ensure = report.slice(report.indexOf('async function ensureCustomerOrg'), report.indexOf('async function ensureLinkedEquipment'));
   assert.match(ensure, /adoptLinkedCustomerOrCreate/);
+  assert.match(ensure, /case-insensitive/);
+  assert.doesNotMatch(ensure, /case-sensitive/);
   assert.doesNotMatch(ensure, /\.eq\('name'/);
   const adoptAt = ensure.indexOf('adoptLinkedCustomerOrCreate');
   const createAt = ensure.indexOf('createShopCustomerOrg');
@@ -495,6 +500,16 @@ test('a saved supplier outside the first page stays selected and the next page i
     90
   );
   assert.equal(byId.ok && byId.supplier && byId.supplier.id, 90);
+  const exactPage = supplierResultPage(
+    Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Supplier ${i + 1}` }))
+  );
+  assert.equal(exactPage.hasMore, false);
+  assert.equal(exactPage.shown.length, 12);
+  const extra = supplierResultPage([...exactPage.shown, { id: 13, name: 'Supplier 13' }]);
+  assert.equal(extra.hasMore, true);
+  assert.equal(extra.shown.length, 12);
+  assert.equal(exactSupplierByName(exactPage.shown, '  supplier 2 ')?.id, 2);
+  assert.equal(exactSupplierByName([...exactPage.shown, { id: 99, name: 'Supplier 2' }], 'Supplier 2'), null);
 });
 
 function searchClient(opts: {

@@ -16,9 +16,11 @@ import DocumentCcField from '@/components/billing/DocumentCcField';
 import { chunkIds } from '@/lib/supabase/paginate';
 import { LINKED_CUSTOMER_DROPDOWN_LIMIT, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
 import {
+  exactSupplierByName,
   loadSupplierById,
   mergePinnedSupplier,
   searchSupplierOrgs,
+  supplierResultPage,
   type SupplierSearchRow,
 } from '@/lib/supplier-search';
 import {
@@ -94,6 +96,7 @@ export default function PurchaseOrderFormClient() {
   const supplierSearchGen = useRef(0);
   const supplierFetched = useRef(0);
   const pinnedSupplierRef = useRef<SupplierSearchRow | null>(null);
+  const suppliersRef = useRef<SupplierOpt[]>([]);
   const supplierSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const explicitSupplierRef = useRef(false);
   const pickedSupplierNameRef = useRef('');
@@ -199,34 +202,53 @@ export default function PurchaseOrderFormClient() {
   const refreshSuppliers = useCallback(async (query: string, offset = 0) => {
     const gen = ++supplierSearchGen.current;
     try {
-      const result = await searchSupplierOrgs(supabase, query, { offset });
+      const result = await searchSupplierOrgs(supabase, query, {
+        offset,
+        limit: LINKED_CUSTOMER_DROPDOWN_LIMIT + 1,
+      });
       if (gen !== supplierSearchGen.current) return;
       if (!result.ok) {
         setSupplierSearchError(true);
         setSupplierHasMore(false);
-        if (offset === 0) setSuppliers(mergePinnedSupplier([], pinnedSupplierRef.current));
+        if (offset === 0) {
+          const kept = mergePinnedSupplier([], pinnedSupplierRef.current);
+          suppliersRef.current = kept;
+          setSuppliers(kept);
+        }
         return;
       }
+      const page = supplierResultPage(result.suppliers);
       setSupplierSearchError(false);
-      setSupplierHasMore(result.suppliers.length >= LINKED_CUSTOMER_DROPDOWN_LIMIT);
-      supplierFetched.current = offset + result.suppliers.length;
-      setSuppliers((prev) => {
-        const page = offset === 0 ? result.suppliers : [...prev, ...result.suppliers];
-        const seen = new Set<string>();
-        const unique = page.filter((row) => {
-          const key = String(row.id);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        });
-        return mergePinnedSupplier(unique, pinnedSupplierRef.current);
+      setSupplierHasMore(page.hasMore);
+      supplierFetched.current = offset + page.shown.length;
+      const prior = offset === 0 ? [] : suppliersRef.current;
+      const seen = new Set<string>();
+      const unique = [...prior, ...page.shown].filter((row) => {
+        const key = String(row.id);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
       });
+      const merged = mergePinnedSupplier(unique, pinnedSupplierRef.current);
+      suppliersRef.current = merged;
+      setSuppliers(merged);
+      if (!explicitSupplierRef.current) {
+        const match = exactSupplierByName(unique, query);
+        if (match) {
+          pinnedSupplierRef.current = match;
+          applySupplier(match);
+        }
+      }
     } catch (e) {
       console.warn('load suppliers', e);
       if (gen === supplierSearchGen.current) {
         setSupplierSearchError(true);
         setSupplierHasMore(false);
-        if (offset === 0) setSuppliers(mergePinnedSupplier([], pinnedSupplierRef.current));
+        if (offset === 0) {
+          const kept = mergePinnedSupplier([], pinnedSupplierRef.current);
+          suppliersRef.current = kept;
+          setSuppliers(kept);
+        }
       }
     }
   }, [supabase]);
@@ -292,12 +314,20 @@ export default function PurchaseOrderFormClient() {
         pinnedSupplierRef.current = snapshot;
         explicitSupplierRef.current = true;
         pickedSupplierNameRef.current = snapshot.name;
-        setSuppliers((prev) => mergePinnedSupplier(prev, snapshot));
+        setSuppliers((prev) => {
+          const next = mergePinnedSupplier(prev, snapshot);
+          suppliersRef.current = next;
+          return next;
+        });
         const loaded = await loadSupplierById(supabase, savedId);
         if (loaded.ok && loaded.supplier) {
           const pinned = { ...loaded.supplier, name: snapshot.name };
           pinnedSupplierRef.current = pinned;
-          setSuppliers((prev) => mergePinnedSupplier(prev, pinned));
+          setSuppliers((prev) => {
+            const next = mergePinnedSupplier(prev, pinned);
+            suppliersRef.current = next;
+            return next;
+          });
         }
       }
       setSupEmail(data.supplier_email || '');
