@@ -203,6 +203,86 @@ SELECT 'service_role write landed',
   AND invoice_data::jsonb ->> 'note' = 'edited'
 FROM public.service_invoices WHERE id = 1;
 
+-- String invoice_data. parseInvoiceData would read payment_url out of a JSON
+-- string. The client must not be able to store one. A non-object OLD value
+-- is locked as a whole, so a legacy string cannot be rewritten either.
+INSERT INTO proof (label, ok)
+SELECT 'client insert of string invoice_data is rejected',
+  pg_temp.attempt('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001', $q$
+    INSERT INTO public.service_invoices (id, invoice_data, status)
+    VALUES (
+      4,
+      to_jsonb('{"payment_url":"https://checkout.stripe.com/c/pay/cs_X","stripe_checkout_session_id":"cs_X"}'::text)::json,
+      'sent'
+    )
+  $q$) = 'invoice_data must be a JSON object';
+
+INSERT INTO proof (label, ok)
+SELECT 'string insert did not land',
+  NOT EXISTS (SELECT 1 FROM public.service_invoices WHERE id = 4);
+
+INSERT INTO proof (label, ok)
+SELECT 'client update of an unlocked row to string invoice_data is rejected',
+  pg_temp.attempt('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001', $q$
+    UPDATE public.service_invoices
+    SET invoice_data = to_jsonb('{"payment_url":"https://checkout.stripe.com/c/pay/cs_X","stripe_checkout_session_id":"cs_X"}'::text)::json
+    WHERE id = 3
+  $q$) = 'invoice_data must be a JSON object';
+
+INSERT INTO proof (label, ok)
+SELECT 'unlocked row stayed a JSON object',
+  jsonb_typeof(invoice_data::jsonb) = 'object'
+  AND invoice_data::jsonb ->> 'note' = 'draft'
+  AND NOT (invoice_data::jsonb ? 'payment_url')
+FROM public.service_invoices WHERE id = 3;
+
+INSERT INTO proof (label, ok)
+SELECT 'service_role insert of string invoice_data is allowed',
+  pg_temp.attempt('service_role', '', $q$
+    INSERT INTO public.service_invoices (id, invoice_data, status)
+    VALUES (
+      4,
+      to_jsonb('{"payment_url":"https://checkout.stripe.com/c/pay/cs_X","stripe_checkout_session_id":"cs_X"}'::text)::json,
+      'sent'
+    )
+  $q$) = 'ok';
+
+INSERT INTO proof (label, ok)
+SELECT 'service_role update of an unlocked row to string invoice_data is allowed',
+  pg_temp.attempt('service_role', '', $q$
+    UPDATE public.service_invoices
+    SET invoice_data = to_jsonb('{"note":"still a string"}'::text)::json
+    WHERE id = 3
+  $q$) = 'ok';
+
+INSERT INTO proof (label, ok)
+SELECT 'legacy string row rejects a client string rewrite',
+  pg_temp.attempt('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001', $q$
+    UPDATE public.service_invoices
+    SET invoice_data = to_jsonb('{"payment_url":"https://checkout.stripe.com/c/pay/cs_Y","stripe_checkout_session_id":"cs_Y"}'::text)::json
+    WHERE id = 4
+  $q$) = 'invoice_data must be a JSON object';
+
+INSERT INTO proof (label, ok)
+SELECT 'legacy string row rejects a client object rewrite',
+  pg_temp.attempt('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001', $q$
+    UPDATE public.service_invoices
+    SET invoice_data = '{"payment_url":"https://checkout.stripe.com/c/pay/cs_Y","stripe_checkout_session_id":"cs_Y","note":"changed"}'::json
+    WHERE id = 4
+  $q$) = 'invoice_data cannot be changed by the client';
+
+INSERT INTO proof (label, ok)
+SELECT 'legacy string row rejects a client status update',
+  pg_temp.attempt('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001', $q$
+    UPDATE public.service_invoices SET status = 'paid' WHERE id = 4
+  $q$) = 'invoice_data must be a JSON object';
+
+INSERT INTO proof (label, ok)
+SELECT 'legacy string invoice_data is unchanged',
+  invoice_data::jsonb = to_jsonb('{"payment_url":"https://checkout.stripe.com/c/pay/cs_X","stripe_checkout_session_id":"cs_X"}'::text)
+  AND status = 'sent'
+FROM public.service_invoices WHERE id = 4;
+
 -- Rollback restores client edits of payment_url and keeps the column lock.
 \ir ../migrations/20261117_000962_service_invoice_payment_url_guard_rollback.sql
 

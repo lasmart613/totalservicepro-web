@@ -39,6 +39,16 @@ export function parseInvoiceData(val: unknown): Record<string, unknown> {
   return {};
 }
 
+/**
+ * Object invoice_data only. A JSON string is not parsed.
+ * The public pay page uses this so a string cannot satisfy the session
+ * check or supply payment_url. Other callers keep parseInvoiceData.
+ */
+export function invoiceDataObject(val: unknown): Record<string, unknown> | null {
+  if (!val || typeof val !== 'object' || Array.isArray(val)) return null;
+  return { ...(val as Record<string, unknown>) };
+}
+
 export function money2(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }

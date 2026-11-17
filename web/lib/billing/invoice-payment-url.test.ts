@@ -135,7 +135,13 @@ test('pay page redirects only to an allowed URL and otherwise shows the unavaila
   assert.equal(invoicePayPageAction({}).type, 'message');
 });
 
-test('000962 replaces the 000803 guard and the rollback restores the column lock only', () => {
+function plpgsqlBody(sql: string): string {
+  const match = sql.match(/AS \$\$([\s\S]*?)\$\$;/);
+  assert.ok(match, 'function body');
+  return match[1].replace(/\s+/g, ' ').trim();
+}
+
+test('000962 replaces the 000803 guard and the rollback restores that function', () => {
   const forward = readFileSync(
     join(here, '../../supabase/migrations/20261117_000962_service_invoice_payment_url_guard.sql'),
     'utf8'
@@ -144,17 +150,24 @@ test('000962 replaces the 000803 guard and the rollback restores the column lock
     join(here, '../../supabase/migrations/20261117_000962_service_invoice_payment_url_guard_rollback.sql'),
     'utf8'
   );
+  const original = readFileSync(
+    join(here, '../../supabase/migrations/20261006_000803_service_invoice_stripe_session_claim.sql'),
+    'utf8'
+  );
   assert.match(forward, /CREATE OR REPLACE FUNCTION public\.service_invoices_guard_stripe_session\(\)/);
   assert.match(forward, /IF auth\.uid\(\) IS NULL THEN/);
   assert.match(forward, /stripe_session_id cannot be set by the client/);
   assert.match(forward, /stripe_session_id cannot be changed by the client/);
+  assert.match(forward, /invoice_data must be a JSON object/);
+  assert.match(forward, /invoice_data cannot be changed by the client/);
   assert.match(forward, /lower\(e\.key\) = 'payment_url'/);
   assert.match(forward, /position\('stripe_checkout_session' IN lower\(e\.key\)\) = 1/);
   assert.match(forward, /stripe_checkout_expired_ids/);
   assert.match(forward, /invoice payment fields cannot be changed by the client/);
+  assert.doesNotMatch(forward, /new_data := '\{\}'::jsonb/);
+  assert.equal(plpgsqlBody(rollback), plpgsqlBody(original));
   assert.doesNotMatch(rollback, /invoice payment fields cannot be changed by the client/);
-  assert.match(rollback, /stripe_session_id cannot be changed by the client/);
-  assert.match(rollback, /CREATE OR REPLACE FUNCTION public\.service_invoices_guard_stripe_session\(\)/);
+  assert.doesNotMatch(rollback, /invoice_data must be a JSON object/);
 });
 
 test('the pay page assigns the checked URL and not the raw paymentUrl', () => {

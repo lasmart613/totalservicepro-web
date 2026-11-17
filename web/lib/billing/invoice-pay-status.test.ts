@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NextRequest } from 'next/server';
+import { invoiceDataObject, parseInvoiceData } from './apply-invoice-payment.ts';
 import { VOIDED_INVOICE_MESSAGE } from './void-invoice.ts';
 import { INVOICE_PAYMENT_LINK_UNAVAILABLE } from './invoice-payment-url.ts';
 import { runInvoicePayStatus, type InvoicePayStatusDeps } from '../../app/api/billing/invoices/pay-status/route.ts';
@@ -137,6 +138,32 @@ test('a voided flag inside invoice_data stays hidden without the session', async
   );
   const missing = await snapshot(await runInvoicePayStatus(request('?id=missing'), deps(null)));
   assert.deepEqual(hidden, missing);
+});
+
+test('string invoice_data never redirects and matches the not-found response', async () => {
+  const planted = JSON.stringify({
+    payment_url: CHECKOUT,
+    stripe_checkout_session_id: SESSION,
+    voided: true,
+  });
+  assert.equal(parseInvoiceData(planted).payment_url, CHECKOUT);
+  assert.equal(invoiceDataObject(planted), null);
+  assert.equal(invoiceDataObject([planted]), null);
+
+  const missing = await snapshot(await runInvoicePayStatus(request('?id=9&session=' + SESSION), deps(null)));
+  const cases = [
+    { status: 'sent', invoice_data: planted },
+    { status: 'void', invoice_data: planted },
+    { status: 'sent', invoice_data: [planted] },
+  ];
+  for (const row of cases) {
+    const shot = await snapshot(
+      await runInvoicePayStatus(request('?id=9&session=' + SESSION), deps(row))
+    );
+    assert.deepEqual(shot, missing, row.status);
+    assert.equal(shot.body.includes('checkout.stripe.com'), false);
+    assert.equal(shot.body.includes('voided'), false);
+  }
 });
 
 test('missing id and a missing service role are not the not-found body', async () => {

@@ -20,6 +20,21 @@
 -- JSON null and a missing key are the same value. Other invoice_data keys
 -- still save. A signed-in write that keeps these values is allowed.
 --
+-- invoice_data must be a JSON object for a signed-in write. A string,
+-- array, number, or other non-object is rejected even when the row had no
+-- locked keys yet. parseInvoiceData accepts a JSON string, so a string
+-- such as '{"payment_url":"...","stripe_checkout_session_id":"cs_X"}'
+-- would otherwise pass this trigger and then satisfy the public pay page.
+--
+-- A non-object OLD value is fully locked for client writes. It is not
+-- unwrapped. #>> '{}' would honor keys only when the text is one valid
+-- object, and a parse miss (or a second encoding) would let the client
+-- replace the value and plant a pay link. The client cannot change that
+-- value, including by rewriting it as an object. Because NEW is the whole
+-- row, a client update of any column on a non-object row is rejected too:
+-- NEW.invoice_data is still that non-object. The service role can rewrite
+-- it to an object. SQL NULL is not a JSON value and is not locked.
+--
 -- Who writes them today, and which role that uses:
 --   * send-invoice persists payment_url and stripe_checkout_session_id with
 --     getSupabaseAdmin() when SUPABASE_SERVICE_ROLE_KEY is set
@@ -75,18 +90,21 @@ DECLARE
   new_locked jsonb;
 BEGIN
   -- auth.uid() is null for the service role, so webhook, confirm, send, and
-  -- void writes that use the service-role key still return NEW.
+  -- void writes that use the service-role key still return NEW, including
+  -- a string invoice_data the service role itself stored.
   IF auth.uid() IS NULL THEN
     RETURN NEW;
+  END IF;
+
+  IF NEW.invoice_data IS NOT NULL
+     AND jsonb_typeof(NEW.invoice_data::jsonb) IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'invoice_data must be a JSON object';
   END IF;
 
   new_data := CASE
     WHEN NEW.invoice_data IS NULL THEN '{}'::jsonb
     ELSE NEW.invoice_data::jsonb
   END;
-  IF new_data IS NULL OR jsonb_typeof(new_data) IS DISTINCT FROM 'object' THEN
-    new_data := '{}'::jsonb;
-  END IF;
 
   SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
     INTO new_locked
@@ -112,13 +130,21 @@ BEGIN
     RAISE EXCEPTION 'stripe_session_id cannot be changed by the client';
   END IF;
 
+  -- Fail closed. A string, array, or other non-object is locked as a whole.
+  -- Replacing it with an object would drop whatever keys a string unwrap missed.
+  IF OLD.invoice_data IS NOT NULL
+     AND jsonb_typeof(OLD.invoice_data::jsonb) IS DISTINCT FROM 'object' THEN
+    IF NEW.invoice_data IS NULL
+       OR NEW.invoice_data::jsonb IS DISTINCT FROM OLD.invoice_data::jsonb THEN
+      RAISE EXCEPTION 'invoice_data cannot be changed by the client';
+    END IF;
+    RETURN NEW;
+  END IF;
+
   old_data := CASE
     WHEN OLD.invoice_data IS NULL THEN '{}'::jsonb
     ELSE OLD.invoice_data::jsonb
   END;
-  IF old_data IS NULL OR jsonb_typeof(old_data) IS DISTINCT FROM 'object' THEN
-    old_data := '{}'::jsonb;
-  END IF;
 
   SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
     INTO old_locked

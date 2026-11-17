@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { parseInvoiceData } from '@/lib/billing/apply-invoice-payment';
+import { invoiceDataObject } from '@/lib/billing/apply-invoice-payment';
 import { isVoidInvoiceStatus, sessionMatchesInvoice, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import {
   INVOICE_PAYMENT_LINK_UNAVAILABLE,
@@ -47,11 +47,15 @@ export async function runInvoicePayStatus(req: NextRequest, deps: InvoicePayStat
   const { data, error } = await load(id);
   if (error || !data) return invoiceNotFound();
 
-  if (!session || !sessionMatchesInvoice(data.invoice_data, session)) {
+  // A JSON string is not an invoice object. parseInvoiceData would accept
+  // it and could both match the session and return its payment_url.
+  const dataRecord = invoiceDataObject(data.invoice_data);
+  if (!dataRecord) return invoiceNotFound();
+
+  if (!session || !sessionMatchesInvoice(dataRecord, session)) {
     return invoiceNotFound();
   }
 
-  const dataRecord = parseInvoiceData(data.invoice_data);
   if (isVoidInvoiceStatus(data.status) || dataRecord.voided === true) {
     return NextResponse.json({ voided: true, message: VOIDED_INVOICE_MESSAGE });
   }

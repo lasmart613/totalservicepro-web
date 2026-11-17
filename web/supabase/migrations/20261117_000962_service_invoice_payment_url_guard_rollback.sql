@@ -31,8 +31,7 @@ BEGIN
 END;
 $$;
 
-COMMENT ON FUNCTION public.service_invoices_guard_stripe_session() IS
-  'Latest Stripe Checkout session credited on this invoice is not client-writable. auth.uid() IS NULL (service role) still writes stripe_session_id.';
+COMMENT ON FUNCTION public.service_invoices_guard_stripe_session() IS NULL;
 
 REVOKE EXECUTE ON FUNCTION public.service_invoices_guard_stripe_session() FROM PUBLIC, anon, authenticated;
 
