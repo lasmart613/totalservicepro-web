@@ -157,9 +157,44 @@ FROM public.service_invoices
 WHERE id = 265523;
 SQL
 )
-check "stored 1175 replay is not an overpayment" "$BIG" "possibly_already_credited:false"
+check "stored 1175 replay asks the shop to verify once" "$BIG" "possibly_already_credited:true"
 check "stored 1175 replay does not notify" "$BIG_NOTIFY" "false"
 check "stored 1175 ledger" "$BIGSTATE" "1275.00:verify:1:possibly_already_credited:1"
+
+# Open link L is $800. An older session B pays $300. L must stay out of the
+# credited-session list. Paying L for $800 against $700 due is a real
+# overpayment and notifies. Org 2655, scratch invoice 265524.
+$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (265524, 2655, 'sent', 1000, 0, '{\"line_items\":[{\"description\":\"Link\"}],\"stripe_checkout_session_id\":\"cs_test_link_l\",\"payment_url\":\"https://checkout.stripe.com/c/pay/cs_test_link_l\"}'::jsonb)" >/dev/null
+$P -c "SELECT public.apply_service_invoice_stripe_payment(265524, 'cs_test_link_b', 300, 'usd', '{}'::jsonb)" >/dev/null
+LINKIDS=$($P -At -c "SELECT invoice_data->>'stripe_checkout_session_ids' FROM public.service_invoices WHERE id = 265524")
+LINKPAY=$($P -At -c "SELECT (r->>'reason') || ':' || (r->>'notify') FROM (SELECT public.apply_service_invoice_stripe_payment(265524, 'cs_test_link_l', 800, 'usd', '{}'::jsonb) AS r) s")
+LINKAMT=$($P -At -c "SELECT amount_paid FROM public.service_invoices WHERE id = 265524")
+check "crediting B does not store unpaid link L" "$LINKIDS" '["cs_test_link_b"]'
+check "paying open link L over the balance notifies" "$LINKPAY $LINKAMT" "overpaid_not_credited:true 300.00"
+
+# Legacy row: a manual or older credit already stored unpaid link L in the
+# history. Paying it is still recorded, and the shop is told once to check Stripe.
+$P <<'SQL' >/dev/null
+INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, stripe_session_id, invoice_data)
+VALUES (
+  265525, 2655, 'partially_paid', 1000, 300, 'cs_test_legacy_b',
+  '{"line_items":[{"description":"Legacy"}],"stripe_checkout_session_id":"cs_test_legacy_l","stripe_checkout_session_ids":["cs_test_legacy_l","cs_test_legacy_b"]}'::jsonb
+);
+SQL
+LEGACY=$($P -At -c "SELECT (r->>'reason') || ':' || (r->>'notify') FROM (SELECT public.apply_service_invoice_stripe_payment(265525, 'cs_test_legacy_l', 800, 'usd', '{}'::jsonb) AS r) s")
+LEGACY2=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265525, 'cs_test_legacy_l', 800, 'usd', '{}'::jsonb)->>'notify'")
+LEGACYAMT=$($P -At -c "SELECT amount_paid FROM public.service_invoices WHERE id = 265525")
+check "legacy open link in the history still notifies" "$LEGACY $LEGACYAMT" "possibly_already_credited:true 300.00"
+check "legacy open link replay stays quiet" "$LEGACY2" "false"
+
+# A second session on an invoice that is already paid notifies once.
+$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (265526, 2655, 'sent', 100, 0, '{\"line_items\":[{\"description\":\"Paid\"}]}'::jsonb)" >/dev/null
+$P -c "SELECT public.apply_service_invoice_stripe_payment(265526, 'cs_test_full', 100, 'usd', '{}'::jsonb)" >/dev/null
+DIFF=$($P -At -c "SELECT (r->>'reason') || ':' || (r->>'notify') FROM (SELECT public.apply_service_invoice_stripe_payment(265526, 'cs_test_extra', 50, 'usd', '{}'::jsonb) AS r) s")
+DIFF2=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265526, 'cs_test_extra', 50, 'usd', '{}'::jsonb)->>'notify'")
+DIFFAMT=$($P -At -c "SELECT amount_paid FROM public.service_invoices WHERE id = 265526")
+check "second session on a paid invoice notifies once" "$DIFF $DIFFAMT" "different_paid_session:true 100.00"
+check "second session replay stays quiet" "$DIFF2" "false"
 
 EXTRA=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265502, 'cs_test_allow', 10, 'usd', '{\"payment_url\":\"https://evil.example\",\"stripe_destination_account\":\"acct_123\",\"payout_status\":\"held\"}'::jsonb)->>'claimed'")
 EXTRA_URL=$($P -At -c "SELECT COALESCE(invoice_data->>'payment_url', '') || ':' || COALESCE(invoice_data->>'stripe_destination_account', '') || ':' || COALESCE(invoice_data->>'payout_status', '') FROM public.service_invoices WHERE id = 265502")

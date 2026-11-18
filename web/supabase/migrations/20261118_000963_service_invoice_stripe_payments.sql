@@ -23,9 +23,10 @@
 -- lists sessions that were created, not sessions that were proven paid.
 -- A replay that is larger than the balance and whose id is already in that
 -- list, or equals stripe_session_id, is recorded as possibly_already_credited
--- and is not applied and does not notify. stripe_checkout_session_id by
--- itself is the open pay link written before payment, so it still records a
--- real overpayment.
+-- and is not applied. The shop gets one neutral notice to check Stripe,
+-- because a legacy row may have stored an unpaid open-link id in that list.
+-- stripe_checkout_session_id by itself is the open pay link. Crediting a
+-- different session does not copy that unpaid id into the list.
 --
 -- Repo only. Do not apply this file to production from the pull request.
 -- Rollback: 20261118_000963_service_invoice_stripe_payments_rollback.sql
@@ -121,6 +122,7 @@ DECLARE
   v_entry jsonb;
   v_list jsonb;
   v_known boolean;
+  v_notify boolean;
   v_attempts jsonb;
 BEGIN
   v_session := btrim(COALESCE(p_session_id, ''));
@@ -233,6 +235,7 @@ BEGIN
     ELSE
       v_list := '[]'::jsonb;
     END IF;
+    v_notify := false;
     IF NOT EXISTS (
       SELECT 1 FROM jsonb_array_elements(v_list) AS prior
       WHERE prior->>'sessionId' = v_session AND prior->>'reason' = 'different_paid_session'
@@ -242,8 +245,15 @@ BEGIN
       SET invoice_data = v_data || jsonb_build_object('stripe_checkout_session_conflict', v_list),
           updated_at = pg_catalog.now()
       WHERE id = p_invoice_id;
+      v_notify := true;
     END IF;
-    RETURN jsonb_build_object('ok', false, 'reason', 'different_paid_session');
+    RETURN jsonb_build_object(
+      'ok', false,
+      'reason', 'different_paid_session',
+      'notify', v_notify,
+      'session_amount', ROUND(p_amount, 2),
+      'invoice_id', p_invoice_id
+    );
   END IF;
 
   IF ROUND(p_amount, 2) > v_remaining + 0.01 THEN
@@ -321,7 +331,7 @@ BEGIN
       'ok', true,
       'claimed', false,
       'overpaid', v_outcome = 'overpaid_not_credited',
-      'notify', v_outcome = 'overpaid_not_credited',
+      'notify', true,
       'reason', CASE
         WHEN v_outcome = 'possibly_already_credited' THEN 'possibly_already_credited'
         ELSE 'overpaid_not_credited'
@@ -379,12 +389,11 @@ BEGIN
   IF jsonb_typeof(v_ids) IS DISTINCT FROM 'array' THEN
     v_ids := '[]'::jsonb;
   END IF;
+  -- Only the session that was just paid. The stored open-link id may still
+  -- be unpaid. Copying it here makes a later payment of that link look like
+  -- a replay and hides a real overpayment.
   IF NOT v_ids @> to_jsonb(v_session) THEN
     v_ids := v_ids || to_jsonb(v_session);
-  END IF;
-  IF NULLIF(btrim(COALESCE(v_data->>'stripe_checkout_session_id', '')), '') IS NOT NULL
-     AND NOT v_ids @> to_jsonb(btrim(v_data->>'stripe_checkout_session_id')) THEN
-    v_ids := v_ids || to_jsonb(btrim(v_data->>'stripe_checkout_session_id'));
   END IF;
 
   v_extra := '{}'::jsonb;

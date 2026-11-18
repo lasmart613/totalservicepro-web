@@ -177,8 +177,8 @@ export function buildInvoicePaymentPatch(input: {
     const ids = Array.isArray(data.stripe_checkout_session_ids)
       ? data.stripe_checkout_session_ids.map(String)
       : [];
-    const priorSession = String(data.stripe_checkout_session_id || '');
-    if (priorSession && !ids.includes(priorSession)) ids.push(priorSession);
+    // The previous stripe_checkout_session_id is the open pay link. It was
+    // not paid by this session, so it does not belong in the credited list.
     if (!ids.includes(sessionId)) ids.push(sessionId);
     data.stripe_checkout_session_id = sessionId;
     data.stripe_checkout_session_ids = ids;

@@ -62,7 +62,8 @@ test('an open pay-link session id is not proof of payment', () => {
   assert.equal(patch.status, 'paid');
   assert.equal(patch.amount_paid, 250);
   assert.equal(patch.invoice_data.balanceDue, 0);
-  assert.deepEqual(patch.invoice_data.stripe_checkout_session_ids, ['cs_live_old', 'cs_live_new']);
+  assert.deepEqual(patch.invoice_data.stripe_checkout_session_ids, ['cs_live_new']);
+  assert.equal(patch.invoice_data.stripe_checkout_session_id, 'cs_live_new');
 });
 
 test('a manual payment leaves Checkout session keys untouched', () => {

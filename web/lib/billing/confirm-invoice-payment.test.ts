@@ -67,7 +67,13 @@ function memoryInvoice(initial: Record<string, unknown>) {
           orFilter = filter;
           return api;
         },
+        order() {
+          return api;
+        },
         limit() {
+          if (table === 'organization_memberships') {
+            return Promise.resolve({ data: [{ user_id: 'admin-1', role: 'owner' }], error: null });
+          }
           return api;
         },
         maybeSingle: async () => {

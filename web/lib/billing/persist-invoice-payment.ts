@@ -201,11 +201,15 @@ export async function applyInvoiceCheckoutSession(input: {
     return { ok: false, reason: classifyInvoicePayFailure(error.message || 'update_failed') };
   }
   const claim = readClaim(data);
+  const sessionAmount = money2(Number(claim?.session_amount) || amountCents / 100);
   if (claim?.ok === true && claim.reason === 'possibly_already_credited') {
     console.warn('[billing] Checkout session may already have been credited; not applied again', {
       invoiceId,
       sessionId,
     });
+    if (claim.notify) {
+      await notifyShopOfPayment(input.writer, row, String(claim.status || row.status || 'sent'), sessionAmount, 'verify');
+    }
     return { ok: false, reason: 'possibly_already_credited' };
   }
   if (claim?.ok === true && claim.overpaid) {
@@ -214,7 +218,7 @@ export async function applyInvoiceCheckoutSession(input: {
         input.writer,
         row,
         String(claim.status || row.status || 'sent'),
-        money2(Number(claim.session_amount) || amountCents / 100),
+        sessionAmount,
         'overpaid',
         money2(Number(claim.balance_due) || 0)
       );
@@ -228,6 +232,9 @@ export async function applyInvoiceCheckoutSession(input: {
         invoiceId,
         sessionId,
       });
+      if (claim?.notify) {
+        await notifyShopOfPayment(input.writer, row, String(row.status || 'paid'), sessionAmount, 'verify');
+      }
     }
     return { ok: false, reason };
   }
@@ -235,7 +242,10 @@ export async function applyInvoiceCheckoutSession(input: {
   const status = String(claim.status || row.status || 'paid');
   const amountPaid = money2(Number(claim.amount_paid) || 0);
   if (claim.claimed) {
-    await notifyShopOfPayment(input.writer, row, status, amountPaid);
+    await notifyShopOfPayment(input.writer, row, status, money2(amountCents / 100), 'payment', 0, {
+      paid: amountPaid,
+      total: money2(Number(row.total) || 0),
+    });
   }
   return {
     ok: true,
@@ -261,49 +271,63 @@ async function loadInvoice(
   return { ok: true, row: data as InvoicePaymentRow };
 }
 
+const INVOICE_NOTICE_ROLES = ['admin', 'company_admin', 'owner'] as const;
+
 export async function notifyShopOfPayment(
   writer: SupabaseClient,
   inv: InvoicePaymentRow,
-  status: string,
-  amountPaid: number,
-  notice: 'payment' | 'overpaid' = 'payment',
-  balanceDue = 0
+  _status: string,
+  amount: number,
+  notice: 'payment' | 'overpaid' | 'verify' = 'payment',
+  balanceDue = 0,
+  ledger?: { paid?: number; total?: number }
 ): Promise<void> {
-  const ids = new Set<string>();
-  if (inv.created_by) ids.add(String(inv.created_by));
+  const ids: string[] = [];
   if (inv.organization_id != null) {
     try {
-      const { data: profiles } = await writer
-        .from('user_profiles')
-        .select('id, role, organization_id, active_organization_id')
-        .or(`organization_id.eq.${inv.organization_id},active_organization_id.eq.${inv.organization_id}`)
-        .limit(30);
-      for (const p of profiles || []) {
-        const role = String(p.role || '').toLowerCase();
-        if (['admin', 'company_admin', 'billing_manager', 'service_manager'].includes(role)) {
-          ids.add(String(p.id));
-        }
+      const { data: members, error } = await writer
+        .from('organization_memberships')
+        .select('user_id, role')
+        .eq('organization_id', inv.organization_id)
+        .or(INVOICE_NOTICE_ROLES.map((role) => `role.ilike.${role}`).join(','))
+        .order('user_id', { ascending: true })
+        .limit(100);
+      if (error) throw new Error(error.message || 'membership roster');
+      const seen = new Set<string>();
+      for (const member of members || []) {
+        const role = String(member.role || '').toLowerCase();
+        const userId = String(member.user_id || '');
+        if (!userId || seen.has(userId)) continue;
+        if (!(INVOICE_NOTICE_ROLES as readonly string[]).includes(role)) continue;
+        seen.add(userId);
+        ids.push(userId);
       }
+      ids.sort();
     } catch (e) {
       console.warn('invoice pay notify roster', e);
     }
   }
   const num = inv.invoice_number || `#${inv.id}`;
   const who = inv.customer_name || 'A customer';
-  const label = status === 'paid' ? 'paid in full' : 'sent a partial payment';
-  let shown = formatOrgMoney(money2(amountPaid));
+  let shown = formatOrgMoney(money2(amount));
   let balanceShown = formatOrgMoney(money2(balanceDue));
+  let paidShown = formatOrgMoney(money2(ledger?.paid ?? amount));
+  let totalShown = formatOrgMoney(money2(ledger?.total ?? (Number(inv.total) || 0)));
   try {
     const prefs = await loadOrgMoneyPrefs(writer, inv.organization_id);
-    shown = formatOrgMoney(money2(amountPaid), prefs);
+    shown = formatOrgMoney(money2(amount), prefs);
     balanceShown = formatOrgMoney(money2(balanceDue), prefs);
+    paidShown = formatOrgMoney(money2(ledger?.paid ?? amount), prefs);
+    totalShown = formatOrgMoney(money2(ledger?.total ?? (Number(inv.total) || 0)), prefs);
   } catch {
     /* USD locale format */
   }
   const message =
     notice === 'overpaid'
       ? `Overpayment on invoice ${num} needs a manual refund. ${who} sent ${shown}, which is more than the balance due (${balanceShown}). It was not applied.`
-      : `Invoice ${num} paid ${shown}. ${who} ${label}.`;
+      : notice === 'verify'
+        ? `Check Stripe: invoice ${num} may have been paid twice.`
+        : `${shown} payment received on invoice ${num} (${paidShown} of ${totalShown} paid).`;
   const link = `/invoices/new?id=${inv.id}`;
   for (const userId of ids) {
     try {
