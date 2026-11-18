@@ -85,11 +85,21 @@ test('hotfix: signed-in directory goes through the service-role route, not a not
   assert.match(page, /Authorization: `Bearer \$\{session\.access_token\}`/);
   assert.doesNotMatch(page, /DIRECTORY_NOT_IMPORTED_OR|notes\./);
   const route = read('app/api/directory/listed/route.ts');
-  assert.match(route, /status: 401/);
+  // #384 keeps one service-role client for the directory read and the rating RPC.
+  // #385 moved Cache-Control onto UNSHARED_CACHE_HEADERS. #386 sends every
+  // response, including both 401s, through noStoreJson(body, status).
+  // The import, not a same-file helper, is what attaches the private no-store header.
+  assert.match(route, /import \{ noStoreJson \} from '@\/lib\/reviews-server'/);
+  assert.match(route, /if \(!token\) return noStoreJson\(\{ error: 'Sign in required' \}, 401\)/);
+  assert.match(route, /if \(userErr \|\| !user\) return noStoreJson\(\{ error: 'Invalid session' \}, 401\)/);
+  assert.doesNotMatch(route, /NextResponse\.json/);
   assert.match(route, /auth\.getUser\(token\)/);
+  assert.match(route, /const admin = getSupabaseAdmin\(\)/);
+  assert.match(route, /loadSignedInDirectory\(admin\)/);
   assert.ok(route.indexOf('auth.getUser(token)') < route.indexOf('getSupabaseAdmin()'), 'session check before service role');
-  assert.match(route, /loadSignedInDirectory\(getSupabaseAdmin\(\)\)/);
-  assert.match(route, /private, no-store/);
+  assert.ok(route.indexOf('getSupabaseAdmin()') < route.indexOf('loadSignedInDirectory(admin)'), 'directory read uses the service-role client');
+  assert.match(read('lib/reviews-server.ts'), /return NextResponse\.json\(body, \{ status, headers: UNSHARED_CACHE_HEADERS \}\)/);
+  assert.match(read('lib/reviews.ts'), /'Cache-Control': 'private, no-store'/);
   for (const c of ORG_PRIVATE_COLUMNS) assert.ok(!(SIGNED_IN_DIRECTORY_COLUMNS as readonly string[]).includes(c), c);
 });
 
