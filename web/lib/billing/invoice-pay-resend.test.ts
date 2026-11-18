@@ -71,6 +71,34 @@ test('a paid invoice does not touch Stripe', async () => {
   assert.equal(calls, 0);
 });
 
+test('a credited deposit session can be replaced with a balance session', async () => {
+  let expired = 0;
+  const plan = await planInvoicePayLink({
+    invoice: {
+      id: 3,
+      status: 'partially_paid',
+      total: 1000,
+      amount_paid: 300,
+      stripe_session_id: 'cs_test_deposit',
+      invoice_data: {
+        ...openData,
+        stripe_checkout_session_id: 'cs_test_deposit',
+        payment_url: 'https://checkout.stripe.com/c/pay/cs_test_deposit',
+        payment_amount: 300,
+        deferredReleased: true,
+      },
+    },
+    payAmount: 700,
+    loadCheckout: async () => ({ status: 'complete', payment_status: 'paid', amount_total: 30000, url: null }),
+    expireCheckout: async () => {
+      expired += 1;
+      return 'completed';
+    },
+  });
+  assert.deepEqual(plan, { action: 'create' });
+  assert.equal(expired, 0);
+});
+
 test('a replacement expires the open session before another can be created', async () => {
   const expired: string[] = [];
   const plan = await planInvoicePayLink({

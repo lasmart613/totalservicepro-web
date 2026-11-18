@@ -12,6 +12,8 @@ import type { CheckoutExpireClass } from './void-invoice.ts';
 export const INVOICE_ALREADY_PAID = 'This invoice is already paid.';
 export const INVOICE_CHECKOUT_ALREADY_PAID = 'This invoice already has a paid Checkout session.';
 export const INVOICE_PAY_LINK_BUSY = 'The open payment link could not be replaced. Try again.';
+export const INVOICE_PAY_LINK_UNVERIFIED =
+  'Stripe is not configured, so the existing payment link could not be checked and was not resent.';
 
 const CHECKOUT_SESSION_ID = /^cs_(test|live)_[A-Za-z0-9_]+$/;
 
@@ -22,6 +24,8 @@ export type PayLinkInvoice = {
   amount_paid?: number | string | null;
   invoice_data?: unknown;
   stripe_session_id?: string | null;
+  /** Session ids already in service_invoice_stripe_payments, when the caller loaded them. */
+  creditedSessionIds?: string[] | null;
 };
 
 export type CheckoutSessionSnapshot = {
@@ -44,6 +48,14 @@ export type PayLinkPlan =
 
 type LoadCheckout = (sessionId: string) => Promise<CheckoutSessionSnapshot | null>;
 type ExpireCheckout = (sessionId: string) => Promise<CheckoutExpireClass>;
+
+/** True when this Checkout session was already credited on the invoice. */
+export function sessionAlreadyCredited(invoice: PayLinkInvoice, sessionId: string): boolean {
+  const id = String(sessionId || '').trim();
+  if (!id) return false;
+  if (String(invoice.stripe_session_id || '').trim() === id) return true;
+  return (invoice.creditedSessionIds || []).map(String).includes(id);
+}
 
 export function invoiceAlreadyPaid(inv: PayLinkInvoice): boolean {
   if (String(inv.status || '').trim().toLowerCase() === 'paid') return true;
@@ -108,6 +120,7 @@ export async function planInvoicePayLink(input: {
   payAmount: number;
   loadCheckout?: LoadCheckout;
   expireCheckout?: ExpireCheckout;
+  isSessionCredited?: (sessionId: string) => boolean | Promise<boolean>;
 }): Promise<PayLinkPlan> {
   if (invoiceAlreadyPaid(input.invoice)) return { action: 'skip', reason: INVOICE_ALREADY_PAID };
   const open = openPayLink(input.invoice.invoice_data);
@@ -115,6 +128,10 @@ export async function planInvoicePayLink(input: {
 
   const load = input.loadCheckout ?? defaultLoadCheckout;
   const expire = input.expireCheckout ?? defaultExpireCheckout;
+  const credited = async (sessionId: string) => {
+    if (input.isSessionCredited) return input.isSessionCredited(sessionId);
+    return sessionAlreadyCredited(input.invoice, sessionId);
+  };
   let snapshot: CheckoutSessionSnapshot | null = null;
   try {
     snapshot = await load(open.sessionId);
@@ -124,6 +141,9 @@ export async function planInvoicePayLink(input: {
   }
 
   if (snapshot && sessionSettled(snapshot)) {
+    if (await credited(open.sessionId)) {
+      return { action: 'create' };
+    }
     console.warn('[billing] refusing a new Checkout session; the open pay link is already complete', {
       invoiceId: input.invoice.id == null ? null : String(input.invoice.id),
       sessionId: open.sessionId,
@@ -144,7 +164,10 @@ export async function planInvoicePayLink(input: {
     console.warn('[billing] Checkout session expire failed', e);
     classification = 'failed';
   }
-  if (classification === 'completed') return { action: 'skip', reason: INVOICE_CHECKOUT_ALREADY_PAID };
+  if (classification === 'completed') {
+    if (await credited(open.sessionId)) return { action: 'create' };
+    return { action: 'skip', reason: INVOICE_CHECKOUT_ALREADY_PAID };
+  }
   if (classification === 'expired' || classification === 'already_expired') return { action: 'create' };
   return { action: 'skip', reason: INVOICE_PAY_LINK_BUSY };
 }

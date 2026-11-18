@@ -65,6 +65,28 @@ test('an open pay-link session id is not proof of payment', () => {
   assert.deepEqual(patch.invoice_data.stripe_checkout_session_ids, ['cs_live_old', 'cs_live_new']);
 });
 
+test('a manual payment leaves Checkout session keys untouched', () => {
+  const invoice_data = {
+    payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+    stripe_checkout_session_id: 'cs_test_open',
+    stripe_checkout_session_ids: ['cs_test_open'],
+    stripe_checkout_expired_ids: ['cs_test_old'],
+    line_items: [{ description: 'Service' }],
+  };
+  const patch = buildInvoicePaymentPatch({
+    invoice: { id: 9, total: 80, amount_paid: 0, invoice_data },
+    addAmount: 20,
+    method: 'Check',
+  });
+  assert.equal(patch.amount_paid, 20);
+  assert.equal(patch.status, 'partially_paid');
+  assert.equal(patch.invoice_data.payment_url, invoice_data.payment_url);
+  assert.equal(patch.invoice_data.stripe_checkout_session_id, 'cs_test_open');
+  assert.deepEqual(patch.invoice_data.stripe_checkout_session_ids, ['cs_test_open']);
+  assert.deepEqual(patch.invoice_data.stripe_checkout_expired_ids, ['cs_test_old']);
+  assert.deepEqual(patch.invoice_data.line_items, invoice_data.line_items);
+});
+
 test('cash partial leaves remaining balance', () => {
   const patch = buildInvoicePaymentPatch({
     invoice: { id: 1, total: 80, invoice_data: {} },

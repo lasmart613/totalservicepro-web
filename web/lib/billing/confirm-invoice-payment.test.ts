@@ -16,7 +16,31 @@ function memoryInvoice(initial: Record<string, unknown>) {
   };
   let creditWrites = 0;
   let notes = 0;
+  const payments = new Set<string>();
   const writer = {
+    rpc(_fn: string, args: Record<string, unknown>) {
+      const sessionId = String(args.p_session_id || '');
+      const amount = Math.round((Number(args.p_amount) || 0) * 100) / 100;
+      if (String(args.p_invoice_id) !== String(row.id)) {
+        return Promise.resolve({ data: { ok: false, reason: 'invoice_not_found' }, error: null });
+      }
+      if (payments.has(sessionId)) {
+        return Promise.resolve({
+          data: { ok: true, claimed: false, status: row.status, amount_paid: row.amount_paid },
+          error: null,
+        });
+      }
+      const total = Math.round((Number(row.total) || 0) * 100) / 100;
+      const paid = Math.round((Number(row.amount_paid) || 0) * 100) / 100;
+      const newPaid = Math.round((paid + amount) * 100) / 100;
+      const status = total > 0 && newPaid + 0.004 >= total ? 'paid' : 'partially_paid';
+      payments.add(sessionId);
+      creditWrites += 1;
+      row.amount_paid = newPaid;
+      row.status = status;
+      row.stripe_session_id = sessionId;
+      return Promise.resolve({ data: { ok: true, claimed: true, status, amount_paid: newPaid }, error: null });
+    },
     from(table: string) {
       const filters: Record<string, unknown> = {};
       let orFilter = '';

@@ -169,14 +169,20 @@ export function buildInvoicePaymentPatch(input: {
   const status = paymentStatusFromAmounts(total, amount_paid);
   const data = parseInvoiceData(input.invoice.invoice_data);
   const sessionId = String(input.sessionId || '').trim();
-  const ids = Array.isArray(data.stripe_checkout_session_ids)
-    ? data.stripe_checkout_session_ids.map(String)
-    : [];
-  const priorSession = String(data.stripe_checkout_session_id || '');
-  if (priorSession && !ids.includes(priorSession)) ids.push(priorSession);
-  if (sessionId && !ids.includes(sessionId)) ids.push(sessionId);
-  if (sessionId) data.stripe_checkout_session_id = sessionId;
-  if (ids.length) data.stripe_checkout_session_ids = ids;
+  // Cash and check saves use the signed-in client. Draft #390's 000962 trigger
+  // rejects any change to payment_url or keys that start with
+  // stripe_checkout_session. Leave those keys untouched unless this payment
+  // is itself a Checkout session.
+  if (sessionId) {
+    const ids = Array.isArray(data.stripe_checkout_session_ids)
+      ? data.stripe_checkout_session_ids.map(String)
+      : [];
+    const priorSession = String(data.stripe_checkout_session_id || '');
+    if (priorSession && !ids.includes(priorSession)) ids.push(priorSession);
+    if (!ids.includes(sessionId)) ids.push(sessionId);
+    data.stripe_checkout_session_id = sessionId;
+    data.stripe_checkout_session_ids = ids;
+  }
   data.deposit = amount_paid;
   data.balanceDue = money2(Math.max(0, total - amount_paid));
   data.depositMethod = input.method;

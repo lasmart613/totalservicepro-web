@@ -47,9 +47,11 @@ import {
 import { invoiceChecksPayableName } from '@/lib/billing/invoice-payee';
 import {
   INVOICE_ALREADY_PAID,
+  INVOICE_PAY_LINK_UNVERIFIED,
   invoiceAlreadyPaid,
   openPayLink,
   planInvoicePayLink,
+  sessionAlreadyCredited,
   type CheckoutSessionSnapshot,
 } from '@/lib/billing/invoice-pay-resend';
 /** Same body for a missing invoice and an invoice owned by another shop. */
@@ -230,19 +232,14 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     } else if (includePay && payAmount >= 0.5 && invoiceAlreadyPaid(inv)) {
       stripeSkippedReason = INVOICE_ALREADY_PAID;
     } else if (includePay && payAmount >= 0.5 && stripeProblem) {
-      const open = openPayLink(inv.invoice_data);
-      if (open) {
-        paymentUrl = open.url;
-        stripeSessionId = open.sessionId;
-      } else {
-        stripeSkippedReason = stripeProblem;
-      }
+      stripeSkippedReason = openPayLink(inv.invoice_data) ? INVOICE_PAY_LINK_UNVERIFIED : stripeProblem;
     } else if (includePay && payAmount >= 0.5) {
       const plan = await planInvoicePayLink({
         invoice: inv,
         payAmount,
         loadCheckout: deps.loadCheckout,
         expireCheckout: deps.expireCheckout,
+        isSessionCredited: (sessionId) => sessionAlreadyCredited(inv, sessionId),
       });
       if (plan.action === 'skip') {
         stripeSkippedReason = plan.reason;

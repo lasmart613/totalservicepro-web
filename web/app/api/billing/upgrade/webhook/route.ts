@@ -18,7 +18,7 @@ import {
   retrieveStripeSubscription,
   StripeSubscriptionError,
 } from '@/lib/billing/stripe-subscription';
-import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
+import { applyInvoiceCheckoutSession, invoiceCheckoutWebhookResult } from '@/lib/billing/persist-invoice-payment';
 import { applyPartCheckoutSession } from '@/lib/billing/apply-part-order';
 import { webhookCheckoutAction } from '@/lib/billing/stripe-connect';
 import { syncConnectedAccount } from '@/lib/billing/stripe-connect-api';
@@ -119,14 +119,9 @@ export async function POST(req: NextRequest) {
           alreadyApplied: invoicePay.applied.alreadyApplied,
         });
       }
-      if (invoicePay.reason === 'invoice_void') {
-        return NextResponse.json({ ok: true, ignored: 'invoice_void' });
-      }
-      if (invoicePay.reason === 'different_paid_session') {
-        return NextResponse.json({ ok: true, ignored: 'different_paid_session', kind: 'invoice' });
-      }
-      if (invoicePay.reason === 'claim_conflict') {
-        return NextResponse.json({ error: 'Invoice payment claim conflict' }, { status: 500 });
+      const invoiceFailure = invoiceCheckoutWebhookResult(invoicePay.reason);
+      if (invoiceFailure) {
+        return NextResponse.json(invoiceFailure.body, { status: invoiceFailure.status });
       }
       const result = await applyPaidCheckoutSession({
         writer,
