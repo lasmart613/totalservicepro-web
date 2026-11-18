@@ -88,6 +88,8 @@ test('hotfix: signed-in directory goes through the service-role route, not a not
   // #384 keeps one service-role client for the directory read and the rating RPC.
   // #385 moved Cache-Control onto UNSHARED_CACHE_HEADERS. #386 sends every
   // response, including both 401s, through noStoreJson(body, status).
+  // The import, not a same-file helper, is what attaches the private no-store header.
+  assert.match(route, /import \{ noStoreJson \} from '@\/lib\/reviews-server'/);
   assert.match(route, /if \(!token\) return noStoreJson\(\{ error: 'Sign in required' \}, 401\)/);
   assert.match(route, /if \(userErr \|\| !user\) return noStoreJson\(\{ error: 'Invalid session' \}, 401\)/);
   assert.doesNotMatch(route, /NextResponse\.json/);
