@@ -53,7 +53,8 @@ type ExpireCheckout = (sessionId: string) => Promise<CheckoutExpireClass>;
 /**
  * True when this Checkout session was credited. The payments table is the
  * source of truth; stripe_session_id is only the latest credited id.
- * outcome overpaid_not_credited is not a credit, so the link stays blocked.
+ * A recorded overpayment or a pre-table credit is also "used": the old link
+ * must not stay payable, and resend may open a session for the remainder.
  */
 export async function checkoutSessionWasCredited(
   client: SupabaseClient | null,
@@ -70,7 +71,8 @@ export async function checkoutSessionWasCredited(
       .eq('session_id', id)
       .maybeSingle();
     if (error || !data) return false;
-    return String(data.outcome || 'credited') === 'credited';
+    const outcome = String(data.outcome || 'credited');
+    return outcome === 'credited' || outcome === 'overpaid_not_credited' || outcome === 'possibly_already_credited';
   } catch (e) {
     console.warn('[billing] credited Checkout session lookup failed', e);
     return false;

@@ -103,15 +103,19 @@ check "amount over the balance is recorded and not credited" "$OVER $OVER_AMT" "
 CUR=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265502, 'cs_test_eur', 10, 'eur', '{}'::jsonb)->>'reason'")
 check "non-usd currency is refused" "$CUR" "currency_mismatch"
 
-# $585 session after $100 cash on a $585 invoice: record once, do not credit.
-$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (265503, 2655, 'partially_paid', 585, 100, '{\"line_items\":[{\"description\":\"Link\"}],\"payment_url\":\"https://checkout.stripe.com/c/pay/cs_test_585\"}'::jsonb)" >/dev/null
-OVER585=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585', 585, 'usd', '{\"payment_url\":\"https://evil.example\"}'::jsonb)->>'reason'")
-REPLAY585=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585', 585, 'usd', '{}'::jsonb)->>'notify'")
+# $585 session after $100 cash on a $585 invoice. The id is only the open
+# pay link (stripe_checkout_session_id), so this is a real overpayment.
+$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (265503, 2655, 'partially_paid', 585, 100, '{\"line_items\":[{\"description\":\"Link\"}],\"payment_url\":\"https://checkout.stripe.com/c/pay/cs_test_585\",\"stripe_checkout_session_id\":\"cs_test_585\"}'::jsonb)" >/dev/null
+OVER585=$($P -At -c "SELECT (r->>'reason') || ':' || (r->>'notify') FROM (SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585', 585, 'usd', '{\"payment_url\":\"https://evil.example\"}'::jsonb) AS r) s")
+NOTIFY585=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585', 585, 'usd', '{}'::jsonb)->>'notify'")
+$P -c "SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585b', 500, 'usd', '{}'::jsonb)" >/dev/null
 STATE585=$($P -At <<'SQL'
 SELECT amount_paid::text
-  || ':' || (invoice_data->'stripe_checkout_session_conflict'->>'reason')
-  || ':' || (invoice_data->'stripe_checkout_session_conflict'->>'amount')
-  || ':' || (invoice_data->'stripe_checkout_session_conflict'->>'balanceDue')
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->0->>'reason')
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->0->>'sessionId')
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->0->>'amount')
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->1->>'sessionId')
+  || ':' || jsonb_array_length(invoice_data->'stripe_checkout_session_conflict')::text
   || ':' || COALESCE(invoice_data->>'payment_url', '')
   || ':' || (
     SELECT outcome || ':' || count(*)::text
@@ -123,18 +127,39 @@ FROM public.service_invoices
 WHERE id = 265503;
 SQL
 )
-check "585 overpayment reason" "$OVER585" "overpaid_not_credited"
-check "585 replay does not notify again" "$REPLAY585" "false"
-check "585 ledger and conflict" "$STATE585" "100.00:overpaid:585.00:485.00:https://checkout.stripe.com/c/pay/cs_test_585:overpaid_not_credited:1"
+check "585 overpayment reason" "$OVER585" "overpaid_not_credited:true"
+check "585 replay does not notify again" "$NOTIFY585" "false"
+check "585 ledger keeps both conflicts" "$STATE585" "100.00:overpaid:cs_test_585:585.00:cs_test_585b:2:https://checkout.stripe.com/c/pay/cs_test_585:overpaid_not_credited:1"
 
-# Older $1,175 session larger than the remaining balance is recorded once.
-$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (23, 2655, 'partially_paid', 1500, 400, '{\"line_items\":[{\"description\":\"Older\"}]}'::jsonb)" >/dev/null
-BIG=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(23, 'cs_test_1175', 1175, 'usd', '{}'::jsonb)->>'reason'")
-BIG2=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(23, 'cs_test_1175', 1175, 'usd', '{}'::jsonb)->>'notify'")
-BIGSTATE=$($P -At -c "SELECT amount_paid || ':' || (SELECT count(*) FROM public.service_invoice_stripe_payments WHERE invoice_id = 23) FROM public.service_invoices WHERE id = 23")
-check "1175 overpayment reason" "$BIG" "overpaid_not_credited"
-check "1175 replay is silent" "$BIG2" "false"
-check "1175 amount stays 400 with one row" "$BIGSTATE" "400.00:1"
+# $1,760 invoice, $1,175 already stored from a credit made before this table,
+# then $100 cash (amount_paid 1275). Replaying the old session must not raise
+# an overpayment. Scratch invoice 265523 stands in for that shape. Org 2655.
+$P <<'SQL' >/dev/null
+INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, stripe_session_id, invoice_data)
+VALUES (
+  265523, 2655, 'partially_paid', 1760, 1275, 'cs_test_1175',
+  '{"line_items":[{"description":"Older"}],"stripe_checkout_session_id":"cs_test_1175","stripe_checkout_session_ids":["cs_test_1175"]}'::jsonb
+);
+SQL
+BIG=$($P -At -c "SELECT (r->>'reason') || ':' || (r->>'notify') FROM (SELECT public.apply_service_invoice_stripe_payment(265523, 'cs_test_1175', 1175, 'usd', '{}'::jsonb) AS r) s")
+BIG_NOTIFY=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265523, 'cs_test_1175', 1175, 'usd', '{}'::jsonb)->>'notify'")
+BIGSTATE=$($P -At <<'SQL'
+SELECT amount_paid::text
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->0->>'reason')
+  || ':' || jsonb_array_length(invoice_data->'stripe_checkout_session_conflict')::text
+  || ':' || (
+    SELECT outcome || ':' || count(*)::text
+    FROM public.service_invoice_stripe_payments
+    WHERE invoice_id = 265523
+    GROUP BY outcome
+  )
+FROM public.service_invoices
+WHERE id = 265523;
+SQL
+)
+check "stored 1175 replay is not an overpayment" "$BIG" "possibly_already_credited:false"
+check "stored 1175 replay does not notify" "$BIG_NOTIFY" "false"
+check "stored 1175 ledger" "$BIGSTATE" "1275.00:verify:1:possibly_already_credited:1"
 
 EXTRA=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265502, 'cs_test_allow', 10, 'usd', '{\"payment_url\":\"https://evil.example\",\"stripe_destination_account\":\"acct_123\",\"payout_status\":\"held\"}'::jsonb)->>'claimed'")
 EXTRA_URL=$($P -At -c "SELECT COALESCE(invoice_data->>'payment_url', '') || ':' || COALESCE(invoice_data->>'stripe_destination_account', '') || ':' || COALESCE(invoice_data->>'payout_status', '') FROM public.service_invoices WHERE id = 265502")

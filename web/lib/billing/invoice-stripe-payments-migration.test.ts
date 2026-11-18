@@ -24,7 +24,10 @@ test('000963 claims a Checkout session in one function and locks the table to th
   assert.match(sql, /REVOKE ALL ON TABLE public\.service_invoice_stripe_payments FROM PUBLIC/);
   assert.match(sql, /outcome text NOT NULL DEFAULT 'credited'/);
   assert.match(sql, /overpaid_not_credited/);
-  assert.match(sql, /'reason', 'overpaid'/);
+  assert.match(sql, /possibly_already_credited/);
+  assert.match(sql, /v_reason := 'overpaid'/);
+  assert.match(sql, /v_reason := 'verify'/);
+  assert.match(sql, /v_list \|\| jsonb_build_array\(v_entry\)/);
   assert.match(sql, /stripe_destination_account/);
   assert.doesNotMatch(sql, /FROM public\.service_invoices si/);
   assert.match(sql, /FOR UPDATE/);

@@ -6,8 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { buildInvoicePaymentPatch } from './apply-invoice-payment.ts';
 import {
   applyInvoiceCheckoutSession,
+  INVOICE_NOTIFICATION_TYPE,
   INVOICE_PAY_WEBHOOK_STATUS,
+  NOTIFICATION_TYPE_ALLOWLIST,
   invoiceCheckoutWebhookResult,
+  notifyShopOfPayment,
   STRIPE_PAYMENT_CONFLICT_KEY,
 } from './persist-invoice-payment.ts';
 import { buildNewListingInvoicePayload } from './listing-invoice.ts';
@@ -42,7 +45,7 @@ function memoryInvoice(initial: Record<string, unknown>) {
   let notes = 0;
   let lastFilter = '';
   let reads = 0;
-  const payments = new Map<string, { invoiceId: string; outcome: 'credited' | 'overpaid_not_credited' }>();
+  const payments = new Map<string, { invoiceId: string; outcome: 'credited' | 'overpaid_not_credited' | 'possibly_already_credited' }>();
   const writer = {
     rpc(_fn: string, args: Record<string, unknown>) {
       const sessionId = String(args.p_session_id || '');
@@ -56,14 +59,14 @@ function memoryInvoice(initial: Record<string, unknown>) {
         if (owner.invoiceId !== invoiceId) {
           return Promise.resolve({ data: { ok: false, reason: 'invoice_mismatch' }, error: null });
         }
-        if (owner.outcome === 'overpaid_not_credited') {
+        if (owner.outcome === 'overpaid_not_credited' || owner.outcome === 'possibly_already_credited') {
           return Promise.resolve({
             data: {
               ok: true,
               claimed: false,
-              overpaid: true,
+              overpaid: owner.outcome === 'overpaid_not_credited',
               notify: false,
-              reason: 'overpaid_not_credited',
+              reason: owner.outcome,
               status: row.status,
               amount_paid: row.amount_paid,
             },
@@ -94,22 +97,26 @@ function memoryInvoice(initial: Record<string, unknown>) {
         return Promise.resolve({ data: { ok: false, reason: 'different_paid_session' }, error: null });
       }
       if (amount > remaining + 0.01) {
-        payments.set(sessionId, { invoiceId, outcome: 'overpaid_not_credited' });
-        const data = { ...((row.invoice_data as Record<string, unknown>) || {}) };
-        data.stripe_checkout_session_conflict = {
-          reason: 'overpaid',
-          sessionId,
-          amount,
-          balanceDue: remaining,
-        };
-        row.invoice_data = data;
+        const prior = { ...((row.invoice_data as Record<string, unknown>) || {}) };
+        const ids = Array.isArray(prior.stripe_checkout_session_ids)
+          ? prior.stripe_checkout_session_ids.map(String)
+          : [];
+        const known = String(row.stripe_session_id || '') === sessionId || ids.includes(sessionId);
+        const outcome = known ? 'possibly_already_credited' : 'overpaid_not_credited';
+        const reason = known ? 'verify' : 'overpaid';
+        payments.set(sessionId, { invoiceId, outcome });
+        const existing = prior.stripe_checkout_session_conflict;
+        const list = Array.isArray(existing) ? [...existing] : existing ? [existing] : [];
+        list.push({ reason, sessionId, amount, balanceDue: remaining });
+        prior.stripe_checkout_session_conflict = list;
+        row.invoice_data = prior;
         return Promise.resolve({
           data: {
             ok: true,
             claimed: false,
-            overpaid: true,
-            notify: true,
-            reason: 'overpaid_not_credited',
+            overpaid: !known,
+            notify: !known,
+            reason: known ? 'possibly_already_credited' : 'overpaid_not_credited',
             status: row.status,
             amount_paid: paid,
             session_amount: amount,
@@ -327,13 +334,42 @@ test('a $585 Checkout after a $100 cash payment is recorded once and not credite
   assert.equal(db.row.status, 'partially_paid');
   assert.equal(db.creditWrites, 0);
   assert.equal(db.notes, 1);
-  const conflict = (db.row.invoice_data as { stripe_checkout_session_conflict?: Record<string, unknown> })
+  const conflict = (db.row.invoice_data as { stripe_checkout_session_conflict?: Record<string, unknown>[] })
     .stripe_checkout_session_conflict;
-  assert.equal(conflict?.reason, 'overpaid');
-  assert.equal(conflict?.sessionId, 'cs_test_585');
-  assert.equal(conflict?.amount, 585);
-  assert.equal(conflict?.balanceDue, 485);
+  assert.equal(conflict?.[0]?.reason, 'overpaid');
+  assert.equal(conflict?.[0]?.sessionId, 'cs_test_585');
+  assert.equal(conflict?.[0]?.amount, 585);
+  assert.equal(conflict?.[0]?.balanceDue, 485);
   assert.deepEqual((db.row.invoice_data as { line_items?: unknown }).line_items, [{ description: 'Service' }]);
+});
+
+test('a replay of a session stored before the payments table is not an overpayment alert', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 1760,
+      amount_paid: 1275,
+      status: 'partially_paid',
+      stripe_session_id: 'cs_test_1175',
+      invoice_data: {
+        line_items: [{ description: 'Service' }],
+        stripe_checkout_session_id: 'cs_test_1175',
+        stripe_checkout_session_ids: ['cs_test_1175'],
+      },
+    })
+  );
+  const session = paidSession('cs_test_1175', '44', 117500);
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  const replay = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok, false);
+  assert.equal(replay.ok, false);
+  if (!first.ok) assert.equal(first.reason, 'possibly_already_credited');
+  if (!replay.ok) assert.equal(replay.reason, 'possibly_already_credited');
+  assert.equal(db.row.amount_paid, 1275);
+  assert.equal(db.creditWrites, 0);
+  assert.equal(db.notes, 0);
+  const conflict = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
+    .stripe_checkout_session_conflict;
+  assert.equal(conflict?.[0]?.reason, 'verify');
 });
 
 test('replaying an older larger session records the overpayment once and does not credit', async () => {
@@ -549,5 +585,113 @@ test('000803 guards stripe_session_id and client invoice edits leave it unchange
     assert.equal(invoiceCheckoutWebhookResult(reason)?.status, status, reason);
   }
   assert.equal(invoiceCheckoutWebhookResult('not_invoice_checkout'), null);
-  assert.equal(invoiceCheckoutWebhookResult('unexpected_permanent')?.status, 200);
+  assert.equal(invoiceCheckoutWebhookResult('unexpected_reason')?.status, 500);
+  assert.equal(invoiceCheckoutWebhookResult('canceling statement due to lock timeout')?.status, 500);
+  assert.equal(invoiceCheckoutWebhookResult('connection terminated unexpectedly')?.status, 500);
+});
+
+test('raw database errors stay retryable', async () => {
+  const session = paidSession('cs_test_lock', '44', 10000);
+  const invoice = openInvoice();
+  async function fail(message: string) {
+    const writer = {
+      from() {
+        return {
+          select() {
+            return this;
+          },
+          eq() {
+            return this;
+          },
+          maybeSingle: async () =>
+            message.startsWith('load')
+              ? { data: null, error: { message } }
+              : { data: invoice, error: null },
+          rpc: async () => ({ data: null, error: { message } }),
+        };
+      },
+      rpc: async () => ({ data: null, error: { message } }),
+    };
+    return applyInvoiceCheckoutSession({ writer: writer as never, session });
+  }
+  const locked = await fail('canceling statement due to lock timeout');
+  const dropped = await fail('connection terminated unexpectedly');
+  const loaded = await fail('load invoice: connection terminated');
+  assert.equal(locked.ok, false);
+  assert.equal(dropped.ok, false);
+  assert.equal(loaded.ok, false);
+  if (!locked.ok) assert.equal(locked.reason, 'update_failed');
+  if (!dropped.ok) assert.equal(dropped.reason, 'update_failed');
+  if (!loaded.ok) assert.equal(loaded.reason, 'load_failed');
+  for (const reason of ['update_failed', 'load_failed', 'canceling statement due to lock timeout']) {
+    assert.equal(invoiceCheckoutWebhookResult(reason)?.status, 500);
+  }
+  assert.equal(invoiceCheckoutWebhookResult('not_paid')?.status, 200);
+});
+
+test('shop payment notices use the production notification allowlist', async () => {
+  const inserted: Record<string, unknown>[] = [];
+  const writer = {
+    from(table: string) {
+      return {
+        select() {
+          return this;
+        },
+        or() {
+          return this;
+        },
+        limit: async () => ({ data: [], error: null }),
+        insert(row: Record<string, unknown>) {
+          if (table === 'notifications') {
+            if (row.type === 'blocked') {
+              return Promise.resolve({ error: { message: 'notifications_type_check' } });
+            }
+            inserted.push(row);
+          }
+          return Promise.resolve({ error: null });
+        },
+      };
+    },
+  };
+  const invoice = {
+    id: 44,
+    invoice_number: '1044',
+    customer_name: 'Clinic',
+    created_by: 'user-1',
+    organization_id: 2655,
+  };
+  await notifyShopOfPayment(writer as never, invoice, 'paid', 300);
+  await notifyShopOfPayment(writer as never, invoice, 'partially_paid', 585, 'overpaid', 485);
+  assert.equal(inserted.length, 2);
+  assert.equal(inserted[0].type, 'general');
+  assert.equal(inserted[1].type, 'general');
+  assert.match(String(inserted[0].message), /^Invoice 1044 paid /);
+  assert.match(String(inserted[1].message), /^Overpayment on invoice 1044 needs a manual refund/);
+  assert.equal(inserted[0].link, '/invoices/new?id=44');
+  for (const row of inserted) {
+    assert.equal(NOTIFICATION_TYPE_ALLOWLIST.includes(row.type as (typeof NOTIFICATION_TYPE_ALLOWLIST)[number]), true);
+    assert.equal(row.type, INVOICE_NOTIFICATION_TYPE);
+  }
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map(String).join(' '));
+  };
+  const failing = {
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        or() {
+          return this;
+        },
+        limit: async () => ({ data: [], error: null }),
+        insert: async () => ({ error: { message: 'notifications_type_check' } }),
+      };
+    },
+  };
+  await notifyShopOfPayment(failing as never, invoice, 'paid', 10);
+  console.warn = original;
+  assert.equal(warnings.some((line) => /notifications_type_check/.test(line)), true);
 });

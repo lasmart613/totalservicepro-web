@@ -102,7 +102,7 @@ test('a stored session is used when the payments table says it was credited', as
     invoice_data: openData,
   };
   assert.equal(await checkoutSessionWasCredited(client as never, invoice, 'cs_test_old'), true);
-  assert.equal(await checkoutSessionWasCredited(client as never, invoice, 'cs_test_over'), false);
+  assert.equal(await checkoutSessionWasCredited(client as never, invoice, 'cs_test_over'), true);
   assert.deepEqual(calls, [
     'service_invoice_stripe_payments.session_id=cs_test_old',
     'service_invoice_stripe_payments.session_id=cs_test_over',
@@ -124,6 +124,23 @@ test('a stored session is used when the payments table says it was credited', as
     isSessionCredited: (sessionId) => checkoutSessionWasCredited(client as never, invoice, sessionId),
   });
   assert.deepEqual(plan, { action: 'create' });
+  const overPlan = await planInvoicePayLink({
+    invoice: {
+      ...invoice,
+      invoice_data: {
+        ...openData,
+        stripe_checkout_session_id: 'cs_test_over',
+        payment_url: 'https://checkout.stripe.com/c/pay/cs_test_over',
+      },
+    },
+    payAmount: 700,
+    loadCheckout: async () => ({ status: 'complete', payment_status: 'paid', amount_total: 58500, url: null }),
+    expireCheckout: async () => {
+      throw new Error('overpaid session is not expired');
+    },
+    isSessionCredited: (sessionId) => checkoutSessionWasCredited(client as never, invoice, sessionId),
+  });
+  assert.deepEqual(overPlan, { action: 'create' });
 });
 
 test('a credited deposit session can be replaced with a balance session', async () => {
