@@ -1,6 +1,8 @@
 /**
  * Apply a Stripe Checkout payment (or a manual cash/check amount) onto a TSP invoice.
- * Idempotent on stripe session id. Does not invent amounts.
+ * A payment is credited only through the stripe_session_id column. The open
+ * pay-link id in invoice_data.stripe_checkout_session_id is not proof of payment.
+ * Does not invent amounts.
  */
 import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from './void-invoice.ts';
 
@@ -14,6 +16,8 @@ export type InvoicePaymentRow = {
   organization_id?: string | number | null;
   invoice_data?: unknown;
   amount_paid?: number | string | null;
+  /** Claim column. Set only when a Checkout payment is applied. */
+  stripe_session_id?: string | null;
 };
 
 export type InvoicePaymentPatch = {
@@ -70,24 +74,70 @@ const STRIPE_SESSION_ID_SAFE = /^[A-Za-z0-9_]+$/;
 export const INVOICE_STRIPE_SESSION_COLUMN = 'stripe_session_id';
 
 /**
- * PostgREST filter for an atomic claim:
- * UPDATE ... WHERE stripe_session_id IS NULL OR stripe_session_id <> $session
- * Returns null when the id cannot be placed safely in the filter string.
+ * Sessions that may return success without a second credit:
+ * stripe_session_id IS NULL, or it already equals this session.
+ * A different session does not match. Returns null when the id cannot be
+ * placed safely in a PostgREST filter string.
  */
 export function invoiceSessionClaimFilter(sessionId: string): string | null {
   const id = String(sessionId || '').trim();
   if (!STRIPE_SESSION_ID_SAFE.test(id)) return null;
-  return `${INVOICE_STRIPE_SESSION_COLUMN}.is.null,${INVOICE_STRIPE_SESSION_COLUMN}.neq.${id}`;
+  return `${INVOICE_STRIPE_SESSION_COLUMN}.is.null,${INVOICE_STRIPE_SESSION_COLUMN}.eq.${id}`;
 }
 
+/**
+ * Crediting UPDATE filter. Rows affected means this delivery claimed the
+ * invoice. A later delivery of the same session does not match, so it cannot
+ * add the amount again. Same-session success is a follow-up read, not a
+ * second write. Pair with invoiceSessionClaimFilter.
+ */
+export function invoiceSessionCreditFilter(sessionId: string): string | null {
+  if (!invoiceSessionClaimFilter(sessionId)) return null;
+  return `${INVOICE_STRIPE_SESSION_COLUMN}.is.null`;
+}
+
+/** Compare-and-swap filter for a later payment on a not-yet-paid invoice. */
+export function invoiceSessionEqualsFilter(sessionId: string): string | null {
+  const id = String(sessionId || '').trim();
+  if (!invoiceSessionClaimFilter(id)) return null;
+  return `${INVOICE_STRIPE_SESSION_COLUMN}.eq.${id}`;
+}
+
+function textId(value: unknown): string {
+  if (value == null) return '';
+  return String(value).trim();
+}
+
+/**
+ * The Checkout session belongs to one invoice. metadata.invoice_id and
+ * client_reference_id must agree when both are set. Either one is enough.
+ */
+export function checkoutBelongsToInvoice(session: {
+  metadata?: Record<string, string | undefined> | null;
+  client_reference_id?: unknown;
+}): { ok: true; invoiceId: string } | { ok: false; reason: 'missing_invoice_id' | 'invoice_mismatch' } {
+  const meta = session.metadata || {};
+  const fromMeta = textId(meta.invoice_id);
+  const fromRef = textId(session.client_reference_id);
+  if (fromMeta && fromRef && fromMeta !== fromRef) return { ok: false, reason: 'invoice_mismatch' };
+  const invoiceId = fromMeta || fromRef;
+  if (!invoiceId) return { ok: false, reason: 'missing_invoice_id' };
+  return { ok: true, invoiceId };
+}
+
+/** True when the claim column already records this Checkout session. */
 export function alreadyAppliedSession(inv: InvoicePaymentRow, sessionId: string): boolean {
   const id = String(sessionId || '').trim();
   if (!id) return false;
-  const data = parseInvoiceData(inv.invoice_data);
-  if (String(data.stripe_checkout_session_id || '') === id) return true;
-  const ids = data.stripe_checkout_session_ids;
-  if (Array.isArray(ids) && ids.map(String).includes(id)) return true;
-  return false;
+  return textId(inv.stripe_session_id) === id;
+}
+
+/** Status paid, or amount_paid already covers the total. */
+export function invoiceFullyPaid(inv: InvoicePaymentRow): boolean {
+  if (String(inv.status || '').trim().toLowerCase() === 'paid') return true;
+  const total = money2(Number(inv.total) || 0);
+  if (total <= 0) return false;
+  return existingPaidAmount(inv) + 0.004 >= total;
 }
 
 export function checkoutLooksLikeInvoicePay(session: {

@@ -3,7 +3,11 @@ import test from 'node:test';
 import {
   alreadyAppliedSession,
   buildInvoicePaymentPatch,
+  checkoutBelongsToInvoice,
   checkoutLooksLikeInvoicePay,
+  invoiceFullyPaid,
+  invoiceSessionClaimFilter,
+  invoiceSessionCreditFilter,
   paymentStatusFromAmounts,
 } from './apply-invoice-payment.ts';
 
@@ -23,14 +27,31 @@ test('Stripe invoice checkout is detected from metadata, not subscription mode',
   assert.equal(checkoutLooksLikeInvoicePay({ mode: 'payment', metadata: {} }), false);
 });
 
-test('applying a Stripe session is idempotent and adds to prior deposit', () => {
+test('an open pay-link session id is not proof of payment', () => {
   const inv = {
     id: 9,
     total: 250,
     invoice_data: { deposit: 50, stripe_checkout_session_id: 'cs_live_old' },
   };
-  assert.equal(alreadyAppliedSession(inv, 'cs_live_old'), true);
-  assert.equal(alreadyAppliedSession(inv, 'cs_live_new'), false);
+  assert.equal(alreadyAppliedSession(inv, 'cs_live_old'), false);
+  assert.equal(alreadyAppliedSession({ ...inv, stripe_session_id: 'cs_live_old' }, 'cs_live_old'), true);
+  assert.equal(alreadyAppliedSession({ ...inv, stripe_session_id: 'cs_live_old' }, 'cs_live_new'), false);
+  assert.equal(invoiceFullyPaid({ id: 9, total: 250, status: 'paid', amount_paid: 0 }), true);
+  assert.equal(invoiceFullyPaid({ id: 9, total: 250, status: 'sent', amount_paid: 250 }), true);
+  assert.equal(invoiceFullyPaid({ id: 9, total: 250, status: 'partially_paid', amount_paid: 50 }), false);
+  assert.equal(
+    invoiceSessionClaimFilter('cs_test_race1'),
+    'stripe_session_id.is.null,stripe_session_id.eq.cs_test_race1'
+  );
+  assert.equal(invoiceSessionCreditFilter('cs_test_race1'), 'stripe_session_id.is.null');
+  assert.deepEqual(checkoutBelongsToInvoice({ metadata: { invoice_id: '9' }, client_reference_id: '9' }), {
+    ok: true,
+    invoiceId: '9',
+  });
+  assert.equal(
+    checkoutBelongsToInvoice({ metadata: { invoice_id: '9' }, client_reference_id: '8' }).ok,
+    false
+  );
   const patch = buildInvoicePaymentPatch({
     invoice: inv,
     addAmount: 200,

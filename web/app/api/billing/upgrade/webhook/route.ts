@@ -122,6 +122,12 @@ export async function POST(req: NextRequest) {
       if (invoicePay.reason === 'invoice_void') {
         return NextResponse.json({ ok: true, ignored: 'invoice_void' });
       }
+      if (invoicePay.reason === 'different_paid_session') {
+        return NextResponse.json({ ok: true, ignored: 'different_paid_session', kind: 'invoice' });
+      }
+      if (invoicePay.reason === 'claim_conflict') {
+        return NextResponse.json({ error: 'Invoice payment claim conflict' }, { status: 500 });
+      }
       const result = await applyPaidCheckoutSession({
         writer,
         session,

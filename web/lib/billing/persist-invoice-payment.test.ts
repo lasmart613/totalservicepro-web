@@ -3,30 +3,44 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildInvoicePaymentPatch, invoiceSessionClaimFilter } from './apply-invoice-payment.ts';
-import { applyInvoiceCheckoutSession } from './persist-invoice-payment.ts';
+import { buildInvoicePaymentPatch, invoiceSessionCreditFilter } from './apply-invoice-payment.ts';
+import { applyInvoiceCheckoutSession, STRIPE_PAYMENT_CONFLICT_KEY } from './persist-invoice-payment.ts';
 import { buildNewListingInvoicePayload } from './listing-invoice.ts';
 import { buildVoidInvoicePatch } from './void-invoice.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-test('invoice session claim filter is null-or-different-session', () => {
-  assert.equal(
-    invoiceSessionClaimFilter('cs_test_race1'),
-    'stripe_session_id.is.null,stripe_session_id.neq.cs_test_race1'
-  );
-  assert.equal(invoiceSessionClaimFilter('cs test'), null);
-});
+const QA_ORG = 2655;
 
-test('overlapping checkout deliveries credit a session only once', async () => {
-  let claimedSession: string | null = null;
-  let writes = 0;
+function cloneInvoice(row: Record<string, unknown>) {
+  const copy = { ...row };
+  if (copy.invoice_data && typeof copy.invoice_data === 'object') {
+    copy.invoice_data = { ...(copy.invoice_data as Record<string, unknown>) };
+  }
+  return copy;
+}
+
+function orMatches(row: Record<string, unknown>, filter: string): boolean {
+  return filter.split(',').some((part) => {
+    const [col, op, ...rest] = part.split('.');
+    const value = rest.join('.');
+    const current = row[col];
+    if (op === 'is' && value === 'null') return current == null || current === '';
+    if (op === 'eq') return String(current ?? '') === value;
+    return false;
+  });
+}
+
+function memoryInvoice(initial: Record<string, unknown>) {
+  const row = cloneInvoice(initial);
+  let creditWrites = 0;
   let notes = 0;
   let lastFilter = '';
-
+  let reads = 0;
   const writer = {
     from(table: string) {
       const filters: Record<string, unknown> = {};
+      let orFilter = '';
       let op: 'select' | 'update' | 'insert' = 'select';
       let payload: Record<string, unknown> | null = null;
       const api = {
@@ -48,6 +62,7 @@ test('overlapping checkout deliveries credit a session only once', async () => {
           return api;
         },
         or(filter: string) {
+          orFilter = filter;
           if (table === 'service_invoices') lastFilter = filter;
           return api;
         },
@@ -55,30 +70,18 @@ test('overlapping checkout deliveries credit a session only once', async () => {
           return api;
         },
         maybeSingle: async () => {
-          if (table === 'service_invoices' && op === 'select') {
-            return {
-              data: {
-                id: '44',
-                total: 100,
-                status: 'sent',
-                amount_paid: 0,
-                invoice_number: '1044',
-                customer_name: 'Clinic',
-                created_by: 'user-1',
-                organization_id: 42,
-                invoice_data: {},
-              },
-              error: null,
-            };
+          if (table !== 'service_invoices') return { data: null, error: null };
+          const idOk = filters.id == null || String(filters.id) === String(row.id);
+          if (!idOk) return { data: null, error: null };
+          if (op === 'select') {
+            reads += 1;
+            return { data: cloneInvoice(row), error: null };
           }
-          if (table === 'service_invoices' && op === 'update') {
-            const session = String(payload?.stripe_session_id || '');
-            if (claimedSession && claimedSession === session) {
-              return { data: null, error: null };
-            }
-            claimedSession = session;
-            writes += 1;
-            return { data: { id: filters.id }, error: null };
+          if (op === 'update') {
+            if (orFilter && !orMatches(row, orFilter)) return { data: null, error: null };
+            if (payload && Object.prototype.hasOwnProperty.call(payload, 'stripe_session_id')) creditWrites += 1;
+            Object.assign(row, payload);
+            return { data: { id: row.id }, error: null };
           }
           return { data: null, error: null };
         },
@@ -86,31 +89,220 @@ test('overlapping checkout deliveries credit a session only once', async () => {
       return api;
     },
   };
+  return {
+    writer,
+    get row() {
+      return row;
+    },
+    get creditWrites() {
+      return creditWrites;
+    },
+    get notes() {
+      return notes;
+    },
+    get lastFilter() {
+      return lastFilter;
+    },
+    get reads() {
+      return reads;
+    },
+  };
+}
 
-  const session = {
-    id: 'cs_test_race1',
+function paidSession(id: string, invoiceId: string, amountCents = 10000, extra: Record<string, unknown> = {}) {
+  return {
+    id,
     mode: 'payment',
     status: 'complete',
     payment_status: 'paid',
-    amount_total: 10000,
-    metadata: { kind: 'invoice_pay', invoice_id: '44' },
+    amount_total: amountCents,
+    metadata: { kind: 'invoice_pay', invoice_id: invoiceId },
+    ...extra,
   };
+}
 
+function openInvoice(extra: Record<string, unknown> = {}) {
+  return {
+    id: 44,
+    total: 100,
+    status: 'sent',
+    amount_paid: 0,
+    invoice_number: '1044',
+    customer_name: 'Clinic',
+    created_by: 'user-1',
+    organization_id: QA_ORG,
+    stripe_session_id: null,
+    invoice_data: {
+      line_items: [{ description: 'Service' }],
+      stripe_checkout_session_id: 'cs_test_open',
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+      payment_amount: 100,
+    },
+    ...extra,
+  };
+}
+
+test('pay after the pay link was sent credits once and notifies the shop', async () => {
+  const db = memoryInvoice(openInvoice());
+  const result = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session: paidSession('cs_test_open', '44'),
+  });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.applied.alreadyApplied, false);
+  assert.equal(result.applied.amountPaid, 100);
+  assert.equal(result.applied.status, 'paid');
+  assert.equal(db.creditWrites, 1);
+  assert.equal(db.notes, 1);
+  assert.equal(db.row.stripe_session_id, 'cs_test_open');
+  assert.equal(db.row.status, 'paid');
+  assert.equal(db.row.amount_paid, 100);
+  const stored = db.row.invoice_data as { line_items?: { description: string }[] };
+  assert.deepEqual(stored.line_items, [{ description: 'Service' }]);
+  assert.equal(db.lastFilter, invoiceSessionCreditFilter('cs_test_open'));
+});
+
+test('a duplicate webhook for the same session is a no-op success', async () => {
+  const db = memoryInvoice(openInvoice());
+  const session = paidSession('cs_test_open', '44');
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  const second = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok && !first.applied.alreadyApplied, true);
+  assert.equal(second.ok && second.applied.alreadyApplied, true);
+  if (second.ok) assert.equal(second.applied.amountPaid, 100);
+  assert.equal(db.creditWrites, 1);
+  assert.equal(db.notes, 1);
+  assert.equal(db.row.amount_paid, 100);
+});
+
+test('a webhook and confirm race for the same session credits once', async () => {
+  const db = memoryInvoice(openInvoice());
+  const session = paidSession('cs_test_race1', '44');
   const [first, second] = await Promise.all([
-    applyInvoiceCheckoutSession({ writer: writer as never, session }),
-    applyInvoiceCheckoutSession({ writer: writer as never, session }),
+    applyInvoiceCheckoutSession({ writer: db.writer as never, session }),
+    applyInvoiceCheckoutSession({ writer: db.writer as never, session }),
   ]);
-
   const results = [first, second];
   assert.equal(results.filter((row) => row.ok && row.applied.alreadyApplied).length, 1);
   assert.equal(results.filter((row) => row.ok && !row.applied.alreadyApplied).length, 1);
-  const credited = results.find((row) => row.ok && !row.applied.alreadyApplied);
-  assert.ok(credited && credited.ok);
-  if (credited && credited.ok) assert.equal(credited.applied.amountPaid, 100);
-  assert.equal(writes, 1);
-  assert.equal(notes, 1);
-  assert.equal(claimedSession, 'cs_test_race1');
-  assert.equal(lastFilter, invoiceSessionClaimFilter('cs_test_race1'));
+  assert.equal(db.creditWrites, 1);
+  assert.equal(db.notes, 1);
+  assert.equal(db.row.stripe_session_id, 'cs_test_race1');
+  assert.equal(db.row.amount_paid, 100);
+  assert.equal(db.lastFilter, invoiceSessionCreditFilter('cs_test_race1'));
+});
+
+test('a different session on an already-paid invoice does not credit again', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      status: 'paid',
+      amount_paid: 100,
+      stripe_session_id: 'cs_test_first',
+    })
+  );
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((item) => String(item)).join(' '));
+  };
+  try {
+    const result = await applyInvoiceCheckoutSession({
+      writer: db.writer as never,
+      session: paidSession('cs_test_second', '44'),
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, 'different_paid_session');
+  } finally {
+    console.warn = original;
+  }
+  assert.equal(db.creditWrites, 0);
+  assert.equal(db.notes, 0);
+  assert.equal(db.row.amount_paid, 100);
+  assert.equal(db.row.stripe_session_id, 'cs_test_first');
+  assert.equal(db.row.status, 'paid');
+  const data = db.row.invoice_data as Record<string, unknown>;
+  const conflict = data[STRIPE_PAYMENT_CONFLICT_KEY] as { sessionId?: string; creditedSessionId?: string };
+  assert.equal(conflict.sessionId, 'cs_test_second');
+  assert.equal(conflict.creditedSessionId, 'cs_test_first');
+  assert.equal(warnings.some((line) => /different session/.test(line)), true);
+});
+
+test('a later session can still pay a remaining balance exactly once', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      status: 'partially_paid',
+      amount_paid: 40,
+      stripe_session_id: 'cs_test_deposit',
+      invoice_data: { deposit: 40 },
+    })
+  );
+  const session = paidSession('cs_test_balance', '44', 6000);
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  const second = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok && !first.applied.alreadyApplied, true);
+  if (first.ok) assert.equal(first.applied.amountPaid, 100);
+  assert.equal(second.ok && second.applied.alreadyApplied, true);
+  assert.equal(db.creditWrites, 1);
+  assert.equal(db.notes, 1);
+  assert.equal(db.row.amount_paid, 100);
+  assert.equal(db.row.stripe_session_id, 'cs_test_balance');
+});
+
+test('an unpaid or expired Checkout session never credits', async () => {
+  const unpaid = memoryInvoice(openInvoice());
+  const unpaidResult = await applyInvoiceCheckoutSession({
+    writer: unpaid.writer as never,
+    session: { ...paidSession('cs_test_open', '44'), status: 'open', payment_status: 'unpaid' },
+  });
+  assert.equal(unpaidResult.ok, false);
+  if (!unpaidResult.ok) assert.equal(unpaidResult.reason, 'not_paid');
+  assert.equal(unpaid.creditWrites, 0);
+  assert.equal(unpaid.notes, 0);
+
+  const expired = memoryInvoice(openInvoice());
+  const expiredResult = await applyInvoiceCheckoutSession({
+    writer: expired.writer as never,
+    session: { ...paidSession('cs_test_open', '44'), status: 'expired', payment_status: 'unpaid' },
+  });
+  assert.equal(expiredResult.ok, false);
+  if (!expiredResult.ok) assert.equal(expiredResult.reason, 'not_paid');
+  assert.equal(expired.creditWrites, 0);
+
+  const free = memoryInvoice(openInvoice());
+  const freeResult = await applyInvoiceCheckoutSession({
+    writer: free.writer as never,
+    session: { ...paidSession('cs_test_open', '44'), payment_status: 'no_payment_required' },
+  });
+  assert.equal(freeResult.ok, false);
+  if (!freeResult.ok) assert.equal(freeResult.reason, 'not_paid');
+  assert.equal(free.creditWrites, 0);
+  assert.equal(free.row.amount_paid, 0);
+});
+
+test('a session for another invoice never credits this invoice', async () => {
+  const mismatch = memoryInvoice(openInvoice());
+  const mismatchResult = await applyInvoiceCheckoutSession({
+    writer: mismatch.writer as never,
+    session: { ...paidSession('cs_test_other', '44'), client_reference_id: '99' },
+  });
+  assert.equal(mismatchResult.ok, false);
+  if (!mismatchResult.ok) assert.equal(mismatchResult.reason, 'invoice_mismatch');
+  assert.equal(mismatch.reads, 0);
+  assert.equal(mismatch.creditWrites, 0);
+  assert.equal(mismatch.row.amount_paid, 0);
+  assert.equal(mismatch.row.stripe_session_id, null);
+
+  const other = memoryInvoice(openInvoice());
+  const otherResult = await applyInvoiceCheckoutSession({
+    writer: other.writer as never,
+    session: paidSession('cs_test_other', '99'),
+  });
+  assert.equal(otherResult.ok, false);
+  if (!otherResult.ok) assert.equal(otherResult.reason, 'invoice_not_found');
+  assert.equal(other.creditWrites, 0);
+  assert.equal(other.row.id, 44);
+  assert.equal(other.row.amount_paid, 0);
 });
 
 test('000803 guards stripe_session_id and client invoice edits leave it unchanged', () => {
@@ -188,6 +380,15 @@ test('000803 guards stripe_session_id and client invoice edits leave it unchange
   assert.match(webhook, /getSupabaseAdmin\(\)/);
   assert.match(webhook, /applyInvoiceCheckoutSession\(\{\s*writer,/);
   assert.match(confirm, /hasServiceRole\(\)/);
-  assert.match(confirm, /writer: getSupabaseAdmin\(\)/);
+  assert.match(confirm, /deps\.writer \?\? getSupabaseAdmin\(\)/);
   assert.doesNotMatch(confirm, /from\('service_invoices'\)/);
+  assert.match(webhook, /different_paid_session/);
+  assert.match(webhook, /claim_conflict/);
+  const applySrc = readFileSync(join(here, 'apply-invoice-payment.ts'), 'utf8');
+  const already = applySrc.slice(
+    applySrc.indexOf('export function alreadyAppliedSession'),
+    applySrc.indexOf('export function invoiceFullyPaid')
+  );
+  assert.doesNotMatch(already, /stripe_checkout_session_id/);
+  assert.match(claim, /invoiceSessionCreditFilter\(sessionId\)/);
 });
