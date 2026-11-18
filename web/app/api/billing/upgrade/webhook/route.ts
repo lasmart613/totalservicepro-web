@@ -121,6 +121,12 @@ export async function POST(req: NextRequest) {
       }
       const invoiceFailure = invoiceCheckoutWebhookResult(invoicePay.reason);
       if (invoiceFailure) {
+        if (invoiceFailure.status === 200) {
+          console.warn('[billing/upgrade/webhook] invoice checkout acknowledged without a retry', {
+            sessionId,
+            reason: invoicePay.reason,
+          });
+        }
         return NextResponse.json(invoiceFailure.body, { status: invoiceFailure.status });
       }
       const result = await applyPaidCheckoutSession({

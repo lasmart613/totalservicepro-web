@@ -29,29 +29,50 @@ export type AppliedInvoicePayment = {
  */
 export const STRIPE_PAYMENT_CONFLICT_KEY = 'stripe_checkout_session_conflict';
 
-const INVOICE_PAY_ACK = new Set(['invoice_void', 'different_paid_session']);
-
 /**
- * Webhook result for an invoice Checkout attempt. null means this session
- * is not an invoice payment and the subscription handler may run.
- * Every other failure is 500 so Stripe retries. Void and a different
- * session on an already-paid invoice are acknowledged.
+ * HTTP status Stripe should see for an invoice-checkout failure.
+ *
+ * 500 is only for a failure a later delivery might clear:
+ * load_failed, update_failed, payment_claim_unavailable, claim_conflict,
+ * and invoice_not_found. invoice_not_found stays 500 because the id comes
+ * from the Checkout session and the row can be missing briefly (the send
+ * has not committed, or a read replica has not caught up). A session that
+ * will never match an invoice retries until Stripe stops; that is preferred
+ * to dropping a payment that arrives early.
+ *
+ * Anything that cannot succeed on retry is 200, including a void, a
+ * different session on a paid invoice, and an overpayment that was recorded
+ * and not credited. not_invoice_checkout is null so the subscription
+ * handler can still run.
  */
+export const INVOICE_PAY_WEBHOOK_STATUS = {
+  load_failed: 500,
+  update_failed: 500,
+  payment_claim_unavailable: 500,
+  claim_conflict: 500,
+  invoice_not_found: 500,
+  invoice_void: 200,
+  different_paid_session: 200,
+  overpaid_not_credited: 200,
+  amount_exceeds_balance: 200,
+  not_paid: 200,
+  not_complete: 200,
+  no_payment_required: 200,
+  currency_mismatch: 200,
+  missing_invoice_id: 200,
+  invoice_mismatch: 200,
+  bad_amount: 200,
+  bad_session_id: 200,
+} as const;
+
 export function invoiceCheckoutWebhookResult(
   reason: string
 ): { status: 200 | 500; body: Record<string, unknown> } | null {
   if (reason === 'not_invoice_checkout') return null;
-  if (INVOICE_PAY_ACK.has(reason)) {
-    return {
-      status: 200,
-      body: {
-        ok: true,
-        ignored: reason,
-        ...(reason === 'different_paid_session' ? { kind: 'invoice' } : {}),
-      },
-    };
-  }
-  return { status: 500, body: { error: reason } };
+  const known = (INVOICE_PAY_WEBHOOK_STATUS as Record<string, 200 | 500>)[reason];
+  const status = known ?? 200;
+  if (status === 500) return { status, body: { error: reason } };
+  return { status: 200, body: { ok: true, ignored: reason, kind: 'invoice' } };
 }
 
 function meta(session: StripeObject): Record<string, string> {
@@ -67,9 +88,13 @@ function meta(session: StripeObject): Record<string, string> {
 type PaymentClaim = {
   ok?: boolean;
   claimed?: boolean;
+  overpaid?: boolean;
+  notify?: boolean;
   reason?: string;
   status?: string;
   amount_paid?: number | string;
+  session_amount?: number | string;
+  balance_due?: number | string;
 };
 
 function readClaim(data: unknown): PaymentClaim | null {
@@ -130,6 +155,19 @@ export async function applyInvoiceCheckoutSession(input: {
     return { ok: false, reason: message || 'update_failed' };
   }
   const claim = readClaim(data);
+  if (claim?.ok === true && claim.overpaid) {
+    if (claim.notify) {
+      await notifyShopOfPayment(
+        input.writer,
+        row,
+        String(claim.status || row.status || 'sent'),
+        money2(Number(claim.session_amount) || amountCents / 100),
+        'overpaid',
+        money2(Number(claim.balance_due) || 0)
+      );
+    }
+    return { ok: false, reason: 'overpaid_not_credited' };
+  }
   if (!claim || claim.ok !== true) {
     const reason = String(claim?.reason || 'update_failed');
     if (reason === 'different_paid_session') {
@@ -171,7 +209,9 @@ export async function notifyShopOfPayment(
   writer: SupabaseClient,
   inv: InvoicePaymentRow,
   status: string,
-  amountPaid: number
+  amountPaid: number,
+  notice: 'payment' | 'overpaid' = 'payment',
+  balanceDue = 0
 ): Promise<void> {
   const ids = new Set<string>();
   if (inv.created_by) ids.add(String(inv.created_by));
@@ -196,19 +236,25 @@ export async function notifyShopOfPayment(
   const who = inv.customer_name || 'A customer';
   const label = status === 'paid' ? 'paid in full' : 'sent a partial payment';
   let shown = formatOrgMoney(money2(amountPaid));
+  let balanceShown = formatOrgMoney(money2(balanceDue));
   try {
     const prefs = await loadOrgMoneyPrefs(writer, inv.organization_id);
     shown = formatOrgMoney(money2(amountPaid), prefs);
+    balanceShown = formatOrgMoney(money2(balanceDue), prefs);
   } catch {
     /* USD locale format */
   }
-  const message = `${who} ${label} on invoice ${num} (${shown}).`;
+  const message =
+    notice === 'overpaid'
+      ? `${who} sent ${shown} on invoice ${num}, which is more than the balance due (${balanceShown}). It was not applied and needs a manual refund or credit.`
+      : `${who} ${label} on invoice ${num} (${shown}).`;
+  const noticeType = notice === 'overpaid' ? 'invoice_overpaid' : 'invoice_paid';
   const link = `/invoices/new?id=${inv.id}`;
   for (const userId of ids) {
     try {
       const row: Record<string, unknown> = {
         user_id: userId,
-        type: 'invoice_paid',
+        type: noticeType,
         message,
         is_read: false,
         link,

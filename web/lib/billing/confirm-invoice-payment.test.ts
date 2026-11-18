@@ -169,7 +169,8 @@ test('public confirm does not credit an unpaid session', async () => {
   const body = await res.json();
   assert.equal(res.status, 409);
   assert.equal(body.ok, false);
-  assert.equal(body.error, 'not_paid');
+  assert.equal(body.error, 'This payment could not be applied.');
+  assert.equal(JSON.stringify(body).includes('not_paid'), false);
   assert.equal(db.creditWrites, 0);
   assert.equal(db.notes, 0);
   assert.equal(db.row.amount_paid, 0);

@@ -4,6 +4,7 @@ import {
   INVOICE_ALREADY_PAID,
   INVOICE_CHECKOUT_ALREADY_PAID,
   INVOICE_PAY_LINK_BUSY,
+  checkoutSessionWasCredited,
   invoiceAlreadyPaid,
   openPayLink,
   planInvoicePayLink,
@@ -69,6 +70,60 @@ test('a paid invoice does not touch Stripe', async () => {
   });
   assert.deepEqual(plan, { action: 'skip', reason: INVOICE_ALREADY_PAID });
   assert.equal(calls, 0);
+});
+
+test('a stored session is used when the payments table says it was credited', async () => {
+  const calls: string[] = [];
+  const client = {
+    from(table: string) {
+      return {
+        select() {
+          return {
+            eq(column: string, value: string) {
+              calls.push(`${table}.${column}=${value}`);
+              return {
+                maybeSingle: async () => ({
+                  data: value === 'cs_test_old' ? { outcome: 'credited' } : { outcome: 'overpaid_not_credited' },
+                  error: null,
+                }),
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  const invoice = {
+    id: 3,
+    status: 'partially_paid',
+    total: 1000,
+    amount_paid: 300,
+    stripe_session_id: 'cs_test_latest',
+    invoice_data: openData,
+  };
+  assert.equal(await checkoutSessionWasCredited(client as never, invoice, 'cs_test_old'), true);
+  assert.equal(await checkoutSessionWasCredited(client as never, invoice, 'cs_test_over'), false);
+  assert.deepEqual(calls, [
+    'service_invoice_stripe_payments.session_id=cs_test_old',
+    'service_invoice_stripe_payments.session_id=cs_test_over',
+  ]);
+  const plan = await planInvoicePayLink({
+    invoice: {
+      ...invoice,
+      invoice_data: {
+        ...openData,
+        stripe_checkout_session_id: 'cs_test_old',
+        payment_url: 'https://checkout.stripe.com/c/pay/cs_test_old',
+      },
+    },
+    payAmount: 700,
+    loadCheckout: async () => ({ status: 'complete', payment_status: 'paid', amount_total: 30000, url: null }),
+    expireCheckout: async () => {
+      throw new Error('credited session is not expired');
+    },
+    isSessionCredited: (sessionId) => checkoutSessionWasCredited(client as never, invoice, sessionId),
+  });
+  assert.deepEqual(plan, { action: 'create' });
 });
 
 test('a credited deposit session can be replaced with a balance session', async () => {

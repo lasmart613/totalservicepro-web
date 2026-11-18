@@ -17,9 +17,10 @@
 -- RLS is on and there are no policies. anon and authenticated have no
 -- grants. service_role is granted DML and bypasses RLS.
 --
--- Backfill inserts the current stripe_session_id only. Older session ids
--- that were overwritten on the invoice are not reconstructed. The amount
--- stored for that row is the invoice's current amount_paid.
+-- There is no backfill. stripe_session_id on existing invoices is only the
+-- latest id, and copying amount_paid onto it would pretend that one session
+-- collected the whole balance. invoice_data.stripe_checkout_session_ids
+-- lists sessions that were created, not sessions that were proven paid.
 --
 -- Repo only. Do not apply this file to production from the pull request.
 -- Rollback: 20261118_000963_service_invoice_stripe_payments_rollback.sql
@@ -51,6 +52,9 @@ CREATE TABLE IF NOT EXISTS public.service_invoice_stripe_payments (
   invoice_id bigint NOT NULL REFERENCES public.service_invoices (id) ON DELETE CASCADE,
   session_id text NOT NULL,
   amount numeric(12, 2) NOT NULL CHECK (amount >= 0),
+  outcome text NOT NULL DEFAULT 'credited'
+    CONSTRAINT service_invoice_stripe_payments_outcome_check
+    CHECK (outcome IN ('credited', 'overpaid_not_credited')),
   created_at timestamptz NOT NULL DEFAULT pg_catalog.now(),
   CONSTRAINT service_invoice_stripe_payments_session_id_key PRIMARY KEY (session_id)
 );
@@ -59,7 +63,10 @@ COMMENT ON TABLE public.service_invoice_stripe_payments IS
   'Append-only Checkout sessions already credited on a service invoice. session_id is unique. Service role only.';
 
 COMMENT ON COLUMN public.service_invoice_stripe_payments.session_id IS
-  'Stripe Checkout session id (cs_...). One session credits one invoice once.';
+  'Stripe Checkout session id (cs_...). One session is recorded once, whether or not it was credited.';
+
+COMMENT ON COLUMN public.service_invoice_stripe_payments.outcome IS
+  'credited: amount_paid was increased. overpaid_not_credited: the session was larger than the balance due and was not applied.';
 
 CREATE INDEX IF NOT EXISTS service_invoice_stripe_payments_invoice_id_idx
   ON public.service_invoice_stripe_payments (invoice_id);
@@ -80,16 +87,6 @@ BEGIN
     EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.service_invoice_stripe_payments TO service_role';
   END IF;
 END $$;
-
-INSERT INTO public.service_invoice_stripe_payments (invoice_id, session_id, amount, created_at)
-SELECT
-  si.id,
-  btrim(si.stripe_session_id),
-  ROUND(COALESCE(si.amount_paid, 0), 2),
-  COALESCE(si.paid_at, si.updated_at, pg_catalog.now())
-FROM public.service_invoices si
-WHERE btrim(COALESCE(si.stripe_session_id, '')) <> ''
-ON CONFLICT (session_id) DO NOTHING;
 
 CREATE OR REPLACE FUNCTION public.apply_service_invoice_stripe_payment(
   p_invoice_id bigint,
@@ -113,6 +110,7 @@ DECLARE
   v_new_paid numeric;
   v_status text;
   v_owner bigint;
+  v_outcome text;
   v_session text;
   v_conflict jsonb;
   v_attempts jsonb;
@@ -136,21 +134,34 @@ BEGIN
     RETURN jsonb_build_object('ok', false, 'reason', 'invoice_not_found');
   END IF;
 
-  SELECT invoice_id INTO v_owner
+  SELECT invoice_id, outcome INTO v_owner, v_outcome
   FROM public.service_invoice_stripe_payments
   WHERE session_id = v_session;
   IF FOUND THEN
-    IF v_owner = p_invoice_id THEN
+    IF v_owner IS DISTINCT FROM p_invoice_id THEN
+      RETURN jsonb_build_object('ok', false, 'reason', 'invoice_mismatch');
+    END IF;
+    IF v_outcome = 'overpaid_not_credited' THEN
       RETURN jsonb_build_object(
         'ok', true,
         'claimed', false,
+        'overpaid', true,
+        'notify', false,
         'already_applied', true,
+        'reason', 'overpaid_not_credited',
         'invoice_id', p_invoice_id,
-        'status', COALESCE(v_row.status, 'paid'),
+        'status', COALESCE(v_row.status, 'sent'),
         'amount_paid', ROUND(COALESCE(v_row.amount_paid, 0), 2)
       );
     END IF;
-    RETURN jsonb_build_object('ok', false, 'reason', 'invoice_mismatch');
+    RETURN jsonb_build_object(
+      'ok', true,
+      'claimed', false,
+      'already_applied', true,
+      'invoice_id', p_invoice_id,
+      'status', COALESCE(v_row.status, 'paid'),
+      'amount_paid', ROUND(COALESCE(v_row.amount_paid, 0), 2)
+    );
   END IF;
 
   v_data := CASE
@@ -219,28 +230,90 @@ BEGIN
   END IF;
 
   IF ROUND(p_amount, 2) > v_remaining + 0.01 THEN
-    RETURN jsonb_build_object('ok', false, 'reason', 'amount_exceeds_balance');
-  END IF;
-
-  BEGIN
-    INSERT INTO public.service_invoice_stripe_payments (invoice_id, session_id, amount)
-    VALUES (p_invoice_id, v_session, ROUND(p_amount, 2));
-  EXCEPTION
-    WHEN unique_violation THEN
-      SELECT invoice_id INTO v_owner
-      FROM public.service_invoice_stripe_payments
-      WHERE session_id = v_session;
-      IF v_owner = p_invoice_id THEN
+    BEGIN
+      INSERT INTO public.service_invoice_stripe_payments (invoice_id, session_id, amount, outcome)
+      VALUES (p_invoice_id, v_session, ROUND(p_amount, 2), 'overpaid_not_credited');
+    EXCEPTION
+      WHEN unique_violation THEN
+        SELECT invoice_id, outcome INTO v_owner, v_outcome
+        FROM public.service_invoice_stripe_payments
+        WHERE session_id = v_session;
+        IF v_owner IS DISTINCT FROM p_invoice_id THEN
+          RETURN jsonb_build_object('ok', false, 'reason', 'invoice_mismatch');
+        END IF;
         RETURN jsonb_build_object(
           'ok', true,
           'claimed', false,
+          'overpaid', v_outcome = 'overpaid_not_credited',
+          'notify', false,
           'already_applied', true,
+          'reason', CASE WHEN v_outcome = 'overpaid_not_credited' THEN 'overpaid_not_credited' ELSE 'already_applied' END,
           'invoice_id', p_invoice_id,
-          'status', COALESCE(v_row.status, 'paid'),
+          'status', COALESCE(v_row.status, 'sent'),
+          'amount_paid', v_paid
+        );
+    END;
+    UPDATE public.service_invoices
+    SET invoice_data = (
+          v_data || jsonb_build_object(
+            'stripe_checkout_session_conflict',
+            jsonb_build_object(
+              'reason', 'overpaid',
+              'sessionId', v_session,
+              'amount', ROUND(p_amount, 2),
+              'balanceDue', v_remaining,
+              'at', to_jsonb(pg_catalog.now())
+            )
+          )
+        ),
+        updated_at = pg_catalog.now()
+    WHERE id = p_invoice_id;
+    RETURN jsonb_build_object(
+      'ok', true,
+      'claimed', false,
+      'overpaid', true,
+      'notify', true,
+      'reason', 'overpaid_not_credited',
+      'invoice_id', p_invoice_id,
+      'status', COALESCE(v_row.status, 'sent'),
+      'amount_paid', v_paid,
+      'session_amount', ROUND(p_amount, 2),
+      'balance_due', v_remaining
+    );
+  END IF;
+
+  BEGIN
+    INSERT INTO public.service_invoice_stripe_payments (invoice_id, session_id, amount, outcome)
+    VALUES (p_invoice_id, v_session, ROUND(p_amount, 2), 'credited');
+  EXCEPTION
+    WHEN unique_violation THEN
+      SELECT invoice_id, outcome INTO v_owner, v_outcome
+      FROM public.service_invoice_stripe_payments
+      WHERE session_id = v_session;
+      IF v_owner IS DISTINCT FROM p_invoice_id THEN
+        RETURN jsonb_build_object('ok', false, 'reason', 'invoice_mismatch');
+      END IF;
+      IF v_outcome = 'overpaid_not_credited' THEN
+        RETURN jsonb_build_object(
+          'ok', true,
+          'claimed', false,
+          'overpaid', true,
+          'notify', false,
+          'already_applied', true,
+          'reason', 'overpaid_not_credited',
+          'invoice_id', p_invoice_id,
+          'status', COALESCE(v_row.status, 'sent'),
           'amount_paid', v_paid
         );
       END IF;
-      RETURN jsonb_build_object('ok', false, 'reason', 'invoice_mismatch');
+      RETURN jsonb_build_object(
+        'ok', true,
+        'claimed', false,
+        'already_applied', true,
+        'invoice_id', p_invoice_id,
+        'status', COALESCE(v_row.status, 'paid'),
+        'amount_paid', v_paid
+      );
   END;
 
   v_new_paid := ROUND(v_paid + p_amount, 2);
@@ -262,14 +335,19 @@ BEGIN
     v_ids := v_ids || to_jsonb(btrim(v_data->>'stripe_checkout_session_id'));
   END IF;
 
-  v_extra := CASE
-    WHEN p_extra IS NULL OR jsonb_typeof(p_extra) IS DISTINCT FROM 'object' THEN '{}'::jsonb
-    ELSE p_extra
-  END;
-  v_extra := v_extra
-    - 'deposit' - 'balanceDue' - 'depositMethod' - 'depositDate'
-    - 'last_payment_method' - 'last_payment_at'
-    - 'stripe_checkout_session_id' - 'stripe_checkout_session_ids';
+  v_extra := '{}'::jsonb;
+  IF p_extra IS NOT NULL AND jsonb_typeof(p_extra) = 'object' THEN
+    IF p_extra ? 'stripe_destination_account'
+       AND jsonb_typeof(p_extra->'stripe_destination_account') IS DISTINCT FROM 'null' THEN
+      v_extra := v_extra || jsonb_build_object(
+        'stripe_destination_account', p_extra->'stripe_destination_account'
+      );
+    END IF;
+    IF p_extra ? 'payout_status'
+       AND jsonb_typeof(p_extra->'payout_status') IS DISTINCT FROM 'null' THEN
+      v_extra := v_extra || jsonb_build_object('payout_status', p_extra->'payout_status');
+    END IF;
+  END IF;
 
   UPDATE public.service_invoices
   SET amount_paid = v_new_paid,

@@ -40,11 +40,7 @@ SQL
 
 $P -c "BEGIN" -f "$MIG" -c "COMMIT" >/tmp/pay963-mig.log 2>&1 || { echo "FAIL migration"; cat /tmp/pay963-mig.log; exit 1; }
 
-check "backfill row" "$($P -At -c "SELECT session_id || ':' || amount FROM public.service_invoice_stripe_payments WHERE invoice_id = 265501")" "cs_test_backfill:100.00"
-
-# Replay of the backfilled session must not add the amount again.
-REPLAY=$($P -At -c "SELECT (public.apply_service_invoice_stripe_payment(265501, 'cs_test_backfill', 100, 'usd', '{}'::jsonb)->>'claimed') || ':' || (SELECT amount_paid FROM public.service_invoices WHERE id = 265501)")
-check "backfill replay is not a second credit" "$REPLAY" "false:100.00"
+check "no backfill rows" "$($P -At -c "SELECT count(*) FROM public.service_invoice_stripe_payments")" "0"
 
 # Stand-in for draft #390's 000962 guard. auth.uid() is null here, which is
 # the service role. The claim function must still be able to write the
@@ -102,9 +98,48 @@ fb=$(grep -cx false /tmp/pay963-race-b.txt || true)
 check "race returns one claim and one replay" "$((ta + tb)) $((fa + fb))" "1 1"
 
 OVER=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265502, 'cs_test_over', 900, 'usd', '{}'::jsonb)->>'reason'")
-check "amount over the balance is refused" "$OVER" "amount_exceeds_balance"
+OVER_AMT=$($P -At -c "SELECT amount_paid FROM public.service_invoices WHERE id = 265502")
+check "amount over the balance is recorded and not credited" "$OVER $OVER_AMT" "overpaid_not_credited 650.00"
 CUR=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265502, 'cs_test_eur', 10, 'eur', '{}'::jsonb)->>'reason'")
 check "non-usd currency is refused" "$CUR" "currency_mismatch"
+
+# $585 session after $100 cash on a $585 invoice: record once, do not credit.
+$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (265503, 2655, 'partially_paid', 585, 100, '{\"line_items\":[{\"description\":\"Link\"}],\"payment_url\":\"https://checkout.stripe.com/c/pay/cs_test_585\"}'::jsonb)" >/dev/null
+OVER585=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585', 585, 'usd', '{\"payment_url\":\"https://evil.example\"}'::jsonb)->>'reason'")
+REPLAY585=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265503, 'cs_test_585', 585, 'usd', '{}'::jsonb)->>'notify'")
+STATE585=$($P -At <<'SQL'
+SELECT amount_paid::text
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->>'reason')
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->>'amount')
+  || ':' || (invoice_data->'stripe_checkout_session_conflict'->>'balanceDue')
+  || ':' || COALESCE(invoice_data->>'payment_url', '')
+  || ':' || (
+    SELECT outcome || ':' || count(*)::text
+    FROM public.service_invoice_stripe_payments
+    WHERE session_id = 'cs_test_585'
+    GROUP BY outcome
+  )
+FROM public.service_invoices
+WHERE id = 265503;
+SQL
+)
+check "585 overpayment reason" "$OVER585" "overpaid_not_credited"
+check "585 replay does not notify again" "$REPLAY585" "false"
+check "585 ledger and conflict" "$STATE585" "100.00:overpaid:585.00:485.00:https://checkout.stripe.com/c/pay/cs_test_585:overpaid_not_credited:1"
+
+# Older $1,175 session larger than the remaining balance is recorded once.
+$P -c "INSERT INTO public.service_invoices (id, organization_id, status, total, amount_paid, invoice_data) VALUES (23, 2655, 'partially_paid', 1500, 400, '{\"line_items\":[{\"description\":\"Older\"}]}'::jsonb)" >/dev/null
+BIG=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(23, 'cs_test_1175', 1175, 'usd', '{}'::jsonb)->>'reason'")
+BIG2=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(23, 'cs_test_1175', 1175, 'usd', '{}'::jsonb)->>'notify'")
+BIGSTATE=$($P -At -c "SELECT amount_paid || ':' || (SELECT count(*) FROM public.service_invoice_stripe_payments WHERE invoice_id = 23) FROM public.service_invoices WHERE id = 23")
+check "1175 overpayment reason" "$BIG" "overpaid_not_credited"
+check "1175 replay is silent" "$BIG2" "false"
+check "1175 amount stays 400 with one row" "$BIGSTATE" "400.00:1"
+
+EXTRA=$($P -At -c "SELECT public.apply_service_invoice_stripe_payment(265502, 'cs_test_allow', 10, 'usd', '{\"payment_url\":\"https://evil.example\",\"stripe_destination_account\":\"acct_123\",\"payout_status\":\"held\"}'::jsonb)->>'claimed'")
+EXTRA_URL=$($P -At -c "SELECT COALESCE(invoice_data->>'payment_url', '') || ':' || COALESCE(invoice_data->>'stripe_destination_account', '') || ':' || COALESCE(invoice_data->>'payout_status', '') FROM public.service_invoices WHERE id = 265502")
+check "allowlisted extra still credits" "$EXTRA" "true"
+check "p_extra cannot set payment_url" "$EXTRA_URL" ":acct_123:held"
 
 # Flip to a signed-in uid. The guard installed above now rejects client edits.
 $P <<'SQL' >/dev/null
@@ -125,7 +160,7 @@ check "client cannot execute the claim function" "$(printf '%s' "$EXEC" | grep -
 $P -c "BEGIN" -f "$RB" -c "COMMIT" >/tmp/pay963-rb.log 2>&1 || { echo "FAIL rollback"; cat /tmp/pay963-rb.log; exit 1; }
 check "rollback drops the table" "$($P -At -c "SELECT to_regclass('public.service_invoice_stripe_payments') IS NULL")" "t"
 check "rollback drops the function" "$($P -At -c "SELECT to_regprocedure('public.apply_service_invoice_stripe_payment(bigint, text, numeric, text, jsonb)') IS NULL")" "t"
-check "rollback keeps the invoice amount" "$($P -At -c "SELECT amount_paid FROM public.service_invoices WHERE id = 265502")" "650.00"
+check "rollback keeps the invoice amount" "$($P -At -c "SELECT amount_paid FROM public.service_invoices WHERE id = 265502")" "660.00"
 
 dropdb --if-exists "$DB" >/dev/null 2>&1 || true
 if [ "$fail" = 0 ]; then echo "ALL PASS"; else echo "FAILED"; exit 1; fi

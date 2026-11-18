@@ -4,6 +4,7 @@
  * Anything else is expired before a replacement is created, so two links
  * cannot both be payable.
  */
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { existingPaidAmount, money2, parseInvoiceData } from './apply-invoice-payment.ts';
 import { expireCheckoutSession } from './stripe-pay.ts';
 import { retrieveCheckoutSession } from './stripe-subscription.ts';
@@ -48,6 +49,33 @@ export type PayLinkPlan =
 
 type LoadCheckout = (sessionId: string) => Promise<CheckoutSessionSnapshot | null>;
 type ExpireCheckout = (sessionId: string) => Promise<CheckoutExpireClass>;
+
+/**
+ * True when this Checkout session was credited. The payments table is the
+ * source of truth; stripe_session_id is only the latest credited id.
+ * outcome overpaid_not_credited is not a credit, so the link stays blocked.
+ */
+export async function checkoutSessionWasCredited(
+  client: SupabaseClient | null,
+  invoice: PayLinkInvoice,
+  sessionId: string
+): Promise<boolean> {
+  if (sessionAlreadyCredited(invoice, sessionId)) return true;
+  const id = String(sessionId || '').trim();
+  if (!client || !id) return false;
+  try {
+    const { data, error } = await client
+      .from('service_invoice_stripe_payments')
+      .select('outcome')
+      .eq('session_id', id)
+      .maybeSingle();
+    if (error || !data) return false;
+    return String(data.outcome || 'credited') === 'credited';
+  } catch (e) {
+    console.warn('[billing] credited Checkout session lookup failed', e);
+    return false;
+  }
+}
 
 /** True when this Checkout session was already credited on the invoice. */
 export function sessionAlreadyCredited(invoice: PayLinkInvoice, sessionId: string): boolean {

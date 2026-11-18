@@ -50,8 +50,8 @@ import {
   INVOICE_PAY_LINK_UNVERIFIED,
   invoiceAlreadyPaid,
   openPayLink,
+  checkoutSessionWasCredited,
   planInvoicePayLink,
-  sessionAlreadyCredited,
   type CheckoutSessionSnapshot,
 } from '@/lib/billing/invoice-pay-resend';
 /** Same body for a missing invoice and an invoice owned by another shop. */
@@ -239,7 +239,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         payAmount,
         loadCheckout: deps.loadCheckout,
         expireCheckout: deps.expireCheckout,
-        isSessionCredited: (sessionId) => sessionAlreadyCredited(inv, sessionId),
+        isSessionCredited: (sessionId) => checkoutSessionWasCredited(admin, inv, sessionId),
       });
       if (plan.action === 'skip') {
         stripeSkippedReason = plan.reason;

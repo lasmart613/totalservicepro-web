@@ -22,7 +22,11 @@ test('000963 claims a Checkout session in one function and locks the table to th
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
   assert.doesNotMatch(sql, /CREATE POLICY/i);
   assert.match(sql, /REVOKE ALL ON TABLE public\.service_invoice_stripe_payments FROM PUBLIC/);
-  assert.match(sql, /ON CONFLICT \(session_id\) DO NOTHING/);
+  assert.match(sql, /outcome text NOT NULL DEFAULT 'credited'/);
+  assert.match(sql, /overpaid_not_credited/);
+  assert.match(sql, /'reason', 'overpaid'/);
+  assert.match(sql, /stripe_destination_account/);
+  assert.doesNotMatch(sql, /FROM public\.service_invoices si/);
   assert.match(sql, /FOR UPDATE/);
   assert.match(sql, /INSERT INTO public\.service_invoice_stripe_payments/);
   assert.match(sql, /stripe_session_id = v_session/);

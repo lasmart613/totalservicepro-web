@@ -5,6 +5,8 @@ import { retrieveCheckoutSession, StripeSubscriptionError, type StripeObject } f
 import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
 import { VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 
+const CONFIRM_REFUSED = 'This payment could not be applied.';
+
 export const dynamic = 'force-dynamic';
 
 /** Apply a paid Stripe Checkout session onto the TSP invoice. Public: Stripe is the source of truth. */
@@ -52,13 +54,14 @@ async function confirm(sessionId: string, deps: ConfirmDeps = {}) {
       session,
     });
     if (!result.ok) {
+      console.warn('[billing] invoice confirm refused', { reason: result.reason });
       if (result.reason === 'invoice_void') {
         return NextResponse.json(
           { ok: false, voided: true, error: VOIDED_INVOICE_MESSAGE },
           { status: 409 }
         );
       }
-      return NextResponse.json({ ok: false, error: result.reason }, { status: 409 });
+      return NextResponse.json({ ok: false, error: CONFIRM_REFUSED }, { status: 409 });
     }
     return NextResponse.json({ ok: true, ...result.applied });
   } catch (e: unknown) {

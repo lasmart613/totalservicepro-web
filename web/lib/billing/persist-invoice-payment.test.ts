@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { buildInvoicePaymentPatch } from './apply-invoice-payment.ts';
 import {
   applyInvoiceCheckoutSession,
+  INVOICE_PAY_WEBHOOK_STATUS,
   invoiceCheckoutWebhookResult,
   STRIPE_PAYMENT_CONFLICT_KEY,
 } from './persist-invoice-payment.ts';
@@ -41,8 +42,7 @@ function memoryInvoice(initial: Record<string, unknown>) {
   let notes = 0;
   let lastFilter = '';
   let reads = 0;
-  const payments = new Map<string, string>();
-  if (row.stripe_session_id) payments.set(String(row.stripe_session_id), String(row.id));
+  const payments = new Map<string, { invoiceId: string; outcome: 'credited' | 'overpaid_not_credited' }>();
   const writer = {
     rpc(_fn: string, args: Record<string, unknown>) {
       const sessionId = String(args.p_session_id || '');
@@ -53,8 +53,22 @@ function memoryInvoice(initial: Record<string, unknown>) {
       }
       const owner = payments.get(sessionId);
       if (owner) {
-        if (owner !== invoiceId) {
+        if (owner.invoiceId !== invoiceId) {
           return Promise.resolve({ data: { ok: false, reason: 'invoice_mismatch' }, error: null });
+        }
+        if (owner.outcome === 'overpaid_not_credited') {
+          return Promise.resolve({
+            data: {
+              ok: true,
+              claimed: false,
+              overpaid: true,
+              notify: false,
+              reason: 'overpaid_not_credited',
+              status: row.status,
+              amount_paid: row.amount_paid,
+            },
+            error: null,
+          });
         }
         return Promise.resolve({
           data: { ok: true, claimed: false, status: row.status, amount_paid: row.amount_paid },
@@ -80,11 +94,33 @@ function memoryInvoice(initial: Record<string, unknown>) {
         return Promise.resolve({ data: { ok: false, reason: 'different_paid_session' }, error: null });
       }
       if (amount > remaining + 0.01) {
-        return Promise.resolve({ data: { ok: false, reason: 'amount_exceeds_balance' }, error: null });
+        payments.set(sessionId, { invoiceId, outcome: 'overpaid_not_credited' });
+        const data = { ...((row.invoice_data as Record<string, unknown>) || {}) };
+        data.stripe_checkout_session_conflict = {
+          reason: 'overpaid',
+          sessionId,
+          amount,
+          balanceDue: remaining,
+        };
+        row.invoice_data = data;
+        return Promise.resolve({
+          data: {
+            ok: true,
+            claimed: false,
+            overpaid: true,
+            notify: true,
+            reason: 'overpaid_not_credited',
+            status: row.status,
+            amount_paid: paid,
+            session_amount: amount,
+            balance_due: remaining,
+          },
+          error: null,
+        });
       }
       const newPaid = Math.round((paid + amount) * 100) / 100;
       const status = total > 0 && newPaid + 0.004 >= total ? 'paid' : 'partially_paid';
-      payments.set(sessionId, invoiceId);
+      payments.set(sessionId, { invoiceId, outcome: 'credited' });
       creditWrites += 1;
       row.amount_paid = newPaid;
       row.status = status;
@@ -267,17 +303,50 @@ test('replaying earlier sessions does not credit them again', async () => {
   assert.equal(db.notes, 2);
 });
 
-test('a charge larger than the balance due is not credited', async () => {
-  const db = memoryInvoice(openInvoice({ total: 100, amount_paid: 40 }));
-  const result = await applyInvoiceCheckoutSession({
-    writer: db.writer as never,
-    session: paidSession('cs_test_over', '44', 9000),
-  });
-  assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.reason, 'amount_exceeds_balance');
+test('a $585 Checkout after a $100 cash payment is recorded once and not credited', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 585,
+      amount_paid: 100,
+      status: 'partially_paid',
+      invoice_data: {
+        line_items: [{ description: 'Service' }],
+        payment_url: 'https://checkout.stripe.com/c/pay/cs_test_585',
+        stripe_checkout_session_id: 'cs_test_585',
+      },
+    })
+  );
+  const session = paidSession('cs_test_585', '44', 58500);
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  const replay = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok, false);
+  assert.equal(replay.ok, false);
+  if (!first.ok) assert.equal(first.reason, 'overpaid_not_credited');
+  if (!replay.ok) assert.equal(replay.reason, 'overpaid_not_credited');
+  assert.equal(db.row.amount_paid, 100);
+  assert.equal(db.row.status, 'partially_paid');
   assert.equal(db.creditWrites, 0);
-  assert.equal(db.notes, 0);
-  assert.equal(db.row.amount_paid, 40);
+  assert.equal(db.notes, 1);
+  const conflict = (db.row.invoice_data as { stripe_checkout_session_conflict?: Record<string, unknown> })
+    .stripe_checkout_session_conflict;
+  assert.equal(conflict?.reason, 'overpaid');
+  assert.equal(conflict?.sessionId, 'cs_test_585');
+  assert.equal(conflict?.amount, 585);
+  assert.equal(conflict?.balanceDue, 485);
+  assert.deepEqual((db.row.invoice_data as { line_items?: unknown }).line_items, [{ description: 'Service' }]);
+});
+
+test('replaying an older larger session records the overpayment once and does not credit', async () => {
+  const db = memoryInvoice(openInvoice({ total: 1175, amount_paid: 400, status: 'partially_paid' }));
+  const session = paidSession('cs_test_1175', '44', 117500);
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  const replay = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok, false);
+  assert.equal(replay.ok, false);
+  if (!first.ok) assert.equal(first.reason, 'overpaid_not_credited');
+  assert.equal(db.row.amount_paid, 400);
+  assert.equal(db.creditWrites, 0);
+  assert.equal(db.notes, 1);
 });
 
 test('a different session on an already-paid invoice does not credit again', async () => {
@@ -476,18 +545,9 @@ test('000803 guards stripe_session_id and client invoice edits leave it unchange
     applySrc.indexOf('export function invoiceFullyPaid')
   );
   assert.doesNotMatch(already, /stripe_checkout_session_id/);
-  for (const reason of [
-    'load_failed',
-    'update_failed',
-    'invoice_not_found',
-    'claim_conflict',
-    'not_paid',
-    'payment_claim_unavailable',
-    'amount_exceeds_balance',
-  ]) {
-    assert.equal(invoiceCheckoutWebhookResult(reason)?.status, 500, reason);
+  for (const [reason, status] of Object.entries(INVOICE_PAY_WEBHOOK_STATUS)) {
+    assert.equal(invoiceCheckoutWebhookResult(reason)?.status, status, reason);
   }
-  assert.equal(invoiceCheckoutWebhookResult('invoice_void')?.status, 200);
-  assert.equal(invoiceCheckoutWebhookResult('different_paid_session')?.status, 200);
   assert.equal(invoiceCheckoutWebhookResult('not_invoice_checkout'), null);
+  assert.equal(invoiceCheckoutWebhookResult('unexpected_permanent')?.status, 200);
 });
