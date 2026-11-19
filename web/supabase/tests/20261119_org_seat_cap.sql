@@ -315,8 +315,8 @@ BEGIN
   END IF;
   IF has_function_privilege('authenticated', 'public.org_seat_limit(bigint)', 'EXECUTE')
      OR has_function_privilege('anon', 'public.org_seat_limit(bigint)', 'EXECUTE')
-     OR has_function_privilege('authenticated', 'public.org_membership_seat_allows(bigint,uuid)', 'EXECUTE')
-     OR has_function_privilege('anon', 'public.org_membership_seat_allows(bigint,uuid)', 'EXECUTE') THEN
+     OR has_function_privilege('authenticated', 'public.org_membership_seat_allows(bigint,uuid,boolean)', 'EXECUTE')
+     OR has_function_privilege('anon', 'public.org_membership_seat_allows(bigint,uuid,boolean)', 'EXECUTE') THEN
     RAISE EXCEPTION 'seat helpers are executable by client roles';
   END IF;
   IF position('org_membership_seat_allows' IN pg_get_functiondef('public.user_profiles_sync_membership()'::regprocedure)) = 0
@@ -339,26 +339,29 @@ BEGIN
   RAISE NOTICE 'ok   under cap: trigger path added the first seat';
 END $$;
 
--- At cap: a second profile write is refused. The first member stays.
+-- At cap, a service-role profile insert (signup metadata, no JWT) keeps the
+-- profile and does not add a seat. The auth.users row is not rolled back.
+INSERT INTO public.user_profiles (id, email, role, organization_id)
+VALUES ('00000000-0000-4000-8000-000000008802', 'second@example.test', 'fse', 8801);
 DO $$
 BEGIN
-  BEGIN
-    INSERT INTO public.user_profiles (id, email, role, organization_id)
-    VALUES ('00000000-0000-4000-8000-000000008802', 'second@example.test', 'fse', 8801);
-    RAISE EXCEPTION 'at cap trigger insert was allowed';
-  EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
-        RAISE EXCEPTION 'trigger seat error was not clear: %', SQLERRM;
-      END IF;
-  END;
   IF pg_temp.members(8801) <> 1 THEN
-    RAISE EXCEPTION 'blocked trigger path changed memberships';
+    RAISE EXCEPTION 'at-cap signup added a membership (count %)', pg_temp.members(8801);
   END IF;
-  IF EXISTS (SELECT 1 FROM public.user_profiles WHERE id = '00000000-0000-4000-8000-000000008802') THEN
-    RAISE EXCEPTION 'blocked profile write was committed';
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE id = '00000000-0000-4000-8000-000000008802'
+      AND organization_id = 8801
+  ) THEN
+    RAISE EXCEPTION 'at-cap signup did not keep the profile';
   END IF;
-  RAISE NOTICE 'ok   at cap: trigger path blocked, existing member kept';
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008802'
+  ) THEN
+    RAISE EXCEPTION 'at-cap signup created a membership';
+  END IF;
+  RAISE NOTICE 'ok   at cap: signup keeps the profile and skips the membership';
 END $$;
 
 -- Already a member: profile write on a full org still updates that row.
@@ -376,44 +379,61 @@ END $$;
 -- Grandfather: three members on a 1-seat org stay. The next add is blocked.
 -- These rows stand in for members who were already there before 000965.
 -- The trigger is off only for that seed; a real apply does not do this.
-ALTER TABLE public.organization_memberships DISABLE TRIGGER organization_memberships_enforce_seat_cap;
+ALTER TABLE public.organization_memberships DISABLE TRIGGER trg_zz_enforce_seat_cap;
 INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES
   ('00000000-0000-4000-8000-000000008821', 8802, 'fse', true),
   ('00000000-0000-4000-8000-000000008822', 8802, 'fse', false),
   ('00000000-0000-4000-8000-000000008823', 8802, 'fse', false);
-ALTER TABLE public.organization_memberships ENABLE TRIGGER organization_memberships_enforce_seat_cap;
+ALTER TABLE public.organization_memberships ENABLE TRIGGER trg_zz_enforce_seat_cap;
+INSERT INTO public.user_profiles (id, email, role, organization_id)
+VALUES ('00000000-0000-4000-8000-000000008824', 'fourth@example.test', 'fse', 8802);
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO public.user_profiles (id, email, role, organization_id)
-    VALUES ('00000000-0000-4000-8000-000000008824', 'fourth@example.test', 'fse', 8802);
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008825', 8802, 'fse', false);
     RAISE EXCEPTION 'over-cap org accepted a new member';
   EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%seat%' THEN
-        RAISE EXCEPTION 'over-cap error was not a seat error: %', SQLERRM;
+    WHEN insufficient_privilege THEN
+      IF SQLERRM ~ '[0-9]' OR SQLERRM ILIKE '%upgrade%' OR SQLERRM ILIKE '%using % of %' THEN
+        RAISE EXCEPTION 'over-cap raw insert leaked the cap: %', SQLERRM;
       END IF;
   END;
   IF pg_temp.members(8802) <> 3 THEN
     RAISE EXCEPTION 'over-cap org lost or gained members (count %)', pg_temp.members(8802);
   END IF;
-  RAISE NOTICE 'ok   over-cap org keeps 3 members and blocks the next add';
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE id = '00000000-0000-4000-8000-000000008824' AND organization_id = 8802
+  ) THEN
+    RAISE EXCEPTION 'over-cap signup profile was not kept';
+  END IF;
+  RAISE NOTICE 'ok   over-cap org keeps 3 members, keeps the new profile, blocks the next seat';
 END $$;
 
--- Complimentary Premium stays at 1: second seat blocked, first kept.
+-- Complimentary Premium stays at 1. The second service-role profile is kept
+-- with no membership. A raw second membership is refused.
 INSERT INTO public.user_profiles (id, email, role, organization_id)
 VALUES ('00000000-0000-4000-8000-000000008831', 'comp@example.test', 'fse', 8803);
+INSERT INTO public.user_profiles (id, email, role, organization_id)
+VALUES ('00000000-0000-4000-8000-000000008832', 'comp2@example.test', 'fse', 8803);
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO public.user_profiles (id, email, role, organization_id)
-    VALUES ('00000000-0000-4000-8000-000000008832', 'comp2@example.test', 'fse', 8803);
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008833', 8803, 'fse', false);
     RAISE EXCEPTION 'complimentary Premium accepted a second seat';
   EXCEPTION
-    WHEN check_violation THEN NULL;
+    WHEN insufficient_privilege THEN NULL;
   END;
   IF pg_temp.members(8803) <> 1 THEN
     RAISE EXCEPTION 'complimentary Premium membership count is %', pg_temp.members(8803);
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE id = '00000000-0000-4000-8000-000000008832' AND organization_id = 8803
+  ) THEN
+    RAISE EXCEPTION 'complimentary Premium did not keep the second profile';
   END IF;
   RAISE NOTICE 'ok   complimentary Premium stays at 1 seat';
 END $$;
@@ -436,6 +456,9 @@ BEGIN
 END $$;
 
 -- Direct insert at cap, with an open invite that would otherwise be allowed.
+-- The trigger fires before RLS and must not name the count or the plan.
+-- membership_insert_allowed, which runs only after that invite is authorized,
+-- still raises the detailed message.
 INSERT INTO public.engineer_invitations (organization_id, email, role, accepted, expires_at)
 VALUES (8801, 'invited@example.test', 'fse', false, now() + interval '7 days');
 SET LOCAL ROLE authenticated;
@@ -444,16 +467,29 @@ SELECT set_config('request.jwt.claim.email', 'invited@example.test', true);
 DO $$
 BEGIN
   BEGIN
+    PERFORM public.membership_insert_allowed(
+      '00000000-0000-4000-8000-000000008850', 8801, 'fse', false);
+    RAISE EXCEPTION 'authorized seat check did not raise';
+  EXCEPTION
+    WHEN check_violation THEN
+      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' OR SQLERRM NOT ILIKE '%upgrade to Team%' THEN
+        RAISE EXCEPTION 'authorized seat message was not detailed: %', SQLERRM;
+      END IF;
+  END;
+  BEGIN
     INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
     VALUES ('00000000-0000-4000-8000-000000008850', 8801, 'fse', false);
     RAISE EXCEPTION 'direct insert at cap was allowed';
   EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
-        RAISE EXCEPTION 'direct insert error was not the seat message: %', SQLERRM;
+    WHEN insufficient_privilege THEN
+      IF SQLERRM ~ '[0-9]' OR SQLERRM ILIKE '%upgrade%' OR SQLERRM ILIKE '%contact us%'
+         OR SQLERRM ILIKE '%team%' OR SQLERRM ILIKE '%using % of %' THEN
+        RAISE EXCEPTION 'direct insert leaked the cap: %', SQLERRM;
       END IF;
+    WHEN check_violation THEN
+      RAISE EXCEPTION 'direct insert raised a counted seat error: %', SQLERRM;
   END;
-  RAISE NOTICE 'ok   at cap: direct insert blocked';
+  RAISE NOTICE 'ok   at cap: direct insert blocked without a count or a plan';
 END $$;
 RESET ROLE;
 DO $$
@@ -463,22 +499,25 @@ BEGIN
   END IF;
 END $$;
 
--- No invite. Under the cap this is an RLS denial (the trigger allows the row,
--- then the policy rejects it). At the cap the BEFORE INSERT trigger runs
--- before RLS and raises the seat error. Either way no row is added.
+-- No invite. Under the cap and at the cap the denial is insufficient_privilege
+-- and neither message names a count or a plan.
 INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
 VALUES (8814, 'Empty for stranger', 'service_company', false, 'free', 'free');
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000008851', true);
 SELECT set_config('request.jwt.claim.email', 'stranger@example.test', true);
 DO $$
+DECLARE
+  open_msg text;
+  full_msg text;
 BEGIN
   BEGIN
     INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
     VALUES ('00000000-0000-4000-8000-000000008851', 8814, 'fse', false);
     RAISE EXCEPTION 'stranger direct insert into an open org was allowed';
   EXCEPTION
-    WHEN insufficient_privilege THEN NULL;
+    WHEN insufficient_privilege THEN
+      open_msg := SQLERRM;
     WHEN check_violation THEN
       RAISE EXCEPTION 'stranger on an open org got a seat error: %', SQLERRM;
   END;
@@ -487,13 +526,25 @@ BEGIN
     VALUES ('00000000-0000-4000-8000-000000008851', 8801, 'fse', false);
     RAISE EXCEPTION 'stranger direct insert into a full org was allowed';
   EXCEPTION
-    WHEN insufficient_privilege THEN NULL;
+    WHEN insufficient_privilege THEN
+      full_msg := SQLERRM;
     WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%seat%' THEN
-        RAISE EXCEPTION 'stranger on a full org was not denied: %', SQLERRM;
-      END IF;
+      RAISE EXCEPTION 'stranger on a full org got a counted seat error: %', SQLERRM;
   END;
-  RAISE NOTICE 'ok   stranger without an invite is denied';
+  IF open_msg IS NULL OR full_msg IS NULL THEN
+    RAISE EXCEPTION 'stranger denial missing (open %, full %)', open_msg, full_msg;
+  END IF;
+  IF open_msg ~ '[0-9]' OR full_msg ~ '[0-9]'
+     OR open_msg ILIKE '%upgrade%' OR full_msg ILIKE '%upgrade%'
+     OR open_msg ILIKE '%contact us%' OR full_msg ILIKE '%contact us%'
+     OR open_msg ILIKE '%team%' OR full_msg ILIKE '%team%'
+     OR open_msg ILIKE '%using % of %' OR full_msg ILIKE '%using % of %' THEN
+    RAISE EXCEPTION 'stranger denial leaked a cap (open %, full %)', open_msg, full_msg;
+  END IF;
+  IF has_function_privilege('authenticated', 'public.organization_memberships_enforce_seat_cap()', 'EXECUTE') THEN
+    RAISE EXCEPTION 'authenticated can execute the seat trigger function';
+  END IF;
+  RAISE NOTICE 'ok   stranger without an invite is denied the same way under and at the cap';
 END $$;
 RESET ROLE;
 DO $$
@@ -550,7 +601,8 @@ BEGIN
   RAISE NOTICE 'ok   under cap: invite trigger path allowed';
 END $$;
 
--- Team: 9 seated, the 10th lands, the 11th is blocked. Message names 10 seats.
+-- Team: 9 seated, the 10th profile lands. An 11th service-role profile is kept
+-- with no membership. A raw 11th membership is refused without naming 10.
 INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
 SELECT (
   '00000000-0000-4000-8000-' || lpad((8300 + g)::text, 12, '0')
@@ -560,22 +612,33 @@ SELECT set_config('request.jwt.claim.sub', '', true);
 SELECT set_config('request.jwt.claim.email', '', true);
 INSERT INTO public.user_profiles (id, email, role, organization_id)
 VALUES ('00000000-0000-4000-8000-000000008310', 'tenth@example.test', 'fse', 8804);
+INSERT INTO public.user_profiles (id, email, role, organization_id)
+VALUES ('00000000-0000-4000-8000-000000008311', 'eleventh@example.test', 'fse', 8804);
 DO $$
 BEGIN
   BEGIN
-    INSERT INTO public.user_profiles (id, email, role, organization_id)
-    VALUES ('00000000-0000-4000-8000-000000008311', 'eleventh@example.test', 'fse', 8804);
-    RAISE EXCEPTION '11th team seat was allowed';
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008312', 8804, 'fse', false);
+    RAISE EXCEPTION '11th team membership was allowed';
   EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 10 of 10 seats%' THEN
-        RAISE EXCEPTION 'team cap message was not clear: %', SQLERRM;
+    WHEN insufficient_privilege THEN
+      IF SQLERRM ~ '[0-9]' OR SQLERRM ILIKE '%contact us%' OR SQLERRM ILIKE '%using % of %' THEN
+        RAISE EXCEPTION '11th membership leaked the cap: %', SQLERRM;
       END IF;
   END;
   IF pg_temp.members(8804) <> 10 THEN
     RAISE EXCEPTION 'team org count is %', pg_temp.members(8804);
   END IF;
-  RAISE NOTICE 'ok   team: 10th allowed, 11th blocked';
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE id = '00000000-0000-4000-8000-000000008311' AND organization_id = 8804
+  ) OR EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008311'
+  ) THEN
+    RAISE EXCEPTION '11th profile was not kept without a membership';
+  END IF;
+  RAISE NOTICE 'ok   team: 10th profile seated, 11th profile kept, raw 11th blocked';
 END $$;
 
 -- Expired invite does not open the direct-insert door (RLS denial, not a seat error).
@@ -610,10 +673,12 @@ BEGIN
     VALUES ('00000000-0000-4000-8000-000000008880', 8801, 'fse', false);
     RAISE EXCEPTION 'raw insert at cap was allowed';
   EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
-        RAISE EXCEPTION 'raw insert error was not the seat message: %', SQLERRM;
+    WHEN insufficient_privilege THEN
+      IF SQLERRM ~ '[0-9]' OR SQLERRM ILIKE '%upgrade%' OR SQLERRM ILIKE '%using % of %' THEN
+        RAISE EXCEPTION 'raw insert leaked the cap: %', SQLERRM;
       END IF;
+    WHEN check_violation THEN
+      RAISE EXCEPTION 'raw insert raised a counted seat error: %', SQLERRM;
   END;
   IF pg_temp.members(8801) <> 1 THEN
     RAISE EXCEPTION 'raw insert changed the full org';
@@ -630,10 +695,12 @@ BEGIN
       '00000000-0000-4000-8000-000000008881', 8801, 'fse', false);
     RAISE EXCEPTION 'set_home_membership at cap was allowed';
   EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
-        RAISE EXCEPTION 'set_home_membership error was not the seat message: %', SQLERRM;
+    WHEN insufficient_privilege THEN
+      IF SQLERRM ~ '[0-9]' OR SQLERRM ILIKE '%upgrade%' OR SQLERRM ILIKE '%using % of %' THEN
+        RAISE EXCEPTION 'set_home_membership leaked the cap: %', SQLERRM;
       END IF;
+    WHEN check_violation THEN
+      RAISE EXCEPTION 'set_home_membership raised a counted seat error: %', SQLERRM;
   END;
   IF pg_temp.members(8801) <> 1 THEN
     RAISE EXCEPTION 'set_home_membership changed the full org';
@@ -655,10 +722,12 @@ BEGIN
     PERFORM public.accept_team_invite(inv);
     RAISE EXCEPTION 'accept_team_invite at cap was allowed';
   EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
-        RAISE EXCEPTION 'accept_team_invite error was not the seat message: %', SQLERRM;
+    WHEN insufficient_privilege THEN
+      IF SQLERRM ~ '[0-9]' OR SQLERRM ILIKE '%upgrade%' OR SQLERRM ILIKE '%using % of %' THEN
+        RAISE EXCEPTION 'accept_team_invite leaked the cap: %', SQLERRM;
       END IF;
+    WHEN check_violation THEN
+      RAISE EXCEPTION 'accept_team_invite raised a counted seat error: %', SQLERRM;
   END;
   IF pg_temp.members(8801) <> 1 THEN
     RAISE EXCEPTION 'accept_team_invite changed the full org';
@@ -666,34 +735,31 @@ BEGIN
   RAISE NOTICE 'ok   at cap: accept_team_invite blocked';
 END $$;
 
--- Directory claim writes the profile first. Service-role profile write inserts
--- a membership and must stop at the cap. The profile row must not move.
+-- Service-role profile update onto a full org keeps the profile and adds no seat.
 SELECT set_config('request.jwt.claim.sub', '', true);
 SELECT set_config('request.jwt.claim.email', '', true);
 INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
 VALUES (8815, 'Directory home', 'service_company', false, 'free', 'free');
 INSERT INTO public.user_profiles (id, email, role, organization_id)
 VALUES ('00000000-0000-4000-8000-000000008883', 'directory@example.test', 'fse', 8815);
+UPDATE public.user_profiles
+SET organization_id = 8801
+WHERE id = '00000000-0000-4000-8000-000000008883';
 DO $$
 BEGIN
-  BEGIN
-    UPDATE public.user_profiles
-    SET organization_id = 8801
-    WHERE id = '00000000-0000-4000-8000-000000008883';
-    RAISE EXCEPTION 'directory-style profile write joined a full org';
-  EXCEPTION
-    WHEN check_violation THEN
-      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
-        RAISE EXCEPTION 'directory profile write error was not the seat message: %', SQLERRM;
-      END IF;
-  END;
   IF pg_temp.members(8801) <> 1 THEN
-    RAISE EXCEPTION 'directory profile write added a member';
+    RAISE EXCEPTION 'service-role profile move added a member';
   END IF;
-  IF (SELECT organization_id FROM public.user_profiles WHERE id = '00000000-0000-4000-8000-000000008883') <> 8815 THEN
-    RAISE EXCEPTION 'blocked directory write moved the profile';
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008883' AND organization_id = 8801
+  ) THEN
+    RAISE EXCEPTION 'service-role profile move created a membership';
   END IF;
-  RAISE NOTICE 'ok   at cap: directory-style profile write blocked';
+  IF (SELECT organization_id FROM public.user_profiles WHERE id = '00000000-0000-4000-8000-000000008883') <> 8801 THEN
+    RAISE EXCEPTION 'service-role profile move did not keep the profile';
+  END IF;
+  RAISE NOTICE 'ok   at cap: service-role profile move keeps the profile and skips the seat';
 END $$;
 
 -- Existing member: ON CONFLICT DO UPDATE still applies on a full org.
@@ -765,7 +831,10 @@ BEGIN
     RAISE EXCEPTION 'concurrent 11th insert committed';
   EXCEPTION
     WHEN OTHERS THEN
-      IF SQLERRM NOT ILIKE '%using 10 of 10 seats%' AND SQLERRM NOT ILIKE '%seat%' THEN
+      IF SQLERRM ILIKE '%using % of %' OR SQLERRM ILIKE '%contact us%' OR SQLERRM ~ '[0-9]' THEN
+        RAISE EXCEPTION 'concurrent insert leaked the cap: %', SQLERRM;
+      END IF;
+      IF SQLERRM NOT ILIKE '%organization membership was not added%' THEN
         RAISE EXCEPTION 'concurrent insert failed for another reason: %', SQLERRM;
       END IF;
       IF clock_timestamp() - started < interval '1 second' THEN
@@ -788,6 +857,105 @@ BEGIN
   RAISE NOTICE 'ok   two sessions at 9/10 finished at 10';
 END $$;
 
+-- Lock order: trg_zz_enforce_seat_cap sorts after trg_guard_clinic_owner_membership.
+-- A claim holds the clinic-owner lock, then inserts (seat lock second).
+-- A direct owner insert must take the clinic-owner lock first too, or the two deadlock.
+CREATE OR REPLACE FUNCTION public.guard_clinic_owner_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $fn$
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tsp.clinic_owner:' || NEW.organization_id::text, 0));
+  RETURN NEW;
+END;
+$fn$;
+DROP TRIGGER IF EXISTS trg_guard_clinic_owner_membership ON public.organization_memberships;
+CREATE TRIGGER trg_guard_clinic_owner_membership
+  BEFORE INSERT ON public.organization_memberships
+  FOR EACH ROW
+  EXECUTE FUNCTION public.guard_clinic_owner_membership();
+
+DO $$
+DECLARE
+  names text;
+BEGIN
+  SELECT string_agg(t.tgname, ',' ORDER BY t.tgname)
+    INTO names
+  FROM pg_trigger t
+  WHERE t.tgrelid = 'public.organization_memberships'::regclass
+    AND NOT t.tgisinternal
+    AND t.tgname IN ('trg_guard_clinic_owner_membership', 'trg_zz_enforce_seat_cap');
+  IF names IS DISTINCT FROM 'trg_guard_clinic_owner_membership,trg_zz_enforce_seat_cap' THEN
+    RAISE EXCEPTION 'seat trigger does not sort after the clinic guard: %', names;
+  END IF;
+  RAISE NOTICE 'ok   seat trigger name sorts after trg_guard_clinic_owner_membership';
+END $$;
+
+INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
+VALUES (8841, 'Lock order', 'service_company', true, 'team', 'team');
+
+SELECT dblink_connect('c1', format('dbname=%s', current_database()));
+SELECT dblink_connect('c2', format('dbname=%s', current_database()));
+SELECT dblink_send_query('c1', $q$
+DO $$
+BEGIN
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tsp.clinic_owner:8841', 0));
+  PERFORM dblink_exec(format('dbname=%s', current_database()),
+    'INSERT INTO public.seat_cap_barrier (id) VALUES (2)');
+  PERFORM pg_sleep(2);
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES ('00000000-0000-4000-8000-000000008421', 8841, 'owner', false);
+END $$;
+$q$);
+DO $$
+DECLARE i integer;
+BEGIN
+  FOR i IN 1..80 LOOP
+    EXIT WHEN EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 2);
+    PERFORM pg_sleep(0.05);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 2) THEN
+    RAISE EXCEPTION 'claim session did not take the clinic-owner lock';
+  END IF;
+END $$;
+DO $$
+DECLARE started timestamptz := clock_timestamp();
+BEGIN
+  BEGIN
+    PERFORM dblink_exec('c2', $q$
+      INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+      VALUES ('00000000-0000-4000-8000-000000008422', 8841, 'owner', false)
+    $q$);
+  EXCEPTION
+    WHEN deadlock_detected THEN
+      RAISE EXCEPTION 'direct owner insert deadlocked with the claim lock';
+    WHEN OTHERS THEN
+      IF SQLERRM ILIKE '%deadlock%' THEN
+        RAISE EXCEPTION 'direct owner insert deadlocked: %', SQLERRM;
+      END IF;
+      RAISE;
+  END;
+  IF clock_timestamp() - started < interval '1 second' THEN
+    RAISE EXCEPTION 'direct insert did not wait for the clinic-owner lock';
+  END IF;
+  RAISE NOTICE 'ok   direct owner insert waited on the clinic-owner lock and did not deadlock';
+END $$;
+SELECT * FROM dblink_get_result('c1') AS r(x text);
+SELECT dblink_disconnect('c1');
+SELECT dblink_disconnect('c2');
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8841) <> 2 THEN
+    RAISE EXCEPTION 'lock-order inserts finished at %',
+      (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8841);
+  END IF;
+  RAISE NOTICE 'ok   claim lock then seat lock, and direct insert, both committed';
+END $$;
+
 -- Rollback restores the live bodies and drops the trigger.
 -- The cap is gone again: a second profile write on a 1-seat org succeeds.
 \i web/supabase/migrations/20261119_000965_org_seat_cap_rollback.sql
@@ -802,12 +970,13 @@ BEGIN
   END IF;
   IF to_regprocedure('public.org_seat_limit(bigint)') IS NOT NULL
      OR to_regprocedure('public.org_membership_seat_allows(bigint,uuid)') IS NOT NULL
+     OR to_regprocedure('public.org_membership_seat_allows(bigint,uuid,boolean)') IS NOT NULL
      OR to_regprocedure('public.organization_memberships_enforce_seat_cap()') IS NOT NULL THEN
     RAISE EXCEPTION 'rollback left seat helpers behind';
   END IF;
   IF EXISTS (
     SELECT 1 FROM pg_trigger
-    WHERE tgname = 'organization_memberships_enforce_seat_cap'
+    WHERE tgname IN ('organization_memberships_enforce_seat_cap', 'trg_zz_enforce_seat_cap')
       AND NOT tgisinternal
   ) THEN
     RAISE EXCEPTION 'rollback left the seat trigger';

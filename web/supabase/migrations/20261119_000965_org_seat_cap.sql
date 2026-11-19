@@ -92,7 +92,14 @@ $function$;
 COMMENT ON FUNCTION public.org_seat_limit(bigint) IS
   '000965: SQL port of lib/org-plan.ts orgSeatLimit. Team/Enterprise 10; Free, Premium, and complimentary Premium 1. NULL if the org row is missing. Expired complimentary (premium_until <= now) is 1 even when the tier name is team.';
 
-CREATE OR REPLACE FUNCTION public.org_membership_seat_allows(p_org bigint, p_user uuid)
+DROP FUNCTION IF EXISTS public.org_membership_seat_allows(bigint, uuid);
+DROP FUNCTION IF EXISTS public.org_membership_seat_allows(bigint, uuid, boolean);
+
+CREATE OR REPLACE FUNCTION public.org_membership_seat_allows(
+  p_org bigint,
+  p_user uuid,
+  p_detailed boolean DEFAULT false
+)
 RETURNS boolean
 LANGUAGE plpgsql
 VOLATILE
@@ -129,26 +136,34 @@ BEGIN
   WHERE m.organization_id = p_org;
 
   IF coalesce(used, 0) >= lim THEN
-    IF lim >= 10 THEN
-      RAISE EXCEPTION 'You''re using % of % seats — contact us for more.', used, lim
+    -- Counts and the plan name are only for a caller who is already allowed
+    -- to add a member (the profile trigger after its auth checks, and
+    -- membership_insert_allowed). The insert trigger passes false so a
+    -- stranger cannot learn how full the org is or which plan it is on.
+    IF p_detailed THEN
+      IF lim >= 10 THEN
+        RAISE EXCEPTION 'You''re using % of % seats — contact us for more.', used, lim
+          USING ERRCODE = 'check_violation';
+      END IF;
+      RAISE EXCEPTION 'You''re using % of % % — upgrade to Team to add more people.',
+        used,
+        lim,
+        CASE WHEN lim = 1 THEN 'seat' ELSE 'seats' END
         USING ERRCODE = 'check_violation';
     END IF;
-    RAISE EXCEPTION 'You''re using % of % % — upgrade to Team to add more people.',
-      used,
-      lim,
-      CASE WHEN lim = 1 THEN 'seat' ELSE 'seats' END
-      USING ERRCODE = 'check_violation';
+    RAISE EXCEPTION 'organization membership was not added'
+      USING ERRCODE = '42501';
   END IF;
 
   RETURN true;
 END;
 $function$;
 
-COMMENT ON FUNCTION public.org_membership_seat_allows(bigint, uuid) IS
-  '000965: true when p_user may gain a new membership in p_org. Raises when the org is missing or already at org_seat_limit. Does not remove anyone.';
+COMMENT ON FUNCTION public.org_membership_seat_allows(bigint, uuid, boolean) IS
+  '000965: true when p_user may gain a new membership in p_org. Raises when the org is missing or already at org_seat_limit. p_detailed names the count and the plan; the insert trigger leaves it false. Does not remove anyone.';
 
 REVOKE ALL ON FUNCTION public.org_seat_limit(bigint) FROM PUBLIC, anon, authenticated;
-REVOKE ALL ON FUNCTION public.org_membership_seat_allows(bigint, uuid) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public.org_membership_seat_allows(bigint, uuid, boolean) FROM PUBLIC, anon, authenticated;
 
 -- One lock per organization for the rest of this transaction. Distinct from
 -- tsp.clinic_owner locks. hashtextextended returns bigint for pg_advisory_xact_lock.
@@ -168,19 +183,24 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('tsp.org_seat:' || NEW.organization_id::text, 0)
   );
-  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.user_id);
+  -- Generic refusal. No member count and no plan name: this runs before RLS.
+  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.user_id, false);
   RETURN NEW;
 END;
 $function$;
 
 COMMENT ON FUNCTION public.organization_memberships_enforce_seat_cap() IS
-  '000965 BEFORE INSERT. Locks the org for this transaction, then refuses a new member at org_seat_limit. An existing member passes so ON CONFLICT DO UPDATE still applies. Does not remove anyone.';
+  '000965 BEFORE INSERT. Locks the org for this transaction, then refuses a new member at org_seat_limit with a generic error. An existing member passes so ON CONFLICT DO UPDATE still applies. Does not remove anyone. Trigger name trg_zz_enforce_seat_cap sorts after trg_guard_clinic_owner_membership so both paths take the clinic-owner lock first.';
 
-REVOKE ALL ON FUNCTION public.organization_memberships_enforce_seat_cap() FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.organization_memberships_enforce_seat_cap() TO authenticated, service_role;
+REVOKE ALL ON FUNCTION public.organization_memberships_enforce_seat_cap() FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.organization_memberships_enforce_seat_cap() TO service_role;
 
+-- Name sorts after trg_guard_clinic_owner_membership. A direct owner insert
+-- then takes the clinic-owner lock first and the seat lock second, the same
+-- order claim_clinic_owner_invite and claim_directory_listing_invite already use.
 DROP TRIGGER IF EXISTS organization_memberships_enforce_seat_cap ON public.organization_memberships;
-CREATE TRIGGER organization_memberships_enforce_seat_cap
+DROP TRIGGER IF EXISTS trg_zz_enforce_seat_cap ON public.organization_memberships;
+CREATE TRIGGER trg_zz_enforce_seat_cap
   BEFORE INSERT ON public.organization_memberships
   FOR EACH ROW
   EXECUTE FUNCTION public.organization_memberships_enforce_seat_cap();
@@ -227,9 +247,22 @@ BEGIN
       WHERE m.user_id = NEW.id
         AND m.is_home IS TRUE
     ) INTO home;
-    -- Friendly error before the insert. The BEFORE INSERT trigger is the
-    -- locked check; this call raises the same seat message and never returns false.
-    PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id);
+    -- Signup (auth.users insert → profile, no JWT) must not be rolled back
+    -- when the invited org is already full. Keep the profile, skip the seat.
+    BEGIN
+      PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id, true);
+    EXCEPTION
+      WHEN check_violation THEN
+        IF SQLERRM ILIKE '%could not be checked%' THEN
+          RAISE;
+        END IF;
+        RAISE NOTICE '000965: seat cap full; kept profile % without a new membership in org %',
+          NEW.id, NEW.organization_id;
+        IF NEW.active_organization_id IS NULL THEN
+          NEW.active_organization_id := NEW.organization_id;
+        END IF;
+        RETURN NEW;
+    END;
     INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
     VALUES (NEW.id, NEW.organization_id, grant_role, home)
     ON CONFLICT (user_id, organization_id) DO UPDATE
@@ -328,7 +361,7 @@ BEGIN
     ELSE grant_role
   END;
 
-  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id);
+  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id, true);
   INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
   VALUES (NEW.id, NEW.organization_id, grant_role, false)
   ON CONFLICT (user_id, organization_id) DO UPDATE
@@ -401,7 +434,7 @@ AS $function$
     -- Seat check only after the insert would otherwise be allowed, so a
     -- stranger still gets the RLS denial and not a seat-count error.
     -- Raises when the org is at cap or the cap cannot be read.
-    THEN public.org_membership_seat_allows(p_organization_id, p_user_id)
+    THEN public.org_membership_seat_allows(p_organization_id, p_user_id, true)
     ELSE false
   END;
 $function$;

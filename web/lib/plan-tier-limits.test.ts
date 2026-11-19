@@ -219,13 +219,17 @@ test('seat cap is enforced on invites, claims and membership adds', () => {
   assert.match(mig, /CREATE OR REPLACE FUNCTION public\.user_profiles_sync_membership/);
   assert.match(mig, /CREATE OR REPLACE FUNCTION public\.membership_insert_allowed/);
   assert.doesNotMatch(mig, /DELETE\s+FROM\s+public\.organization_memberships/i);
+  assert.match(mig, /CREATE TRIGGER trg_zz_enforce_seat_cap/);
   assert.match(mig, /BEFORE INSERT ON public\.organization_memberships/);
   assert.match(mig, /pg_advisory_xact_lock/);
+  assert.match(mig, /REVOKE ALL ON FUNCTION public\.organization_memberships_enforce_seat_cap\(\) FROM PUBLIC, anon, authenticated/);
+  assert.doesNotMatch(mig, /GRANT EXECUTE ON FUNCTION public\.organization_memberships_enforce_seat_cap\(\) TO authenticated/);
   assert.match(mig, /^BEGIN;/m);
   assert.match(mig, /^COMMIT;/m);
   assert.doesNotMatch(mig, /IF NOT public\.org_membership_seat_allows/);
   const rollback = src('../supabase/migrations/20261119_000965_org_seat_cap_rollback.sql');
   assert.match(rollback, /DROP TRIGGER IF EXISTS organization_memberships_enforce_seat_cap/);
+  assert.match(rollback, /DROP TRIGGER IF EXISTS trg_zz_enforce_seat_cap/);
   assert.match(rollback, /DROP FUNCTION IF EXISTS public\.organization_memberships_enforce_seat_cap/);
   assert.match(rollback, /^BEGIN;/m);
   assert.match(rollback, /^COMMIT;/m);

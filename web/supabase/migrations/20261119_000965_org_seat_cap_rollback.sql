@@ -20,6 +20,7 @@ BEGIN;
 SET LOCAL lock_timeout = '5s';
 
 DROP TRIGGER IF EXISTS organization_memberships_enforce_seat_cap ON public.organization_memberships;
+DROP TRIGGER IF EXISTS trg_zz_enforce_seat_cap ON public.organization_memberships;
 DROP FUNCTION IF EXISTS public.organization_memberships_enforce_seat_cap();
 
 CREATE OR REPLACE FUNCTION public.user_profiles_sync_membership()
@@ -233,6 +234,7 @@ $function$;
 COMMENT ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) IS
   'Client membership insert: own shop at the founder role for that org type (never platform admin), or an unexpired unaccepted invite whose role matches after admin is mapped to company_admin. NULL expires_at is open only when created_at is within 14 days. Invite inserts cannot set is_home.';
 
+DROP FUNCTION IF EXISTS public.org_membership_seat_allows(bigint, uuid, boolean);
 DROP FUNCTION IF EXISTS public.org_membership_seat_allows(bigint, uuid);
 DROP FUNCTION IF EXISTS public.org_seat_limit(bigint);
 
