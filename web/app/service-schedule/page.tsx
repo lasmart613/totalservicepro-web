@@ -1,7 +1,7 @@
 'use client';
 import { useFormatDate } from '@/lib/use-format-date';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -58,6 +58,11 @@ import { catalogChoiceLabel, mergedManufacturerOption, mergedModelOption } from 
 import { listManufacturerChoices, listModelChoices, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
+import { loadCustomerEquipment } from '@/lib/customer-equipment';
+import {
+  scheduleEquipmentQuery,
+  ticketPatchFromSavedEquipment,
+} from '@/lib/customer-equipment-record';
 import { DEFAULT_EQUIPMENT_TYPE, EQUIPMENT_TYPES, equipmentTypeOrDefault, type EquipmentType } from '@/lib/equipment-types';
 import {
   OTHER_MANUFACTURER,
@@ -175,6 +180,8 @@ export default function ServiceSchedule() {
 
   const supabase = getSupabaseClient();
   const router = useRouter();
+  const presetStarted = useRef(false);
+  const [presetQuery, setPresetQuery] = useState<{ customerId: string; equipmentId: string } | null>(null);
   const catalog = useEquipmentCatalog(supabase);
   const manufacturers = useMemo(
     () => listManufacturerChoices({ ...catalog, equipmentType: form.equipment_type }),
@@ -434,6 +441,65 @@ export default function ServiceSchedule() {
   useEffect(() => {
     refreshCustomers(orgId);
   }, [orgId, refreshCustomers]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    setPresetQuery(scheduleEquipmentQuery({ get: (key) => params.get(key) }));
+  }, []);
+
+  useEffect(() => {
+    const preset = presetQuery;
+    if (presetStarted.current || !preset || customers.length === 0) return;
+    const match = customers.find((row) => String(row.id) === preset.customerId);
+    if (!match) return;
+    presetStarted.current = true;
+    setShowNew(true);
+    void (async () => {
+      await applyCustomer(match);
+      if (!preset.equipmentId) return;
+      const list = await loadCustomerEquipment(supabase, match.id);
+      const row = list.find((item) => String(item.id) === preset.equipmentId);
+      if (!row) return;
+      const loaded = await loadCustomerLocations(supabase, match.id);
+      const locs = loaded.unavailable ? [] : loaded.locations;
+      const patch = ticketPatchFromSavedEquipment({
+        equipment: row,
+        locations: locs,
+        current: {
+          customer_address: match.address,
+          customer_city: match.city,
+          customer_state: match.state,
+          customer_zip: match.zip,
+          customer_phone: match.phone,
+          customer_contact: match.contact,
+        },
+        officePhone: match.officePhone,
+      });
+      setTicketEquipmentId(String(row.id));
+      if (patch.selectedLocationId) setSelectedLocationId(patch.selectedLocationId);
+      setForm((prev) => ({
+        ...prev,
+        ...(patch.equipment_type ? { equipment_type: patch.equipment_type } : {}),
+        equipment_make: patch.equipment_make,
+        equipment_make_other: '',
+        equipment_model: patch.equipment_model,
+        equipment_model_other: '',
+        serial_number: patch.serial_number,
+        ...(patch.address
+          ? {
+              customer_address: patch.address.customer_address,
+              customer_city: patch.address.customer_city,
+              customer_state: patch.address.customer_state,
+              customer_zip: patch.address.customer_zip,
+              customer_phone: patch.address.customer_phone,
+              customer_contact: patch.address.customer_contact,
+            }
+          : {}),
+      }));
+    })();
+    // applyCustomer is recreated each render; the ref makes this run once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customers, presetQuery, supabase]);
 
   useEffect(() => {
     refreshAssignees(orgId, userId);
@@ -1522,16 +1588,36 @@ export default function ServiceSchedule() {
                     setTicketEquipmentId('');
                     return;
                   }
+                  const office = customers.find((item) => String(item.id) === String(customerOrgId))?.officePhone;
                   setTicketEquipmentId(String(row.id));
-                  setForm((prev) => ({
-                    ...prev,
-                    ...(row.equipment_type ? { equipment_type: equipmentTypeOrDefault(row.equipment_type) } : {}),
-                    equipment_make: row.manufacturer,
-                    equipment_make_other: '',
-                    equipment_model: row.model,
-                    equipment_model_other: '',
-                    serial_number: row.serial_number,
-                  }));
+                  setForm((prev) => {
+                    const patch = ticketPatchFromSavedEquipment({
+                      equipment: row,
+                      locations: customerLocations,
+                      current: prev,
+                      officePhone: office,
+                    });
+                    if (patch.selectedLocationId) setSelectedLocationId(patch.selectedLocationId);
+                    return {
+                      ...prev,
+                      ...(patch.equipment_type ? { equipment_type: patch.equipment_type } : {}),
+                      equipment_make: patch.equipment_make,
+                      equipment_make_other: '',
+                      equipment_model: patch.equipment_model,
+                      equipment_model_other: '',
+                      serial_number: patch.serial_number,
+                      ...(patch.address
+                        ? {
+                            customer_address: patch.address.customer_address,
+                            customer_city: patch.address.customer_city,
+                            customer_state: patch.address.customer_state,
+                            customer_zip: patch.address.customer_zip,
+                            customer_phone: patch.address.customer_phone,
+                            customer_contact: patch.address.customer_contact,
+                          }
+                        : {}),
+                    };
+                  });
                 }}
                 t={t}
                 idPrefix="ticket-eq"

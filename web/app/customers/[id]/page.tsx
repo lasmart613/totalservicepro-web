@@ -13,8 +13,13 @@ import {
 } from '@/lib/roles';
 import { ownerOrgTypeLabel } from '@/lib/org-types';
 import { toast } from 'sonner';
-import { displayModelName, displayModelText } from '@/lib/model-display';
+import { displayModelText } from '@/lib/model-display';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
+import { CustomerEquipmentSection } from '@/components/CustomerEquipmentSection';
+import {
+  loadCustomerEquipmentRecords,
+  type CustomerEquipmentRecord,
+} from '@/lib/customer-equipment-record';
 import { CustomerLocationsPanel } from '@/components/CustomerLocationsPanel';
 import {
   directoryFormFromOrg,
@@ -38,7 +43,6 @@ import {
 } from '@/lib/customer-contacts';
 import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
 import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
-import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
 import { useT } from '@/lib/fa/locale';
 import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
@@ -74,20 +78,6 @@ type CustomerOrg = {
   threads_url?: string | null;
 };
 
-type EquipmentRow = {
-  id: number | string;
-  manufacturer?: string | null;
-  model?: string | null;
-  serial_number?: string | null;
-  status?: string | null;
-  equipment_type?: string | null;
-  name?: string | null;
-  notes?: string | null;
-  next_pm_due?: string | null;
-  customer_organization_id?: number | string | null;
-  organization_id?: number | string | null;
-};
-
 type ReportRow = {
   id: string;
   report_number?: string | null;
@@ -98,6 +88,7 @@ type ReportRow = {
   equipment_name?: string | null;
   model_type?: string | null;
   serial_number?: string | null;
+  equipment_id?: string | number | null;
   service_engineer?: string | null;
   customer_name?: string | null;
 };
@@ -110,14 +101,6 @@ type ContactRow = {
   phone?: string | null;
   email?: string | null;
   is_primary?: boolean | null;
-};
-
-const BRAND_ICONS: Record<string, string> = {
-  Lumenis: '🔬',
-  Candela: '⚡',
-  Cynosure: '💡',
-  Cutera: '🌟',
-  'Solta Medical': '✨',
 };
 
 function initials(name?: string | null): string {
@@ -157,7 +140,7 @@ export default function CustomerProfilePage() {
   const [userOrgType, setUserOrgType] = useState<string | null>(null);
 
   const [customer, setCustomer] = useState<CustomerOrg | null>(null);
-  const [equipment, setEquipment] = useState<EquipmentRow[]>([]);
+  const [equipment, setEquipment] = useState<CustomerEquipmentRecord[]>([]);
   const [reports, setReports] = useState<ReportRow[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
   const [tab, setTab] = useState<TabKey>('overview');
@@ -358,30 +341,7 @@ export default function CustomerProfilePage() {
 
   async function loadEquipment(customerId: string) {
     // equipment.customer_organization_id is the customer link. There is no organization_id column.
-    try {
-      const { data, error } = await supabase
-        .from('equipment')
-        .select('*')
-        .eq('customer_organization_id', customerId)
-        .order('manufacturer', { ascending: true })
-        .limit(200);
-
-      if (!error) {
-        setEquipment((data as EquipmentRow[]) || []);
-        return;
-      }
-
-      // Minimal select if * fails
-      const r3 = await supabase
-        .from('equipment')
-        .select('id, manufacturer, model, serial_number, notes, customer_organization_id')
-        .eq('customer_organization_id', customerId)
-        .limit(200);
-      setEquipment((r3.data as EquipmentRow[]) || []);
-    } catch (e) {
-      console.warn('equipment load failed', e);
-      setEquipment([]);
-    }
+    setEquipment(await loadCustomerEquipmentRecords(supabase, customerId));
   }
 
   async function loadReports(
@@ -864,78 +824,16 @@ export default function CustomerProfilePage() {
         )}
 
         {/* Equipment */}
-        {tab === 'equipment' && (
-          <div className="section">
-            <div className="flex items-center gap-2 mb-3">
-              <span>🔬</span>
-              <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--gold)] flex-1">
-                Equipment Inventory
-              </h2>
-            </div>
-            {equipment.length === 0 ? (
-              <p className="text-sm text-[var(--text3)] py-2">
-                No equipment on record for this customer.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {equipment.map((eq) => {
-                  const histCount = reports.filter(
-                    (r) =>
-                      (eq.id != null && String((r as any).equipment_id) === String(eq.id)) ||
-                      (eq.serial_number &&
-                        r.serial_number &&
-                        String(r.serial_number).toLowerCase() ===
-                          String(eq.serial_number).toLowerCase())
-                  ).length;
-                  return (
-                  <div key={eq.id}>
-                  <div
-                    className="flex items-center gap-3 p-3 rounded-xl bg-[var(--surface2)] border border-[var(--border)]"
-                  >
-                    <div className="text-xl w-9 text-center shrink-0">
-                      {BRAND_ICONS[eq.manufacturer || ''] || '⚙️'}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-bold text-sm truncate">
-                        {[eq.manufacturer, displayModelName(eq.model || eq.name)].filter(Boolean).join(' ') ||
-                          'Equipment'}
-                      </div>
-                      <div className="text-xs text-[var(--text3)] mt-0.5">
-                        SN: {eq.serial_number || 'N/A'}
-                        {eq.equipment_type ? ` · ${eq.equipment_type}` : ''}
-                        {histCount > 0 ? ` · ${histCount} report${histCount === 1 ? '' : 's'}` : ''}
-                      </div>
-                      {eq.next_pm_due && (
-                        <div className="text-xs text-amber-400 mt-0.5">
-                          PM due: {fmtDate(eq.next_pm_due)}
-                        </div>
-                      )}
-                    </div>
-                    <span
-                      className={`text-[10px] font-bold px-2 py-1 rounded-full border shrink-0 ${statusClass(
-                        eq.status || 'active'
-                      )}`}
-                    >
-                      {eq.status || 'Active'}
-                    </span>
-                  </div>
-                  {userOrgType === 'service_company' && eq.id != null && (
-                    <LockedHistoryPanel
-                      supabase={supabase}
-                      ownerOrgId={id}
-                      equipmentId={eq.id}
-                      clinicName={customer?.name}
-                    />
-                  )}
-                  </div>
-                  );
-                })}
-              </div>
-            )}
-            <p className="text-xs text-[var(--text3)] mt-3">
-              Add equipment via Service Report or the facility&apos;s My Lasers.
-            </p>
-          </div>
+        {tab === 'equipment' && customer && (
+          <CustomerEquipmentSection
+            customerId={customer.id}
+            customerName={customer.name || ''}
+            canEdit={canEdit}
+            rows={equipment}
+            reports={reports}
+            showLockedHistory={userOrgType === 'service_company'}
+            onRows={setEquipment}
+          />
         )}
 
         {/* Service History */}
