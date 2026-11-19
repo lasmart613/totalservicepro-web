@@ -199,6 +199,151 @@ BEGIN
 END $$;
 ROLLBACK;
 
+-- Over cap (3 of 1) uses the same stranger text. Seed past the cap with the
+-- trigger off; a real apply does not do this.
+INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
+VALUES (8803, 'Over', 'service_company', false, 'free', 'free');
+ALTER TABLE public.organization_memberships DISABLE TRIGGER trg_zz_enforce_seat_cap;
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+SELECT (
+  '00000000-0000-4000-8000-' || lpad((8300 + g)::text, 12, '0')
+)::uuid, 8803, 'fse', false
+FROM generate_series(1, 3) g;
+ALTER TABLE public.organization_memberships ENABLE TRIGGER trg_zz_enforce_seat_cap;
+
+BEGIN;
+SET LOCAL ROLE authenticated;
+SELECT set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000008851', true);
+SELECT set_config('request.jwt.claim.email', 'stranger@example.test', true);
+DO $$
+DECLARE
+  open_msg text;
+  full_msg text;
+  over_msg text;
+BEGIN
+  BEGIN
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008851', 8814, 'fse', false);
+    RAISE EXCEPTION 'open insert allowed';
+  EXCEPTION WHEN insufficient_privilege THEN open_msg := SQLERRM;
+  END;
+  BEGIN
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008851', 8801, 'fse', false);
+    RAISE EXCEPTION 'full insert allowed';
+  EXCEPTION WHEN insufficient_privilege THEN full_msg := SQLERRM;
+  END;
+  BEGIN
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008851', 8803, 'fse', false);
+    RAISE EXCEPTION 'over insert allowed';
+  EXCEPTION WHEN insufficient_privilege THEN over_msg := SQLERRM;
+  END;
+  IF open_msg IS NULL OR full_msg IS DISTINCT FROM open_msg OR over_msg IS DISTINCT FROM open_msg THEN
+    RAISE EXCEPTION 'stranger text differs (open %, full %, over %)', open_msg, full_msg, over_msg;
+  END IF;
+  RAISE NOTICE 'ok   stranger text is identical under, at, and over the cap';
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8803) <> 3
+     OR (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8814) <> 0
+     OR (SELECT count(*) FROM public.organization_memberships WHERE user_id = '00000000-0000-4000-8000-000000008851') <> 0 THEN
+    RAISE EXCEPTION 'stranger insert changed a membership count';
+  END IF;
+END $$;
+ROLLBACK;
+
+-- Creator rejoin races a service-role insert that holds the 10th seat.
+-- The profile trigger's own check runs before the lock and can see 9.
+-- The insert trigger must still stop the creator. End state is exactly 10.
+INSERT INTO public.organizations (id, name, type, created_by, is_premium, subscription_tier, plan) VALUES
+  (8842, 'Race team', 'service_company', '00000000-0000-4000-8000-000000008840', true, 'team', 'team'),
+  (8843, 'Creator home', 'service_company', '00000000-0000-4000-8000-000000008840', false, 'free', 'free');
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+SELECT (
+  '00000000-0000-4000-8000-' || lpad((8400 + g)::text, 12, '0')
+)::uuid, 8842, 'fse', false
+FROM generate_series(1, 9) g;
+SELECT set_config('request.jwt.claim.sub', '', true);
+INSERT INTO public.user_profiles (id, email, role, organization_id)
+VALUES ('00000000-0000-4000-8000-000000008840', 'creator@example.test', 'fse', 8843);
+
+CREATE EXTENSION IF NOT EXISTS dblink;
+CREATE TABLE IF NOT EXISTS public.seat_cap_barrier (id integer PRIMARY KEY);
+SELECT dblink_connect('c1', format('dbname=%s', current_database()));
+SELECT dblink_connect('c2', format('dbname=%s', current_database()));
+SELECT dblink_send_query('c1', $q$
+DO $$
+BEGIN
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES ('00000000-0000-4000-8000-000000008410', 8842, 'fse', false);
+  PERFORM dblink_exec(format('dbname=%s', current_database()),
+    'INSERT INTO public.seat_cap_barrier (id) VALUES (3)');
+  PERFORM pg_sleep(2);
+END $$;
+$q$);
+DO $$
+DECLARE i integer;
+BEGIN
+  FOR i IN 1..80 LOOP
+    EXIT WHEN EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 3);
+    PERFORM pg_sleep(0.05);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 3) THEN
+    RAISE EXCEPTION 'service-role insert did not take the seat lock';
+  END IF;
+END $$;
+DO $$
+DECLARE started timestamptz := clock_timestamp();
+BEGIN
+  BEGIN
+    PERFORM dblink_exec('c2', $q$
+      DO $b$
+      BEGIN
+        PERFORM set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000008840', true);
+        PERFORM set_config('request.jwt.claim.email', 'creator@example.test', true);
+        UPDATE public.user_profiles
+        SET organization_id = 8842, active_organization_id = 8842
+        WHERE id = '00000000-0000-4000-8000-000000008840';
+      END
+      $b$;
+    $q$);
+    RAISE EXCEPTION 'creator rejoin committed while the 10th seat was open';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLERRM ILIKE '%creator rejoin committed%' THEN
+        RAISE;
+      END IF;
+      IF clock_timestamp() - started < interval '1 second' THEN
+        RAISE EXCEPTION 'creator rejoin did not wait for the seat lock (%): %',
+          clock_timestamp() - started, SQLERRM;
+      END IF;
+  END;
+  RAISE NOTICE 'ok   creator rejoin waited, then was refused';
+END $$;
+SELECT * FROM dblink_get_result('c1') AS r(x text);
+SELECT dblink_disconnect('c1');
+SELECT dblink_disconnect('c2');
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8842) <> 10 THEN
+    RAISE EXCEPTION 'creator race finished at %',
+      (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8842);
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008840' AND organization_id = 8842
+  ) THEN
+    RAISE EXCEPTION 'creator was seated on the full org';
+  END IF;
+  IF (SELECT organization_id FROM public.user_profiles WHERE id = '00000000-0000-4000-8000-000000008840') <> 8843 THEN
+    RAISE EXCEPTION 'creator profile moved onto the full org';
+  END IF;
+  RAISE NOTICE 'ok   creator rejoin race ended at exactly 10';
+END $$;
+
 -- Rollback of 000966 restores the 000965 update behavior: the profile moves
 -- and no membership is added.
 \i web/supabase/migrations/20261119_000966_seat_cap_followups_rollback.sql

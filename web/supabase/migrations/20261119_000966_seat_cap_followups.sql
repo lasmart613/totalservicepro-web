@@ -35,13 +35,22 @@ BEGIN
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('tsp.org_seat:' || NEW.organization_id::text, 0)
   );
-  -- An authenticated caller who is not allowed to insert gets the same
-  -- row-level denial whether the org is full or empty. membership_insert_allowed
-  -- returns false for that caller and raises the detailed seat message only
-  -- after the caller is allowed to add someone. Service role (auth.uid()
-  -- null) bypasses RLS, so it still hits the generic refusal below.
+  -- An authenticated caller who is not allowed to insert still takes this
+  -- lock and the seat check. Row-level security does not apply inside a
+  -- SECURITY DEFINER writer (the profile trigger inserts as its owner), so
+  -- returning NEW without the check let a creator rejoin a full org.
+  -- When the org is full, raise the same text row-level security uses, so a
+  -- stranger sees identical bytes under the cap and at the cap. When a seat
+  -- is free, return NEW and let row-level security deny a stranger.
   IF auth.uid() IS NOT NULL
      AND NOT public.membership_insert_allowed(NEW.user_id, NEW.organization_id, NEW.role, NEW.is_home) THEN
+    BEGIN
+      PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.user_id, false);
+    EXCEPTION
+      WHEN insufficient_privilege THEN
+        RAISE EXCEPTION 'new row violates row-level security policy for table "organization_memberships"'
+          USING ERRCODE = '42501';
+    END;
     RETURN NEW;
   END IF;
   PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.user_id, false);
@@ -50,7 +59,7 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.organization_memberships_enforce_seat_cap() IS
-  '000966 BEFORE INSERT. Locks the org, then refuses a new member at org_seat_limit. An authenticated caller who fails membership_insert_allowed is left for row-level security, so a stranger sees the same denial on a full org and an open one. Service role still gets a generic refusal with no count and no plan.';
+  '000966 BEFORE INSERT. Locks the org, then refuses a new member at org_seat_limit. An authenticated caller who fails membership_insert_allowed still takes that lock: a full org raises the row-level security text, a free seat returns NEW. Service role still gets a generic refusal with no count and no plan.';
 
 CREATE OR REPLACE FUNCTION public.user_profiles_sync_membership()
 RETURNS trigger

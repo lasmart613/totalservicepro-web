@@ -192,11 +192,11 @@ async function seatCapRaceResult(
   organizationId: number | string,
   userId: string | null | undefined,
   error: { message?: string; code?: string } | null
-): Promise<{ ok: false; error: string; seatLimited: true } | null> {
+): Promise<{ ok: false; error: string; seatLimited: boolean } | null> {
   if (!isSeatCapDbError(error)) return null;
   const again = await orgSeatCheck(admin, organizationId, userId);
   if (!again.ok) return { ok: false, error: again.error, seatLimited: true };
-  return { ok: false, error: seatLimitMessage(again.limit, again.limit), seatLimited: true };
+  return { ok: false, error: 'That seat was just taken. Try again.', seatLimited: false };
 }
 
 export async function upsertMembership(
