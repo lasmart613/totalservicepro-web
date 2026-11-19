@@ -1,11 +1,11 @@
--- Local proof for 20261119_000959_customer_equipment_record.sql and its rollback.
+-- Local proof for 20261119_000964_customer_equipment_record.sql and its rollback.
 -- Empty Postgres scratch database only. Never a live database.
 -- Fixture orgs are 9301, 9304, and 9309. Live orgs 4, 153, 154, 1005, 2616,
 -- 5509, 5515, and 5516 are refused.
 --
 --   createdb equipment_record_proof
 --   psql "postgresql:///equipment_record_proof" -v ON_ERROR_STOP=1 \
---     -f path/to/web/supabase/tests/20261119_customer_equipment_record.sql
+--     -f path/to/web/supabase/tests/20261119_000964_customer_equipment_record.sql
 --   dropdb equipment_record_proof
 \set ON_ERROR_STOP on
 
@@ -51,7 +51,7 @@ CREATE TABLE public.locations (
   organization_id bigint REFERENCES public.organizations(id),
   name text NOT NULL
 );
--- The existing customer unit. New columns are added by 000959, not a new table.
+-- The existing customer unit. New columns are added by 000964, not a new table.
 CREATE TABLE public.equipment (
   id bigint PRIMARY KEY,
   customer_organization_id bigint REFERENCES public.organizations(id),
@@ -148,8 +148,8 @@ BEGIN
   END IF;
 END $$;
 
-\ir ../migrations/20261119_000959_customer_equipment_record.sql
-\ir ../migrations/20261119_000959_customer_equipment_record.sql
+\ir ../migrations/20261119_000964_customer_equipment_record.sql
+\ir ../migrations/20261119_000964_customer_equipment_record.sql
 
 DO $$
 DECLARE
@@ -250,7 +250,7 @@ BEGIN
   RAISE NOTICE 'PASS soft-remove keeps ticket and report links';
 END $$;
 
-\ir ../migrations/20261119_000959_customer_equipment_record_rollback.sql
+\ir ../migrations/20261119_000964_customer_equipment_record_rollback.sql
 
 DO $$
 BEGIN
@@ -259,7 +259,7 @@ BEGIN
     WHERE table_schema = 'public' AND table_name = 'equipment'
       AND column_name IN ('install_date', 'warranty_or_contract', 'removed_at')
   ) THEN
-    RAISE EXCEPTION 'FAIL rollback left a 000959 column';
+    RAISE EXCEPTION 'FAIL rollback left a 000964 column';
   END IF;
   IF (SELECT count(*) FROM public.equipment WHERE id = 1) <> 1 THEN
     RAISE EXCEPTION 'FAIL rollback removed the equipment row';

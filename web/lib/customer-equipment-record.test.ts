@@ -352,7 +352,7 @@ test('customer record reuses EquipmentCascadeFields and the new ticket form pref
   const section = readFileSync(join(here, '../components/CustomerEquipmentSection.tsx'), 'utf8');
   const schedule = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
   const migration = readFileSync(
-    join(here, '../supabase/migrations/20261119_000959_customer_equipment_record.sql'),
+    join(here, '../supabase/migrations/20261119_000964_customer_equipment_record.sql'),
     'utf8'
   );
   assert.match(page, /CustomerEquipmentSection/);
