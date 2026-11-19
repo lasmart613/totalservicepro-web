@@ -4,18 +4,32 @@
  * APP_MAIL_BCC is an optional blind copy for development and ops.
  * It is off unless the variable is set to one non-empty, valid email
  * address (surrounding whitespace is trimmed). Unset, blank, and invalid
- * values add no copy. Blank and invalid values log a warning that does
- * not include the value.
+ * values add no copy. Blank and invalid values log one warning per process
+ * that does not include the value.
  * The address is only added as bcc. It is never written into to or cc.
  *
  * Do not log the message body, the API key, or the BCC address from here.
  */
 
-const MAILBOX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+/**
+ * One address Resend can accept: a dot-atom local part and a hostname of
+ * at least two labels. Display names, lists, mailto:, and comments do not match.
+ * Empty local segments (a leading, trailing, or doubled dot) are rejected
+ * separately because the local class itself allows ".".
+ */
+const MAILBOX =
+  /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+$/;
 
 /** Static text so a bad APP_MAIL_BCC can never be written into the log. */
 export const OPS_BCC_IGNORED_WARNING =
   'APP_MAIL_BCC is set but blank or not a valid email; outgoing mail will not include a blind copy.';
+
+let ignoredBccWarned = false;
+
+/** Tests only. Production logs the invalid APP_MAIL_BCC warning once per process. */
+export function resetOpsBccIgnoredWarning(): void {
+  ignoredBccWarned = false;
+}
 
 type EnvLike = {
   APP_MAIL_BCC?: string | undefined;
@@ -49,7 +63,15 @@ function bareMailbox(value: string): string {
   return (wrapped ? wrapped[1] : value).trim().toLowerCase();
 }
 
+function isSingleMailbox(value: string): boolean {
+  if (!MAILBOX.test(value)) return false;
+  const local = value.slice(0, value.indexOf('@'));
+  return local.split('.').every((part) => part.length > 0);
+}
+
 function warnIgnoredMailBcc(): void {
+  if (ignoredBccWarned) return;
+  ignoredBccWarned = true;
   console.warn(OPS_BCC_IGNORED_WARNING);
 }
 
@@ -62,7 +84,7 @@ export function opsBccAddress(env?: EnvLike): string | null {
   const raw = source?.APP_MAIL_BCC;
   if (raw == null) return null;
   const trimmed = String(raw).trim();
-  if (!trimmed || !MAILBOX.test(trimmed)) {
+  if (!trimmed || !isSingleMailbox(trimmed)) {
     warnIgnoredMailBcc();
     return null;
   }
@@ -71,7 +93,9 @@ export function opsBccAddress(env?: EnvLike): string | null {
 
 /**
  * Copy of a Resend payload with the ops address on bcc when it is not
- * already a recipient. to, cc, from, and reply_to are left as given.
+ * already a recipient. The check uses the bare mailbox, case-insensitive,
+ * against to, cc, and any bcc already present. to, cc, from, and reply_to
+ * are left as given.
  * When the copy is off, the payload is returned unchanged.
  */
 export function withOpsBcc<T extends Record<string, unknown>>(message: T, env?: EnvLike): T {
@@ -80,7 +104,7 @@ export function withOpsBcc<T extends Record<string, unknown>>(message: T, env?: 
   const already = new Set(
     [...mailboxList(message.to), ...mailboxList(message.cc), ...mailboxList(message.bcc)].map(bareMailbox)
   );
-  if (already.has(bcc.toLowerCase())) return message;
+  if (already.has(bareMailbox(bcc))) return message;
   const prior = mailboxList(message.bcc);
   return { ...message, bcc: [...prior, bcc] };
 }
