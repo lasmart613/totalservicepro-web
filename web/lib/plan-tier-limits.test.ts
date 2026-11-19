@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { orgSeatLimit, seatAddBlocked, seatLimitMessage, SOLO_SEAT_LIMIT, TEAM_SEAT_LIMIT } from './org-plan.ts';
-import { orgSeatCheck, upsertMembership } from './org-membership-server.ts';
+import { inviteSeatLimitMessage, orgSeatLimit, seatAddBlocked, seatLimitMessage, SOLO_SEAT_LIMIT, TEAM_SEAT_LIMIT } from './org-plan.ts';
+import { orgInviteSeatCheck, orgSeatCheck, upsertMembership } from './org-membership-server.ts';
 import {
   FREE_LISTING_PHOTO_LIMIT,
   PAID_LISTING_PHOTO_LIMIT,
@@ -15,13 +15,23 @@ import {
 const src = (rel: string) => readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
 
 // ---------- seats ----------
-function fakeAdmin(org: Record<string, unknown> | null, members: string[], inserts: unknown[] = []) {
+function fakeAdmin(
+  org: Record<string, unknown> | null,
+  members: string[],
+  inserts: unknown[] = [],
+  invites: Array<Record<string, unknown>> = [],
+  errors: { org?: boolean; members?: boolean; invites?: boolean; emails?: boolean } = {},
+  memberEmails: Record<string, string> = {}
+) {
   return {
     from(table: string) {
       const q: any = {
         select: () => q,
         eq: () => q,
-        maybeSingle: async () => ({ data: table === 'organizations' ? org : null, error: null }),
+        maybeSingle: async () => {
+          if (table === 'organizations' && errors.org) return { data: null, error: { message: 'org read failed' } };
+          return { data: table === 'organizations' ? org : null, error: null };
+        },
         insert: async (row: unknown) => {
           inserts.push(row);
           return { error: null };
@@ -29,13 +39,35 @@ function fakeAdmin(org: Record<string, unknown> | null, members: string[], inser
         delete: () => {
           throw new Error('seat code must never delete');
         },
-        then: (resolve: any) =>
-          resolve({ data: table === 'organization_memberships' ? members.map((user_id) => ({ user_id })) : [], error: null }),
+        then: (resolve: any) => {
+          if (table === 'organization_memberships' && errors.members) {
+            return resolve({ data: null, error: { message: 'member read failed' } });
+          }
+          if (table === 'engineer_invitations' && errors.invites) {
+            return resolve({ data: null, error: { message: 'invite read failed' } });
+          }
+          const data =
+            table === 'organization_memberships'
+              ? members.map((user_id) => ({ user_id }))
+              : table === 'engineer_invitations'
+                ? invites
+                : [];
+          return resolve({ data, error: null });
+        },
       };
       return q;
     },
     async rpc() {
       return { error: null };
+    },
+    auth: {
+      admin: {
+        async getUserById(id: string) {
+          if (errors.emails) return { data: { user: null }, error: { message: 'auth down' } };
+          const email = memberEmails[id] || `${id}@members.invalid`;
+          return { data: { user: { id, email } }, error: null };
+        },
+      },
     },
   } as any;
 }
@@ -78,10 +110,132 @@ test('over-cap org keeps members and only loses new adds; nothing is removed', a
   }
 });
 
+test('invite seat check counts open invites and fails closed', async () => {
+  const free = { is_premium: false, subscription_tier: 'free', plan: 'free' };
+  const open = {
+    email: 'pending@example.test',
+    accepted: false,
+    expires_at: '2099-01-01T00:00:00.000Z',
+    created_at: '2026-11-01T00:00:00.000Z',
+  };
+  const fresh = await orgInviteSeatCheck(fakeAdmin(free, [], []), 8801, 'new@example.test');
+  assert.equal(fresh.ok, true);
+
+  const memberFull = await orgInviteSeatCheck(fakeAdmin(free, ['member-1'], []), 8801, 'new@example.test');
+  assert.equal(memberFull.ok, false);
+  if (!memberFull.ok) {
+    assert.equal(memberFull.status, 403);
+    assert.match(memberFull.error, /1 of 1 seat — upgrade to Team/);
+    assert.doesNotMatch(memberFull.error, /pending invites/);
+  }
+
+  const inviteFull = await orgInviteSeatCheck(fakeAdmin(free, [], [], [open]), 8801, 'new@example.test');
+  assert.equal(inviteFull.ok, false);
+  if (!inviteFull.ok) {
+    assert.equal(inviteFull.status, 403);
+    assert.match(inviteFull.error, /including pending invites/);
+    assert.equal(inviteFull.error, inviteSeatLimitMessage(1, 1, 1));
+  }
+
+  const resend = await orgInviteSeatCheck(fakeAdmin(free, [], [], [open]), 8801, 'pending@example.test');
+  assert.equal(resend.ok, true, 'resending an open invite must not take another seat');
+
+  const expired = { ...open, email: 'old@example.test', expires_at: '2000-01-01T00:00:00.000Z' };
+  const accepted = { ...open, email: 'done@example.test', accepted: true };
+  const recentNullExpiry = {
+    email: 'null-exp@example.test',
+    accepted: false,
+    expires_at: null,
+    created_at: new Date().toISOString(),
+  };
+  const staleNullExpiry = {
+    email: 'stale@example.test',
+    accepted: false,
+    expires_at: null,
+    created_at: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  assert.equal(
+    (await orgInviteSeatCheck(fakeAdmin(free, [], [], [expired, accepted, staleNullExpiry]), 8801, 'new@example.test')).ok,
+    true
+  );
+  const nullExpiryFull = await orgInviteSeatCheck(fakeAdmin(free, [], [], [recentNullExpiry]), 8801, 'new@example.test');
+  assert.equal(nullExpiryFull.ok, false);
+
+  const comp = {
+    is_premium: true,
+    subscription_tier: 'free',
+    plan: 'free',
+    premium_until: '2099-01-01T00:00:00.000Z',
+    premium_grant: 'complimentary_signup',
+  };
+  assert.equal((await orgInviteSeatCheck(fakeAdmin(comp, ['owner'], []), 8803, 'new@example.test')).ok, false);
+  assert.equal(orgSeatLimit(comp), 1);
+
+  const team = { is_premium: true, subscription_tier: 'team', plan: 'team' };
+  const nine = Array.from({ length: 9 }, (_, i) => `m${i}`);
+  assert.equal((await orgInviteSeatCheck(fakeAdmin(team, nine, [], [open]), 8804, 'new@example.test')).ok, false);
+  assert.equal((await orgInviteSeatCheck(fakeAdmin(team, nine, [], [open]), 8804, 'pending@example.test')).ok, true);
+  // An open invite for someone who is already a member does not take a second seat.
+  const memberInviteAllowed = await orgInviteSeatCheck(
+    fakeAdmin(team, nine, [], [open], {}, { m0: 'pending@example.test' }),
+    8804,
+    'new@example.test'
+  );
+  assert.equal(memberInviteAllowed.ok, true);
+  if (memberInviteAllowed.ok) assert.equal(memberInviteAllowed.used, 9);
+  const memberOwnInvite = await orgInviteSeatCheck(
+    fakeAdmin(free, ['member-1'], [], [open], {}, { 'member-1': 'pending@example.test' }),
+    8801,
+    'new@example.test'
+  );
+  assert.equal(memberOwnInvite.ok, false);
+  if (!memberOwnInvite.ok) {
+    assert.equal(memberOwnInvite.status, 403);
+    assert.doesNotMatch(memberOwnInvite.error, /pending invites/);
+  }
+  const emailDown = await orgInviteSeatCheck(
+    fakeAdmin(free, ['member-1'], [], [open], { emails: true }),
+    8801,
+    'new@example.test'
+  );
+  assert.equal(emailDown.ok, false);
+  if (!emailDown.ok) assert.equal(emailDown.status, 503);
+
+  for (const errors of [{ org: true }, { members: true }, { invites: true }]) {
+    const failed = await orgInviteSeatCheck(fakeAdmin(free, [], [], [], errors), 8801, 'new@example.test');
+    assert.equal(failed.ok, false);
+    if (!failed.ok) assert.equal(failed.status, 503);
+  }
+  const missing = await orgInviteSeatCheck(fakeAdmin(null, [], []), 8801, 'new@example.test');
+  assert.equal(missing.ok, false);
+});
+
 test('seat cap is enforced on invites, claims and membership adds', () => {
   const invite = src('../app/api/team/invite/route.ts');
-  assert.match(invite, /\(deps\.seatCheck \?\? orgSeatCheck\)\(admin, orgId/);
+  assert.match(invite, /\(deps\.seatCheck \?\? orgInviteSeatCheck\)\(admin, orgId/);
   assert.match(invite, /seat_limited/);
+  const mig = src('../supabase/migrations/20261119_000965_org_seat_cap.sql');
+  assert.match(mig, /org_membership_seat_allows/);
+  assert.match(mig, /CREATE OR REPLACE FUNCTION public\.user_profiles_sync_membership/);
+  assert.match(mig, /CREATE OR REPLACE FUNCTION public\.membership_insert_allowed/);
+  assert.doesNotMatch(mig, /DELETE\s+FROM\s+public\.organization_memberships/i);
+  assert.match(mig, /CREATE TRIGGER trg_zz_enforce_seat_cap/);
+  assert.match(mig, /BEFORE INSERT ON public\.organization_memberships/);
+  assert.match(mig, /pg_advisory_xact_lock/);
+  assert.match(mig, /REVOKE ALL ON FUNCTION public\.organization_memberships_enforce_seat_cap\(\) FROM PUBLIC, anon, authenticated/);
+  assert.doesNotMatch(mig, /GRANT EXECUTE ON FUNCTION public\.organization_memberships_enforce_seat_cap\(\) TO authenticated/);
+  assert.match(mig, /^BEGIN;/m);
+  assert.match(mig, /^COMMIT;/m);
+  assert.doesNotMatch(mig, /IF NOT public\.org_membership_seat_allows/);
+  const rollback = src('../supabase/migrations/20261119_000965_org_seat_cap_rollback.sql');
+  assert.match(rollback, /DROP TRIGGER IF EXISTS organization_memberships_enforce_seat_cap/);
+  assert.match(rollback, /DROP TRIGGER IF EXISTS trg_zz_enforce_seat_cap/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public\.organization_memberships_enforce_seat_cap/);
+  assert.match(rollback, /^BEGIN;/m);
+  assert.match(rollback, /^COMMIT;/m);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public\.org_seat_limit/);
+  assert.match(rollback, /Founder and create-org use set_home_membership/);
+  assert.doesNotMatch(rollback, /org_membership_seat_allows\(NEW\.organization_id/);
   const claim = src('../app/api/team/claim/route.ts');
   assert.match(claim, /orgSeatCheck\(admin, decision\.add\.organizationId, user\.id\)/);
   const server = src('./org-membership-server.ts');

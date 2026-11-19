@@ -213,3 +213,15 @@ export function seatLimitMessage(used: number, limit: number): string {
     ? `You're using ${n} of ${limit} ${word} — contact us for more.`
     : `You're using ${n} of ${limit} ${word} — upgrade to Team to add more people.`;
 }
+
+/**
+ * Invite creation counts members and open invites as seats in use.
+ * When any of those seats are still-pending invites, say so.
+ */
+export function inviteSeatLimitMessage(used: number, limit: number, openInvites: number): string {
+  const n = Math.max(0, Number(used) || 0);
+  const word = limit === 1 ? 'seat' : 'seats';
+  const pending = Math.max(0, Number(openInvites) || 0) > 0 ? ', including pending invites' : '';
+  const tail = limit >= TEAM_SEAT_LIMIT ? 'contact us for more.' : 'upgrade to Team to add more people.';
+  return `You're using ${n} of ${limit} ${word}${pending} — ${tail}`;
+}
