@@ -16,6 +16,7 @@
  *   DIRECTORY_BLOCKED_RECIPIENTS optional comma list never emailed (Larry's inbox is always blocked)
  *   DIRECTORY_MIN_RESPONSE_MS    optional, default 450 (step-1 answers are padded to this + up to 150 ms jitter)
  *   RESEND_API_KEY               review notice (same key the app uses)
+ *   APP_MAIL_BCC                 optional blind copy of the review notice. Off unless set to one valid email.
  *   DIRECTORY_REVIEW_INBOX       review notice recipient (no default; unset = no notice)
  *   DIRECTORY_NOTICE_FROM        optional sender, default Medical Repair Network <contact@medicalrepairnetwork.com>
  *   DIRECTORY_REVIEW_URL         optional, default https://repairplanet.net/admin/god/directory

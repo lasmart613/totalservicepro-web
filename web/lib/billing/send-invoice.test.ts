@@ -3,7 +3,6 @@ import test, { describe } from 'node:test';
 import { NextRequest } from 'next/server';
 import { DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR, resetDocumentSendRateLimit } from './send-rate-limit.ts';
 import { runSendInvoice } from '../../app/api/billing/send-invoice/route.ts';
-import { DEFAULT_OPS_BCC_EMAIL } from '../mail/outgoing-mail.ts';
 
 const CLINIC = 'clinic@cedar.test';
 const SHOP = 'Cedar Laser Service';
@@ -474,7 +473,7 @@ describe('send invoice', { concurrency: false }, () => {
         assert.match(mailed.from || '', /Total Service Pro|contact@medicalrepairnetwork.com/);
         assert.deepEqual(mailed.to, [CLINIC]);
         assert.equal(mailed.cc, undefined);
-        assert.deepEqual(mailed.bcc, [DEFAULT_OPS_BCC_EMAIL]);
+        assert.equal(mailed.bcc, undefined);
         assert.equal(mailed.reply_to, 'shop@cedar.test');
         const html = mailed.html || '';
         const header = html.slice(0, html.indexOf('Customer / Bill To'));
@@ -552,14 +551,14 @@ describe('send invoice', { concurrency: false }, () => {
         assert.equal(json.emailSent, true);
         assert.equal(json.to, CLINIC);
         assert.deepEqual(json.cc, ['Office@Clinic.test', 'boss@clinic.test']);
-        assert.equal(JSON.stringify(json).includes(DEFAULT_OPS_BCC_EMAIL), false);
+        assert.equal(JSON.stringify(json).toLowerCase().includes('fieldservicetotalservice@gmail.com'), false);
         assert.equal(sent.length, 1);
         const message = sent[0];
         assert.deepEqual(message.to, [CLINIC]);
         assert.deepEqual(message.cc, ['Office@Clinic.test', 'boss@clinic.test']);
-        assert.deepEqual(message.bcc, [DEFAULT_OPS_BCC_EMAIL]);
+        assert.equal(message.bcc, undefined);
         assert.equal(message.reply_to, 'shop@cedar.test');
-        assert.equal(String(message.from).includes(DEFAULT_OPS_BCC_EMAIL), false);
+        assert.equal(String(message.from).toLowerCase().includes('fieldservicetotalservice@gmail.com'), false);
         assert.equal(db.updates.length, 1);
         const patch = db.updates[0].patch;
         assert.deepEqual(Object.keys(patch), ['invoice_data']);
