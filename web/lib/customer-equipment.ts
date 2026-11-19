@@ -17,10 +17,15 @@ export type CustomerEquipment = {
   manufacturer: string;
   model: string;
   serial_number: string;
+  /** Customer location when the column is present. Null when unassigned or not migrated yet. */
+  location_id: number | string | null;
 };
 
-/** Only these columns are read. notes, service_notes, photo_url and room stay out. */
-export const CUSTOMER_EQUIPMENT_COLUMNS = 'id, equipment_type, manufacturer, model, serial_number';
+/** Picker columns. notes, service_notes, photo_url and room stay out. */
+export const CUSTOMER_EQUIPMENT_COLUMNS =
+  'id, equipment_type, manufacturer, model, serial_number, location_id, removed_at';
+const NO_REMOVED_COLUMNS = 'id, equipment_type, manufacturer, model, serial_number, location_id';
+const NO_LOCATION_COLUMNS = 'id, equipment_type, manufacturer, model, serial_number';
 const LEGACY_COLUMNS = 'id, manufacturer, model, serial_number';
 export const NEW_EQUIPMENT_VALUE = '__new__';
 
@@ -35,14 +40,22 @@ function missingTypeColumn(err: any): boolean {
   return err?.code === '42703' || /equipment_type/i.test(m);
 }
 
+function namedColumnMissing(err: any, name: string): boolean {
+  const text = `${err?.code || ''} ${err?.message || ''}`;
+  if (!new RegExp(`\\b${name}\\b`, 'i').test(text)) return false;
+  return /42703|PGRST204|column|schema cache|does not exist/i.test(text);
+}
+
 export function toCustomerEquipment(row: any): CustomerEquipment | null {
   if (!row || row.id == null) return null;
+  if (row.removed_at) return null;
   return {
     id: row.id,
     equipment_type: normalizeEquipmentType(row.equipment_type),
     manufacturer: clean(row.manufacturer),
     model: clean(row.model),
     serial_number: clean(row.serial_number),
+    location_id: row.location_id == null || row.location_id === '' ? null : row.location_id,
   };
 }
 
@@ -57,16 +70,15 @@ export async function loadCustomerEquipment(
   customerOrgId: string | number | null | undefined
 ): Promise<CustomerEquipment[]> {
   if (customerOrgId == null || customerOrgId === '') return [];
-  const run = (cols: string) =>
-    client
-      .from('equipment')
-      .select(cols)
-      .eq('customer_organization_id', customerOrgId)
-      .order('manufacturer', { ascending: true })
-      .order('model', { ascending: true })
-      .limit(200);
+  const run = (cols: string) => {
+    let q = client.from('equipment').select(cols).eq('customer_organization_id', customerOrgId);
+    if (cols.includes('removed_at') && typeof q.is === 'function') q = q.is('removed_at', null);
+    return q.order('manufacturer', { ascending: true }).order('model', { ascending: true }).limit(200);
+  };
   try {
     let res = await run(CUSTOMER_EQUIPMENT_COLUMNS);
+    if (res.error && namedColumnMissing(res.error, 'removed_at')) res = await run(NO_REMOVED_COLUMNS);
+    if (res.error && namedColumnMissing(res.error, 'location_id')) res = await run(NO_LOCATION_COLUMNS);
     if (res.error && missingTypeColumn(res.error)) res = await run(LEGACY_COLUMNS);
     if (res.error) {
       console.warn('loadCustomerEquipment', res.error);

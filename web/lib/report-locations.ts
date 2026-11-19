@@ -190,21 +190,27 @@ export function shouldClearEquipmentSelection(
 
 /** Remember a missing equipment.location_id so later customer picks skip that select. */
 let equipmentLocationIdMissing = false;
+let equipmentRemovedAtMissing = false;
 
 export function resetEquipmentLocationProbe(): void {
   equipmentLocationIdMissing = false;
+  equipmentRemovedAtMissing = false;
+}
+
+function missingNamedColumn(error: { message?: string; code?: string } | null | undefined, name: string): boolean {
+  if (!error) return false;
+  const text = `${error.code || ''} ${error.message || ''}`;
+  if (!new RegExp(`\\b${name}\\b`, 'i').test(text)) return false;
+  return /42703|PGRST204|column|schema cache|does not exist/i.test(text);
 }
 
 function missingLocationColumn(error?: { message?: string; code?: string } | null): boolean {
-  if (!error) return false;
-  const code = String(error.code || '');
-  const text = `${code} ${error.message || ''}`;
-  if (code === '42703' || code === 'PGRST204' || /PGRST204/i.test(text)) return true;
-  return /location_id/i.test(text) && /column|schema cache|does not exist|42703/i.test(text);
+  return missingNamedColumn(error, 'location_id');
 }
 
 function normalizeEquipment(row: Record<string, unknown> | null | undefined): ReportEquipmentRow | null {
   if (!row || row.id == null || row.id === '') return null;
+  if (row.removed_at) return null;
   const locationId = row.location_id;
   return {
     id: row.id as string | number,
@@ -222,21 +228,25 @@ export async function loadCustomerEquipment(
   customerId: string | number | null | undefined
 ): Promise<ReportEquipmentRow[]> {
   if (customerId == null || customerId === '') return [];
-  const full = 'id, manufacturer, model, serial_number, location_id, customer_organization_id';
+  const withLocation = equipmentRemovedAtMissing
+    ? 'id, manufacturer, model, serial_number, location_id, customer_organization_id'
+    : 'id, manufacturer, model, serial_number, location_id, customer_organization_id, removed_at';
   const safe = 'id, manufacturer, model, serial_number, customer_organization_id';
+  const query = (columns: string) =>
+    supabase.from('equipment').select(columns).eq('customer_organization_id', customerId).limit(200);
   try {
-    let res = await supabase
-      .from('equipment')
-      .select(equipmentLocationIdMissing ? safe : full)
-      .eq('customer_organization_id', customerId)
-      .limit(200);
+    let res = await query(equipmentLocationIdMissing ? safe : withLocation);
+    if (res?.error && missingNamedColumn(res.error, 'removed_at')) {
+      equipmentRemovedAtMissing = true;
+      res = await query(
+        equipmentLocationIdMissing
+          ? safe
+          : 'id, manufacturer, model, serial_number, location_id, customer_organization_id'
+      );
+    }
     if (res?.error && missingLocationColumn(res.error)) {
       equipmentLocationIdMissing = true;
-      res = await supabase
-        .from('equipment')
-        .select(safe)
-        .eq('customer_organization_id', customerId)
-        .limit(200);
+      res = await query(safe);
     }
     if (res?.error || !Array.isArray(res?.data)) return [];
     return res.data

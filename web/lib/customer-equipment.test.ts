@@ -60,9 +60,23 @@ test('loads only safe columns for the picked org', async () => {
   assert.equal(list.length, 2);
   assert.equal((list[0] as any).notes, undefined);
   assert.equal(calls[0].cols, CUSTOMER_EQUIPMENT_COLUMNS);
+  assert.match(CUSTOMER_EQUIPMENT_COLUMNS, /location_id/);
   assert.ok(!/notes|photo|room/.test(CUSTOMER_EQUIPMENT_COLUMNS));
   assert.deepEqual(calls[1], { table: 'equipment', op: 'eq', col: 'customer_organization_id', v: 2639 });
   assert.equal(list[1].equipment_type, 'beds');
+});
+
+test('picker drops removed units and keeps location_id', async () => {
+  const { client } = fakeClient({
+    rows: [
+      { id: 3, manufacturer: 'Candela', model: 'GentleMax', serial_number: 'A', location_id: 8, removed_at: null },
+      { id: 4, manufacturer: 'Old', model: 'Unit', serial_number: 'B', location_id: 8, removed_at: '2026-01-01' },
+    ],
+  });
+  const list = await loadCustomerEquipment(client, 2655);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].id, 3);
+  assert.equal(list[0].location_id, 8);
 });
 
 test('no org or an RLS error gives an empty list', async () => {
