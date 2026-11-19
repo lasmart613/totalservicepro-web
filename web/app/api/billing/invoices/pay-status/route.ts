@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { parseInvoiceData } from '@/lib/billing/apply-invoice-payment';
-import { isVoidInvoiceStatus, sessionMatchesInvoice, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
+import { invoicePayStatusDecision } from '@/lib/billing/invoice-pay-status';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,17 +22,6 @@ export async function GET(req: NextRequest) {
     .eq('id', id)
     .maybeSingle();
   if (error || !data) return NextResponse.json({ error: 'Invoice not found.' }, { status: 404 });
-
-  const dataRecord = parseInvoiceData(data.invoice_data);
-  if (isVoidInvoiceStatus(data.status) || dataRecord.voided === true) {
-    return NextResponse.json({ voided: true, message: VOIDED_INVOICE_MESSAGE });
-  }
-  if (!session || !sessionMatchesInvoice(data.invoice_data, session)) {
-    return NextResponse.json({ error: 'Invoice not found.' }, { status: 404 });
-  }
-  const paymentUrl = String(dataRecord.payment_url || '').trim();
-  if (!paymentUrl) {
-    return NextResponse.json({ voided: false, payable: false, message: 'This invoice has no payment link.' });
-  }
-  return NextResponse.json({ voided: false, payable: true, paymentUrl });
+  const decision = invoicePayStatusDecision(data, session);
+  return NextResponse.json(decision.body, { status: decision.httpStatus });
 }

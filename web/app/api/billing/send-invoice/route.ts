@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import {
   createInvoiceCheckoutSession as defaultCreateInvoiceCheckoutSession,
+  expireCheckoutSession as defaultExpireCheckoutSession,
   stripeSecretProblem,
   type InvoiceCheckoutOutcome,
   type InvoicePayLinkInput,
@@ -28,7 +29,7 @@ import {
 import { stampLangOnEstimateLinks } from '@/lib/share';
 import { postResendEmail } from '@/lib/mail/outgoing-mail';
 import { ccBesidesRecipient, parseDocumentCc, rememberDocumentCc } from '@/lib/billing/document-cc';
-import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
+import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData, saveInvoicePayLink } from '@/lib/billing/invoice-row-load';
 import {
   buildOwnedInvoiceMessage,
   documentAccountLinks,
@@ -47,6 +48,7 @@ import {
 import { invoiceChecksPayableName } from '@/lib/billing/invoice-payee';
 import {
   INVOICE_ALREADY_PAID,
+  INVOICE_PAY_LINK_BUSY,
   INVOICE_PAY_LINK_UNVERIFIED,
   invoiceAlreadyPaid,
   openPayLink,
@@ -234,90 +236,112 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     } else if (includePay && payAmount >= 0.5 && stripeProblem) {
       stripeSkippedReason = openPayLink(inv.invoice_data) ? INVOICE_PAY_LINK_UNVERIFIED : stripeProblem;
     } else if (includePay && payAmount >= 0.5) {
-      const plan = await planInvoicePayLink({
-        invoice: inv,
-        payAmount,
-        loadCheckout: deps.loadCheckout,
-        expireCheckout: deps.expireCheckout,
-        isSessionCredited: (sessionId) => checkoutSessionWasCredited(admin, inv, sessionId),
+      const amountCents = Math.round(payAmount * 100);
+      const invoiceOrgId = inv.organization_id;
+      const sellerOrgId =
+        typeof invoiceOrgId === 'string' || typeof invoiceOrgId === 'number' ? invoiceOrgId : callerOrgId;
+      const loaded = await loadSellerPayoutAccount(sellerOrgId, admin ?? supabase);
+      const decision = decideSellerChargeRoute({
+        organizationId: sellerOrgId,
+        account: loaded.account,
+        amountCents,
+        schemaReady: loaded.schemaReady,
       });
-      if (plan.action === 'skip') {
-        stripeSkippedReason = plan.reason;
-      } else if (plan.action === 'reuse') {
-        paymentUrl = plan.url;
-        stripeSessionId = plan.sessionId;
-      } else {
-        const amountCents = Math.round(payAmount * 100);
-        const invoiceOrgId = inv.organization_id;
-        const sellerOrgId =
-          typeof invoiceOrgId === 'string' || typeof invoiceOrgId === 'number'
-            ? invoiceOrgId
-            : callerOrgId;
-        const loaded = await loadSellerPayoutAccount(sellerOrgId);
-        const decision = decideSellerChargeRoute({
-          organizationId: sellerOrgId,
-          account: loaded.account,
-          amountCents,
-          schemaReady: loaded.schemaReady,
-        });
-        if (decision.mode === 'refuse') {
-          connectRequired = true;
-          stripeConnect = decision.prompt;
-          stripeSkippedReason = decision.message;
+      const prior = openPayLink(inv.invoice_data);
+      if (decision.mode === 'refuse') {
+        connectRequired = true;
+        stripeConnect = decision.prompt;
+        stripeSkippedReason = decision.message;
+        if (prior) {
+          paymentUrl = prior.url;
+          stripeSessionId = prior.sessionId;
         }
-        const pay =
-          decision.mode === 'refuse'
-            ? null
-            : await createInvoiceCheckoutSession({
-                amountCents,
-                description: invoiceCheckoutDescription(
-                  collectable,
-                  String(inv.invoice_number || `Invoice #${invoiceId}`)
-                ),
-                invoiceId,
-                invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
-                customerEmail: recipient.email,
-                companyName: invoiceChecksPayableName(inv, company.company_name) || null,
+      } else {
+        const plan = await planInvoicePayLink({
+          invoice: inv,
+          payAmount,
+          loadCheckout: deps.loadCheckout,
+          expireCheckout: deps.expireCheckout,
+          isSessionCredited: (sessionId) => checkoutSessionWasCredited(admin, inv, sessionId),
+        });
+        if (plan.action === 'skip') {
+          stripeSkippedReason = plan.reason;
+        } else {
+          const writer = admin ?? supabase;
+          const expireNewSession =
+            deps.expireCheckout ??
+            (async (sessionId: string) => (await defaultExpireCheckoutSession(sessionId)).classification);
+          const pay = await createInvoiceCheckoutSession({
+            amountCents,
+            description: invoiceCheckoutDescription(
+              collectable,
+              String(inv.invoice_number || `Invoice #${invoiceId}`)
+            ),
+            invoiceId,
+            invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
+            customerEmail: recipient.email,
+            companyName: invoiceChecksPayableName(inv, company.company_name) || null,
+            paymentKind: collectable.paymentKind,
+            idempotencyKey: prior ? `invoice-${invoiceId}-replace-${prior.sessionId}` : undefined,
+            ...(decision.mode === 'destination'
+              ? {
+                  destinationAccountId: decision.accountId,
+                  payoutStatus: decision.payoutStatus,
+                  applicationFeeCents: decision.applicationFeeCents,
+                  organizationId: sellerOrgId,
+                }
+              : { legacyPlatformCharge: true as const }),
+          });
+          if (!pay.ok) {
+            if (pay.code === CONNECT_REQUIRED_CODE) {
+              connectRequired = true;
+              stripeConnect = pay.prompt;
+            }
+            stripeSkippedReason = pay.message;
+            if (plan.expiredSessionId && invoiceId && inv) {
+              await saveInvoicePayLink(writer.from('service_invoices'), invoiceId, {
+                paymentUrl: null,
+                sessionId: null,
+                expectedSessionId: plan.expiredSessionId,
+                replacedSessionId: plan.expiredSessionId,
+              });
+            }
+          } else if (invoiceId && inv) {
+            const merged = mergePaymentFieldsIntoInvoiceData(inv, {
+              payment_url: pay.url,
+              stripe_checkout_session_id: pay.sessionId,
+              payment_amount: payAmount,
+              payment_kind: collectable.paymentKind,
+            });
+            if (merged) {
+              const saved = await saveInvoicePayLink(writer.from('service_invoices'), invoiceId, {
+                paymentUrl: pay.url,
+                sessionId: pay.sessionId,
+                paymentAmount: payAmount,
                 paymentKind: collectable.paymentKind,
-                ...(decision.mode === 'destination'
-                  ? {
-                      destinationAccountId: decision.accountId,
-                      payoutStatus: decision.payoutStatus,
-                      applicationFeeCents: decision.applicationFeeCents,
-                      organizationId: sellerOrgId,
-                    }
-                  : { legacyPlatformCharge: true as const }),
+                expectedSessionId: prior?.sessionId || null,
+                replacedSessionId: prior?.sessionId || null,
               });
-        if (pay && !pay.ok && pay.code === CONNECT_REQUIRED_CODE) {
-          connectRequired = true;
-          stripeConnect = pay.prompt;
-          stripeSkippedReason = pay.message;
-        } else if (pay && !pay.ok) {
-          stripeSkippedReason = pay.message;
-        } else if (pay?.ok) {
-          checkoutSessionCreated = true;
-          paymentUrl = pay.url;
-          stripeSessionId = pay.sessionId;
-          if (invoiceId && inv) {
-            try {
-              const merged = mergePaymentFieldsIntoInvoiceData(inv, {
-                payment_url: pay.url,
-                stripe_checkout_session_id: pay.sessionId,
-                payment_amount: payAmount,
-                payment_kind: collectable.paymentKind,
-              });
-              if (merged) {
-                const writer = admin ?? supabase;
-                const { error: upErr } = await writer
-                  .from('service_invoices')
-                  .update({ invoice_data: merged, updated_at: new Date().toISOString() })
-                  .eq('id', invoiceId);
-                if (upErr) console.warn('could not persist payment_url', upErr.message);
+              if (saved.saved || saved.currentSessionId === pay.sessionId) {
+                checkoutSessionCreated = true;
+                paymentUrl = pay.url;
+                stripeSessionId = pay.sessionId;
               } else {
-                console.warn('send-invoice: skipped payment_url persist; invoice_data was not loaded');
+                try {
+                  await expireNewSession(pay.sessionId);
+                } catch (e) {
+                  console.warn('[billing] could not expire the orphan Checkout session', e);
+                }
+                stripeSkippedReason = INVOICE_PAY_LINK_BUSY;
               }
-            } catch (e) {
-              console.warn('could not persist payment_url', e);
+            } else {
+              console.warn('send-invoice: skipped payment_url persist; invoice_data was not loaded');
+              try {
+                await expireNewSession(pay.sessionId);
+              } catch (e) {
+                console.warn('[billing] could not expire the orphan Checkout session', e);
+              }
+              stripeSkippedReason = INVOICE_PAY_LINK_BUSY;
             }
           }
         }

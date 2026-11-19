@@ -24,24 +24,35 @@ test('a stored pay-link session is not treated as paid', () => {
   assert.equal(invoiceAlreadyPaid({ ...inv, amount_paid: 80 }), true);
 });
 
-test('an open Checkout session is reused and a paid one is refused', async () => {
-  let loads = 0;
-  let expires = 0;
+test('resend expires the open Checkout session and does not expire a paid one', async () => {
+  const expired: string[] = [];
   const open = await planInvoicePayLink({
     invoice: { id: 3, status: 'sent', total: 80, amount_paid: 0, invoice_data: openData },
     payAmount: 80,
-    loadCheckout: async () => {
-      loads += 1;
-      return { status: 'open', payment_status: 'unpaid', amount_total: 8000, url: openData.payment_url };
-    },
-    expireCheckout: async () => {
-      expires += 1;
+    loadCheckout: async () => ({ status: 'open', payment_status: 'unpaid', amount_total: 8000, url: openData.payment_url }),
+    expireCheckout: async (sessionId) => {
+      expired.push(sessionId);
       return 'expired';
     },
   });
-  assert.deepEqual(open, { action: 'reuse', sessionId: 'cs_test_open', url: openData.payment_url });
-  assert.equal(loads, 1);
-  assert.equal(expires, 0);
+  assert.deepEqual(open, { action: 'create', expiredSessionId: 'cs_test_open' });
+  assert.deepEqual(expired, ['cs_test_open']);
+
+  const already = await planInvoicePayLink({
+    invoice: { id: 3, status: 'sent', total: 80, amount_paid: 0, invoice_data: openData },
+    payAmount: 80,
+    loadCheckout: async () => ({ status: 'open', payment_status: 'unpaid', amount_total: 8000, url: openData.payment_url }),
+    expireCheckout: async () => 'already_expired',
+  });
+  assert.deepEqual(already, { action: 'create', expiredSessionId: 'cs_test_open' });
+
+  const complete = await planInvoicePayLink({
+    invoice: { id: 3, status: 'sent', total: 80, amount_paid: 0, invoice_data: openData },
+    payAmount: 80,
+    loadCheckout: async () => ({ status: 'open', payment_status: 'unpaid', amount_total: 8000, url: openData.payment_url }),
+    expireCheckout: async () => 'completed',
+  });
+  assert.deepEqual(complete, { action: 'skip', reason: INVOICE_CHECKOUT_ALREADY_PAID });
 
   const paid = await planInvoicePayLink({
     invoice: { id: 3, status: 'sent', total: 80, amount_paid: 0, invoice_data: openData },
@@ -123,7 +134,7 @@ test('a stored session is used when the payments table says it was credited', as
     },
     isSessionCredited: (sessionId) => checkoutSessionWasCredited(client as never, invoice, sessionId),
   });
-  assert.deepEqual(plan, { action: 'create' });
+  assert.deepEqual(plan, { action: 'create', expiredSessionId: null });
   const overPlan = await planInvoicePayLink({
     invoice: {
       ...invoice,
@@ -140,7 +151,7 @@ test('a stored session is used when the payments table says it was credited', as
     },
     isSessionCredited: (sessionId) => checkoutSessionWasCredited(client as never, invoice, sessionId),
   });
-  assert.deepEqual(overPlan, { action: 'create' });
+  assert.deepEqual(overPlan, { action: 'create', expiredSessionId: null });
 });
 
 test('a credited deposit session can be replaced with a balance session', async () => {
@@ -167,7 +178,7 @@ test('a credited deposit session can be replaced with a balance session', async 
       return 'completed';
     },
   });
-  assert.deepEqual(plan, { action: 'create' });
+  assert.deepEqual(plan, { action: 'create', expiredSessionId: null });
   assert.equal(expired, 0);
 });
 
@@ -182,7 +193,7 @@ test('a replacement expires the open session before another can be created', asy
       return 'expired';
     },
   });
-  assert.deepEqual(plan, { action: 'create' });
+  assert.deepEqual(plan, { action: 'create', expiredSessionId: 'cs_test_open' });
   assert.deepEqual(expired, ['cs_test_open']);
 
   const stuck = await planInvoicePayLink({
@@ -192,4 +203,39 @@ test('a replacement expires the open session before another can be created', asy
     expireCheckout: async () => 'failed',
   });
   assert.deepEqual(stuck, { action: 'skip', reason: INVOICE_PAY_LINK_BUSY });
+});
+
+test('a thrown expire does not open a replacement', async () => {
+  const plan = await planInvoicePayLink({
+    invoice: { id: 3, status: 'sent', total: 80, amount_paid: 0, invoice_data: openData },
+    payAmount: 80,
+    loadCheckout: async () => ({ status: 'open', payment_status: 'unpaid', amount_total: 8000, url: openData.payment_url }),
+    expireCheckout: async () => {
+      throw new Error('stripe down');
+    },
+  });
+  assert.deepEqual(plan, { action: 'skip', reason: INVOICE_PAY_LINK_BUSY });
+});
+
+test('a completed expire of an already credited session can be replaced', async () => {
+  let expired = 0;
+  const plan = await planInvoicePayLink({
+    invoice: {
+      id: 3,
+      status: 'partially_paid',
+      total: 1000,
+      amount_paid: 300,
+      stripe_session_id: 'cs_test_open',
+      invoice_data: openData,
+    },
+    payAmount: 700,
+    loadCheckout: async () => ({ status: 'open', payment_status: 'unpaid', amount_total: 8000, url: openData.payment_url }),
+    expireCheckout: async () => {
+      expired += 1;
+      return 'completed';
+    },
+    isSessionCredited: async () => true,
+  });
+  assert.equal(expired, 1);
+  assert.deepEqual(plan, { action: 'create', expiredSessionId: null });
 });

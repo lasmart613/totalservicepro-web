@@ -130,6 +130,8 @@ export type InvoicePayLinkInput = {
   organizationId?: string | number | null;
   /** Pre-Connect platform charge. Same Stripe params main sends today. */
   legacyPlatformCharge?: boolean;
+  /** Same key for two replaces of one stored session, so Stripe returns one Checkout session. */
+  idempotencyKey?: string | null;
 };
 
 export type InvoiceCheckoutOutcome =
@@ -304,12 +306,15 @@ export async function createInvoiceCheckoutSession(
     };
   }
 
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${secret}`,
+    'Content-Type': 'application/x-www-form-urlencoded',
+  };
+  const idempotencyKey = String(input.idempotencyKey || '').trim();
+  if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey.slice(0, 255);
   const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      'Content-Type': 'application/x-www-form-urlencoded',
-    },
+    headers,
     body: params.toString(),
   });
 
