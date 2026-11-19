@@ -1100,6 +1100,10 @@ test('a removed member can be re-invited and the rejoin claim adds the membershi
                   const row = state.profiles.find((item) => item.id === MEMBER) || null;
                   return Promise.resolve({ data: row ? [row] : [], error: null });
                 },
+                then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                  const data = table === 'engineer_invitations' ? [invite] : [];
+                  return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
+                },
                 maybeSingle: async () => {
                   if (table === 'organizations') {
                     return { data: { id: ORG, name: 'North Shop', type: 'service_company', services_offered: null, is_premium: true, subscription_tier: 'team', plan: 'team' }, error: null };
@@ -1243,6 +1247,10 @@ async function reopenAccepted(invite: Invite, profile: Profile) {
               limit() {
                 if (table !== 'user_profiles') return Promise.resolve({ data: [], error: null });
                 return Promise.resolve({ data: profile ? [profile] : [], error: null });
+              },
+              then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                const data = table === 'engineer_invitations' ? [invite] : [];
+                return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
               },
               maybeSingle: async () => {
                 if (table === 'organizations') {

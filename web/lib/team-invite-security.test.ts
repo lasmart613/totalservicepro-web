@@ -609,6 +609,10 @@ function inviteAdmin(state: {
   profile?: Record<string, unknown> | null;
   profiles?: Array<Record<string, unknown> | null>;
   memberships?: Array<{ user_id: string; organization_id: number }>;
+  /** Plan fields for the seat check. Defaults to Team so existing cases stay under the cap. */
+  org?: Record<string, unknown>;
+  /** Open and closed invites returned by a list read. Defaults to the single invite row. */
+  invites?: Array<Record<string, unknown>>;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -678,7 +682,21 @@ function inviteAdmin(state: {
         },
         maybeSingle: async () => {
           if (table === 'organizations') {
-            return { data: { id: 9, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
+            return {
+              data: {
+                id: 9,
+                name: 'North Shop',
+                type: 'service_company',
+                services_offered: null,
+                is_premium: true,
+                subscription_tier: 'team',
+                plan: 'team',
+                premium_until: null,
+                premium_grant: null,
+                ...(state.org || {}),
+              },
+              error: null,
+            };
           }
           if (table === 'organization_memberships') {
             const rows = (state.memberships || []).filter((row) => matchesEq(row));
@@ -700,6 +718,16 @@ function inviteAdmin(state: {
             return { data: state.invite, error: null };
           }
           return { data: null, error: null };
+        },
+        then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          let data: unknown[] = [];
+          if (table === 'organization_memberships') {
+            data = (state.memberships || []).filter((row) => matchesEq(row) && orgOk(row));
+          } else if (table === 'engineer_invitations') {
+            const rows = state.invites ?? (state.invite ? [state.invite] : []);
+            data = rows.filter((row) => row && matchesEmail(row) && orgOk(row) && matchesEq(row));
+          }
+          return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
         },
         insert(row: Record<string, unknown>) {
           inserts.push(row);
@@ -762,6 +790,8 @@ async function postExistingInvite(opts: {
     error?: { message?: string } | null;
   };
   sendOk?: boolean;
+  org?: Record<string, unknown>;
+  invites?: Array<Record<string, unknown>>;
 }) {
   const previous = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -800,6 +830,8 @@ async function postExistingInvite(opts: {
     profiles: opts.profiles,
     memberships,
     linkHandler: opts.linkHandler,
+    org: opts.org,
+    invites: opts.invites,
   });
   const requestEmail = opts.email || INVITEE;
   try {
@@ -915,6 +947,103 @@ function assertNoLink(result: { body: Record<string, unknown>; logs: string[] },
   assert.equal(JSON.stringify(result.body).includes(link), false);
   assert.equal(result.logs.some((line) => line.includes(link) || line.includes('/auth/v1/verify')), false);
 }
+
+const freeOrg = { is_premium: false, subscription_tier: 'free', plan: 'free', premium_until: null, premium_grant: null };
+
+test('invite route counts members and open invites against the seat cap', async () => {
+  const atMemberCap = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite: null,
+    memberships: [{ user_id: 'already-here', organization_id: 9 }],
+    org: freeOrg,
+    email: 'another.person@example.test',
+  });
+  assert.equal(atMemberCap.status, 403);
+  assert.equal(atMemberCap.body.seat_limited, true);
+  assert.match(String(atMemberCap.body.error), /1 of 1 seat — upgrade to Team/);
+  assert.equal(atMemberCap.sent.length, 0);
+  assert.equal(atMemberCap.inserts.length, 0);
+
+  const openOther = {
+    ...pendingCreated,
+    email: 'pending.other@example.test',
+  };
+  const atInviteCap = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite: openOther,
+    memberships: [],
+    org: freeOrg,
+    email: 'another.person@example.test',
+  });
+  assert.equal(atInviteCap.status, 403);
+  assert.equal(atInviteCap.body.seat_limited, true);
+  assert.match(String(atInviteCap.body.error), /including pending invites/);
+  assert.equal(atInviteCap.sent.length, 0);
+  assert.equal(atInviteCap.inserts.length, 0);
+
+  const resendOpen = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite: { ...pendingCreated },
+    memberships: [],
+    org: freeOrg,
+  });
+  assert.equal(resendOpen.status, 200, JSON.stringify(resendOpen.body));
+  assert.equal(resendOpen.body.seat_limited, undefined);
+  assert.equal(resendOpen.sent.length, 1);
+
+  const expired = {
+    ...pendingCreated,
+    email: 'expired.other@example.test',
+    expires_at: '2000-01-01T00:00:00.000Z',
+  };
+  const expiredIgnored = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite: expired,
+    memberships: [],
+    org: freeOrg,
+    email: 'another.person@example.test',
+  });
+  assert.equal(expiredIgnored.status, 200, JSON.stringify(expiredIgnored.body));
+  assert.equal(expiredIgnored.inserts.length, 1);
+
+  const staleNull = {
+    ...pendingCreated,
+    email: 'stale.other@example.test',
+    expires_at: null,
+    created_at: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+  };
+  const staleIgnored = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite: staleNull,
+    memberships: [],
+    org: freeOrg,
+    email: 'another.person@example.test',
+  });
+  assert.equal(staleIgnored.status, 200, JSON.stringify(staleIgnored.body));
+
+  const recentNull = {
+    ...pendingCreated,
+    email: 'recent.null@example.test',
+    expires_at: null,
+    created_at: new Date().toISOString(),
+  };
+  const nullExpiryCounts = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite: recentNull,
+    memberships: [],
+    org: freeOrg,
+    email: 'another.person@example.test',
+  });
+  assert.equal(nullExpiryCounts.status, 403);
+  assert.match(String(nullExpiryCounts.body.error), /including pending invites/);
+  assert.equal(nullExpiryCounts.sent.length, 0);
+});
 
 test('resend to a pending invite-created user emails a set-password link and hides it', async () => {
   const result = await postExistingInvite({

@@ -1,14 +1,22 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { emailsMatch } from '@/lib/email-match';
 import {
   decideInviteForExistingProfile,
   decideSwitch,
+  invitationIsOpen,
   isFounderLockedRole,
   membershipRoleForInvite,
   normalizeOrgId,
   sameOrg,
   type MembershipSnapshot,
 } from '@/lib/org-membership';
-import { orgSeatLimit, seatAddBlocked, seatLimitMessage, type OrgPlanFields } from '@/lib/org-plan';
+import {
+  inviteSeatLimitMessage,
+  orgSeatLimit,
+  seatAddBlocked,
+  seatLimitMessage,
+  type OrgPlanFields,
+} from '@/lib/org-plan';
 
 export type MembershipRow = {
   user_id: string;
@@ -85,6 +93,66 @@ export async function orgSeatCheck(
   if (userId && members.some((m) => m.user_id === userId)) return { ok: true, used, limit };
   if (seatAddBlocked(used, limit)) {
     return { ok: false, status: 403, error: seatLimitMessage(used, limit), used, limit };
+  }
+  return { ok: true, used, limit };
+}
+
+type OpenInviteRow = {
+  email?: string | null;
+  accepted?: boolean | null;
+  expires_at?: string | null;
+  created_at?: string | null;
+};
+
+/**
+ * Seat cap for a NEW invite. Counts accepted members plus unaccepted,
+ * unexpired invites (same open rule as invitationIsOpen: a null expires_at
+ * counts only when created_at is within 14 days).
+ *
+ * Resending an invite that is already open does not take another seat.
+ * A missing org, or a member/invite read that does not come back as a list,
+ * fails closed. Nothing is deleted.
+ */
+export async function orgInviteSeatCheck(
+  admin: SupabaseClient,
+  organizationId: number | string,
+  email?: string | null
+): Promise<OrgSeatCheck> {
+  const { data: org, error: orgErr } = await admin
+    .from('organizations')
+    .select('is_premium, subscription_tier, plan, premium_until, premium_grant')
+    .eq('id', organizationId)
+    .maybeSingle();
+  if (orgErr || !org) return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+
+  const { data: memberRows, error: memErr } = await admin
+    .from('organization_memberships')
+    .select('user_id')
+    .eq('organization_id', organizationId);
+  if (memErr || !Array.isArray(memberRows)) {
+    return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+  }
+
+  const { data: inviteRows, error: invErr } = await admin
+    .from('engineer_invitations')
+    .select('email, accepted, expires_at, created_at')
+    .eq('organization_id', organizationId);
+  if (invErr || !Array.isArray(inviteRows)) {
+    return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+  }
+
+  const open = (inviteRows as OpenInviteRow[]).filter((row) => invitationIsOpen(row));
+  const limit = orgSeatLimit(org as OrgPlanFields);
+  const refreshing = !!email && open.some((row) => emailsMatch(row.email, email));
+  const used = memberRows.length + open.length;
+  if (!refreshing && seatAddBlocked(used, limit)) {
+    return {
+      ok: false,
+      status: 403,
+      error: inviteSeatLimitMessage(used, limit, open.length),
+      used,
+      limit,
+    };
   }
   return { ok: true, used, limit };
 }

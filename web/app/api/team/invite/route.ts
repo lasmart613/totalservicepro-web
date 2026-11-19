@@ -27,7 +27,7 @@ import {
   teamInviteRoleLabel,
   teamInviteSubject,
 } from '@/lib/team-invite';
-import { orgSeatCheck } from '@/lib/org-membership-server';
+import { orgInviteSeatCheck } from '@/lib/org-membership-server';
 import { publicSiteOrigin } from '@/lib/site-origin';
 import { setupLinkRedirect } from '@/lib/auth-link-route';
 
@@ -119,8 +119,11 @@ type InviteDeps = {
   sendEmail?: (input: InviteSendInput) => Promise<{ ok: boolean; status?: number; message?: string }>;
   /** undefined reads RESEND_API_KEY. Null or empty means delivery is not configured. */
   resendKey?: string | null;
-  /** Seat cap check (Free/Premium 1, Team 10). Defaults to orgSeatCheck. */
-  seatCheck?: typeof orgSeatCheck;
+  /**
+   * Seat cap for a new invite (members + open invites).
+   * Defaults to orgInviteSeatCheck. The third argument is the invite email.
+   */
+  seatCheck?: typeof orgInviteSeatCheck;
 };
 
 export async function POST(req: NextRequest) {
@@ -220,8 +223,10 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     const resendKey = deps.resendKey === undefined ? process.env.RESEND_API_KEY : deps.resendKey || '';
     const findUser = deps.findAuthUser ?? findAuthUserByEmail;
 
-    // Seat cap before any email goes out. Over-cap orgs keep current members.
-    const seats = await (deps.seatCheck ?? orgSeatCheck)(admin, orgId as string | number);
+    // Seat cap before any email goes out. Members plus open invites.
+    // Over-cap orgs keep current members. Resending an open invite does not
+    // take another seat.
+    const seats = await (deps.seatCheck ?? orgInviteSeatCheck)(admin, orgId as string | number, email);
     if (!seats.ok) {
       return NextResponse.json(
         { error: seats.error, seat_limited: seats.status === 403, upgrade_url: '/plans' },
