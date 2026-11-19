@@ -210,6 +210,70 @@ test('invite seat check counts open invites and fails closed', async () => {
   assert.equal(missing.ok, false);
 });
 
+test('a seat-trigger race becomes the seat message, not the database text', async () => {
+  const free = { is_premium: false, subscription_tier: 'free', plan: 'free' };
+  const db = (insertError: { code: string; message: string }, fillOnRecheck: boolean) => {
+    let reads = 0;
+    return {
+      from(table: string) {
+        const q: any = {
+          select: () => q,
+          eq: () => q,
+          maybeSingle: async () => ({ data: table === 'organizations' ? free : null, error: null }),
+          insert: async () => ({ error: insertError }),
+          then: (resolve: (value: unknown) => void) => {
+            reads += 1;
+            const members = reads === 1 || !fillOnRecheck ? [] : ['a'];
+            resolve({
+              data: table === 'organization_memberships' ? members.map((user_id) => ({ user_id })) : [],
+              error: null,
+            });
+          },
+        };
+        return q;
+      },
+      async rpc() {
+        return { error: insertError };
+      },
+    } as any;
+  };
+  const cap = { code: '42501', message: 'organization membership was not added' };
+  const added = await upsertMembership(db(cap, true), { userId: 'new', organizationId: 8801, role: 'fse' });
+  assert.equal(added.ok, false);
+  assert.equal(added.seatLimited, true);
+  if (!added.ok) {
+    assert.match(added.error || '', /1 of 1 seat — upgrade to Team/);
+    assert.doesNotMatch(added.error || '', /organization membership was not added/);
+  }
+  const home = await upsertMembership(db(cap, true), {
+    userId: 'new',
+    organizationId: 8801,
+    role: 'fse',
+    isHome: true,
+  });
+  assert.equal(home.ok, false);
+  assert.equal(home.seatLimited, true);
+  if (!home.ok) assert.match(home.error || '', /upgrade to Team/);
+  const rls = await upsertMembership(
+    db({ code: '42501', message: 'new row violates row-level security policy' }, false),
+    { userId: 'other', organizationId: 8801, role: 'fse' }
+  );
+  assert.equal(rls.ok, false);
+  assert.equal(rls.seatLimited, undefined);
+  if (!rls.ok) assert.match(rls.error || '', /row-level security/);
+});
+
+test('000966 limits the signup skip to inserts and lets RLS deny strangers', () => {
+  const mig = src('../supabase/migrations/20261119_000966_seat_cap_followups.sql');
+  assert.match(mig, /TG_OP <> 'INSERT'/);
+  assert.match(mig, /NOT public\.membership_insert_allowed\(NEW\.user_id/);
+  assert.match(mig, /RETURN NEW;/);
+  const rollback = src('../supabase/migrations/20261119_000966_seat_cap_followups_rollback.sql');
+  assert.match(rollback, /000965: seat cap full/);
+  assert.doesNotMatch(rollback, /TG_OP <> 'INSERT'/);
+  assert.doesNotMatch(src('../supabase/migrations/20261119_000965_org_seat_cap.sql'), /TG_OP <> 'INSERT'/);
+});
+
 test('seat cap is enforced on invites, claims and membership adds', () => {
   const invite = src('../app/api/team/invite/route.ts');
   assert.match(invite, /\(deps\.seatCheck \?\? orgInviteSeatCheck\)\(admin, orgId/);

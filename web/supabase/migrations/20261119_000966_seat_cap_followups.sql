@@ -1,0 +1,240 @@
+-- 000966: follow-ups to the seat cap. Does not change seat numbers.
+--
+-- 1. The no-JWT catch in user_profiles_sync_membership only applies to
+--    INSERT. A service-role UPDATE that would move a profile onto a full
+--    org raises, so organization_id and active_organization_id stay put.
+--    A signup INSERT into a full org still keeps the new profile and skips
+--    the membership.
+-- 2. trg_zz_enforce_seat_cap returns NEW when an authenticated caller fails
+--    membership_insert_allowed. Row-level security then denies that insert
+--    with the same text whether the org is full or empty. Service role
+--    still gets the generic refusal, because it bypasses row-level security.
+--
+-- Does not DELETE or UPDATE existing memberships.
+-- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
+-- Rollback: 20261119_000966_seat_cap_followups_rollback.sql restores the
+-- 000965 bodies of these two functions.
+
+BEGIN;
+
+SET LOCAL lock_timeout = '5s';
+
+CREATE OR REPLACE FUNCTION public.organization_memberships_enforce_seat_cap()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+SET row_security = off
+AS $function$
+BEGIN
+  IF NEW.organization_id IS NULL THEN
+    RAISE EXCEPTION 'organization seat limit could not be checked'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tsp.org_seat:' || NEW.organization_id::text, 0)
+  );
+  -- An authenticated caller who is not allowed to insert gets the same
+  -- row-level denial whether the org is full or empty. membership_insert_allowed
+  -- returns false for that caller and raises the detailed seat message only
+  -- after the caller is allowed to add someone. Service role (auth.uid()
+  -- null) bypasses RLS, so it still hits the generic refusal below.
+  IF auth.uid() IS NOT NULL
+     AND NOT public.membership_insert_allowed(NEW.user_id, NEW.organization_id, NEW.role, NEW.is_home) THEN
+    RETURN NEW;
+  END IF;
+  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.user_id, false);
+  RETURN NEW;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.organization_memberships_enforce_seat_cap() IS
+  '000966 BEFORE INSERT. Locks the org, then refuses a new member at org_seat_limit. An authenticated caller who fails membership_insert_allowed is left for row-level security, so a stranger sees the same denial on a full org and an open one. Service role still gets a generic refusal with no count and no plan.';
+
+CREATE OR REPLACE FUNCTION public.user_profiles_sync_membership()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  actor uuid;
+  grant_role text;
+  invite_role text;
+  existing_role text;
+  own_created boolean;
+  member_of_new boolean;
+  home boolean;
+  org_changed boolean;
+  elevated text[] := ARRAY[
+    'admin', 'company_admin', 'owner', 'parts_supplier', 'supplier',
+    'service_manager', 'dispatcher', 'scheduler', 'billing_manager', 'crm'
+  ];
+BEGIN
+  actor := auth.uid();
+
+  org_changed :=
+    (TG_OP = 'INSERT' AND NEW.organization_id IS NOT NULL)
+    OR (TG_OP = 'UPDATE' AND NEW.organization_id IS DISTINCT FROM OLD.organization_id);
+
+  -- Service role / SECURITY DEFINER caller with no JWT user. Trusted for
+  -- roles, not for skipping the seat cap.
+  IF actor IS NULL THEN
+    IF NEW.organization_id IS NULL THEN
+      RETURN NEW;
+    END IF;
+    grant_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(NEW.role), ''), 'fse'));
+    -- A profile write or org switch must not steal home. is_home becomes true
+    -- only when this user has no home row. Founder and create-org call
+    -- set_home_membership, which has already marked the new home, so this
+    -- stays false and the conflict update keeps that row.
+    SELECT NOT EXISTS (
+      SELECT 1 FROM public.organization_memberships m
+      WHERE m.user_id = NEW.id
+        AND m.is_home IS TRUE
+    ) INTO home;
+    -- Signup INSERT (auth.users → profile, no JWT) must not be rolled back
+    -- when the invited org is already full. Keep that new profile and skip
+    -- the seat. An UPDATE that would point an existing profile at a full org
+    -- raises, so organization_id and active_organization_id stay where they were.
+    BEGIN
+      PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id, true);
+    EXCEPTION
+      WHEN check_violation THEN
+        IF SQLERRM ILIKE '%could not be checked%' OR TG_OP <> 'INSERT' THEN
+          RAISE;
+        END IF;
+        RAISE NOTICE '000966: seat cap full; kept new profile % without a membership in org %',
+          NEW.id, NEW.organization_id;
+        IF NEW.active_organization_id IS NULL THEN
+          NEW.active_organization_id := NEW.organization_id;
+        END IF;
+        RETURN NEW;
+    END;
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES (NEW.id, NEW.organization_id, grant_role, home)
+    ON CONFLICT (user_id, organization_id) DO UPDATE
+      SET updated_at = now(),
+          is_home = public.organization_memberships.is_home OR EXCLUDED.is_home,
+          role = CASE
+            WHEN public.organization_memberships.is_home THEN public.organization_memberships.role
+            ELSE EXCLUDED.role
+          END;
+    IF NEW.active_organization_id IS NULL THEN
+      NEW.active_organization_id := NEW.organization_id;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' AND NEW.id IS DISTINCT FROM actor THEN
+    RAISE EXCEPTION 'user_profiles insert must be your own row';
+  END IF;
+
+  IF (TG_OP = 'UPDATE' AND NEW.active_organization_id IS DISTINCT FROM OLD.active_organization_id
+      AND NEW.active_organization_id IS NOT NULL)
+     OR (TG_OP = 'INSERT' AND NEW.active_organization_id IS NOT NULL) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM public.organization_memberships m
+      WHERE m.user_id = actor AND m.organization_id = NEW.active_organization_id
+    )
+    AND (
+      NEW.active_organization_id IS DISTINCT FROM NEW.organization_id
+      OR NEW.organization_id IS NULL
+    ) THEN
+      RAISE EXCEPTION 'active_organization_id must reference an existing membership';
+    END IF;
+  END IF;
+
+  IF NOT org_changed OR NEW.organization_id IS NULL THEN
+    IF TG_OP = 'UPDATE'
+       AND NEW.role IS DISTINCT FROM OLD.role
+       AND lower(COALESCE(NEW.role, '')) = ANY (elevated) THEN
+      SELECT m.role INTO existing_role
+      FROM public.organization_memberships m
+      WHERE m.user_id = actor
+        AND m.organization_id = COALESCE(NEW.organization_id, OLD.organization_id)
+      LIMIT 1;
+      IF existing_role IS NULL
+         OR lower(public.profile_role_from_membership(existing_role)) IS DISTINCT FROM lower(btrim(NEW.role)) THEN
+        RAISE EXCEPTION 'cannot self-assign an elevated role';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.organizations o
+    WHERE o.id = NEW.organization_id AND o.created_by = actor
+  ) INTO own_created;
+
+  SELECT m.role INTO existing_role
+  FROM public.organization_memberships m
+  WHERE m.user_id = actor AND m.organization_id = NEW.organization_id
+  LIMIT 1;
+  member_of_new := existing_role IS NOT NULL;
+
+  SELECT NULLIF(TRIM(i.role), '') INTO invite_role
+  FROM public.engineer_invitations i
+  WHERE i.organization_id = NEW.organization_id
+    AND public.auth_login_email() IS NOT NULL
+    AND lower(btrim(i.email)) = public.auth_login_email()
+    AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
+  ORDER BY i.created_at DESC NULLS LAST, i.id DESC
+  LIMIT 1;
+
+  IF member_of_new THEN
+    grant_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(existing_role), ''), 'fse'));
+  ELSIF own_created THEN
+    IF lower(COALESCE(NEW.role, '')) = ANY (elevated) THEN
+      RAISE EXCEPTION 'cannot self-assign an elevated role';
+    END IF;
+    grant_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(NEW.role), ''), 'fse'));
+    IF lower(grant_role) = ANY (elevated) THEN
+      RAISE EXCEPTION 'cannot self-assign an elevated role';
+    END IF;
+  ELSIF invite_role IS NOT NULL THEN
+    grant_role := public.profile_role_from_membership(invite_role);
+  ELSE
+    RAISE EXCEPTION 'cannot join an organization you did not create, are not a member of, and were not invited to';
+  END IF;
+
+  IF lower(COALESCE(NEW.role, '')) = ANY (elevated)
+     AND NOT (TG_OP = 'UPDATE' AND lower(btrim(OLD.role)) = 'admin')
+     AND lower(btrim(NEW.role)) IS DISTINCT FROM lower(btrim(grant_role)) THEN
+    RAISE EXCEPTION 'cannot self-assign an elevated role';
+  END IF;
+
+  NEW.role := CASE
+    WHEN TG_OP = 'UPDATE' AND lower(btrim(OLD.role)) = 'admin' THEN 'admin'
+    ELSE grant_role
+  END;
+
+  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id, true);
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES (NEW.id, NEW.organization_id, grant_role, false)
+  ON CONFLICT (user_id, organization_id) DO UPDATE
+    SET updated_at = now(),
+        is_home = public.organization_memberships.is_home,
+        role = CASE
+          WHEN public.organization_memberships.is_home THEN public.organization_memberships.role
+          ELSE EXCLUDED.role
+        END;
+
+  IF NEW.active_organization_id IS NULL THEN
+    NEW.active_organization_id := NEW.organization_id;
+  ELSIF NOT EXISTS (
+    SELECT 1 FROM public.organization_memberships m
+    WHERE m.user_id = actor AND m.organization_id = NEW.active_organization_id
+  ) AND NEW.active_organization_id IS DISTINCT FROM NEW.organization_id THEN
+    RAISE EXCEPTION 'active_organization_id must reference an existing membership';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+COMMENT ON FUNCTION public.user_profiles_sync_membership() IS
+  'BEFORE INSERT/UPDATE. Client org changes require creator, existing membership, or an unaccepted invite for auth.users email. A service-role INSERT into a full org keeps the new profile and skips the membership (000966). A service-role UPDATE onto a full org raises, so the previous organization_id stays.';
+
+COMMIT;
