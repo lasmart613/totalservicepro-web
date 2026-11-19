@@ -19,7 +19,7 @@ import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { readEstimateDocumentLocale } from '@/lib/billing/estimate-action';
-import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
+import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE, type CheckoutExpireClass } from '@/lib/billing/void-invoice';
 import {
   releaseDocumentSendSlot,
   takeDocumentSendSlot,
@@ -45,7 +45,15 @@ import {
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
 import { invoiceChecksPayableName } from '@/lib/billing/invoice-payee';
-
+import {
+  INVOICE_ALREADY_PAID,
+  INVOICE_PAY_LINK_UNVERIFIED,
+  invoiceAlreadyPaid,
+  openPayLink,
+  checkoutSessionWasCredited,
+  planInvoicePayLink,
+  type CheckoutSessionSnapshot,
+} from '@/lib/billing/invoice-pay-resend';
 /** Same body for a missing invoice and an invoice owned by another shop. */
 const INVOICE_NOT_FOUND = 'Invoice not found.';
 
@@ -60,6 +68,8 @@ type SendInvoiceDeps = {
   userClient?: SupabaseClient;
   adminClient?: SupabaseClient | null;
   createCheckout?: (input: InvoicePayLinkInput) => Promise<InvoiceCheckoutOutcome>;
+  loadCheckout?: (sessionId: string) => Promise<CheckoutSessionSnapshot | null>;
+  expireCheckout?: (sessionId: string) => Promise<CheckoutExpireClass>;
 };
 
 export async function POST(req: NextRequest) {
@@ -219,9 +229,23 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     const stripeProblem = stripeSecretProblem();
     if (isVoidInvoiceStatus(inv.status)) {
       stripeSkippedReason = VOIDED_INVOICE_MESSAGE;
+    } else if (includePay && payAmount >= 0.5 && invoiceAlreadyPaid(inv)) {
+      stripeSkippedReason = INVOICE_ALREADY_PAID;
+    } else if (includePay && payAmount >= 0.5 && stripeProblem) {
+      stripeSkippedReason = openPayLink(inv.invoice_data) ? INVOICE_PAY_LINK_UNVERIFIED : stripeProblem;
     } else if (includePay && payAmount >= 0.5) {
-      if (stripeProblem) {
-        stripeSkippedReason = stripeProblem;
+      const plan = await planInvoicePayLink({
+        invoice: inv,
+        payAmount,
+        loadCheckout: deps.loadCheckout,
+        expireCheckout: deps.expireCheckout,
+        isSessionCredited: (sessionId) => checkoutSessionWasCredited(admin, inv, sessionId),
+      });
+      if (plan.action === 'skip') {
+        stripeSkippedReason = plan.reason;
+      } else if (plan.action === 'reuse') {
+        paymentUrl = plan.url;
+        stripeSessionId = plan.sessionId;
       } else {
         const amountCents = Math.round(payAmount * 100);
         const invoiceOrgId = inv.organization_id;

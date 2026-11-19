@@ -18,7 +18,7 @@ import {
   retrieveStripeSubscription,
   StripeSubscriptionError,
 } from '@/lib/billing/stripe-subscription';
-import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
+import { applyInvoiceCheckoutSession, invoiceCheckoutWebhookResult } from '@/lib/billing/persist-invoice-payment';
 import { applyPartCheckoutSession } from '@/lib/billing/apply-part-order';
 import { webhookCheckoutAction } from '@/lib/billing/stripe-connect';
 import { syncConnectedAccount } from '@/lib/billing/stripe-connect-api';
@@ -119,8 +119,15 @@ export async function POST(req: NextRequest) {
           alreadyApplied: invoicePay.applied.alreadyApplied,
         });
       }
-      if (invoicePay.reason === 'invoice_void') {
-        return NextResponse.json({ ok: true, ignored: 'invoice_void' });
+      const invoiceFailure = invoiceCheckoutWebhookResult(invoicePay.reason);
+      if (invoiceFailure) {
+        if (invoiceFailure.status === 200) {
+          console.warn('[billing/upgrade/webhook] invoice checkout acknowledged without a retry', {
+            sessionId,
+            reason: invoicePay.reason,
+          });
+        }
+        return NextResponse.json(invoiceFailure.body, { status: invoiceFailure.status });
       }
       const result = await applyPaidCheckoutSession({
         writer,
