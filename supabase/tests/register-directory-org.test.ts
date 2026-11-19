@@ -11,7 +11,6 @@
  */
 import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts'
 import { handle, logConfigOnce, resetColdStart } from '../functions/register-directory-org/handler.ts'
-import { DEFAULT_OPS_BCC_EMAIL } from '../../web/lib/mail/outgoing-mail.ts'
 import {
   buildReviewNotice,
   checkFormTicket,
@@ -489,7 +488,7 @@ Deno.test('notice: sent once on step-2 completion, escaped, bidi stripped, fixed
   assertEquals(mails.length, 1)
   const m = mails[0].body
   assertEquals(m.to, ['review@example.test'])
-  assertEquals(m.bcc, [DEFAULT_OPS_BCC_EMAIL])
+  assertEquals(m.bcc, undefined)
   assertEquals(m.cc, undefined)
   assertEquals(m.subject, REVIEW_NOTICE_SUBJECT)
   assert(m.html.includes('&lt;b&gt;Evil &amp; Co&lt;/b&gt;gnp'))
@@ -501,6 +500,35 @@ Deno.test('notice: sent once on step-2 completion, escaped, bidi stripped, fixed
   assert(m.html.includes('possible duplicate'))
   await handle(post({ action: 'complete', token, contact_name: 'Pat Lee' }), e, fx)
   assertEquals(calls.filter((c) => c.url.startsWith('https://api.resend.com')).length, 1)
+})
+
+Deno.test('notice: APP_MAIL_BCC is copied only when it is one valid address', async () => {
+  const NOTICE = { ok: true, company: 'Acme Laser', org_type: 'laser_clinic', contact_name: 'Pat Lee', email: 'pat@example.test', city: 'Mesa', state: 'AZ', status: 'received', held_back: 0 }
+  const base = { RESEND_API_KEY: 're_x', DIRECTORY_REVIEW_INBOX: 'Review@Example.test' }
+  const send = async (extra: Record<string, string>) => {
+    const calls: Call[] = []
+    const token = await issueStep2Token(SECRET, RID)
+    const fx = stub((name) => {
+      if (name === 'directory_registration_step2') return { ok: true, status: 'received' }
+      if (name === 'directory_registration_take_notice') return NOTICE
+      return undefined
+    }, calls)
+    const res = await handle(post({ action: 'complete', token, contact_name: 'Pat Lee' }), env({ ...base, ...extra }), fx)
+    assertEquals(res.status, 200)
+    return calls.filter((c) => c.url.startsWith('https://api.resend.com')).map((c) => c.body)
+  }
+  const blank = await send({ APP_MAIL_BCC: '   ' })
+  assertEquals(blank.length, 1)
+  assertEquals(blank[0].to, ['review@example.test'])
+  assertEquals(blank[0].bcc, undefined)
+  const invalid = await send({ APP_MAIL_BCC: 'not an email' })
+  assertEquals(invalid.length, 1)
+  assertEquals(invalid[0].bcc, undefined)
+  const valid = await send({ APP_MAIL_BCC: '  ops@example.com  ' })
+  assertEquals(valid.length, 1)
+  assertEquals(valid[0].to, ['review@example.test'])
+  assertEquals(valid[0].cc, undefined)
+  assertEquals(valid[0].bcc, ['ops@example.com'])
 })
 
 Deno.test('notice: no inbox / no key / Larry inbox / capped -> nothing sent; send failure never blocks', async () => {

@@ -1,18 +1,21 @@
 /**
  * Every outgoing Resend message goes through this module.
  *
- * APP_MAIL_BCC adds a blind copy for development and ops. Unset uses
- * DEFAULT_OPS_BCC_EMAIL. Set the variable to another address to change it,
- * or to empty, off, false, 0, none, or disabled to stop the copy.
+ * APP_MAIL_BCC is an optional blind copy for development and ops.
+ * It is off unless the variable is set to one non-empty, valid email
+ * address (surrounding whitespace is trimmed). Unset, blank, and invalid
+ * values add no copy. Blank and invalid values log a warning that does
+ * not include the value.
  * The address is only added as bcc. It is never written into to or cc.
  *
- * Do not log the message body or the API key from here.
+ * Do not log the message body, the API key, or the BCC address from here.
  */
 
-export const DEFAULT_OPS_BCC_EMAIL = 'FieldServiceTotalService@gmail.com';
-
 const MAILBOX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const DISABLED = /^(0|off|false|none|disabled)$/i;
+
+/** Static text so a bad APP_MAIL_BCC can never be written into the log. */
+export const OPS_BCC_IGNORED_WARNING =
+  'APP_MAIL_BCC is set but blank or not a valid email; outgoing mail will not include a blind copy.';
 
 type EnvLike = {
   APP_MAIL_BCC?: string | undefined;
@@ -46,20 +49,30 @@ function bareMailbox(value: string): string {
   return (wrapped ? wrapped[1] : value).trim().toLowerCase();
 }
 
-/** Ops blind-copy address, or null when the copy is turned off. */
+function warnIgnoredMailBcc(): void {
+  console.warn(OPS_BCC_IGNORED_WARNING);
+}
+
+/**
+ * Blind-copy address from APP_MAIL_BCC, or null when the copy is off.
+ * Null covers unset, blank, and invalid. Only blank and invalid warn.
+ */
 export function opsBccAddress(env?: EnvLike): string | null {
   const source = env ?? processEnv();
   const raw = source?.APP_MAIL_BCC;
-  if (raw == null) return DEFAULT_OPS_BCC_EMAIL;
+  if (raw == null) return null;
   const trimmed = String(raw).trim();
-  if (!trimmed || DISABLED.test(trimmed)) return null;
-  if (!MAILBOX.test(trimmed)) return null;
+  if (!trimmed || !MAILBOX.test(trimmed)) {
+    warnIgnoredMailBcc();
+    return null;
+  }
   return trimmed;
 }
 
 /**
  * Copy of a Resend payload with the ops address on bcc when it is not
  * already a recipient. to, cc, from, and reply_to are left as given.
+ * When the copy is off, the payload is returned unchanged.
  */
 export function withOpsBcc<T extends Record<string, unknown>>(message: T, env?: EnvLike): T {
   const bcc = opsBccAddress(env);
