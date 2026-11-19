@@ -1,8 +1,8 @@
 /**
  * Decide whether send-invoice may open a Stripe Checkout session.
- * A paid invoice is not given a new session. An open session is reused.
- * Anything else is expired before a replacement is created, so two links
- * cannot both be payable.
+ * A paid invoice is not given a new session. A stored open session is
+ * expired before a replacement is created, so the previous link cannot
+ * still be paid. A paid or complete session is never expired.
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { existingPaidAmount, money2, parseInvoiceData } from './apply-invoice-payment.ts';
@@ -116,20 +116,6 @@ function sessionSettled(snapshot: CheckoutSessionSnapshot): boolean {
   return String(snapshot.status || '') === 'complete';
 }
 
-function sessionOpen(snapshot: CheckoutSessionSnapshot): boolean {
-  return String(snapshot.status || '') === 'open' && String(snapshot.payment_status || '') !== 'paid';
-}
-
-function sameCharge(payAmount: number, snapshot: CheckoutSessionSnapshot | null, storedAmount: number | null): boolean {
-  if (snapshot && snapshot.amount_total != null && Number.isFinite(Number(snapshot.amount_total))) {
-    return Math.round(Number(snapshot.amount_total)) === Math.round(payAmount * 100);
-  }
-  if (storedAmount != null && Number.isFinite(storedAmount)) {
-    return Math.abs(storedAmount - payAmount) < 0.009;
-  }
-  return true;
-}
-
 async function defaultLoadCheckout(sessionId: string): Promise<CheckoutSessionSnapshot | null> {
   const session = await retrieveCheckoutSession(sessionId);
   return {
@@ -181,10 +167,6 @@ export async function planInvoicePayLink(input: {
       payment_status: snapshot.payment_status || null,
     });
     return { action: 'skip', reason: INVOICE_CHECKOUT_ALREADY_PAID };
-  }
-
-  if (snapshot && sessionOpen(snapshot) && sameCharge(input.payAmount, snapshot, open.amount)) {
-    return { action: 'reuse', sessionId: open.sessionId, url: open.url };
   }
 
   let classification: CheckoutExpireClass = 'failed';

@@ -726,7 +726,7 @@ describe('send invoice', { concurrency: false }, () => {
     }
   });
 
-  test('resend with an open Checkout session reuses it instead of creating a second one', async () => {
+  test('resend expires the open Checkout session and creates a replacement', async () => {
     resetDocumentSendRateLimit();
     const row = invoiceRow();
     row.invoice_data = {
@@ -768,11 +768,11 @@ describe('send invoice', { concurrency: false }, () => {
         const json = await res.json();
         assert.equal(res.status, 200);
         assert.equal(json.emailSent, true);
-        assert.equal(json.stripeSessionId, 'cs_test_open');
-        assert.equal(json.paymentUrl, 'https://checkout.stripe.com/c/pay/cs_test_open');
-        assert.equal(checkout.calls.length, 0);
-        assert.equal(expired, 0);
-        assert.equal(db.updates.length, 0);
+        assert.equal(json.stripeSessionId, 'session-1');
+        assert.equal(json.paymentUrl, 'https://pay.example/session-1');
+        assert.equal(checkout.calls.length, 1);
+        assert.equal(expired, 1);
+        assert.equal(db.updates.length, 1);
       });
     } finally {
       fetchLog.restore();
