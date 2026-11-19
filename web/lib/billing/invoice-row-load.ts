@@ -83,3 +83,78 @@ function readableInvoiceData(val: unknown): Record<string, unknown> | null {
   }
   return null;
 }
+
+export type InvoicePayLinkSave = {
+  paymentUrl: string | null;
+  sessionId: string | null;
+  paymentAmount?: number | null;
+  paymentKind?: string | null;
+  /** Open session this send is replacing. Kept so an old email can be recognized. */
+  replacedSessionId?: string | null;
+  /**
+   * Write only while this is still the stored Checkout session.
+   * Zero rows means another send already replaced it.
+   */
+  expectedSessionId?: string | null;
+};
+
+/**
+ * Overlay the pay-link keys on the latest invoice_data. Other keys written
+ * since the send started, including stripe_checkout_session_ids, stay.
+ * No new SQL function: the read and the conditional update are the merge.
+ */
+export async function saveInvoicePayLink(
+  invoices: { select: (columns: string) => any; update: (patch: Record<string, unknown>) => any },
+  invoiceId: string | number,
+  patch: InvoicePayLinkSave
+): Promise<{ saved: boolean; currentSessionId: string | null }> {
+  try {
+    let read = await invoices.select('invoice_data, updated_at').eq('id', invoiceId).maybeSingle();
+    if (read?.error && COLUMN_MISSING.test(String(read.error.message || ''))) {
+      read = await invoices.select('invoice_data').eq('id', invoiceId).maybeSingle();
+    }
+    if (read?.error || !read?.data || !Object.prototype.hasOwnProperty.call(read.data, 'invoice_data')) {
+      return { saved: false, currentSessionId: null };
+    }
+    const base = readableInvoiceData(read.data.invoice_data);
+    if (!base) return { saved: false, currentSessionId: null };
+    const current = String(base.stripe_checkout_session_id || '').trim();
+    const expected = String(patch.expectedSessionId || '').trim();
+    if (expected && current && current !== expected) {
+      return { saved: false, currentSessionId: current };
+    }
+    const replaced = Array.isArray(base.replaced_checkout_session_ids)
+      ? base.replaced_checkout_session_ids.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const prior = String(patch.replacedSessionId || '').trim();
+    if (prior && !replaced.includes(prior) && prior !== String(patch.sessionId || '').trim()) {
+      replaced.push(prior);
+    }
+    const next: Record<string, unknown> = {
+      ...base,
+      payment_url: patch.paymentUrl || '',
+      stripe_checkout_session_id: patch.sessionId || '',
+      replaced_checkout_session_ids: replaced,
+    };
+    if (patch.paymentAmount != null) next.payment_amount = patch.paymentAmount;
+    if (patch.paymentKind) next.payment_kind = patch.paymentKind;
+    const payload: Record<string, unknown> = { invoice_data: next };
+    const updatedAt = read.data.updated_at;
+    if (updatedAt) payload.updated_at = new Date().toISOString();
+    let query = invoices.update(payload).eq('id', invoiceId);
+    if (updatedAt) query = query.eq('updated_at', updatedAt);
+    if (expected) query = query.filter('invoice_data->>stripe_checkout_session_id', 'eq', expected);
+    const wrote = await query.select('id');
+    if (wrote?.error) return { saved: false, currentSessionId: current };
+    const rows = Array.isArray(wrote?.data) ? wrote.data : [];
+    if (expected && rows.length === 0) {
+      const again = await invoices.select('invoice_data').eq('id', invoiceId).maybeSingle();
+      const now = String(readableInvoiceData(again?.data?.invoice_data)?.stripe_checkout_session_id || '').trim();
+      return { saved: false, currentSessionId: now || current };
+    }
+    return { saved: rows.length > 0 || !expected, currentSessionId: String(patch.sessionId || '').trim() || null };
+  } catch (e) {
+    console.warn('could not persist payment_url', e);
+    return { saved: false, currentSessionId: null };
+  }
+}

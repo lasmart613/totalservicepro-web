@@ -64,13 +64,46 @@ function memoryClient(tables: Record<string, Record<string, unknown>[]>) {
           return { data: found || null, error: null };
         },
         update(patch: Record<string, unknown>) {
-          updates.push({ table, patch });
+          const match: { col: string; val: unknown }[] = [];
           const upd = {
-            eq() {
+            eq(col: string, val: unknown) {
+              match.push({ col, val });
+              return upd;
+            },
+            filter(col: string, _op: string, val: unknown) {
+              match.push({ col, val });
+              return upd;
+            },
+            select() {
               return upd;
             },
             then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
-              return Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected);
+              const rows = tables[table] || [];
+              const idFilter = match.find((item) => item.col === 'id');
+              const row = rows.find((item) => idFilter == null || String(item.id) === String(idFilter.val));
+              let ok = !!row;
+              for (const item of match) {
+                if (item.col === 'id') continue;
+                if (item.col === 'updated_at' && row?.updated_at != null && String(row.updated_at) !== String(item.val)) {
+                  ok = false;
+                }
+                if (item.col === 'organization_id' && String(row?.organization_id) !== String(item.val)) ok = false;
+                if (item.col === 'invoice_data->>stripe_checkout_session_id') {
+                  const current = String(
+                    (row?.invoice_data as { stripe_checkout_session_id?: string } | undefined)?.stripe_checkout_session_id || ''
+                  );
+                  if (current !== String(item.val)) ok = false;
+                }
+              }
+              if (ok && row && patch.invoice_data && typeof patch.invoice_data === 'object') {
+                row.invoice_data = patch.invoice_data;
+                if (patch.updated_at) row.updated_at = patch.updated_at;
+              }
+              if (ok) updates.push({ table, patch });
+              return Promise.resolve({ data: ok && row ? [{ id: row.id }] : [], error: null }).then(
+                onFulfilled,
+                onRejected
+              );
             },
           };
           return upd;
@@ -733,6 +766,7 @@ describe('send invoice', { concurrency: false }, () => {
       ...(row.invoice_data as Record<string, unknown>),
       payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
       stripe_checkout_session_id: 'cs_test_open',
+      stripe_checkout_session_ids: ['cs_test_webhook'],
       payment_amount: 120,
     };
     const db = memoryClient({
@@ -741,7 +775,7 @@ describe('send invoice', { concurrency: false }, () => {
       service_invoices: [row],
     });
     const checkout = checkoutSpy();
-    let expired = 0;
+    const order: string[] = [];
     const fetchLog = installFetch(() => {
       return new Response(JSON.stringify({ id: 'msg-reuse' }), {
         status: 200,
@@ -753,7 +787,10 @@ describe('send invoice', { concurrency: false }, () => {
         const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
           userClient: db as never,
           adminClient: null,
-          createCheckout: checkout.createCheckout as never,
+          createCheckout: async (input) => {
+            order.push('create');
+            return checkout.createCheckout(input);
+          },
           loadCheckout: async () => ({
             status: 'open',
             payment_status: 'unpaid',
@@ -761,7 +798,7 @@ describe('send invoice', { concurrency: false }, () => {
             amount_total: 12000,
           }),
           expireCheckout: async () => {
-            expired += 1;
+            order.push('expire');
             return 'expired';
           },
         });
@@ -770,8 +807,13 @@ describe('send invoice', { concurrency: false }, () => {
         assert.equal(json.emailSent, true);
         assert.equal(json.stripeSessionId, 'session-1');
         assert.equal(json.paymentUrl, 'https://pay.example/session-1');
-        assert.equal(checkout.calls.length, 1);
-        assert.equal(expired, 1);
+        assert.deepEqual(order, ['expire', 'create']);
+        assert.equal(checkout.calls[0].idempotencyKey, 'invoice-42-replace-cs_test_open');
+        const stored = row.invoice_data as Record<string, unknown>;
+        assert.equal(stored.stripe_checkout_session_id, 'session-1');
+        assert.equal(stored.payment_url, 'https://pay.example/session-1');
+        assert.deepEqual(stored.replaced_checkout_session_ids, ['cs_test_open']);
+        assert.deepEqual(stored.stripe_checkout_session_ids, ['cs_test_webhook']);
         assert.equal(db.updates.length, 1);
       });
     } finally {
@@ -847,6 +889,201 @@ describe('send invoice', { concurrency: false }, () => {
       });
     } finally {
       fetchLog.restore();
+    }
+  });
+
+  test('a payout refusal does not expire the open Checkout session', async () => {
+    resetDocumentSendRateLimit();
+    const previousEnforce = process.env.STRIPE_CONNECT_ENFORCE;
+    process.env.STRIPE_CONNECT_ENFORCE = '1';
+    const row = invoiceRow();
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+      stripe_checkout_session_id: 'cs_test_open',
+      payment_amount: 120,
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const checkout = checkoutSpy();
+    let expired = 0;
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify({ id: 'msg-refuse' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => {
+            throw new Error('must not load after a payout refusal');
+          },
+          expireCheckout: async () => {
+            expired += 1;
+            return 'expired';
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.connectRequired, true);
+        assert.equal(json.paymentUrl, 'https://checkout.stripe.com/c/pay/cs_test_open');
+        assert.equal(expired, 0);
+        assert.equal(checkout.calls.length, 0);
+        assert.equal(
+          (row.invoice_data as { stripe_checkout_session_id?: string }).stripe_checkout_session_id,
+          'cs_test_open'
+        );
+      });
+    } finally {
+      fetchLog.restore();
+      if (previousEnforce == null) delete process.env.STRIPE_CONNECT_ENFORCE;
+      else process.env.STRIPE_CONNECT_ENFORCE = previousEnforce;
+    }
+  });
+
+  test('create failure after expire clears the dead link and the email does not claim one', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+      stripe_checkout_session_id: 'cs_test_open',
+      stripe_checkout_session_ids: ['cs_test_webhook'],
+      payment_amount: 120,
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const order: string[] = [];
+    const original = globalThis.fetch;
+    let mailed = '';
+    globalThis.fetch = (async (url: unknown, init?: { body?: unknown }) => {
+      if (!String(url).includes('api.resend.com')) throw new Error(`unexpected fetch ${url}`);
+      mailed = String(init?.body || '');
+      return new Response(JSON.stringify({ id: 'msg-nocreate' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: async () => {
+            order.push('create');
+            return { ok: false, code: 'stripe_error', message: 'Stripe is down', prompt: null };
+          },
+          loadCheckout: async () => ({
+            status: 'open',
+            payment_status: 'unpaid',
+            url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+            amount_total: 12000,
+          }),
+          expireCheckout: async () => {
+            order.push('expire');
+            return 'expired';
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.paymentUrl, null);
+        assert.equal(json.stripeSessionId, null);
+        assert.match(json.stripeSkippedReason, /Stripe is down/);
+        assert.deepEqual(order, ['expire', 'create']);
+        assert.equal(mailed.includes('checkout.stripe.com'), false);
+        assert.equal(mailed.includes('/pay/invoice/'), false);
+        const stored = row.invoice_data as Record<string, unknown>;
+        assert.equal(stored.payment_url, '');
+        assert.equal(stored.stripe_checkout_session_id, '');
+        assert.deepEqual(stored.replaced_checkout_session_ids, ['cs_test_open']);
+        assert.deepEqual(stored.stripe_checkout_session_ids, ['cs_test_webhook']);
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  test('two resends keep one Checkout session and expire the orphan', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+      stripe_checkout_session_id: 'cs_test_open',
+      payment_amount: 120,
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const keys: string[] = [];
+    const expired: string[] = [];
+    let n = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes('api.resend.com')) throw new Error(`unexpected fetch ${url}`);
+      return new Response(JSON.stringify({ id: 'msg-race' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const send = () =>
+          runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: async (input) => {
+              keys.push(String(input.idempotencyKey || ''));
+              n += 1;
+              return {
+                ok: true as const,
+                url: `https://pay.example/${n}`,
+                sessionId: `cs_test_new_${n}`,
+                livemode: null,
+              };
+            },
+            loadCheckout: async () => ({
+              status: 'open',
+              payment_status: 'unpaid',
+              url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+              amount_total: 12000,
+            }),
+            expireCheckout: async (sessionId) => {
+              expired.push(sessionId);
+              return sessionId === 'cs_test_open' ? 'expired' : 'expired';
+            },
+          });
+        const [first, second] = await Promise.all([send(), send()]);
+        const bodies = [await first.json(), await second.json()];
+        assert.equal(bodies.every((body) => body.emailSent), true);
+        assert.equal(keys.length, 2);
+        assert.equal(keys[0], 'invoice-42-replace-cs_test_open');
+        assert.equal(keys[1], keys[0]);
+        const stored = String((row.invoice_data as { stripe_checkout_session_id?: string }).stripe_checkout_session_id);
+        assert.match(stored, /^cs_test_new_/);
+        const urls = bodies.map((body) => body.paymentUrl).filter(Boolean);
+        assert.equal(urls.length, 1);
+        assert.equal(urls[0], `https://pay.example/${stored.slice('cs_test_new_'.length)}`);
+        assert.equal(expired.includes(stored), false);
+        assert.equal(expired.includes('cs_test_open'), true);
+        assert.equal(expired.some((id) => id.startsWith('cs_test_new_') && id !== stored), true);
+      });
+    } finally {
+      globalThis.fetch = original;
     }
   });
 });

@@ -43,8 +43,7 @@ export type OpenPayLink = {
 };
 
 export type PayLinkPlan =
-  | { action: 'reuse'; sessionId: string; url: string }
-  | { action: 'create' }
+  | { action: 'create'; expiredSessionId: string | null }
   | { action: 'skip'; reason: string };
 
 type LoadCheckout = (sessionId: string) => Promise<CheckoutSessionSnapshot | null>;
@@ -140,7 +139,7 @@ export async function planInvoicePayLink(input: {
 }): Promise<PayLinkPlan> {
   if (invoiceAlreadyPaid(input.invoice)) return { action: 'skip', reason: INVOICE_ALREADY_PAID };
   const open = openPayLink(input.invoice.invoice_data);
-  if (!open) return { action: 'create' };
+  if (!open) return { action: 'create', expiredSessionId: null };
 
   const load = input.loadCheckout ?? defaultLoadCheckout;
   const expire = input.expireCheckout ?? defaultExpireCheckout;
@@ -158,7 +157,7 @@ export async function planInvoicePayLink(input: {
 
   if (snapshot && sessionSettled(snapshot)) {
     if (await credited(open.sessionId)) {
-      return { action: 'create' };
+      return { action: 'create', expiredSessionId: null };
     }
     console.warn('[billing] refusing a new Checkout session; the open pay link is already complete', {
       invoiceId: input.invoice.id == null ? null : String(input.invoice.id),
@@ -177,9 +176,11 @@ export async function planInvoicePayLink(input: {
     classification = 'failed';
   }
   if (classification === 'completed') {
-    if (await credited(open.sessionId)) return { action: 'create' };
+    if (await credited(open.sessionId)) return { action: 'create', expiredSessionId: null };
     return { action: 'skip', reason: INVOICE_CHECKOUT_ALREADY_PAID };
   }
-  if (classification === 'expired' || classification === 'already_expired') return { action: 'create' };
+  if (classification === 'expired' || classification === 'already_expired') {
+    return { action: 'create', expiredSessionId: open.sessionId };
+  }
   return { action: 'skip', reason: INVOICE_PAY_LINK_BUSY };
 }
