@@ -11,9 +11,16 @@
 --
 -- Roll the app back first (or together): the invite API in this change
 -- counts open invites, and the database functions stop enforcing the cap.
+-- Drops organization_memberships_enforce_seat_cap before restoring the
+-- live functions, so a new insert is not checked after this file commits.
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 
+BEGIN;
+
 SET LOCAL lock_timeout = '5s';
+
+DROP TRIGGER IF EXISTS organization_memberships_enforce_seat_cap ON public.organization_memberships;
+DROP FUNCTION IF EXISTS public.organization_memberships_enforce_seat_cap();
 
 CREATE OR REPLACE FUNCTION public.user_profiles_sync_membership()
 RETURNS trigger
@@ -228,3 +235,5 @@ COMMENT ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean
 
 DROP FUNCTION IF EXISTS public.org_membership_seat_allows(bigint, uuid);
 DROP FUNCTION IF EXISTS public.org_seat_limit(bigint);
+
+COMMIT;

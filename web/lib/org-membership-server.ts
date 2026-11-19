@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { emailsMatch } from '@/lib/email-match';
+import { loadAuthEmailsByUserId } from '@/lib/team-profile';
 import {
   decideInviteForExistingProfile,
   decideSwitch,
@@ -110,8 +111,9 @@ type OpenInviteRow = {
  * counts only when created_at is within 14 days).
  *
  * Resending an invite that is already open does not take another seat.
- * A missing org, or a member/invite read that does not come back as a list,
- * fails closed. Nothing is deleted.
+ * An open invite whose auth email already belongs to a member does not
+ * count again. A missing org, a member/invite read that is not a list, or
+ * an auth-email read that fails, fails closed. Nothing is deleted.
  */
 export async function orgInviteSeatCheck(
   admin: SupabaseClient,
@@ -141,7 +143,23 @@ export async function orgInviteSeatCheck(
     return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
   }
 
-  const open = (inviteRows as OpenInviteRow[]).filter((row) => invitationIsOpen(row));
+  const openInvites = (inviteRows as OpenInviteRow[]).filter((row) => invitationIsOpen(row));
+  const memberIds = memberRows
+    .map((row) => String((row as { user_id?: string | null }).user_id || '').trim())
+    .filter(Boolean);
+  let open = openInvites;
+  if (memberIds.length > 0 && openInvites.length > 0) {
+    const authEmails = await loadAuthEmailsByUserId(admin, memberIds);
+    if (!authEmails) {
+      return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+    }
+    if (memberIds.some((id) => !authEmails.get(id))) {
+      return { ok: false, status: 503, error: 'Could not check team seats. Try again.' };
+    }
+    open = openInvites.filter(
+      (row) => !Array.from(authEmails.values()).some((memberEmail) => emailsMatch(row.email, memberEmail))
+    );
+  }
   const limit = orgSeatLimit(org as OrgPlanFields);
   const refreshing = !!email && open.some((row) => emailsMatch(row.email, email));
   const used = memberRows.length + open.length;

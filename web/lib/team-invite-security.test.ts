@@ -761,6 +761,12 @@ function inviteAdmin(state: {
             error: null,
           };
         },
+        getUserById: async (id: string) => {
+          const profile = profileRows.find((row) => String(row.id) === String(id));
+          const email =
+            (profile && typeof profile.email === 'string' && profile.email) || `${id}@members.invalid`;
+          return { data: { user: { id, email } }, error: null };
+        },
       },
     },
   };

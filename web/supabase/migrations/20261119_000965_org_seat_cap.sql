@@ -28,17 +28,30 @@
 -- counts unaccepted, unexpired invites when the invite is created.
 --
 -- New helpers are not SECURITY DEFINER and are not granted to client
--- roles. The two functions that already were SECURITY DEFINER call them,
--- so the member count is not filtered by the caller's RLS.
--- search_path is pinned. row_security is off on the helpers so a partial
--- RLS view cannot under-count and let another seat in; a policy that
--- would hide rows makes the check fail instead.
+-- roles. The seat trigger is SECURITY DEFINER so a client insert cannot
+-- hide other members with RLS and under-count. search_path is pinned.
+-- row_security is off on the helpers and the trigger so a partial RLS
+-- view cannot under-count; a policy that would hide rows makes the check
+-- fail instead.
+--
+-- Every INSERT into organization_memberships (set_home_membership,
+-- accept_team_invite, claim_clinic_owner_invite, claim_directory_listing_invite,
+-- the profile sync trigger, and a raw service-role insert) runs
+-- organization_memberships_enforce_seat_cap. That trigger takes a
+-- per-org transaction advisory lock, then calls org_membership_seat_allows.
+-- Two concurrent adds at 9 of 10 cannot both commit. An existing member
+-- passes, so ON CONFLICT DO UPDATE still updates that row.
+-- The profile trigger and membership_insert_allowed still call the check
+-- so the caller gets the same error before the row is written.
 --
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
--- One transaction. Safe to re-run.
+-- This file is one transaction. Safe to re-run.
 -- Rollback: 20261119_000965_org_seat_cap_rollback.sql
 -- restores the live 000904 user_profiles_sync_membership and the live
--- 000917 membership_insert_allowed (000904 did not define that function).
+-- 000917 membership_insert_allowed (000904 did not define that function)
+-- and drops the trigger.
+
+BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
@@ -82,7 +95,7 @@ COMMENT ON FUNCTION public.org_seat_limit(bigint) IS
 CREATE OR REPLACE FUNCTION public.org_membership_seat_allows(p_org bigint, p_user uuid)
 RETURNS boolean
 LANGUAGE plpgsql
-STABLE
+VOLATILE
 SET search_path = ''
 SET row_security = off
 AS $function$
@@ -137,6 +150,41 @@ COMMENT ON FUNCTION public.org_membership_seat_allows(bigint, uuid) IS
 REVOKE ALL ON FUNCTION public.org_seat_limit(bigint) FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON FUNCTION public.org_membership_seat_allows(bigint, uuid) FROM PUBLIC, anon, authenticated;
 
+-- One lock per organization for the rest of this transaction. Distinct from
+-- tsp.clinic_owner locks. hashtextextended returns bigint for pg_advisory_xact_lock.
+CREATE OR REPLACE FUNCTION public.organization_memberships_enforce_seat_cap()
+RETURNS trigger
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path = ''
+SET row_security = off
+AS $function$
+BEGIN
+  IF NEW.organization_id IS NULL THEN
+    RAISE EXCEPTION 'organization seat limit could not be checked'
+      USING ERRCODE = 'check_violation';
+  END IF;
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tsp.org_seat:' || NEW.organization_id::text, 0)
+  );
+  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.user_id);
+  RETURN NEW;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.organization_memberships_enforce_seat_cap() IS
+  '000965 BEFORE INSERT. Locks the org for this transaction, then refuses a new member at org_seat_limit. An existing member passes so ON CONFLICT DO UPDATE still applies. Does not remove anyone.';
+
+REVOKE ALL ON FUNCTION public.organization_memberships_enforce_seat_cap() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.organization_memberships_enforce_seat_cap() TO authenticated, service_role;
+
+DROP TRIGGER IF EXISTS organization_memberships_enforce_seat_cap ON public.organization_memberships;
+CREATE TRIGGER organization_memberships_enforce_seat_cap
+  BEFORE INSERT ON public.organization_memberships
+  FOR EACH ROW
+  EXECUTE FUNCTION public.organization_memberships_enforce_seat_cap();
+
 CREATE OR REPLACE FUNCTION public.user_profiles_sync_membership()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -179,10 +227,9 @@ BEGIN
       WHERE m.user_id = NEW.id
         AND m.is_home IS TRUE
     ) INTO home;
-    IF NOT public.org_membership_seat_allows(NEW.organization_id, NEW.id) THEN
-      RAISE EXCEPTION 'organization seat limit could not be checked'
-        USING ERRCODE = 'check_violation';
-    END IF;
+    -- Friendly error before the insert. The BEFORE INSERT trigger is the
+    -- locked check; this call raises the same seat message and never returns false.
+    PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id);
     INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
     VALUES (NEW.id, NEW.organization_id, grant_role, home)
     ON CONFLICT (user_id, organization_id) DO UPDATE
@@ -281,10 +328,7 @@ BEGIN
     ELSE grant_role
   END;
 
-  IF NOT public.org_membership_seat_allows(NEW.organization_id, NEW.id) THEN
-    RAISE EXCEPTION 'organization seat limit could not be checked'
-      USING ERRCODE = 'check_violation';
-  END IF;
+  PERFORM public.org_membership_seat_allows(NEW.organization_id, NEW.id);
   INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
   VALUES (NEW.id, NEW.organization_id, grant_role, false)
   ON CONFLICT (user_id, organization_id) DO UPDATE
@@ -314,7 +358,7 @@ COMMENT ON FUNCTION public.user_profiles_sync_membership() IS
 CREATE OR REPLACE FUNCTION public.membership_insert_allowed(p_user_id uuid, p_organization_id bigint, p_role text, p_is_home boolean)
 RETURNS boolean
 LANGUAGE sql
-STABLE
+VOLATILE
 SECURITY DEFINER
 SET search_path = ''
 AS $function$
@@ -363,4 +407,6 @@ AS $function$
 $function$;
 
 COMMENT ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) IS
-  'Client membership insert: own shop at the founder role for that org type (never platform admin), or an unexpired unaccepted invite whose role matches after admin is mapped to company_admin. NULL expires_at is open only when created_at is within 14 days. Invite inserts cannot set is_home. A new row is refused at org_seat_limit (000965). Existing members are not removed.';
+  'Client membership insert: own shop at the founder role for that org type (never platform admin), or an unexpired unaccepted invite whose role matches after admin is mapped to company_admin. NULL expires_at is open only when created_at is within 14 days. Invite inserts cannot set is_home. A new row is refused at org_seat_limit (000965). Existing members are not removed. The BEFORE INSERT trigger locks and checks again.';
+
+COMMIT;

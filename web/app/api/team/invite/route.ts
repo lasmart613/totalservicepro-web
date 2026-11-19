@@ -223,9 +223,12 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     const resendKey = deps.resendKey === undefined ? process.env.RESEND_API_KEY : deps.resendKey || '';
     const findUser = deps.findAuthUser ?? findAuthUserByEmail;
 
-    // Seat cap before any email goes out. Members plus open invites.
-    // Over-cap orgs keep current members. Resending an open invite does not
-    // take another seat.
+    // Seat cap before any email goes out. Members plus open invites, except
+    // an open invite for someone who is already a member.
+    // Two requests at the same moment can both pass this read. Seating the
+    // person takes the per-org lock in organization_memberships, so only one
+    // of them can become a member. Resending an open invite does not take
+    // another seat.
     const seats = await (deps.seatCheck ?? orgInviteSeatCheck)(admin, orgId as string | number, email);
     if (!seats.ok) {
       return NextResponse.json(

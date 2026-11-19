@@ -21,8 +21,6 @@ BEGIN
   END IF;
 END $$;
 
-BEGIN;
-
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF;
@@ -67,7 +65,8 @@ CREATE TABLE public.user_profiles (
   email text,
   role text,
   organization_id bigint,
-  active_organization_id bigint
+  active_organization_id bigint,
+  updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE public.engineer_invitations (
@@ -76,6 +75,7 @@ CREATE TABLE public.engineer_invitations (
   email text,
   role text,
   accepted boolean,
+  accepted_at timestamptz,
   expires_at timestamptz,
   created_at timestamptz NOT NULL DEFAULT now()
 );
@@ -143,6 +143,94 @@ LANGUAGE sql STABLE SET search_path = '' AS $$
   SELECT 'company_admin'::text;
 $$;
 
+-- Live insert paths the seat trigger must cover. Bodies match the inserts in
+-- 000904 set_home_membership and 000400 accept_team_invite.
+-- claim_clinic_owner_invite (000924) and claim_directory_listing_invite (000926)
+-- seat the owner by calling set_home_membership.
+CREATE OR REPLACE FUNCTION public.set_home_membership(
+  p_user_id uuid,
+  p_organization_id bigint,
+  p_role text DEFAULT NULL,
+  p_sync_profile boolean DEFAULT false
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+SET row_security = off
+AS $$
+DECLARE
+  n integer;
+  next_role text;
+BEGIN
+  IF p_user_id IS NULL OR p_organization_id IS NULL THEN
+    RAISE EXCEPTION 'set_home_membership requires a user and an organization';
+  END IF;
+  next_role := CASE
+    WHEN p_role IS NULL OR btrim(p_role) = '' THEN NULL
+    ELSE public.profile_role_from_membership(p_role)
+  END;
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES (p_user_id, p_organization_id, COALESCE(next_role, 'fse'), true)
+  ON CONFLICT (user_id, organization_id) DO UPDATE
+    SET is_home = true, updated_at = now(),
+        role = COALESCE(next_role, public.organization_memberships.role);
+  GET DIAGNOSTICS n = ROW_COUNT;
+  IF n <> 1 THEN
+    RAISE EXCEPTION 'set_home_membership expected 1 membership row, changed %', n;
+  END IF;
+  IF p_sync_profile THEN
+    UPDATE public.user_profiles
+    SET organization_id = p_organization_id,
+        active_organization_id = p_organization_id,
+        role = public.profile_role_from_membership(COALESCE(next_role, role)),
+        updated_at = now()
+    WHERE id = p_user_id;
+  END IF;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.accept_team_invite(
+  p_invite_id bigint,
+  p_leave_organization_id bigint DEFAULT NULL
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  actor uuid;
+  actor_email text;
+  inv public.engineer_invitations%ROWTYPE;
+  mapped_role text;
+BEGIN
+  actor := auth.uid();
+  IF actor IS NULL THEN
+    RAISE EXCEPTION 'not signed in';
+  END IF;
+  actor_email := public.auth_login_email();
+  SELECT * INTO inv
+  FROM public.engineer_invitations
+  WHERE id = p_invite_id
+    AND lower(btrim(email)) = actor_email
+    AND public.invitation_is_open(accepted, expires_at, created_at);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'invitation not found';
+  END IF;
+  mapped_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(inv.role), ''), 'fse'));
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES (actor, inv.organization_id, mapped_role, false)
+  ON CONFLICT (user_id, organization_id) DO UPDATE
+    SET updated_at = now(),
+        role = CASE
+          WHEN public.organization_memberships.is_home THEN public.organization_memberships.role
+          ELSE EXCLUDED.role
+        END;
+  UPDATE public.engineer_invitations
+  SET accepted = true, accepted_at = now()
+  WHERE id = inv.id;
+END;
+$$;
+
 -- Install the pre-000965 (live) bodies, then snapshot them.
 \i web/supabase/migrations/20261119_000965_org_seat_cap_rollback.sql
 
@@ -172,6 +260,8 @@ CREATE OR REPLACE FUNCTION pg_temp.members(p_org bigint) RETURNS integer
 LANGUAGE sql STABLE AS $$
   SELECT count(*)::integer FROM public.organization_memberships WHERE organization_id = p_org
 $$;
+
+BEGIN;
 
 -- Limits match lib/org-plan.ts orgSeatLimit. Complimentary Premium stays at 1.
 INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan, premium_until, premium_grant) VALUES
@@ -284,10 +374,14 @@ BEGIN
 END $$;
 
 -- Grandfather: three members on a 1-seat org stay. The next add is blocked.
+-- These rows stand in for members who were already there before 000965.
+-- The trigger is off only for that seed; a real apply does not do this.
+ALTER TABLE public.organization_memberships DISABLE TRIGGER organization_memberships_enforce_seat_cap;
 INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home) VALUES
   ('00000000-0000-4000-8000-000000008821', 8802, 'fse', true),
   ('00000000-0000-4000-8000-000000008822', 8802, 'fse', false),
   ('00000000-0000-4000-8000-000000008823', 8802, 'fse', false);
+ALTER TABLE public.organization_memberships ENABLE TRIGGER organization_memberships_enforce_seat_cap;
 DO $$
 BEGIN
   BEGIN
@@ -369,7 +463,11 @@ BEGIN
   END IF;
 END $$;
 
--- Same person, no invite, is not a seat error (still denied).
+-- No invite. Under the cap this is an RLS denial (the trigger allows the row,
+-- then the policy rejects it). At the cap the BEFORE INSERT trigger runs
+-- before RLS and raises the seat error. Either way no row is added.
+INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
+VALUES (8814, 'Empty for stranger', 'service_company', false, 'free', 'free');
 SET LOCAL ROLE authenticated;
 SELECT set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000008851', true);
 SELECT set_config('request.jwt.claim.email', 'stranger@example.test', true);
@@ -377,17 +475,33 @@ DO $$
 BEGIN
   BEGIN
     INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
-    VALUES ('00000000-0000-4000-8000-000000008851', 8801, 'fse', false);
-    RAISE EXCEPTION 'stranger direct insert was allowed';
+    VALUES ('00000000-0000-4000-8000-000000008851', 8814, 'fse', false);
+    RAISE EXCEPTION 'stranger direct insert into an open org was allowed';
   EXCEPTION
-    WHEN insufficient_privilege THEN
-      NULL;
+    WHEN insufficient_privilege THEN NULL;
     WHEN check_violation THEN
-      RAISE EXCEPTION 'stranger got a seat error instead of an RLS denial: %', SQLERRM;
+      RAISE EXCEPTION 'stranger on an open org got a seat error: %', SQLERRM;
   END;
-  RAISE NOTICE 'ok   stranger without an invite is denied without a seat error';
+  BEGIN
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008851', 8801, 'fse', false);
+    RAISE EXCEPTION 'stranger direct insert into a full org was allowed';
+  EXCEPTION
+    WHEN insufficient_privilege THEN NULL;
+    WHEN check_violation THEN
+      IF SQLERRM NOT ILIKE '%seat%' THEN
+        RAISE EXCEPTION 'stranger on a full org was not denied: %', SQLERRM;
+      END IF;
+  END;
+  RAISE NOTICE 'ok   stranger without an invite is denied';
 END $$;
 RESET ROLE;
+DO $$
+BEGIN
+  IF pg_temp.members(8814) <> 0 OR pg_temp.members(8801) <> 1 THEN
+    RAISE EXCEPTION 'stranger insert landed';
+  END IF;
+END $$;
 
 -- Via invite: profile org change onto a full org that invited this email.
 INSERT INTO public.organizations (id, name, type, created_by, is_premium, subscription_tier, plan)
@@ -487,7 +601,194 @@ BEGIN
 END $$;
 RESET ROLE;
 
--- Rollback restores the live bodies and drops the helpers.
+-- Raw service-role insert (no RLS) is still stopped by the trigger.
+SELECT set_config('request.jwt.claim.sub', '', true);
+DO $$
+BEGIN
+  BEGIN
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES ('00000000-0000-4000-8000-000000008880', 8801, 'fse', false);
+    RAISE EXCEPTION 'raw insert at cap was allowed';
+  EXCEPTION
+    WHEN check_violation THEN
+      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
+        RAISE EXCEPTION 'raw insert error was not the seat message: %', SQLERRM;
+      END IF;
+  END;
+  IF pg_temp.members(8801) <> 1 THEN
+    RAISE EXCEPTION 'raw insert changed the full org';
+  END IF;
+  RAISE NOTICE 'ok   at cap: raw insert blocked';
+END $$;
+
+-- set_home_membership inserts before the profile update. The trigger blocks it.
+-- claim_clinic_owner_invite and claim_directory_listing_invite call this.
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.set_home_membership(
+      '00000000-0000-4000-8000-000000008881', 8801, 'fse', false);
+    RAISE EXCEPTION 'set_home_membership at cap was allowed';
+  EXCEPTION
+    WHEN check_violation THEN
+      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
+        RAISE EXCEPTION 'set_home_membership error was not the seat message: %', SQLERRM;
+      END IF;
+  END;
+  IF pg_temp.members(8801) <> 1 THEN
+    RAISE EXCEPTION 'set_home_membership changed the full org';
+  END IF;
+  RAISE NOTICE 'ok   at cap: set_home_membership blocked (clinic and directory claims use it)';
+END $$;
+
+-- accept_team_invite inserts the membership itself. The app does not call it.
+INSERT INTO public.engineer_invitations (organization_id, email, role, accepted, expires_at)
+VALUES (8801, 'accept@example.test', 'fse', false, now() + interval '7 days');
+SELECT set_config('request.jwt.claim.sub', '00000000-0000-4000-8000-000000008882', true);
+SELECT set_config('request.jwt.claim.email', 'accept@example.test', true);
+DO $$
+DECLARE inv bigint;
+BEGIN
+  SELECT id INTO inv FROM public.engineer_invitations
+  WHERE email = 'accept@example.test' AND organization_id = 8801;
+  BEGIN
+    PERFORM public.accept_team_invite(inv);
+    RAISE EXCEPTION 'accept_team_invite at cap was allowed';
+  EXCEPTION
+    WHEN check_violation THEN
+      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
+        RAISE EXCEPTION 'accept_team_invite error was not the seat message: %', SQLERRM;
+      END IF;
+  END;
+  IF pg_temp.members(8801) <> 1 THEN
+    RAISE EXCEPTION 'accept_team_invite changed the full org';
+  END IF;
+  RAISE NOTICE 'ok   at cap: accept_team_invite blocked';
+END $$;
+
+-- Directory claim writes the profile first. Service-role profile write inserts
+-- a membership and must stop at the cap. The profile row must not move.
+SELECT set_config('request.jwt.claim.sub', '', true);
+SELECT set_config('request.jwt.claim.email', '', true);
+INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
+VALUES (8815, 'Directory home', 'service_company', false, 'free', 'free');
+INSERT INTO public.user_profiles (id, email, role, organization_id)
+VALUES ('00000000-0000-4000-8000-000000008883', 'directory@example.test', 'fse', 8815);
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.user_profiles
+    SET organization_id = 8801
+    WHERE id = '00000000-0000-4000-8000-000000008883';
+    RAISE EXCEPTION 'directory-style profile write joined a full org';
+  EXCEPTION
+    WHEN check_violation THEN
+      IF SQLERRM NOT ILIKE '%using 1 of 1 seat%' THEN
+        RAISE EXCEPTION 'directory profile write error was not the seat message: %', SQLERRM;
+      END IF;
+  END;
+  IF pg_temp.members(8801) <> 1 THEN
+    RAISE EXCEPTION 'directory profile write added a member';
+  END IF;
+  IF (SELECT organization_id FROM public.user_profiles WHERE id = '00000000-0000-4000-8000-000000008883') <> 8815 THEN
+    RAISE EXCEPTION 'blocked directory write moved the profile';
+  END IF;
+  RAISE NOTICE 'ok   at cap: directory-style profile write blocked';
+END $$;
+
+-- Existing member: ON CONFLICT DO UPDATE still applies on a full org.
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+VALUES ('00000000-0000-4000-8000-000000008801', 8801, 'engineer', false)
+ON CONFLICT (user_id, organization_id) DO UPDATE
+  SET role = EXCLUDED.role, updated_at = now();
+DO $$
+BEGIN
+  IF pg_temp.members(8801) <> 1 THEN
+    RAISE EXCEPTION 'ON CONFLICT update changed the member count';
+  END IF;
+  IF (SELECT role FROM public.organization_memberships
+      WHERE user_id = '00000000-0000-4000-8000-000000008801' AND organization_id = 8801) <> 'engineer' THEN
+    RAISE EXCEPTION 'ON CONFLICT update did not keep the new role';
+  END IF;
+  RAISE NOTICE 'ok   ON CONFLICT update of an existing member succeeded at cap';
+END $$;
+
+-- Committed fixture for the concurrent proof: 9 of 10, two sessions race for the last seats.
+INSERT INTO public.organizations (id, name, type, is_premium, subscription_tier, plan)
+VALUES (8840, 'Race team', 'service_company', true, 'team', 'team');
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+SELECT (
+  '00000000-0000-4000-8000-' || lpad((8400 + g)::text, 12, '0')
+)::uuid, 8840, 'fse', false
+FROM generate_series(1, 9) g;
+
+COMMIT;
+
+CREATE EXTENSION IF NOT EXISTS dblink;
+CREATE TABLE public.seat_cap_barrier (id integer PRIMARY KEY);
+
+SELECT dblink_connect('s1', format('dbname=%s', current_database()));
+SELECT dblink_connect('s2', format('dbname=%s', current_database()));
+
+SELECT dblink_send_query('s1', $q$
+DO $$
+BEGIN
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES ('00000000-0000-4000-8000-000000008410', 8840, 'fse', false);
+  PERFORM dblink_exec(format('dbname=%s', current_database()),
+    'INSERT INTO public.seat_cap_barrier (id) VALUES (1)');
+  PERFORM pg_sleep(3);
+END $$;
+$q$);
+
+DO $$
+DECLARE i integer;
+BEGIN
+  FOR i IN 1..100 LOOP
+    EXIT WHEN EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 1);
+    PERFORM pg_sleep(0.05);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 1) THEN
+    RAISE EXCEPTION 'session A did not take the seat lock';
+  END IF;
+  RAISE NOTICE 'ok   session A holds the org lock with the 10th seat uncommitted';
+END $$;
+
+DO $$
+DECLARE started timestamptz := clock_timestamp();
+BEGIN
+  BEGIN
+    PERFORM dblink_exec('s2', $q$
+      INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+      VALUES ('00000000-0000-4000-8000-000000008411', 8840, 'fse', false)
+    $q$);
+    RAISE EXCEPTION 'concurrent 11th insert committed';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLERRM NOT ILIKE '%using 10 of 10 seats%' AND SQLERRM NOT ILIKE '%seat%' THEN
+        RAISE EXCEPTION 'concurrent insert failed for another reason: %', SQLERRM;
+      END IF;
+      IF clock_timestamp() - started < interval '1 second' THEN
+        RAISE EXCEPTION 'concurrent insert did not wait for the other session (waited %)', clock_timestamp() - started;
+      END IF;
+  END;
+  RAISE NOTICE 'ok   concurrent add waited, then was blocked';
+END $$;
+
+SELECT * FROM dblink_get_result('s1') AS r(x text);
+SELECT dblink_disconnect('s1');
+SELECT dblink_disconnect('s2');
+
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8840) <> 10 THEN
+    RAISE EXCEPTION 'concurrent adds finished at % of 10',
+      (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8840);
+  END IF;
+  RAISE NOTICE 'ok   two sessions at 9/10 finished at 10';
+END $$;
+
+-- Rollback restores the live bodies and drops the trigger.
 -- The cap is gone again: a second profile write on a 1-seat org succeeds.
 \i web/supabase/migrations/20261119_000965_org_seat_cap_rollback.sql
 
@@ -500,8 +801,16 @@ BEGIN
     RAISE EXCEPTION 'rollback did not restore the live function bodies';
   END IF;
   IF to_regprocedure('public.org_seat_limit(bigint)') IS NOT NULL
-     OR to_regprocedure('public.org_membership_seat_allows(bigint,uuid)') IS NOT NULL THEN
+     OR to_regprocedure('public.org_membership_seat_allows(bigint,uuid)') IS NOT NULL
+     OR to_regprocedure('public.organization_memberships_enforce_seat_cap()') IS NOT NULL THEN
     RAISE EXCEPTION 'rollback left seat helpers behind';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'organization_memberships_enforce_seat_cap'
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'rollback left the seat trigger';
   END IF;
   IF position('org_membership_seat_allows' IN pg_get_functiondef('public.user_profiles_sync_membership()'::regprocedure)) <> 0
      OR position('org_membership_seat_allows' IN pg_get_functiondef('public.membership_insert_allowed(uuid,bigint,text,boolean)'::regprocedure)) <> 0 THEN
@@ -510,6 +819,7 @@ BEGIN
   RAISE NOTICE 'ok   rollback restored live bodies and dropped helpers';
 END $$;
 
+BEGIN;
 SELECT set_config('request.jwt.claim.sub', '', true);
 SELECT set_config('request.jwt.claim.email', '', true);
 INSERT INTO public.user_profiles (id, email, role, organization_id)
@@ -521,5 +831,4 @@ BEGIN
   END IF;
   RAISE NOTICE 'ok   rollback: profile write can add a seat past the cap again';
 END $$;
-
 ROLLBACK;
