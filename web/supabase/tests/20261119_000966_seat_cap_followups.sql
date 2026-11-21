@@ -453,41 +453,27 @@ BEGIN
   RAISE NOTICE 'ok   successful claim seated, then removed the old membership and accepted the invite';
 END $$;
 
--- A second claim by the same user does not raise the membership unique
--- constraint, and an invite for another org rolls the insert back.
+-- A second claim by the same member on the invite this org already accepted
+-- succeeds and does not add a row.
 DO $$
 BEGIN
-  BEGIN
-    PERFORM public.claim_team_invite_seat(
-      '00000000-0000-4000-8000-000000008850',
-      8852,
-      'fse',
-      false,
-      false,
-      NULL,
-      8852
-    );
-    RAISE EXCEPTION 'second claim of an accepted invite committed';
-  EXCEPTION
-    WHEN unique_violation THEN
-      RAISE EXCEPTION 'second claim raised unique_violation';
-    WHEN OTHERS THEN
-      IF SQLERRM ILIKE '%second claim of an accepted invite committed%'
-         OR SQLERRM ILIKE '%unique_violation%' THEN
-        RAISE;
-      END IF;
-      IF SQLERRM ILIKE '%constraint%' OR SQLERRM ILIKE '%duplicate%' OR SQLERRM ILIKE '%organization_memberships%' THEN
-        RAISE EXCEPTION 'second claim leaked a constraint name: %', SQLERRM;
-      END IF;
-      IF SQLERRM NOT LIKE '%invite was not accepted%' THEN
-        RAISE EXCEPTION 'second claim unexpected error: %', SQLERRM;
-      END IF;
-  END;
+  PERFORM public.claim_team_invite_seat(
+    '00000000-0000-4000-8000-000000008850',
+    8852,
+    'fse',
+    false,
+    false,
+    NULL,
+    8852
+  );
   IF (SELECT count(*) FROM public.organization_memberships
       WHERE user_id = '00000000-0000-4000-8000-000000008850' AND organization_id = 8852) <> 1 THEN
-    RAISE EXCEPTION 'second claim changed the membership';
+    RAISE EXCEPTION 'repeat claim changed the membership';
   END IF;
-  RAISE NOTICE 'ok   second claim keeps one row and hides the constraint name';
+  IF (SELECT i.accepted FROM public.engineer_invitations i WHERE i.id = 8852) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'repeat claim cleared the invite';
+  END IF;
+  RAISE NOTICE 'ok   repeat claim by the same member succeeds';
 END $$;
 
 INSERT INTO public.organizations (id, name, is_premium, subscription_tier, plan)
@@ -557,6 +543,119 @@ BEGIN
     RAISE EXCEPTION 'already-member claim left the invite open';
   END IF;
   RAISE NOTICE 'ok   already-member claim accepts the open invite without a second row';
+END $$;
+
+-- An invite already accepted, for a caller who is not a member, still rolls back.
+INSERT INTO public.organizations (id, name, is_premium, subscription_tier, plan)
+VALUES (8858, 'taken team', true, 'team', 'team');
+INSERT INTO public.engineer_invitations (id, organization_id, email, role, accepted, expires_at)
+VALUES (8858, 8858, 'other@example.test', 'fse', true, now() + interval '7 days');
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_team_invite_seat(
+      '00000000-0000-4000-8000-000000008858',
+      8858,
+      'fse',
+      false,
+      false,
+      NULL,
+      8858
+    );
+    RAISE EXCEPTION 'accepted-by-someone-else claim committed';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLERRM ILIKE '%accepted-by-someone-else claim committed%' THEN
+        RAISE;
+      END IF;
+      IF SQLERRM NOT LIKE '%invite was not accepted%' THEN
+        RAISE EXCEPTION 'accepted-by-someone-else unexpected error: %', SQLERRM;
+      END IF;
+  END;
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008858'
+  ) THEN
+    RAISE EXCEPTION 'accepted-by-someone-else left a membership';
+  END IF;
+  RAISE NOTICE 'ok   an invite accepted for someone else rolls the claim back';
+END $$;
+
+-- Two claims of the same open invite overlap on the seat lock. Both succeed
+-- and the org gains one member.
+INSERT INTO public.organizations (id, name, is_premium, subscription_tier, plan)
+VALUES (8857, 'race claim', true, 'team', 'team');
+INSERT INTO public.engineer_invitations (id, organization_id, email, role, accepted, expires_at)
+VALUES (8857, 8857, 'racer@example.test', 'fse', false, now() + interval '7 days');
+DELETE FROM public.seat_cap_barrier;
+SELECT dblink_connect('c1', format('dbname=%s', current_database()));
+SELECT dblink_connect('c2', format('dbname=%s', current_database()));
+SELECT dblink_send_query('c1', $q$
+DO $$
+BEGIN
+  PERFORM public.claim_team_invite_seat(
+    '00000000-0000-4000-8000-000000008857',
+    8857,
+    'fse',
+    false,
+    false,
+    NULL,
+    8857
+  );
+  PERFORM dblink_exec(format('dbname=%s', current_database()),
+    'INSERT INTO public.seat_cap_barrier (id) VALUES (7)');
+  PERFORM pg_sleep(2);
+END $$;
+$q$);
+DO $$
+DECLARE i integer;
+BEGIN
+  FOR i IN 1..80 LOOP
+    EXIT WHEN EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 7);
+    PERFORM pg_sleep(0.05);
+  END LOOP;
+  IF NOT EXISTS (SELECT 1 FROM public.seat_cap_barrier WHERE id = 7) THEN
+    RAISE EXCEPTION 'first claim did not take the seat lock';
+  END IF;
+END $$;
+DO $$
+DECLARE started timestamptz := clock_timestamp();
+BEGIN
+  PERFORM dblink_exec('c2', $q$
+    DO $b$
+    BEGIN
+      PERFORM public.claim_team_invite_seat(
+        '00000000-0000-4000-8000-000000008857',
+        8857,
+        'fse',
+        false,
+        false,
+        NULL,
+        8857
+      );
+    END
+    $b$;
+  $q$);
+  IF clock_timestamp() - started < interval '1 second' THEN
+    RAISE EXCEPTION 'second claim did not wait for the seat lock (% )', clock_timestamp() - started;
+  END IF;
+  RAISE NOTICE 'ok   second concurrent claim waited, then succeeded';
+END $$;
+SELECT * FROM dblink_get_result('c1') AS r(x text);
+SELECT dblink_disconnect('c1');
+SELECT dblink_disconnect('c2');
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.organization_memberships
+      WHERE user_id = '00000000-0000-4000-8000-000000008857' AND organization_id = 8857) <> 1 THEN
+    RAISE EXCEPTION 'concurrent claims left % memberships',
+      (SELECT count(*) FROM public.organization_memberships
+       WHERE user_id = '00000000-0000-4000-8000-000000008857' AND organization_id = 8857);
+  END IF;
+  IF (SELECT i.accepted FROM public.engineer_invitations i WHERE i.id = 8857) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'concurrent claims left the invite open';
+  END IF;
+  RAISE NOTICE 'ok   concurrent claims of the same invite end as one member';
 END $$;
 
 -- Rollback of 000966 restores the 000965 update behavior: the profile moves

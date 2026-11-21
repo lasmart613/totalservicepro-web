@@ -441,8 +441,7 @@ export async function runTeamClaim(
     });
   } catch (e: unknown) {
     console.error('team claim error', e);
-    const message = e instanceof Error && e.message ? e.message : 'Claim failed';
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: 'Claim failed' }, { status: 500 });
   }
 }
 

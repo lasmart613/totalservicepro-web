@@ -267,6 +267,7 @@ SET row_security = off
 AS $function$
 DECLARE
   accepted_rows integer;
+  already_member boolean;
 BEGIN
   IF p_user_id IS NULL OR p_organization_id IS NULL THEN
     RAISE EXCEPTION 'claim requires a user and an organization' USING ERRCODE = '22023';
@@ -277,6 +278,15 @@ BEGIN
 
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('tsp.org_seat:' || p_organization_id::text, 0)
+  );
+
+  -- After the lock, a concurrent claim by this same user has committed.
+  -- Checked before the insert so a stranger is not counted as already seated.
+  already_member := EXISTS (
+    SELECT 1
+    FROM public.organization_memberships m
+    WHERE m.user_id = p_user_id
+      AND m.organization_id = p_organization_id
   );
 
   IF COALESCE(p_is_home, false) THEN
@@ -312,14 +322,25 @@ BEGIN
       AND accepted IS NOT TRUE;
     GET DIAGNOSTICS accepted_rows = ROW_COUNT;
     IF accepted_rows <> 1 THEN
-      RAISE EXCEPTION 'invite was not accepted' USING ERRCODE = 'check_violation';
+      -- Same caller, same org, invite already accepted: the first claim won.
+      IF already_member AND EXISTS (
+        SELECT 1
+        FROM public.engineer_invitations i
+        WHERE i.id = p_invite_id
+          AND i.organization_id = p_organization_id
+          AND i.accepted IS TRUE
+      ) THEN
+        NULL;
+      ELSE
+        RAISE EXCEPTION 'invite was not accepted' USING ERRCODE = 'check_violation';
+      END IF;
     END IF;
   END IF;
 END;
 $function$;
 
 COMMENT ON FUNCTION public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint) IS
-  '000966: seat a claimed invite. Insert (under the org seat lock), then delete the membership being left, then mark the invite accepted. A refused insert rolls all of it back.';
+  '000966: seat a claimed invite. Insert (under the org seat lock), then delete the membership being left, then mark the invite accepted. A repeat by the same member on an invite this org already accepted succeeds. Any other missed accept rolls the claim back.';
 
 REVOKE ALL ON FUNCTION public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint) TO service_role;

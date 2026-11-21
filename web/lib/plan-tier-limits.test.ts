@@ -296,6 +296,8 @@ test('000966 limits the signup skip to inserts and lets RLS deny strangers', () 
   assert.match(mig, /AND organization_id = p_organization_id/);
   assert.match(mig, /AND accepted IS NOT TRUE/);
   assert.match(mig, /invite was not accepted/);
+  assert.match(mig, /already_member/);
+  assert.match(mig, /i\.accepted IS TRUE/);
   assert.match(mig, /pg_advisory_xact_lock/);
   assert.match(
     mig,

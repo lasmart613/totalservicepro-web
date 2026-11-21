@@ -1,7 +1,8 @@
--- Rollback for 000966. Drops claim_team_invite_seat (including its
--- ON CONFLICT insert and the invite-accept predicate) and restores the
--- 000965 bodies of organization_memberships_enforce_seat_cap and
--- user_profiles_sync_membership. Does not change membership rows.
+-- Rollback for 000966. Drops claim_team_invite_seat, including its
+-- ON CONFLICT insert, the invite-accept predicate, and the idempotent
+-- success when this member repeats an already-accepted invite for this
+-- org. Restores the 000965 bodies of organization_memberships_enforce_seat_cap
+-- and user_profiles_sync_membership. Does not change membership rows.
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 
 BEGIN;

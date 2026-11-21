@@ -2405,6 +2405,322 @@ async function postFollowupClaim(mode: 'profile' | 'active') {
   }
 }
 
+test('a second claim of the same invite succeeds once the caller is already a member', async () => {
+  const result = await postRepeatClaim();
+  assert.equal(result.first.status, 200, JSON.stringify(result.first.body));
+  assert.equal(result.second.status, 200, JSON.stringify(result.second.body));
+  assert.equal(result.first.body.claimed, true);
+  assert.equal(result.second.body.claimed, true);
+  assert.equal(result.second.body.error, undefined);
+  assert.equal(
+    result.memberships.filter((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN).length,
+    1
+  );
+});
+
+test('a thrown claim error does not return the exception text', async () => {
+  const result = await postThrowingClaim();
+  assert.equal(result.status, 500, JSON.stringify(result.body));
+  assert.equal(result.body.error, 'Claim failed');
+  assert.doesNotMatch(String(result.body.error), /constraint|duplicate|organization_memberships/i);
+});
+
+async function postRepeatClaim() {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const invite = {
+    id: 882,
+    email: INVITEE,
+    organization_id: CLAIM_JOIN,
+    role: 'fse',
+    accepted: false,
+    expires_at: future,
+    created_at: '2026-10-08T00:00:00.000Z',
+  };
+  const listed = [{ user_id: 'auth-1', organization_id: CLAIM_HOME, role: 'fse', is_home: true }];
+  const memberships: MembershipRow[] = listed.map((row) => ({ ...row }));
+  let storedAccepted = false;
+  const admin = {
+    from(table: string) {
+      const filters: Record<string, unknown> = {};
+      const api = {
+        select() {
+          return api;
+        },
+        insert() {
+          throw new Error('insert must go through claim_team_invite_seat');
+        },
+        update() {
+          throw new Error('invite accepted outside the seat transaction');
+        },
+        delete() {
+          throw new Error('delete must go through claim_team_invite_seat');
+        },
+        eq(column: string, value: unknown) {
+          filters[column] = value;
+          return api;
+        },
+        neq() {
+          return api;
+        },
+        ilike() {
+          return api;
+        },
+        filter() {
+          return api;
+        },
+        order() {
+          return api;
+        },
+        limit() {
+          return api;
+        },
+        maybeSingle() {
+          return Promise.resolve(finish(true));
+        },
+        then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          return Promise.resolve(finish(false)).then(onFulfilled, onRejected);
+        },
+      };
+      const finish = (single: boolean) => {
+        if (table === 'organization_memberships') {
+          const rows =
+            filters.user_id != null
+              ? listed
+              : String(filters.organization_id) === String(CLAIM_JOIN)
+                ? []
+                : listed;
+          return { data: single ? rows[0] || null : rows, error: null };
+        }
+        if (table === 'engineer_invitations') return { data: invite, error: null };
+        if (table === 'user_profiles') {
+          return {
+            data: {
+              id: 'auth-1',
+              organization_id: CLAIM_HOME,
+              role: 'fse',
+              onboarding_completed: true,
+            },
+            error: null,
+          };
+        }
+        if (table === 'organizations') {
+          return {
+            data: {
+              id: Number(filters.id),
+              created_at: '2020-01-01T00:00:00.000Z',
+              created_by: 'someone-else',
+              is_premium: true,
+              subscription_tier: 'team',
+              plan: 'team',
+            },
+            error: null,
+          };
+        }
+        return { data: single ? null : [], error: null };
+      };
+      return api;
+    },
+    async rpc(fn: string) {
+      if (fn !== 'claim_team_invite_seat') {
+        return { data: null, error: { message: `unknown rpc ${fn}` } };
+      }
+      const already = memberships.some(
+        (row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN
+      );
+      if (already && storedAccepted) return { data: null, error: null };
+      memberships.push({
+        user_id: 'auth-1',
+        organization_id: CLAIM_JOIN,
+        role: 'fse',
+        is_home: false,
+      });
+      storedAccepted = true;
+      return { data: null, error: null };
+    },
+  };
+  const call = () =>
+    runTeamClaim(
+      new NextRequest('http://127.0.0.1/api/team/claim', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () => admin as never,
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: {
+                user: {
+                  id: 'auth-1',
+                  email: INVITEE,
+                  email_confirmed_at: '2026-10-01T00:00:00.000Z',
+                  user_metadata: {},
+                },
+              },
+              error: null,
+            }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { organization_id: CLAIM_HOME, role: 'fse', onboarding_completed: true },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    );
+  try {
+    const firstResponse = await call();
+    const secondResponse = await call();
+    return {
+      first: { status: firstResponse.status, body: (await firstResponse.json()) as Record<string, unknown> },
+      second: { status: secondResponse.status, body: (await secondResponse.json()) as Record<string, unknown> },
+      memberships,
+    };
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
+}
+
+async function postThrowingClaim() {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  try {
+    const response = await runTeamClaim(
+      new NextRequest('http://127.0.0.1/api/team/claim', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () =>
+          ({
+            from(table: string) {
+              const filters: Record<string, unknown> = {};
+              const row =
+                table === 'engineer_invitations'
+                  ? {
+                      id: 883,
+                      email: INVITEE,
+                      organization_id: CLAIM_JOIN,
+                      role: 'fse',
+                      accepted: false,
+                      expires_at: future,
+                      created_at: '2026-10-08T00:00:00.000Z',
+                    }
+                  : table === 'user_profiles'
+                    ? { id: 'auth-1', organization_id: CLAIM_HOME, role: 'fse', onboarding_completed: true }
+                    : table === 'organizations'
+                      ? {
+                          id: Number(filters.id),
+                          created_at: '2020-01-01T00:00:00.000Z',
+                          created_by: 'someone-else',
+                          is_premium: true,
+                          subscription_tier: 'team',
+                          plan: 'team',
+                        }
+                      : null;
+              const api = {
+                select() {
+                  return api;
+                },
+                eq(column: string, value: unknown) {
+                  filters[column] = value;
+                  if (table === 'organizations' && row && typeof row === 'object') {
+                    (row as { id: number }).id = Number(value);
+                  }
+                  return api;
+                },
+                filter() {
+                  return api;
+                },
+                order() {
+                  return api;
+                },
+                limit() {
+                  return api;
+                },
+                maybeSingle() {
+                  return Promise.resolve({ data: row, error: null });
+                },
+                then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                  const data = table === 'organization_memberships'
+                    ? [{ user_id: 'auth-1', organization_id: CLAIM_HOME, role: 'fse', is_home: true }]
+                    : row;
+                  return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
+                },
+              };
+              return api;
+            },
+            async rpc() {
+              throw new Error(
+                'duplicate key value violates unique constraint "organization_memberships_user_id_organization_id_key"'
+              );
+            },
+          }) as never,
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: {
+                user: {
+                  id: 'auth-1',
+                  email: INVITEE,
+                  email_confirmed_at: '2026-10-01T00:00:00.000Z',
+                  user_metadata: {},
+                },
+              },
+              error: null,
+            }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { organization_id: CLAIM_HOME, role: 'fse', onboarding_completed: true },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    );
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
+}
+
 test('reopened-invite repair SQL is a one-off, not a migration', () => {
   const dir = join(here, '../supabase/oneoff');
   const find = readFileSync(join(dir, '20261009_repair_reopened_invites_find.sql'), 'utf8');
