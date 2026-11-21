@@ -32,12 +32,13 @@ BEGIN
   IF to_regclass('public.organizations') IS NULL THEN
     RAISE EXCEPTION '000953 drift: public.organizations is missing';
   END IF;
+  -- to_regclass, not ::regclass: PL/pgSQL evaluates the cast even when the table is absent.
   IF to_regclass('public.marketplace_wanted') IS NOT NULL
-     AND coalesce(pg_catalog.obj_description('public.marketplace_wanted'::regclass, 'pg_class'), '') NOT LIKE '000953:%' THEN
+     AND coalesce(pg_catalog.obj_description(to_regclass('public.marketplace_wanted'), 'pg_class'), '') NOT LIKE '000953:%' THEN
     RAISE EXCEPTION '000953 drift: public.marketplace_wanted exists and was not created by 000953';
   END IF;
   IF to_regclass('public.marketplace_wanted_messages') IS NOT NULL
-     AND coalesce(pg_catalog.obj_description('public.marketplace_wanted_messages'::regclass, 'pg_class'), '') NOT LIKE '000953:%' THEN
+     AND coalesce(pg_catalog.obj_description(to_regclass('public.marketplace_wanted_messages'), 'pg_class'), '') NOT LIKE '000953:%' THEN
     RAISE EXCEPTION '000953 drift: public.marketplace_wanted_messages exists and was not created by 000953';
   END IF;
   IF EXISTS (
