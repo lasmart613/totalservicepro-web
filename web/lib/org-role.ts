@@ -8,7 +8,10 @@
  * on that same membership row. Founder status is reported only.
  * It does not grant team invite, team sync, or invoice void.
  * isPlatformAdmin is user_profiles.role = 'admin' (what is_admin() reads).
- * A missing membership is no org role. Platform admin is unchanged.
+ * It does not grant team invite, team sync, invoice void, Stripe Connect,
+ * or remove-member. Those require a membership role in this org.
+ * God mode is the allowlist in lib/god.ts and is not consulted here.
+ * A missing membership is no org role.
  * A lookup error fails closed.
  */
 
@@ -72,13 +75,13 @@ function lookupFailed(error: unknown): boolean {
 
 /**
  * Role string a check can compare to its existing allow-list.
- * Platform admin stays admin when that bypass is in the set.
  * The membership role is the org role. Founder status does not raise it.
  * A missing membership does not become an org role.
+ * isPlatformAdmin is not a substitute, including when `allowed` contains admin.
+ * God mode is not applied here.
  */
 export function authorityRole(org: OrgRole, allowed: readonly string[]): string {
-  const allowedSet = new Set(allowed.map((role) => normalizeOrgRole(role)));
-  if (org.isPlatformAdmin && allowedSet.has('admin')) return 'admin';
+  void allowed;
   return normalizeOrgRole(org.role);
 }
 

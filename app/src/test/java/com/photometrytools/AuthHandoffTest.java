@@ -40,6 +40,24 @@ public class AuthHandoffTest {
     }
 
     @Test
+    public void issuedNonceBindsThroughTheSiteBeforeTheCustomTab() throws Exception {
+        String body = "{\"nonce\":\"0123456789abcdef0123456789abcdef\",\"proof\":\""
+                + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"exp\":1700000000}";
+        AuthHandoff.Issued issued = AuthHandoff.parseIssued(body);
+        assertEquals("0123456789abcdef0123456789abcdef", issued.nonce);
+        assertEquals(1700000000L, issued.exp);
+        assertEquals(null, AuthHandoff.parseIssued("{\"nonce\":\"short\",\"proof\":\"aa\",\"exp\":1}"));
+        assertEquals(null, AuthHandoff.parseIssued(null));
+        String authorize = "https://yljztfajyvjzqikxdddf.supabase.co/auth/v1/authorize?provider=google";
+        String bind = AuthHandoff.bindUrl("https://repairplanet.net", issued, authorize);
+        assertTrue(bind.startsWith("https://repairplanet.net/api/auth/android-bind?"));
+        assertTrue(bind.contains("nonce=0123456789abcdef0123456789abcdef"));
+        assertTrue(bind.contains("exp=1700000000"));
+        assertTrue(bind.contains("continue_url="));
+        assertTrue(URLDecoder.decode(bind, "UTF-8").contains(authorize));
+    }
+
+    @Test
     public void appNonceIsThirtyTwoLowerHexChars() {
         String nonce = AuthHandoff.newNonce(new java.security.SecureRandom());
         assertTrue(AuthHandoff.isAppNonce(nonce));

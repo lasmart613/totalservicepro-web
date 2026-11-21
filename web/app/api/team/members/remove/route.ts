@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { sameOrg } from '@/lib/org-membership';
+import { getOrgRole } from '@/lib/org-role';
 import {
   REMOVE_MEMBER_ERRORS,
   REMOVE_MEMBER_RPC,
@@ -42,9 +43,10 @@ function orgIdValue(value: unknown): number | string | null {
  * { userId, organizationId }
  *
  * Caller must hold a CURRENT company_admin or owner membership row in that
- * org. organizations.created_by and founder flags do not count on their own
- * (a creator who was removed or never joined is refused). A profile role of
- * admin does not qualify.
+ * org. A stored membership role of admin is company_admin, the same mapping
+ * invite uses. organizations.created_by and founder flags do not count on
+ * their own (a creator who was removed or never joined is refused). A profile
+ * role of admin does not qualify, and God mode is not a bypass here.
  * Service role performs one RPC so the membership delete, pointer retarget,
  * and pending-invite revoke commit together or not at all.
  */
@@ -110,16 +112,12 @@ export async function runRemoveTeamMember(req: NextRequest, deps: RemoveDeps = {
 
     const admin = (deps.getAdmin ?? getSupabaseAdmin)();
 
-    const { data: callerMembership, error: callerMembershipError } = await admin
-      .from('organization_memberships')
-      .select('*')
-      .eq('user_id', user.id)
-      .eq('organization_id', organizationId)
-      .maybeSingle();
-    if (callerMembershipError) {
-      console.error('remove member caller membership', callerMembershipError.message);
-      return NextResponse.json({ error: REMOVE_MEMBER_ERRORS.db }, { status: 503 });
+    const looked = await getOrgRole(admin, user.id, organizationId);
+    if (!looked.ok) {
+      return NextResponse.json({ error: REMOVE_MEMBER_ERRORS.db }, { status: looked.status });
     }
+    // Membership role only. Profile admin and God are not remove authority.
+    const callerMayRemove = callerMayRemoveTeamMembers({ role: looked.role });
 
     const { data: orgRow, error: orgError } = await admin
       .from('organizations')
@@ -132,8 +130,6 @@ export async function runRemoveTeamMember(req: NextRequest, deps: RemoveDeps = {
     }
 
     const createdBy = orgRow?.created_by ? String(orgRow.created_by) : null;
-    // This org's current membership row only. No creator or founder bypass.
-    const callerMayRemove = callerMayRemoveTeamMembers({ role: callerMembership?.role });
 
     const { data: targetMembership, error: targetMembershipError } = await admin
       .from('organization_memberships')

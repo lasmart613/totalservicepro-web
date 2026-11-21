@@ -40,6 +40,82 @@ public final class AuthHandoff {
         return nonce != null && nonce.matches("^[0-9a-f]{32}$");
     }
 
+    public static final String ISSUE_PATH = "/api/auth/android-nonce";
+    public static final String BIND_PATH = "/api/auth/android-bind";
+
+    /**
+     * Nonce the site issued. The app stores {@code nonce} and opens {@link #bindUrl}
+     * so the Custom Tab receives the matching httpOnly cookie.
+     */
+    public static final class Issued {
+        public final String nonce;
+        public final String proof;
+        public final long exp;
+
+        public Issued(String nonce, String proof, long exp) {
+            this.nonce = nonce;
+            this.proof = proof;
+            this.exp = exp;
+        }
+    }
+
+    /** Flat JSON from GET /api/auth/android-nonce. Null when the body is not one we issued. */
+    public static Issued parseIssued(String json) {
+        if (json == null || json.isEmpty()) return null;
+        String nonce = stringField(json, "nonce");
+        String proof = stringField(json, "proof");
+        Long exp = longField(json, "exp");
+        if (!isAppNonce(nonce) || proof == null || !proof.matches("^[0-9a-f]{64}$") || exp == null || exp <= 0) {
+            return null;
+        }
+        return new Issued(nonce, proof, exp);
+    }
+
+    /**
+     * Custom Tab URL that binds {@code issued} to the browser session and then
+     * continues to the authorize URL the app was about to open.
+     */
+    public static String bindUrl(String origin, Issued issued, String continueUrl) {
+        if (origin == null || issued == null || continueUrl == null) return null;
+        String base = origin.endsWith("/") ? origin.substring(0, origin.length() - 1) : origin;
+        return base + BIND_PATH
+                + "?nonce=" + encode(issued.nonce)
+                + "&proof=" + encode(issued.proof)
+                + "&exp=" + issued.exp
+                + "&continue_url=" + encode(continueUrl);
+    }
+
+    private static String stringField(String json, String key) {
+        String needle = "\"" + key + "\"";
+        int at = json.indexOf(needle);
+        if (at < 0) return null;
+        int colon = json.indexOf(':', at + needle.length());
+        if (colon < 0) return null;
+        int quote = json.indexOf('"', colon + 1);
+        if (quote < 0) return null;
+        int end = json.indexOf('"', quote + 1);
+        if (end < 0) return null;
+        return json.substring(quote + 1, end);
+    }
+
+    private static Long longField(String json, String key) {
+        String needle = "\"" + key + "\"";
+        int at = json.indexOf(needle);
+        if (at < 0) return null;
+        int colon = json.indexOf(':', at + needle.length());
+        if (colon < 0) return null;
+        int i = colon + 1;
+        while (i < json.length() && Character.isWhitespace(json.charAt(i))) i++;
+        int start = i;
+        while (i < json.length() && Character.isDigit(json.charAt(i))) i++;
+        if (i == start) return null;
+        try {
+            return Long.parseLong(json.substring(start, i));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
     public static String newNonce(SecureRandom random) {
         SecureRandom source = random == null ? new SecureRandom() : random;
         byte[] bytes = new byte[16];

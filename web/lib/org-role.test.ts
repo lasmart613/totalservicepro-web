@@ -97,7 +97,7 @@ test('a company_admin profile with an fse membership is not an org lead', async 
   assert.equal(voidInvoiceRole(org), 'fse');
 });
 
-test('no membership is 403 unless the profile is platform admin', async () => {
+test('no membership is not org authority, including a profile role of admin', async () => {
   const shopAdmin = await getOrgRole(
     db({
       user_profiles: [{ id: user, role: 'company_admin' }],
@@ -126,9 +126,28 @@ test('no membership is 403 unless the profile is platform admin', async () => {
   if (!platform.ok) return;
   assert.equal(platform.isPlatformAdmin, true);
   assert.equal(platform.role, null);
-  assert.equal(teamLeadRole(platform), 'admin');
-  assert.equal(voidInvoiceRole(platform), 'admin');
-  assert.equal(orgRoleAllows(platform, SHOP_ADMIN_ROLES), true);
+  assert.equal(teamLeadRole(platform), '');
+  assert.equal(voidInvoiceRole(platform), '');
+  assert.equal(orgRoleAllows(platform, TEAM_LEAD_ROLES), false);
+  assert.equal(orgRoleAllows(platform, SHOP_ADMIN_ROLES), false);
+  assert.equal(orgRoleAllows(platform, VOID_INVOICE_ROLES), false);
+
+  const platformMember = await getOrgRole(
+    db({
+      user_profiles: [{ id: user, role: 'admin' }],
+      organization_memberships: [{ user_id: user, organization_id: 9, role: 'fse' }],
+      organizations: [{ id: 9, created_by: 'other' }],
+    }),
+    user,
+    9
+  );
+  assert.equal(platformMember.ok, true);
+  if (!platformMember.ok) return;
+  assert.equal(platformMember.isPlatformAdmin, true);
+  assert.equal(platformMember.role, 'fse');
+  assert.equal(teamLeadRole(platformMember), 'fse');
+  assert.equal(orgRoleAllows(platformMember, TEAM_LEAD_ROLES), false);
+  assert.equal(orgRoleAllows(platformMember, SHOP_ADMIN_ROLES), false);
 });
 
 test('a membership role of admin is company_admin and is not platform admin', async () => {

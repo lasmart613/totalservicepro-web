@@ -13,7 +13,7 @@ import {
 } from '@/lib/customer-invite-client';
 import { inviteInPlay, resetTeamClaimDedupeForSignIn, type InviteClaimResult } from '@/lib/invite-claim';
 import { callbackDest, profileOrgId } from '@/lib/no-org-route';
-import { buildAndroidHandoff, isTspAndroidWebView } from '@/lib/android-session';
+import { buildAndroidHandoff, isOfficialAndroidAppUrl, isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { decideAuthCallback, setPasswordHref } from '@/lib/auth-link-route';
 import { safeRedirectPath } from '@/lib/safe-redirect';
@@ -306,6 +306,24 @@ function AuthCallbackInner() {
   );
 }
 
+/** Server confirms this browser's cookie is the nonce the official app was issued. */
+async function confirmAndroidHandoffNonce(nonce: string): Promise<boolean> {
+  if (!nonce) return false;
+  try {
+    const res = await fetch('/api/auth/android-handoff', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ nonce }),
+    });
+    if (!res.ok) return false;
+    const body = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+    return body?.ok === true;
+  } catch {
+    return false;
+  }
+}
+
 async function maybeHandoffToAndroid(
   supabase: ReturnType<typeof getSupabaseClient>,
   dest: string,
@@ -322,10 +340,13 @@ async function maybeHandoffToAndroid(
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const nonce = page.searchParams.get('tsp_nonce') || hashParams.get('tsp_nonce') || '';
     const state = page.searchParams.get('state') || hashParams.get('state') || '';
+    const issuedForSession = await confirmAndroidHandoffNonce(nonce);
+    if (isCancelled()) return;
     const { data } = await supabase.auth.getSession();
     const handoff = buildAndroidHandoff({
       completedSignIn: true,
       appRequested: true,
+      issuedForSession,
       nonce,
       state,
       accessToken: data.session?.access_token,
@@ -334,15 +355,15 @@ async function maybeHandoffToAndroid(
       inWebView: false,
     });
     if (!handoff || isCancelled()) return;
-    setAppHandoff(handoff.customSchemeUrl);
+    setAppHandoff(handoff.appUrl);
     setMessage('Opening the Total Service Pro app… If nothing happens, tap the button below.');
     if (!hashParams.get('access_token')) {
       window.location.assign(handoff.httpsUrl);
       await new Promise((r) => setTimeout(r, 900));
       if (isCancelled()) return;
     }
-    if (!handoff.customSchemeUrl.startsWith('totalservicepro://auth-callback')) return;
-    window.location.assign(handoff.customSchemeUrl);
+    if (!isOfficialAndroidAppUrl(handoff.appUrl)) return;
+    window.location.assign(handoff.appUrl);
   } catch {
     /* stay on web */
   }

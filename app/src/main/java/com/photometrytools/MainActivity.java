@@ -78,7 +78,6 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -1133,25 +1132,65 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private volatile boolean authStartInFlight;
+
+    /**
+     * Asks the site for a nonce, stores it, and opens the bind URL in a Custom
+     * Tab. A locally chosen nonce is not used: the site will not hand tokens
+     * to a session it did not issue.
+     */
     private void beginAuthAndOpenCustomTab(String url) {
-        String nonce = newNonce();
+        if (url == null || url.isEmpty() || authStartInFlight) return;
+        authStartInFlight = true;
         String state = null;
         try {
             state = Uri.parse(url).getQueryParameter("state");
         } catch (RuntimeException ignored) {
         }
-        long expiry = System.currentTimeMillis() + AuthHandoff.TTL_MS;
-        getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
-                .edit()
-                .putString(PREFS_AUTH_NONCE, nonce)
-                .putString(PREFS_AUTH_STATE, state == null ? "" : state)
-                .putLong(PREFS_AUTH_EXPIRY, expiry)
-                .apply();
-        openCustomTab(AuthHandoff.withNonceOnRedirect(url, nonce));
+        final String oauthState = state == null ? "" : state;
+        new Thread(() -> {
+            try {
+                AuthHandoff.Issued issued = fetchIssuedNonce();
+                if (issued == null) {
+                    showToast("Could not start sign-in. Try again.");
+                    return;
+                }
+                String bind = AuthHandoff.bindUrl(PRODUCTION_ORIGIN, issued, url);
+                if (bind == null) {
+                    showToast("Could not start sign-in. Try again.");
+                    return;
+                }
+                long expiry = System.currentTimeMillis() + AuthHandoff.TTL_MS;
+                getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                        .edit()
+                        .putString(PREFS_AUTH_NONCE, issued.nonce)
+                        .putString(PREFS_AUTH_STATE, oauthState)
+                        .putLong(PREFS_AUTH_EXPIRY, expiry)
+                        .apply();
+                runOnUiThread(() -> openCustomTab(bind));
+            } finally {
+                authStartInFlight = false;
+            }
+        }, "android-auth-nonce").start();
     }
 
-    private String newNonce() {
-        return AuthHandoff.newNonce(new SecureRandom());
+    private AuthHandoff.Issued fetchIssuedNonce() {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(PRODUCTION_ORIGIN + AuthHandoff.ISSUE_PATH).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(20000);
+            conn.setInstanceFollowRedirects(false);
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Accept", "application/json");
+            int status = conn.getResponseCode();
+            if (status != 200) return null;
+            return AuthHandoff.parseIssued(readLimited(conn.getInputStream()));
+        } catch (Exception e) {
+            return null;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
     }
 
     private AuthHandoff.Pending loadPendingAuth() {
