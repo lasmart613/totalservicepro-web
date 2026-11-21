@@ -321,6 +321,37 @@ test('000966 limits the signup skip to inserts and lets RLS deny strangers', () 
   assert.doesNotMatch(src('../supabase/migrations/20261119_000965_org_seat_cap.sql'), /TG_OP <> 'INSERT'/);
 });
 
+test('000967 requires the invite email to belong to the caller', () => {
+  const prior = src('../supabase/migrations/20261119_000966_seat_cap_followups.sql');
+  const mig = src('../supabase/migrations/20261120_000967_claim_invite_owner_check.sql');
+  const rollback = src('../supabase/migrations/20261120_000967_claim_invite_owner_check_rollback.sql');
+  const claim = (sql: string) => {
+    const start = sql.indexOf('CREATE OR REPLACE FUNCTION public.claim_team_invite_seat(');
+    const end = sql.indexOf('COMMIT;', start);
+    return sql.slice(start, end);
+  };
+  assert.equal(claim(rollback), claim(prior));
+  assert.match(mig, /FROM auth\.users u/);
+  assert.match(mig, /owns_invite/);
+  assert.match(mig, /pg_catalog\.lower\(pg_catalog\.btrim\(coalesce\(email, ''\)\)\) = caller_email/);
+  assert.match(mig, /pg_catalog\.lower\(pg_catalog\.btrim\(coalesce\(i\.email, ''\)\)\)/);
+  assert.match(mig, /invite was not accepted/);
+  assert.match(mig, /pg_advisory_xact_lock/);
+  assert.match(
+    mig,
+    /REVOKE ALL ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) FROM PUBLIC, anon, authenticated/
+  );
+  assert.match(
+    mig,
+    /GRANT EXECUTE ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) TO service_role/
+  );
+  assert.doesNotMatch(
+    mig,
+    /GRANT EXECUTE ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) TO (anon|authenticated|PUBLIC)/
+  );
+  assert.doesNotMatch(mig, /p_email/);
+});
+
 test('seat cap is enforced on invites, claims and membership adds', () => {
   const invite = src('../app/api/team/invite/route.ts');
   assert.match(invite, /\(deps\.seatCheck \?\? orgInviteSeatCheck\)\(admin, orgId/);
