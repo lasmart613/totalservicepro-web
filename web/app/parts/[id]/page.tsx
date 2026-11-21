@@ -612,7 +612,7 @@ export default function PartDetailPage() {
               {vendors.length} vendor{vendors.length === 1 ? '' : 's'} on file. Names and costs are hidden.
             </p>
           ) : (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto table-scroll">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">

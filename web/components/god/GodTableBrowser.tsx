@@ -361,7 +361,7 @@ export function GodTableBrowser({
         </div>
       )}
 
-      <div className="overflow-x-auto card mb-6">
+      <div className="overflow-x-auto table-scroll card mb-6">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">

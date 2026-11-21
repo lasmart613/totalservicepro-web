@@ -551,7 +551,7 @@ function CrmTable({
   return (
     <div>
       <p className="text-sm text-[var(--text3)] mb-3">{caption}</p>
-      <div className="overflow-x-auto card">
+      <div className="overflow-x-auto table-scroll card">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">

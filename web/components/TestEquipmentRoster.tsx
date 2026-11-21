@@ -241,7 +241,7 @@ export function TestEquipmentRoster(props: {
       ) : rows.length === 0 ? (
         <div className="text-center py-8 text-[var(--text3)]">{t('No company test equipment yet.')}</div>
       ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto table-scroll">
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text3)]">

@@ -199,7 +199,7 @@ export function GodComplimentaryPremium() {
         </button>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto table-scroll">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
