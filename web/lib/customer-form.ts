@@ -529,6 +529,19 @@ const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'lase
 
 export const LINKED_CUSTOMER_DROPDOWN_LIMIT = 12;
 
+/** Pause between keystrokes before a customer-name search hits the network. */
+export const LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS = 180;
+
+/** Search text sent to the database. Trimmed, then cut at 80 characters. */
+export const LINKED_CUSTOMER_SEARCH_MAX_CHARS = 80;
+
+export function clampCustomerSearch(raw: string): string {
+  return String(raw ?? '').trim().slice(0, LINKED_CUSTOMER_SEARCH_MAX_CHARS);
+}
+
+/** `recent` is newest links. `name` is alphabetical on the organization name, before the limit. */
+export type LinkedCustomerSearchSort = 'recent' | 'name';
+
 export type LinkedCustomerOpt = {
   id: string | number;
   name: string;
@@ -712,6 +725,7 @@ function linkedCustomerFromEmbed(row: {
         contact_name?: string | null;
         type?: string | null;
         directory_contacts?: unknown;
+        contacts?: DirectoryContactRow[] | null;
       }
     | null
     | undefined;
@@ -723,7 +737,7 @@ function linkedCustomerFromEmbed(row: {
     email: org.email,
     phone: org.phone,
     directory_contacts: org.directory_contacts,
-    contactRows: [],
+    contactRows: Array.isArray(org.contacts) ? org.contacts : [],
   });
   return {
     id: org.id,
@@ -751,7 +765,8 @@ function linkedCustomerFromEmbed(row: {
 export async function searchLinkedCustomers(
   supabase: { from: (table: string) => any },
   serviceOrgId: string | number,
-  query: string
+  query: string,
+  _sort: LinkedCustomerSearchSort = 'recent'
 ): Promise<LinkedCustomerOpt[]> {
   const term = sanitizeCustomerSearch(query);
   let data: unknown[] | null = null;
@@ -777,6 +792,7 @@ export async function searchLinkedCustomers(
           { referencedTable: 'organizations' }
         )
         .limit(LINKED_CUSTOMER_DROPDOWN_LIMIT);
+      void _sort;
     }
     const res = await req;
     if (!res?.error) {
@@ -802,6 +818,128 @@ export async function searchLinkedCustomers(
     out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   }
   return out;
+}
+
+const LINKED_CUSTOMER_BY_ID_SELECT = [
+  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name, type, directory_contacts, contacts(first_name, last_name, title, phone, email, is_primary))',
+  ...LINKED_CUSTOMER_SEARCH_SELECT,
+] as const;
+
+function optFromSearchRow(row: Record<string, unknown> | null | undefined): LinkedCustomerOpt | null {
+  if (!row || row.id == null || !String(row.name || '').trim()) return null;
+  return {
+    id: row.id as string | number,
+    name: String(row.name).trim(),
+    address: (row.address as string | null) ?? null,
+    city: (row.city as string | null) ?? null,
+    state: (row.state as string | null) ?? null,
+    zip: (row.zip as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    email: (row.email as string | null) ?? null,
+    contact: (row.contact as string | null) ?? null,
+    contactRole: (row.contact_role as string | null) ?? null,
+    officePhone: (row.office_phone as string | null) ?? null,
+    linkedAt: (row.linked_at as string | null) ?? null,
+  };
+}
+
+export type ShopCustomerSearch =
+  | { ok: true; customers: LinkedCustomerOpt[] }
+  | { ok: false };
+
+/**
+ * Ticket and new-call customer box. One RPC. The database sorts A to Z
+ * before the limit and matches the combined contact string. The rows come
+ * back in that order; this function does not sort or slice them again.
+ * A failed call is { ok: false } so the form can show an error instead of
+ * an empty list that looks like "add a new company".
+ */
+export async function searchShopCustomers(
+  supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }> },
+  serviceOrgId: string | number,
+  query: string
+): Promise<ShopCustomerSearch> {
+  const raw = clampCustomerSearch(query);
+  const res = await supabase.rpc('search_linked_customers', {
+    p_service_org_id: serviceOrgId,
+    p_query: raw,
+    p_sort: raw ? 'name' : 'recent',
+    p_limit: LINKED_CUSTOMER_DROPDOWN_LIMIT,
+  });
+  if (res?.error) {
+    console.warn('linked customer search', res.error);
+    return { ok: false };
+  }
+  const rows = Array.isArray(res?.data) ? res.data : [];
+  const customers: LinkedCustomerOpt[] = [];
+  for (const row of rows) {
+    const opt = optFromSearchRow(row as Record<string, unknown>);
+    if (opt) customers.push(opt);
+  }
+  return { ok: true, customers };
+}
+
+export type LinkedCustomerNameLookup =
+  | { ok: true; customer: LinkedCustomerOpt | null }
+  | { ok: false };
+
+/**
+ * One request for a clinic just added to this shop.
+ * Used after "add a company" so the form can select that row without
+ * downloading every link. Contacts on the organization are included so the
+ * phone and email match the directory.
+ */
+export async function loadLinkedCustomerOpt(
+  supabase: { from: (table: string) => any },
+  serviceOrgId: string | number,
+  customerOrganizationId: string | number
+): Promise<LinkedCustomerOpt | null> {
+  if (customerOrganizationId == null || customerOrganizationId === '') return null;
+  for (let i = 0; i < LINKED_CUSTOMER_BY_ID_SELECT.length; i++) {
+    const res = await supabase
+      .from('organization_customers')
+      .select(LINKED_CUSTOMER_BY_ID_SELECT[i])
+      .eq('service_organization_id', serviceOrgId)
+      .eq('customer_organization_id', customerOrganizationId)
+      .limit(1);
+    if (!res?.error) {
+      const row = Array.isArray(res.data) ? res.data[0] : null;
+      return row ? linkedCustomerFromEmbed(row) : null;
+    }
+    const message = String(res.error?.message || '');
+    const missing =
+      i < LINKED_CUSTOMER_BY_ID_SELECT.length - 1 &&
+      /contacts|directory_contacts|relationship|column|schema cache|does not exist|42703|PGRST200|PGRST204/i.test(message);
+    if (missing) continue;
+    console.warn('linked customer by id', res.error);
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Exact trimmed name among every customer linked to this shop.
+ * Case-insensitive. Punctuation is part of the name. A failed lookup is
+ * { ok: false } so the caller does not insert a second organization.
+ */
+export async function findLinkedCustomerByName(
+  supabase: { rpc: (fn: string, args: Record<string, unknown>) => Promise<{ data?: unknown; error?: { message?: string } | null }> },
+  serviceOrgId: string | number,
+  name: string
+): Promise<LinkedCustomerNameLookup> {
+  const raw = String(name ?? '');
+  if (!raw.trim()) return { ok: true, customer: null };
+  const res = await supabase.rpc('find_linked_customer_by_name', {
+    p_service_org_id: serviceOrgId,
+    p_name: raw,
+  });
+  if (res?.error) {
+    console.warn('linked customer exact name', res.error);
+    return { ok: false };
+  }
+  const rows = Array.isArray(res?.data) ? res.data : res?.data ? [res.data] : [];
+  const customer = optFromSearchRow(rows[0] as Record<string, unknown>);
+  return { ok: true, customer };
 }
 
 export function filterLinkedCustomers(

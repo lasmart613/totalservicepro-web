@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useT } from '@/lib/fa/locale';
@@ -20,7 +20,11 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { ArrowLeft, Edit2, MapPinCheck, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { filterLinkedCustomers, loadLinkedCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
+import {
+  LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
+  searchShopCustomers,
+  type LinkedCustomerOpt,
+} from '@/lib/customer-form';
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
@@ -81,8 +85,13 @@ export default function ServiceTicketDetail() {
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
   const [organizations, setOrganizations] = useState<LinkedCustomerOpt[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
+  const shopIdRef = useRef<string | number | null>(null);
+  const customerSearchGen = useRef(0);
+  const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('');
@@ -101,22 +110,43 @@ export default function ServiceTicketDetail() {
   const [dbLaserModels, setDbLaserModels] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
-  const filteredOrgs = filterLinkedCustomers(organizations, custSearch, 12);
+  const filteredOrgs = organizations;
 
-  // Load DB manufacturers and models for dropdowns (independent of ticket)
-  useEffect(() => {
-    (async () => {
+  const refreshCustomers = useCallback(
+    async (orgId: string | number, query: string) => {
+      const gen = ++customerSearchGen.current;
+      setCustomersLoading(true);
       try {
-        const { data: m } = await supabase.from('manufacturers').select('*').order('name');
-        const norm = (m||[]).map(normalizeManufacturerRow).filter((r) => r.name);
-        setDbMfrs(norm);
+        const result = await searchShopCustomers(supabase, orgId, query);
+        if (gen !== customerSearchGen.current) return;
+        if (!result.ok) {
+          setCustomerSearchError(true);
+          setOrganizations([]);
+          return;
+        }
+        setCustomerSearchError(false);
+        setOrganizations(result.customers);
+      } catch {
+        if (gen === customerSearchGen.current) {
+          setCustomerSearchError(true);
+          setOrganizations([]);
+        }
+      } finally {
+        if (gen === customerSearchGen.current) setCustomersLoading(false);
+      }
+    },
+    [supabase]
+  );
 
-        const { data: lm } = await supabase.from('laser_models').select('*').order('name');
-        const normLm = (lm||[]).map(normalizeModelRow);
-        setDbLaserModels(normLm);
-      } catch(e){ console.warn('db mfr/models load warn', e); }
-    })();
-  }, [supabase]);
+  function scheduleCustomerSearch(query: string) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    const orgId = shopIdRef.current;
+    if (orgId == null || orgId === '') return;
+    setCustomersLoading(true);
+    customerSearchTimer.current = setTimeout(() => {
+      void refreshCustomers(orgId, query);
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
 
   // Fetch ticket + organizations
   useEffect(() => {
@@ -134,129 +164,155 @@ export default function ServiceTicketDetail() {
         if (ticketError) throw ticketError;
         const assigned = ticketAssigneeId(ticketData);
         const normalized = { ...ticketData, assigned_to: assigned };
+        const nextShopId = ticketData.organization_id;
+        shopIdRef.current = nextShopId ?? null;
+        customerSearchGen.current += 1;
+        setOrganizations([]);
+        setCustomersLoading(false);
         setTicket(normalized);
-        // Linked equipment record: serial fallback when the ticket has none stored.
-        if (normalized?.equipment_id != null && normalized.equipment_id !== '') {
+        setFormData(normalized);
+        setCustSearch(ticketData.customer_name || '');
+
+        const equipmentPromise = (async () => {
+          // Linked equipment record: serial fallback when the ticket has none stored.
+          if (normalized?.equipment_id == null || normalized.equipment_id === '') return null;
           try {
             const { data: eq } = await supabase
               .from('equipment')
               .select('*')
               .eq('id', normalized.equipment_id)
               .maybeSingle();
-            setLinkedEquipment((eq as Record<string, unknown>) || null);
+            return (eq as Record<string, unknown>) || null;
           } catch {
-            setLinkedEquipment(null);
+            return null;
           }
-        } else {
-          setLinkedEquipment(null);
-        }
-        setFormData(normalized);
-        let ticketReports: ExistingTicketReport[] = [];
-        try {
-          ticketReports = await listReportsForTicket(supabase, normalized);
-        } catch {
-          ticketReports = [];
-        }
-        // Carry-forward: pending issues from this equipment's last report (same org only).
-        try {
-          setPendingFromLast(
-            await loadPendingFromLastVisit(supabase as any, {
-              organizationId: normalized.organization_id,
-              equipmentId: normalized.equipment_id,
-              serialNumber: normalized.serial_number,
-              excludeReportIds: ticketReports.map((r) => r.id),
-              excludeTicketId: normalized.id,
-              excludeTicketNumber: normalized.ticket_number || null,
-            })
-          );
-        } catch {
-          setPendingFromLast(null);
-        }
-        try {
-          setExistingReports(await listReportsForTicket(supabase, normalized));
-        } catch (reportErr) {
-          console.warn('ticket reports', reportErr);
-          setExistingReports([]);
-        }
+        })();
 
-        const nextShopId = ticketData.organization_id;
-        if (nextShopId != null && nextShopId !== '') {
-          const zone = await resolveNumberingTimeZone(supabase, nextShopId, { allowBrowser: false });
-          setDocZone(zone.timeZone);
-        }
-        setCustSearch(ticketData.customer_name || '');
-        if (nextShopId != null) {
-          setOrganizations(await loadLinkedCustomers(supabase, nextShopId));
-        } else {
-          setOrganizations([]);
-        }
-
-        let meId: string | null = null;
-        let meName = '';
-        let meRole = '';
-        try {
-          const user =
-            (await supabase.auth.getSession()).data.session?.user ??
-            (await supabase.auth.getUser()).data.user ??
-            null;
-          meId = user?.id || null;
-          setUserId(meId);
-          if (meId) {
-            const withOrg = await supabase
-              .from('user_profiles')
-              .select('first_name, last_name, email, role, organizations(type)')
-              .eq('id', meId)
-              .maybeSingle();
-            const prof = withOrg.error
-              ? (
-                  await supabase
-                    .from('user_profiles')
-                    .select('first_name, last_name, email, role')
-                    .eq('id', meId)
-                    .maybeSingle()
-                ).data
-              : withOrg.data;
-            meName =
-              [prof?.first_name, prof?.last_name].filter(Boolean).join(' ') ||
-              prof?.email ||
-              '';
-            meRole = prof?.role || '';
-            const orgRow = Array.isArray(prof?.organizations) ? prof.organizations[0] : prof?.organizations;
-            setViewerOrgType(orgRow?.type || null);
-            setSelfName(meName);
+        const reportsPromise = (async () => {
+          try {
+            const ticketReports = await listReportsForTicket(supabase, normalized);
+            let pending: PendingFromLastVisit | null = null;
+            try {
+              pending = await loadPendingFromLastVisit(supabase as any, {
+                organizationId: normalized.organization_id,
+                equipmentId: normalized.equipment_id,
+                serialNumber: normalized.serial_number,
+                excludeReportIds: ticketReports.map((r) => r.id),
+                excludeTicketId: normalized.id,
+                excludeTicketNumber: normalized.ticket_number || null,
+              });
+            } catch {
+              pending = null;
+            }
+            return { ticketReports, pending };
+          } catch (reportErr) {
+            console.warn('ticket reports', reportErr);
+            return { ticketReports: [] as ExistingTicketReport[], pending: null };
           }
-          setViewerRole(meRole || '');
-        } catch (e) {
-          console.warn('ticket editor session', e);
-          setViewerRole('');
-        }
+        })();
 
-        try {
-          setAssignees(
-            await loadTicketAssignees(supabase, {
+        const zonePromise = (async () => {
+          if (nextShopId == null || nextShopId === '') return null;
+          try {
+            const zone = await resolveNumberingTimeZone(supabase, nextShopId, { allowBrowser: false });
+            return zone.timeZone;
+          } catch {
+            return null;
+          }
+        })();
+
+        const peoplePromise = (async () => {
+          let meId: string | null = null;
+          let meName = '';
+          let meRole = '';
+          let orgType: string | null = null;
+          try {
+            const user =
+              (await supabase.auth.getSession()).data.session?.user ??
+              (await supabase.auth.getUser()).data.user ??
+              null;
+            meId = user?.id || null;
+            if (meId) {
+              const withOrg = await supabase
+                .from('user_profiles')
+                .select('first_name, last_name, email, role, organizations(type)')
+                .eq('id', meId)
+                .maybeSingle();
+              const prof = withOrg.error
+                ? (
+                    await supabase
+                      .from('user_profiles')
+                      .select('first_name, last_name, email, role')
+                      .eq('id', meId)
+                      .maybeSingle()
+                  ).data
+                : withOrg.data;
+              meName =
+                [prof?.first_name, prof?.last_name].filter(Boolean).join(' ') ||
+                prof?.email ||
+                '';
+              meRole = prof?.role || '';
+              const orgSource = prof as {
+                organizations?: { type?: string | null } | Array<{ type?: string | null }> | null;
+              } | null;
+              const orgRow = Array.isArray(orgSource?.organizations)
+                ? orgSource.organizations[0]
+                : orgSource?.organizations;
+              orgType = orgRow?.type || null;
+            }
+          } catch (e) {
+            console.warn('ticket editor session', e);
+          }
+          let assignees: TicketAssignee[] = [];
+          try {
+            assignees = await loadTicketAssignees(supabase, {
               orgId: nextShopId ?? null,
               meId,
               selfName: meName,
               selfRole: meRole,
               keepIds: [assigned],
-            })
-          );
-        } catch (e) {
-          console.warn('ticket assignees', e);
-          setAssignees([]);
-        }
+            });
+          } catch (e) {
+            console.warn('ticket assignees', e);
+          }
+          return { meId, meName, meRole, orgType, assignees };
+        })();
 
-        // Load reference data for equipment dropdowns
-        try {
-          const { data: m } = await supabase.from('manufacturers').select('id, name').order('name');
-          setDbMfrs(m || []);
-          // equipment_type keeps GE OEC (c_arm) and other non-laser brands out of the Laser list.
-          const { data: lm } = await supabase
-            .from('laser_models')
-            .select('id, name, manufacturer_id, equipment_type')
-            .order('name');
-          setDbLaserModels(lm || []);
-        } catch (e) { /* fallback to free text ok */ }
+        const catalogPromise = (async () => {
+          try {
+            const [mRes, lmRes] = await Promise.all([
+              supabase.from('manufacturers').select('id, name').order('name'),
+              // equipment_type keeps GE OEC (c_arm) and other non-laser brands out of the Laser list.
+              supabase
+                .from('laser_models')
+                .select('id, name, manufacturer_id, equipment_type')
+                .order('name'),
+            ]);
+            return { m: mRes.data || [], lm: lmRes.data || [] };
+          } catch {
+            return { m: [], lm: [] };
+          }
+        })();
+
+        const [equipment, reports, zone, people, catalog] = await Promise.all([
+          equipmentPromise,
+          reportsPromise,
+          zonePromise,
+          peoplePromise,
+          catalogPromise,
+        ]);
+
+        setLinkedEquipment(equipment);
+        setExistingReports(reports.ticketReports);
+        setPendingFromLast(reports.pending);
+        if (zone) setDocZone(zone);
+        setUserId(people.meId);
+        setSelfName(people.meName);
+        setViewerRole(people.meRole || '');
+        setViewerOrgType(people.orgType);
+        setAssignees(people.assignees);
+        setDbMfrs(catalog.m);
+        setDbLaserModels(catalog.lm);
       } catch (err) {
         console.error('Error fetching data:', err);
       } finally {
@@ -265,6 +321,9 @@ export default function ServiceTicketDetail() {
     };
 
     fetchData();
+    return () => {
+      if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    };
   }, [ticketId, supabase]);
 
   const liveCatalog = useMemo(
@@ -290,6 +349,9 @@ export default function ServiceTicketDetail() {
   };
 
   const handleCustomerSelect = (selectedOrg: LinkedCustomerOpt | 'new') => {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    customerSearchGen.current += 1;
+    setCustomersLoading(false);
     if (selectedOrg === 'new') {
       setFormData((prev: any) => ({ ...prev, customer_organization_id: null }));
       return;
@@ -571,12 +633,26 @@ export default function ServiceTicketDetail() {
                       setShowCustDrop(true);
                       handleInputChange('customer_name', value);
                       if (!value) handleCustomerSelect('new');
+                      scheduleCustomerSearch(value);
                     }}
-                    onFocus={() => setShowCustDrop(true)}
+                    onFocus={() => {
+                      setShowCustDrop(true);
+                      scheduleCustomerSearch(custSearch);
+                    }}
                     placeholder="Type to find a company assigned to this shop"
                     autoComplete="off"
                   />
-                  {showCustDrop && filteredOrgs.length > 0 && (
+                  {showCustDrop && customerSearchError && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)] shadow-lg">
+                      {t("Couldn't load customers. Try again.")}
+                    </div>
+                  )}
+                  {showCustDrop && !customerSearchError && customersLoading && filteredOrgs.length === 0 && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)] shadow-lg">
+                      Searching customers…
+                    </div>
+                  )}
+                  {showCustDrop && !customerSearchError && filteredOrgs.length > 0 && (
                     <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
                       {filteredOrgs.map((org) => (
                         <button

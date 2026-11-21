@@ -11,8 +11,11 @@ import {
   updateCustomerOrg,
   finalizeOrganizationPayload,
   filterLinkedCustomers,
+  findLinkedCustomerByName,
+  loadLinkedCustomerOpt,
   loadLinkedCustomerOrgs,
   matchLinkedCustomer,
+  searchShopCustomers,
   sanitizeCustomerSearch,
   searchLinkedCustomers,
   stripOverflowingAddressFields,
@@ -54,8 +57,18 @@ test('exact name match is used instead of creating a duplicate company', () => {
 test('new service call form autocompletes assigned customers and can add a new company', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const src = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
-  assert.match(src, /loadLinkedCustomers/);
-  assert.match(src, /organization_customers|loadLinkedCustomers/);
+  assert.match(src, /searchShopCustomers/);
+  assert.match(src, /findLinkedCustomerByName/);
+  assert.match(src, /customerNameRef/);
+  assert.match(src, /explicitPickRef/);
+  assert.match(src, /if \(!explicitPickRef\.current\) \{[\s\S]*?matchLinkedCustomer\(result\.customers, customerNameRef\.current\)/);
+  assert.match(src, /Couldn't load customers\. Try again\./);
+  assert.doesNotMatch(src, /matchLinkedCustomer\(rows, customerNameRef/);
+  assert.match(src, /if \(!lookup\.ok\)/);
+  assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
+  assert.match(src, /customerSearchGen/);
+  assert.doesNotMatch(src, /loadLinkedCustomers\(/);
+  assert.doesNotMatch(src, /searchLinkedCustomers\(/);
   assert.match(src, /AddCustomerModal/);
   assert.match(src, /createLinkedCustomer/);
   assert.match(src, /Add a company/);
@@ -248,7 +261,14 @@ test('ticket editor keeps shop organization_id and writes customer_organization_
   const src = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
   assert.match(src, /TICKET_SAVE_FIELDS/);
   assert.match(src, /customer_organization_id: selectedOrg\.id/);
-  assert.match(src, /loadLinkedCustomers/);
+  assert.match(src, /searchShopCustomers/);
+  assert.match(src, /Promise\.all/);
+  assert.match(src, /Couldn't load customers\. Try again\./);
+  assert.doesNotMatch(src, /searchLinkedCustomers\(/);
+  assert.match(src, /LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS/);
+  assert.match(src, /customerSearchGen/);
+  assert.equal(src.split('listReportsForTicket(').length - 1, 1);
+  assert.doesNotMatch(src, /loadLinkedCustomers\(/);
   assert.doesNotMatch(src, /[^_]organization_id: selectedOrg\.id/);
   assert.doesNotMatch(src, /update\(\{ \.\.\.formData/);
 });
@@ -467,6 +487,130 @@ test('a typed customer search does not page and does not retry when the first se
   assert.doesNotMatch(or[0], /%%/);
   assert.equal(or[1].referencedTable, 'organizations');
   assert.equal(client.calls[0].order, undefined);
+});
+
+test('000960 sorts linked customers in SQL before the limit and does not add indexes', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261117_000960_linked_customer_search.sql'),
+    'utf8'
+  );
+  const rollback = readFileSync(
+    join(here, '../supabase/migrations/20261117_000960_linked_customer_search_rollback.sql'),
+    'utf8'
+  );
+  assert.match(sql, /SECURITY INVOKER/);
+  assert.match(sql, /lower\(btrim\(o\.name\)\) = lower\(btrim\(p_name\)\)/);
+  assert.match(sql, /left\(btrim\(coalesce\(p_query, ''\)\), 80\)/);
+  assert.match(sql, /ORDER BY lower\(m\.org_name\) ASC/);
+  const orderAt = sql.lastIndexOf('ORDER BY lower(m.org_name) ASC');
+  const limitAt = sql.indexOf('LIMIT v_limit', orderAt);
+  assert.ok(orderAt > 0 && limitAt > orderAt);
+  assert.match(sql, /o\.type IS NOT NULL/);
+  assert.match(sql, /COALESCE\(NULLIF\(btrim\(r\.email\), ''\), h\.office_email\)/);
+  assert.doesNotMatch(sql, /CREATE INDEX/);
+  assert.doesNotMatch(sql, /pg_trgm/);
+  assert.match(sql, /normalize_linked_directory/);
+  assert.match(sql, /linked_customer_prefilter_text/);
+  assert.match(sql, /role\.value ->> 'name'/);
+  const findAt = sql.indexOf('CREATE OR REPLACE FUNCTION public.find_linked_customer_by_name');
+  const findBody = sql.slice(findAt, sql.indexOf('COMMENT ON FUNCTION public.find_linked_customer_by_name'));
+  assert.doesNotMatch(findBody, /left\(/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public.search_linked_customers/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public.find_linked_customer_by_name/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public.linked_customer_prefilter_text/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public.normalize_linked_directory/);
+});
+
+function rpcClient(rows: unknown[], error?: { message: string } | null) {
+  const calls: Array<{ fn: string; args: Record<string, unknown> }> = [];
+  return {
+    calls,
+    async rpc(fn: string, args: Record<string, unknown>) {
+      calls.push({ fn, args });
+      return { data: rows, error: error || null };
+    },
+  };
+}
+
+test('shop customer search keeps server order for more than 12 matches and sends the raw name', async () => {
+  const serverOrder = Array.from({ length: 15 }, (_, i) => ({
+    id: 100 - i,
+    name: `Clinic ${String(15 - i).padStart(2, '0')}`,
+    city: 'Austin',
+    state: 'TX',
+    phone: '555-2222',
+    email: 'larry@smith.test',
+    contact: 'Larry Smart',
+    contact_role: 'Owner',
+    office_phone: '555-1111',
+    linked_at: '2026-01-01T00:00:00Z',
+  }));
+  const client = rpcClient(serverOrder);
+  const found = await searchShopCustomers(client as never, 2655, 'Dr. Smith, Inc.');
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].fn, 'search_linked_customers');
+  assert.equal(client.calls[0].args.p_query, 'Dr. Smith, Inc.');
+  assert.equal(client.calls[0].args.p_sort, 'name');
+  assert.equal(client.calls[0].args.p_limit, 12);
+  assert.equal(found.ok, true);
+  if (!found.ok) return;
+  assert.equal(found.customers.length, 15);
+  assert.deepEqual(
+    found.customers.map((row) => row.name),
+    serverOrder.map((row) => row.name)
+  );
+  assert.equal(found.customers[0].phone, '555-2222');
+  assert.equal(found.customers[0].contact, 'Larry Smart');
+  assert.equal(found.customers[0].officePhone, '555-1111');
+
+  const quoted = rpcClient([]);
+  await searchShopCustomers(quoted as never, 2655, 'say "hi": Clinic');
+  assert.equal(quoted.calls[0].args.p_query, 'say "hi": Clinic');
+
+  const long = rpcClient([]);
+  await searchShopCustomers(long as never, 2655, `  ${'A'.repeat(90)}  `);
+  assert.equal(String(long.calls[0].args.p_query).length, 80);
+
+  const failed = rpcClient([], { message: 'timeout' });
+  const down = await searchShopCustomers(failed as never, 2655, 'Clinic');
+  assert.deepEqual(down, { ok: false });
+});
+
+test('exact customer name is one RPC and a failed lookup does not look like no match', async () => {
+  const client = rpcClient([
+    { id: 10, name: 'Dr. Smith, Inc.', phone: '555-2222', email: 'larry@smith.test', contact: 'Larry Smart' },
+  ]);
+  const hit = await findLinkedCustomerByName(client as never, 2655, '  Dr. Smith, Inc.  ');
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].fn, 'find_linked_customer_by_name');
+  assert.equal(client.calls[0].args.p_name, '  Dr. Smith, Inc.  ');
+  assert.equal(hit.ok, true);
+  if (hit.ok) assert.equal(hit.customer?.id, 10);
+
+  const missing = rpcClient([]);
+  const none = await findLinkedCustomerByName(missing as never, 2655, 'Dr Smith Inc');
+  assert.deepEqual(none, { ok: true, customer: null });
+
+  const failed = rpcClient([], { message: 'function find_linked_customer_by_name does not exist' });
+  const down = await findLinkedCustomerByName(failed as never, 2655, 'Dr. Smith, Inc.');
+  assert.deepEqual(down, { ok: false });
+});
+
+test('one linked customer is loaded by id without paging the shop', async () => {
+  const client = searchClient({
+    rows: [
+      {
+        created_at: '2026-11-02T00:00:00Z',
+        organizations: { id: 44, name: 'New Clinic', type: 'customer', city: 'Austin' },
+      },
+    ],
+  });
+  const hit = await loadLinkedCustomerOpt(client as never, 2655, 44);
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0].limit, 1);
+  assert.equal(hit?.name, 'New Clinic');
+  assert.equal(hit?.city, 'Austin');
 });
 
 test('directory_contacts missing retries once; any other error does not', async () => {

@@ -1,7 +1,7 @@
 'use client';
 import { useFormatDate } from '@/lib/use-format-date';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -41,9 +41,11 @@ import {
 import {
   createLinkedCustomer,
   emptyCustomerForm,
-  filterLinkedCustomers,
-  loadLinkedCustomers,
+  findLinkedCustomerByName,
+  LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
+  loadLinkedCustomerOpt,
   matchLinkedCustomer,
+  searchShopCustomers,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
 import { normalizeStateCode } from '@/lib/geo';
@@ -165,6 +167,14 @@ export default function ServiceSchedule() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [customers, setCustomers] = useState<LinkedCustomerOpt[]>([]);
+  const [customersLoading, setCustomersLoading] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
+  const [pickedOfficePhone, setPickedOfficePhone] = useState<string | null>(null);
+  const customerSearchGen = useRef(0);
+  const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customerNameRef = useRef('');
+  const explicitPickRef = useRef(false);
+  const pickedNameRef = useRef('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [ticketEquipmentId, setTicketEquipmentId] = useState('');
@@ -397,20 +407,52 @@ export default function ServiceSchedule() {
   }, [supabase, formatTicket]);
 
   const refreshCustomers = useCallback(
-    async (oId: number | string | null) => {
+    async (oId: number | string | null, query: string) => {
       if (oId == null) {
         setCustomers([]);
+        setCustomersLoading(false);
         return;
       }
+      const gen = ++customerSearchGen.current;
+      setCustomersLoading(true);
       try {
-        setCustomers(await loadLinkedCustomers(supabase, oId));
+        const result = await searchShopCustomers(supabase, oId, query);
+        if (gen !== customerSearchGen.current) return;
+        if (!result.ok) {
+          setCustomerSearchError(true);
+          setCustomers([]);
+          return;
+        }
+        setCustomerSearchError(false);
+        setCustomers(result.customers);
+        if (!explicitPickRef.current) {
+          const match = matchLinkedCustomer(result.customers, customerNameRef.current);
+          if (match) {
+            setCustomerOrgId(match.id);
+            setPickedOfficePhone(match.officePhone ?? null);
+          }
+        }
       } catch (e) {
         console.warn('ticket customers', e);
-        setCustomers([]);
+        if (gen === customerSearchGen.current) {
+          setCustomerSearchError(true);
+          setCustomers([]);
+        }
+      } finally {
+        if (gen === customerSearchGen.current) setCustomersLoading(false);
       }
     },
     [supabase]
   );
+
+  function scheduleCustomerSearch(oId: number | string | null, query: string) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    if (oId == null) return;
+    setCustomersLoading(true);
+    customerSearchTimer.current = setTimeout(() => {
+      void refreshCustomers(oId, query);
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
 
   const refreshAssignees = useCallback(
     async (oId: number | string | null, meId: string | null) => {
@@ -432,17 +474,16 @@ export default function ServiceSchedule() {
   );
 
   useEffect(() => {
-    refreshCustomers(orgId);
-  }, [orgId, refreshCustomers]);
+    return () => {
+      if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     refreshAssignees(orgId, userId);
   }, [orgId, userId, refreshAssignees]);
 
-  const filteredCustomers = useMemo(
-    () => filterLinkedCustomers(customers, form.customer_name),
-    [customers, form.customer_name]
-  );
+  const filteredCustomers = customers;
 
   function applyLocation(loc: CustomerLocation, officePhone?: string | null) {
     setSelectedLocationId(String(loc.id));
@@ -461,7 +502,14 @@ export default function ServiceSchedule() {
   }
 
   async function applyCustomer(c: LinkedCustomerOpt) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    customerSearchGen.current += 1;
+    setCustomersLoading(false);
+    explicitPickRef.current = true;
+    pickedNameRef.current = c.name;
+    customerNameRef.current = c.name;
     setCustomerOrgId(c.id);
+    setPickedOfficePhone(c.officePhone ?? null);
     setShowCustDrop(false);
     const base = {
       customer_name: c.name,
@@ -613,10 +661,16 @@ export default function ServiceSchedule() {
     setShowCustDrop(false);
     setShowAddCustomer(false);
     setAssignedTo(userId || '');
+    setPickedOfficePhone(null);
+    customerNameRef.current = '';
+    explicitPickRef.current = false;
+    pickedNameRef.current = '';
+    setCustomerSearchError(false);
+    setCustomers([]);
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    customerSearchGen.current += 1;
+    setCustomersLoading(false);
     setShowNew(true);
-    if (orgId != null && customers.length === 0) {
-      refreshCustomers(orgId);
-    }
   }
 
   async function createTicket(e: React.FormEvent) {
@@ -654,7 +708,12 @@ export default function ServiceSchedule() {
 
       let linkedCustomerId = customerOrgId;
       if (!linkedCustomerId) {
-        linkedCustomerId = matchLinkedCustomer(customers, customer)?.id || null;
+        const lookup = await findLinkedCustomerByName(supabase, orgId, customer);
+        if (!lookup.ok) {
+          setFormError('Could not check whether this company is already on your list. Nothing was created.');
+          return;
+        }
+        linkedCustomerId = lookup.customer?.id || null;
       }
       const customerState = normalizeStateCode(form.customer_state);
 
@@ -675,7 +734,11 @@ export default function ServiceSchedule() {
         });
         if (created.detailsWarning) toast.error(created.detailsWarning);
         linkedCustomerId = created.id;
-        await refreshCustomers(orgId);
+        const createdOpt = await loadLinkedCustomerOpt(supabase, orgId, created.id);
+        if (createdOpt) {
+          setCustomers([createdOpt]);
+          setPickedOfficePhone(createdOpt.officePhone ?? null);
+        }
       }
 
       const equipment = resolveTicketEquipment({
@@ -1349,14 +1412,26 @@ export default function ServiceSchedule() {
                   value={form.customer_name}
                   onChange={(e) => {
                     const value = e.target.value;
+                    customerNameRef.current = value;
                     setForm({ ...form, customer_name: value, customer_zip: '' });
-                    const match = matchLinkedCustomer(customers, value);
-                    setCustomerOrgId(match?.id || null);
+                    const stillThePick =
+                      explicitPickRef.current &&
+                      value.trim().toLowerCase() === pickedNameRef.current.trim().toLowerCase();
+                    if (!stillThePick) {
+                      explicitPickRef.current = false;
+                      const match = matchLinkedCustomer(customers, value);
+                      setCustomerOrgId(match?.id || null);
+                      setPickedOfficePhone(match?.officePhone ?? null);
+                    }
                     setCustomerLocations([]);
                     setSelectedLocationId('');
                     setShowCustDrop(true);
+                    scheduleCustomerSearch(orgId, value);
                   }}
-                  onFocus={() => setShowCustDrop(true)}
+                  onFocus={() => {
+                    setShowCustDrop(true);
+                    scheduleCustomerSearch(orgId, form.customer_name);
+                  }}
                   onBlur={() => {
                     window.setTimeout(() => setShowCustDrop(false), 180);
                   }}
@@ -1367,14 +1442,20 @@ export default function ServiceSchedule() {
                 />
                 {showCustDrop && (
                   <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
-                    {filteredCustomers.length === 0 && !form.customer_name.trim() && (
+                    {customerSearchError && (
                       <div className="px-3 py-2 text-xs text-[var(--text3)]">
-                        {customers.length
-                          ? 'Start typing to search your customers.'
-                          : 'No customers assigned to this shop yet.'}
+                        {t("Couldn't load customers. Try again.")}
                       </div>
                     )}
-                    {filteredCustomers.map((c) => (
+                    {!customerSearchError && customersLoading && filteredCustomers.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-[var(--text3)]">Searching customers…</div>
+                    )}
+                    {!customerSearchError && !customersLoading && filteredCustomers.length === 0 && !form.customer_name.trim() && (
+                      <div className="px-3 py-2 text-xs text-[var(--text3)]">
+                        No customers assigned to this shop yet.
+                      </div>
+                    )}
+                    {!customerSearchError && filteredCustomers.map((c) => (
                       <button
                         key={String(c.id)}
                         type="button"
@@ -1388,6 +1469,7 @@ export default function ServiceSchedule() {
                         </div>
                       </button>
                     ))}
+                    {!customerSearchError && (
                     <button
                       type="button"
                       className="w-full text-left px-3 py-2 border-t border-[var(--border)] text-sm text-[var(--gold)] hover:bg-[var(--surface)]"
@@ -1401,6 +1483,7 @@ export default function ServiceSchedule() {
                         ? `Add “${form.customer_name.trim()}” as a new company`
                         : 'Add a company that’s new to me'}
                     </button>
+                    )}
                   </div>
                 )}
                 <p className="text-[10px] text-[var(--text3)] mt-1">
@@ -1416,7 +1499,9 @@ export default function ServiceSchedule() {
                     setSelectedLocationId('');
                     return;
                   }
-                  const office = customers.find((row) => String(row.id) === String(customerOrgId))?.officePhone;
+                  const office =
+                    pickedOfficePhone ??
+                    customers.find((row) => String(row.id) === String(customerOrgId))?.officePhone;
                   applyLocation(loc, office);
                 }}
               />
@@ -1726,9 +1811,7 @@ export default function ServiceSchedule() {
           initialName={form.customer_name}
           onClose={() => setShowAddCustomer(false)}
           onCreated={async (id) => {
-            const list = await loadLinkedCustomers(supabase, orgId);
-            setCustomers(list);
-            const hit = list.find((c) => String(c.id) === String(id));
+            const hit = await loadLinkedCustomerOpt(supabase, orgId, id);
             if (hit) applyCustomer(hit);
             else setCustomerOrgId(id);
             setShowAddCustomer(false);
