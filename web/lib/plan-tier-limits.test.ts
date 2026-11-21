@@ -291,8 +291,26 @@ test('000966 limits the signup skip to inserts and lets RLS deny strangers', () 
   assert.match(mig, /NOT public\.membership_insert_allowed\(NEW\.user_id/);
   assert.match(mig, /new row violates row-level security policy for table "organization_memberships"/);
   assert.match(mig, /RETURN NEW;/);
+  assert.match(mig, /CREATE OR REPLACE FUNCTION public\.claim_team_invite_seat/);
+  assert.match(mig, /pg_advisory_xact_lock/);
+  assert.match(
+    mig,
+    /REVOKE ALL ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) FROM PUBLIC, anon, authenticated/
+  );
+  assert.match(
+    mig,
+    /GRANT EXECUTE ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) TO service_role/
+  );
+  assert.doesNotMatch(
+    mig,
+    /GRANT EXECUTE ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) TO (anon|authenticated|PUBLIC)/
+  );
   const rollback = src('../supabase/migrations/20261119_000966_seat_cap_followups_rollback.sql');
   assert.match(rollback, /000965: seat cap full/);
+  assert.match(
+    rollback,
+    /DROP FUNCTION IF EXISTS public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\)/
+  );
   assert.doesNotMatch(rollback, /TG_OP <> 'INSERT'/);
   assert.doesNotMatch(src('../supabase/migrations/20261119_000965_org_seat_cap.sql'), /TG_OP <> 'INSERT'/);
 });

@@ -344,6 +344,115 @@ BEGIN
   RAISE NOTICE 'ok   creator rejoin race ended at exactly 10';
 END $$;
 
+-- claim_team_invite_seat: a refused insert keeps the old membership and the
+-- open invite. A successful insert removes the old membership and accepts
+-- the invite only after the new row exists. Execute is service_role only.
+DO $$
+BEGIN
+  IF has_function_privilege('anon', 'public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint)', 'EXECUTE')
+     OR has_function_privilege('public', 'public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'claim_team_invite_seat is executable by anon, authenticated, or PUBLIC';
+  END IF;
+  IF NOT has_function_privilege('service_role', 'public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'service_role cannot execute claim_team_invite_seat';
+  END IF;
+  RAISE NOTICE 'ok   claim_team_invite_seat execute is service_role only';
+END $$;
+
+INSERT INTO public.organizations (id, name, is_premium, subscription_tier, plan)
+VALUES
+  (8850, 'full team', true, 'team', 'team'),
+  (8851, 'old shop', true, 'team', 'team'),
+  (8852, 'open team', true, 'team', 'team');
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+SELECT
+  ('00000000-0000-4000-8000-0000000088' || lpad(g::text, 2, '0'))::uuid,
+  8850,
+  'fse',
+  false
+FROM generate_series(1, 10) AS g;
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+VALUES ('00000000-0000-4000-8000-000000008850', 8851, 'fse', false);
+INSERT INTO public.engineer_invitations (id, organization_id, email, role, accepted, expires_at)
+VALUES
+  (8850, 8850, 'mover@example.test', 'fse', false, now() + interval '7 days'),
+  (8852, 8852, 'mover@example.test', 'fse', false, now() + interval '7 days');
+
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_team_invite_seat(
+      '00000000-0000-4000-8000-000000008850',
+      8850,
+      'fse',
+      false,
+      false,
+      8851,
+      8850
+    );
+    RAISE EXCEPTION 'full-org claim committed';
+  EXCEPTION
+    WHEN insufficient_privilege THEN
+      NULL;
+  END;
+  IF NOT EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008850' AND organization_id = 8851
+  ) THEN
+    RAISE EXCEPTION 'refused claim deleted the old membership';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008850' AND organization_id = 8850
+  ) THEN
+    RAISE EXCEPTION 'refused claim seated the user on the full org';
+  END IF;
+  IF (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8850) <> 10 THEN
+    RAISE EXCEPTION 'refused claim changed the full org';
+  END IF;
+  IF (SELECT accepted FROM public.engineer_invitations WHERE id = 8850) IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'refused claim accepted the invite';
+  END IF;
+  RAISE NOTICE 'ok   refused claim kept the old membership and the open invite';
+END $$;
+
+DO $$
+DECLARE
+  seated_ok boolean;
+  invite_accepted boolean;
+BEGIN
+  PERFORM public.claim_team_invite_seat(
+    '00000000-0000-4000-8000-000000008850',
+    8852,
+    'fse',
+    false,
+    false,
+    8851,
+    8852
+  );
+  seated_ok := EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008850' AND organization_id = 8852
+  );
+  invite_accepted := (
+    SELECT i.accepted FROM public.engineer_invitations i WHERE i.id = 8852
+  );
+  IF NOT seated_ok THEN
+    RAISE EXCEPTION 'successful claim did not insert the new membership';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008850' AND organization_id = 8851
+  ) THEN
+    RAISE EXCEPTION 'successful claim left the old membership';
+  END IF;
+  IF invite_accepted IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'successful claim did not accept the invite';
+  END IF;
+  RAISE NOTICE 'ok   successful claim seated, then removed the old membership and accepted the invite';
+END $$;
+
 -- Rollback of 000966 restores the 000965 update behavior: the profile moves
 -- and no membership is added.
 \i web/supabase/migrations/20261119_000966_seat_cap_followups_rollback.sql
@@ -357,6 +466,9 @@ BEGIN
   IF position('TG_OP <> ''INSERT''' IN pg_get_functiondef('public.user_profiles_sync_membership()'::regprocedure)) <> 0
      OR position('membership_insert_allowed(NEW.user_id' IN pg_get_functiondef('public.organization_memberships_enforce_seat_cap()'::regprocedure)) <> 0 THEN
     RAISE EXCEPTION 'rollback left the 000966 changes in place';
+  END IF;
+  IF to_regprocedure('public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint)') IS NOT NULL THEN
+    RAISE EXCEPTION 'rollback left claim_team_invite_seat';
   END IF;
   IF (SELECT organization_id FROM public.user_profiles WHERE id = '00000000-0000-4000-8000-000000008802') <> 8801 THEN
     RAISE EXCEPTION 'rollback did not restore the 000965 update path';

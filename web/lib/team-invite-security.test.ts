@@ -1656,12 +1656,34 @@ function claimAdmin(state: {
       return api;
     },
     async rpc(fn: string, args: Record<string, unknown>) {
-      if (fn !== 'set_home_membership') {
+      if (fn !== 'set_home_membership' && fn !== 'claim_team_invite_seat') {
         return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
       const userId = String(args.p_user_id);
       const orgId = Number(args.p_organization_id);
       const role = String(args.p_role || 'fse');
+      if (fn === 'claim_team_invite_seat' && args.p_is_home !== true) {
+        state.memberships.push({
+          user_id: userId,
+          organization_id: orgId,
+          role,
+          is_home: false,
+        });
+        if (args.p_leave_organization_id != null) {
+          state.memberships = state.memberships.filter(
+            (item) =>
+              !(
+                item.user_id === userId &&
+                String(item.organization_id) === String(args.p_leave_organization_id)
+              )
+          );
+        }
+        if (args.p_invite_id != null) {
+          state.invite.accepted = true;
+          state.invite.accepted_at = new Date().toISOString();
+        }
+        return { data: null, error: null };
+      }
       for (const row of state.memberships) {
         if (row.user_id === userId && row.organization_id !== orgId) row.is_home = false;
       }
@@ -1684,6 +1706,21 @@ function claimAdmin(state: {
         if (profile) {
           profile.organization_id = orgId;
           profile.role = role;
+        }
+      }
+      if (fn === 'claim_team_invite_seat') {
+        if (args.p_leave_organization_id != null) {
+          state.memberships = state.memberships.filter(
+            (item) =>
+              !(
+                item.user_id === userId &&
+                String(item.organization_id) === String(args.p_leave_organization_id)
+              )
+          );
+        }
+        if (args.p_invite_id != null) {
+          state.invite.accepted = true;
+          state.invite.accepted_at = new Date().toISOString();
         }
       }
       return { data: null, error: null };
@@ -1815,6 +1852,284 @@ test('a reopened invite lets a removed member rejoin', async () => {
     true
   );
 });
+
+// QA org ids only. A full team is 10 seats.
+const CLAIM_HOME = 2655;
+const CLAIM_LEAVE = 2656;
+const CLAIM_JOIN = 2639;
+
+test('a seat-cap rejection keeps the old membership and leaves the invite open', async () => {
+  const result = await postSeatClaim({ rejectInsert: true });
+  assert.equal(result.status, 403, JSON.stringify(result.body));
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.seat_limited, true);
+  assert.equal(result.body.upgrade_url, '/plans');
+  assert.match(String(result.body.error), /10 of 10 seats/);
+  assert.doesNotMatch(String(result.body.error), /2655|2656|2639/);
+  assert.equal(result.invite.accepted, false);
+  assert.equal(result.rpcCalls, 1);
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_LEAVE),
+    true
+  );
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN),
+    false
+  );
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_HOME && row.is_home),
+    true
+  );
+});
+
+test('a claim removes the old membership and accepts the invite only after the new row exists', async () => {
+  const result = await postSeatClaim({ rejectInsert: false });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.claimed, true);
+  assert.deepEqual(result.ops, ['insert', 'delete', 'accept']);
+  assert.equal(result.acceptedWhileSeated, true);
+  assert.equal(result.invite.accepted, true);
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN),
+    true
+  );
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_LEAVE),
+    false
+  );
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_HOME && row.is_home),
+    true
+  );
+});
+
+async function postSeatClaim(opts: { rejectInsert: boolean }) {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const invite: Record<string, unknown> = {
+    id: 880,
+    email: INVITEE,
+    organization_id: CLAIM_JOIN,
+    role: 'fse',
+    accepted: false,
+    accepted_at: null,
+    expires_at: future,
+    created_at: '2026-10-08T00:00:00.000Z',
+    first_name: 'New',
+    last_name: 'Person',
+  };
+  const memberships: MembershipRow[] = [
+    { user_id: 'auth-1', organization_id: CLAIM_HOME, role: 'fse', is_home: true },
+    { user_id: 'auth-1', organization_id: CLAIM_LEAVE, role: 'fse', is_home: false },
+  ];
+  const ops: string[] = [];
+  let rpcCalls = 0;
+  let acceptedWhileSeated = false;
+  let seatReads = 0;
+  try {
+    const response = await runTeamClaim(
+      new NextRequest('http://127.0.0.1/api/team/claim', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ leaveOrganizationId: CLAIM_LEAVE }),
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () =>
+          ({
+            from(table: string) {
+              const filters: Record<string, unknown> = {};
+              let op: 'select' | 'update' = 'select';
+              const api = {
+                select() {
+                  return api;
+                },
+                insert() {
+                  throw new Error(`${table} insert must go through claim_team_invite_seat`);
+                },
+                update() {
+                  op = 'update';
+                  if (table === 'engineer_invitations') {
+                    throw new Error('invite accepted outside the seat transaction');
+                  }
+                  return api;
+                },
+                delete() {
+                  throw new Error(`${table} delete must go through claim_team_invite_seat`);
+                },
+                eq(column: string, value: unknown) {
+                  filters[column] = value;
+                  return api;
+                },
+                neq() {
+                  return api;
+                },
+                ilike() {
+                  return api;
+                },
+                filter() {
+                  return api;
+                },
+                order() {
+                  return api;
+                },
+                limit() {
+                  return api;
+                },
+                maybeSingle() {
+                  return Promise.resolve(finish(true));
+                },
+                then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                  return Promise.resolve(finish(false)).then(onFulfilled, onRejected);
+                },
+              };
+              const finish = (single: boolean) => {
+                if (op === 'update') return { data: null, error: null };
+                if (table === 'organization_memberships') {
+                  if (filters.user_id != null) {
+                    const rows = memberships.filter((row) => row.user_id === filters.user_id);
+                    return { data: single ? rows[0] || null : rows, error: null };
+                  }
+                  if (String(filters.organization_id) === String(CLAIM_JOIN)) {
+                    seatReads += 1;
+                    if (!opts.rejectInsert || seatReads === 1) {
+                      return { data: single ? null : [], error: null };
+                    }
+                    const full = Array.from({ length: 10 }, (_, index) => ({
+                      user_id: `seat-${index}`,
+                    }));
+                    return { data: single ? full[0] : full, error: null };
+                  }
+                  return { data: single ? null : [], error: null };
+                }
+                if (table === 'engineer_invitations') return { data: invite, error: null };
+                if (table === 'user_profiles') {
+                  return {
+                    data: {
+                      id: 'auth-1',
+                      email: INVITEE,
+                      organization_id: CLAIM_HOME,
+                      role: 'fse',
+                      onboarding_completed: true,
+                    },
+                    error: null,
+                  };
+                }
+                if (table === 'organizations') {
+                  const id = Number(filters.id);
+                  if (id === CLAIM_JOIN) {
+                    return {
+                      data: {
+                        id,
+                        created_at: '2020-01-01T00:00:00.000Z',
+                        created_by: 'someone-else',
+                        is_premium: true,
+                        subscription_tier: 'team',
+                        plan: 'team',
+                      },
+                      error: null,
+                    };
+                  }
+                  return {
+                    data: {
+                      id,
+                      created_at: '2020-01-01T00:00:00.000Z',
+                      created_by: 'someone-else',
+                    },
+                    error: null,
+                  };
+                }
+                return { data: single ? null : [], error: null };
+              };
+              return api;
+            },
+            async rpc(fn: string) {
+              rpcCalls += 1;
+              if (fn !== 'claim_team_invite_seat') {
+                return { data: null, error: { message: `unknown rpc ${fn}` } };
+              }
+              if (opts.rejectInsert) {
+                return {
+                  data: null,
+                  error: { code: '42501', message: 'organization membership was not added' },
+                };
+              }
+              ops.push('insert');
+              memberships.push({
+                user_id: 'auth-1',
+                organization_id: CLAIM_JOIN,
+                role: 'fse',
+                is_home: false,
+              });
+              ops.push('delete');
+              const leaveAt = memberships.findIndex(
+                (row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_LEAVE
+              );
+              if (leaveAt >= 0) memberships.splice(leaveAt, 1);
+              ops.push('accept');
+              acceptedWhileSeated = memberships.some(
+                (row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN
+              );
+              invite.accepted = true;
+              invite.accepted_at = new Date().toISOString();
+              return { data: null, error: null };
+            },
+          }) as never,
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: {
+                user: {
+                  id: 'auth-1',
+                  email: INVITEE,
+                  email_confirmed_at: '2026-10-01T00:00:00.000Z',
+                  user_metadata: { first_name: 'New', last_name: 'Person' },
+                },
+              },
+              error: null,
+            }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: {
+                    organization_id: CLAIM_HOME,
+                    role: 'fse',
+                    onboarding_completed: true,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as Record<string, unknown>,
+      invite,
+      memberships,
+      ops,
+      rpcCalls,
+      acceptedWhileSeated,
+    };
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
+}
 
 test('reopened-invite repair SQL is a one-off, not a migration', () => {
   const dir = join(here, '../supabase/oneoff');

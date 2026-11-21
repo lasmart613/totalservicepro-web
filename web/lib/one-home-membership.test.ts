@@ -333,7 +333,7 @@ function claimAdmin(state: {
       return api;
     },
     async rpc(fn: string, args: Record<string, unknown>) {
-      if (fn !== 'set_home_membership') {
+      if (fn !== 'set_home_membership' && fn !== 'claim_team_invite_seat') {
         return { data: null, error: { message: `unknown rpc ${fn}` } };
       }
       const snapshot = state.memberships.map((row) => ({ ...row }));
@@ -341,6 +341,28 @@ function claimAdmin(state: {
       const userId = String(args.p_user_id);
       const orgId = Number(args.p_organization_id);
       const role = String(args.p_role || 'fse');
+      if (fn === 'claim_team_invite_seat' && args.p_is_home !== true) {
+        state.memberships.push({
+          user_id: userId,
+          organization_id: orgId,
+          role,
+          is_home: false,
+        });
+        if (args.p_leave_organization_id != null) {
+          state.memberships = state.memberships.filter(
+            (row) =>
+              !(
+                row.user_id === userId &&
+                String(row.organization_id) === String(args.p_leave_organization_id)
+              )
+          );
+        }
+        if (args.p_invite_id != null) {
+          state.invite.accepted = true;
+          state.invite.accepted_at = new Date().toISOString();
+        }
+        return { data: null, error: null };
+      }
       try {
         for (const row of state.memberships) {
           if (row.user_id === userId && row.organization_id !== orgId && row.is_home) row.is_home = false;
@@ -365,6 +387,21 @@ function claimAdmin(state: {
           if (profile) {
             profile.organization_id = orgId;
             profile.role = role;
+          }
+        }
+        if (fn === 'claim_team_invite_seat') {
+          if (args.p_leave_organization_id != null) {
+            state.memberships = state.memberships.filter(
+              (row) =>
+                !(
+                  row.user_id === userId &&
+                  String(row.organization_id) === String(args.p_leave_organization_id)
+                )
+            );
+          }
+          if (args.p_invite_id != null) {
+            state.invite.accepted = true;
+            state.invite.accepted_at = new Date().toISOString();
           }
         }
         return { data: null, error: null };

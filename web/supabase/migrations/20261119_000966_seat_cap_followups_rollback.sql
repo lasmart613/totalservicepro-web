@@ -1,11 +1,13 @@
--- Rollback for 000966. Restores the 000965 bodies of
--- organization_memberships_enforce_seat_cap and user_profiles_sync_membership.
--- Does not change membership rows.
+-- Rollback for 000966. Drops claim_team_invite_seat and restores the 000965
+-- bodies of organization_memberships_enforce_seat_cap and
+-- user_profiles_sync_membership. Does not change membership rows.
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 
 BEGIN;
 
 SET LOCAL lock_timeout = '5s';
+
+DROP FUNCTION IF EXISTS public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint);
 
 CREATE OR REPLACE FUNCTION public.organization_memberships_enforce_seat_cap()
 RETURNS trigger

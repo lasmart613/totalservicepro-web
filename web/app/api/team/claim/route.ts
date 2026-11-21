@@ -13,10 +13,9 @@ import {
 import { teamInviteJoinGate } from '@/lib/team-invite-guard';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
 import {
-  deleteMembership,
+  claimTeamInviteSeat,
   listMembershipsForUser,
   setActiveOrganization,
-  upsertMembership,
   orgSeatCheck,
 } from '@/lib/org-membership-server';
 
@@ -348,28 +347,27 @@ export async function runTeamClaim(
         { status: seats.status }
       );
     }
-    const added = await upsertMembership(admin, {
+    // Insert, leave the old membership, and accept the invite in one transaction.
+    // A refused insert leaves the old membership and the open invite alone.
+    const added = await claimTeamInviteSeat(admin, {
       userId: user.id,
       organizationId: decision.add.organizationId,
       role: decision.add.role,
       isHome: moveHome,
       syncProfile: moveHome,
+      leaveOrganizationId: decision.leaveOrganizationId,
+      inviteId: inv.id,
     });
     if (!added.ok) {
-      if (moveHome) {
-        return NextResponse.json(
-          { ok: false, error: added.error || 'Could not move your home organization.' },
-          { status: 503 }
-        );
-      }
-      console.warn('claim membership upsert failed, attaching profile anyway', added.error);
-    }
-
-    if (decision.leaveOrganizationId) {
-      await deleteMembership(admin, {
-        userId: user.id,
-        organizationId: decision.leaveOrganizationId,
-      });
+      const seatLimited = added.seatLimited === true;
+      return NextResponse.json(
+        {
+          ok: false,
+          error: added.error || 'Could not join this team.',
+          ...(seatLimited ? { seat_limited: true, upgrade_url: '/plans' } : {}),
+        },
+        { status: seatLimited ? 403 : 503 }
+      );
     }
 
     let activateId = decision.activateOrganizationId;
@@ -396,13 +394,6 @@ export async function runTeamClaim(
         organizationId: decision.add.organizationId,
         role: decision.add.role,
       });
-    }
-
-    if (inv.id) {
-      await admin
-        .from('engineer_invitations')
-        .update({ accepted: true, accepted_at: new Date().toISOString() })
-        .eq('id', inv.id);
     }
 
     const { data: after } = await admin

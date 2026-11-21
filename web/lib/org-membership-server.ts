@@ -199,6 +199,39 @@ async function seatCapRaceResult(
   return { ok: false, error: 'That seat was just taken. Try again.', seatLimited: false };
 }
 
+export async function claimTeamInviteSeat(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    organizationId: number | string;
+    role?: string | null;
+    isHome?: boolean;
+    syncProfile?: boolean;
+    leaveOrganizationId?: number | string | null;
+    inviteId?: number | string | null;
+  }
+): Promise<{ ok: true } | { ok: false; error: string; seatLimited?: boolean }> {
+  const organizationId = Number(input.organizationId);
+  const leave =
+    input.leaveOrganizationId == null || input.leaveOrganizationId === ''
+      ? null
+      : Number(input.leaveOrganizationId);
+  const inviteId = input.inviteId == null || input.inviteId === '' ? null : Number(input.inviteId);
+  const { error } = await admin.rpc('claim_team_invite_seat', {
+    p_user_id: input.userId,
+    p_organization_id: organizationId,
+    p_role: input.role ?? null,
+    p_is_home: input.isHome === true,
+    p_sync_profile: input.syncProfile === true,
+    p_leave_organization_id: leave,
+    p_invite_id: inviteId,
+  });
+  if (!error) return { ok: true };
+  const raced = await seatCapRaceResult(admin, organizationId, input.userId, error);
+  if (raced) return raced;
+  return { ok: false, error: error.message };
+}
+
 export async function upsertMembership(
   admin: SupabaseClient,
   input: {

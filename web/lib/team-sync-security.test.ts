@@ -66,7 +66,7 @@ test('no membership from an expired invite', () => {
   const gateAt = claim.indexOf('const gate = teamInviteJoinGate');
   assert.ok(gateAt > 0, 'claim runs the join gate');
   assert.ok(
-    gateAt < claim.indexOf('await upsertMembership'),
+    gateAt < claim.indexOf('await claimTeamInviteSeat'),
     'claim checks the invite before any membership write'
   );
   assert.ok(
@@ -212,10 +212,11 @@ test('an existing-profile invite does not create a membership until claim', () =
     invite.indexOf('await recordInvitation()') < invite.lastIndexOf('deliverForExistingAccount'),
     'the invite row is written before the email is sent'
   );
-  assert.match(claim, /await upsertMembership/);
+  assert.match(claim, /await claimTeamInviteSeat/);
+  assert.doesNotMatch(claim, /await upsertMembership/);
   assert.match(claim, /teamInviteJoinGate/);
   assert.ok(
-    claim.indexOf('const gate = teamInviteJoinGate') < claim.indexOf('await upsertMembership')
+    claim.indexOf('const gate = teamInviteJoinGate') < claim.indexOf('await claimTeamInviteSeat')
   );
 
   const page = readRoute('../app/admin/team/page.tsx');

@@ -1374,6 +1374,33 @@ function claimAdmin(state: { invite: Invite; memberships: Membership[]; profiles
       };
       return api;
     },
+    async rpc(fn: string, args: Record<string, unknown>) {
+      if (fn !== 'claim_team_invite_seat') {
+        return { data: null, error: { message: `unknown rpc ${fn}` } };
+      }
+      const userId = String(args.p_user_id);
+      const orgId = Number(args.p_organization_id);
+      state.memberships.push({
+        user_id: userId,
+        organization_id: orgId,
+        role: String(args.p_role || 'fse'),
+        is_home: args.p_is_home === true,
+      });
+      if (args.p_leave_organization_id != null) {
+        state.memberships = state.memberships.filter(
+          (row) =>
+            !(
+              row.user_id === userId &&
+              String(row.organization_id) === String(args.p_leave_organization_id)
+            )
+        );
+      }
+      if (args.p_invite_id != null) {
+        state.invite.accepted = true;
+        state.invite.accepted_at = new Date().toISOString();
+      }
+      return { data: null, error: null };
+    },
   };
 }
 

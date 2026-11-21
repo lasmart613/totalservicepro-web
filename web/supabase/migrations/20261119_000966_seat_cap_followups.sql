@@ -10,10 +10,11 @@
 --    with the same text whether the org is full or empty. Service role
 --    still gets the generic refusal, because it bypasses row-level security.
 --
--- Does not DELETE or UPDATE existing memberships.
+-- Does not sweep existing memberships. claim_team_invite_seat deletes only
+-- the membership the caller is leaving, and only after the new row exists.
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 -- Rollback: 20261119_000966_seat_cap_followups_rollback.sql restores the
--- 000965 bodies of these two functions.
+-- 000965 bodies of these two functions and drops claim_team_invite_seat.
 
 BEGIN;
 
@@ -245,5 +246,73 @@ $$;
 
 COMMENT ON FUNCTION public.user_profiles_sync_membership() IS
   'BEFORE INSERT/UPDATE. Client org changes require creator, existing membership, or an unaccepted invite for auth.users email. A service-role INSERT into a full org keeps the new profile and skips the membership (000966). A service-role UPDATE onto a full org raises, so the previous organization_id stays.';
+
+-- Claim join: insert the new membership, drop the old one, and accept the
+-- invite in one transaction. The seat trigger locks the org on the insert.
+-- If that insert is refused, this function raises and the delete and the
+-- accept never happen.
+CREATE OR REPLACE FUNCTION public.claim_team_invite_seat(
+  p_user_id uuid,
+  p_organization_id bigint,
+  p_role text,
+  p_is_home boolean,
+  p_sync_profile boolean,
+  p_leave_organization_id bigint,
+  p_invite_id bigint
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+SET row_security = off
+AS $function$
+BEGIN
+  IF p_user_id IS NULL OR p_organization_id IS NULL THEN
+    RAISE EXCEPTION 'claim requires a user and an organization' USING ERRCODE = '22023';
+  END IF;
+  IF p_leave_organization_id IS NOT NULL AND p_leave_organization_id = p_organization_id THEN
+    RAISE EXCEPTION 'cannot leave the organization being joined' USING ERRCODE = '22023';
+  END IF;
+
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('tsp.org_seat:' || p_organization_id::text, 0)
+  );
+
+  IF COALESCE(p_is_home, false) THEN
+    PERFORM public.set_home_membership(
+      p_user_id,
+      p_organization_id,
+      p_role,
+      COALESCE(p_sync_profile, false)
+    );
+  ELSE
+    INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+    VALUES (
+      p_user_id,
+      p_organization_id,
+      COALESCE(NULLIF(pg_catalog.btrim(p_role), ''), 'fse'),
+      false
+    );
+  END IF;
+
+  IF p_leave_organization_id IS NOT NULL THEN
+    DELETE FROM public.organization_memberships
+    WHERE user_id = p_user_id
+      AND organization_id = p_leave_organization_id;
+  END IF;
+
+  IF p_invite_id IS NOT NULL THEN
+    UPDATE public.engineer_invitations
+    SET accepted = true,
+        accepted_at = pg_catalog.now()
+    WHERE id = p_invite_id;
+  END IF;
+END;
+$function$;
+
+COMMENT ON FUNCTION public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint) IS
+  '000966: seat a claimed invite. Insert (under the org seat lock), then delete the membership being left, then mark the invite accepted. A refused insert rolls all of it back.';
+
+REVOKE ALL ON FUNCTION public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_team_invite_seat(uuid, bigint, text, boolean, boolean, bigint, bigint) TO service_role;
 
 COMMIT;
