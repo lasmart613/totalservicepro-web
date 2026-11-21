@@ -15,6 +15,12 @@ import {
 import { listManufacturers } from '@/lib/laser-catalog';
 import { toast } from 'sonner';
 import { StorageImage } from '@/components/StorageImage';
+import {
+  acceptListingPhotoFiles,
+  blockListingSaveForPhotoFailure,
+  uploadListingPhotos,
+} from '@/lib/marketplace/listing-photos';
+import { listingPhotoStorage } from '@/lib/marketplace/listing-photos-client';
 
 const PART_CATEGORIES = [
   'Optical / Handpiece',
@@ -121,6 +127,7 @@ export default function EditPartListingPage() {
   const [status, setStatus] = useState<string>('active');
   const [form, setForm] = useState<FormState>(emptyForm());
   const [existingImages, setExistingImages] = useState<string[]>([]);
+  const [photoError, setPhotoError] = useState('');
   const [newFiles, setNewFiles] = useState<File[]>([]);
   const [newPreviews, setNewPreviews] = useState<string[]>([]);
   const [featuredIndex, setFeaturedIndex] = useState(0);
@@ -177,9 +184,22 @@ export default function EditPartListingPage() {
   }, [id]);
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
-    const left = 8 - existingImages.length - newFiles.length;
-    const slice = files.slice(0, left);
+    const picked = Array.from(e.target.files || []);
+    e.target.value = '';
+    const { accepted, rejected } = acceptListingPhotoFiles(picked);
+    const left = Math.max(0, 8 - existingImages.length - newFiles.length);
+    const slice = accepted.slice(0, left);
+    const notes = rejected.map((item) => `${item.name}: ${item.reason}`);
+    if (accepted.length > left) {
+      notes.push(left === 0 ? 'This listing already has 8 photos.' : `Only ${left} more photo${left === 1 ? '' : 's'} can be added.`);
+    }
+    if (notes.length) {
+      const message = notes.join(' ');
+      setPhotoError(message);
+      toast.error(message);
+    } else {
+      setPhotoError('');
+    }
     if (!slice.length) return;
     setNewFiles((prev) => [...prev, ...slice]);
     slice.forEach((file) => {
@@ -187,7 +207,6 @@ export default function EditPartListingPage() {
       reader.onload = () => setNewPreviews((p) => [...p, String(reader.result || '')]);
       reader.readAsDataURL(file);
     });
-    e.target.value = '';
   };
 
   const removePreview = (index: number) => {
@@ -202,29 +221,12 @@ export default function EditPartListingPage() {
     else if (featuredIndex > index) setFeaturedIndex((f) => f - 1);
   };
 
-  const uploadNewImages = async (userId: string): Promise<string[]> => {
-    if (!newFiles.length) return [];
-    const urls: string[] = [];
-    for (let n = 0; n < newFiles.length; n++) {
-      const file = newFiles[n];
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `${userId}/listings/${Date.now()}_${n}.${ext}`;
-      for (const bucket of ['marketplace-images', 'equipment-photos', 'equipment']) {
-        const { error } = await getSupabaseClient().storage.from(bucket).upload(path, file, {
-          upsert: true,
-          contentType: file.type || `image/${ext}`,
-        });
-        if (!error) {
-          const { data } = getSupabaseClient().storage.from(bucket).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            break;
-          }
-        }
-      }
-    }
-    return urls;
-  };
+  const uploadNewImages = (userId: string) =>
+    uploadListingPhotos(listingPhotoStorage(), {
+      userId,
+      files: newFiles,
+      action: 'saved',
+    });
 
   const orderedImages = (uploaded: string[]) => {
     const merged = [...existingImages, ...uploaded];
@@ -264,8 +266,26 @@ export default function EditPartListingPage() {
     setSaving(true);
     try {
       const { data: auth } = await getSupabaseClient().auth.getUser();
-      const uploaded = auth.user?.id ? await uploadNewImages(auth.user.id) : [];
-      const images = orderedImages(uploaded);
+      let uploadedUrls: string[] = [];
+      if (newFiles.length) {
+        if (!auth.user?.id) {
+          const message = 'Sign in again before uploading photos.';
+          setPhotoError(message);
+          toast.error(message);
+          return;
+        }
+        const uploaded = await uploadNewImages(auth.user.id);
+        const blocked = blockListingSaveForPhotoFailure(newFiles.length, uploaded);
+        if (blocked || !uploaded.ok) {
+          const message = blocked || 'Photos were not saved, so the listing was not saved.';
+          setPhotoError(message);
+          toast.error(message);
+          return;
+        }
+        uploadedUrls = uploaded.urls;
+        setPhotoError('');
+      }
+      const images = orderedImages(uploadedUrls);
       const headers = await marketplaceAuthHeaders();
       const res = await fetch(`/api/marketplace/parts/${encodeURIComponent(id)}`, {
         method: 'PATCH',
@@ -385,6 +405,12 @@ export default function EditPartListingPage() {
           <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-3">
             <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Photos</h3>
             <p className="text-xs text-[var(--text3)]">Up to 8 photos. First / starred photo is the cover.</p>
+            <p className="text-xs text-[var(--text3)]">JPEG, PNG, WebP, or GIF. HEIC photos need to be exported first.</p>
+            {photoError ? (
+              <p className="text-sm text-red-400" role="alert" data-testid="listing-photo-error">
+                {photoError}
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               {allPreviews.map((src, i) => (
                 <div key={`${src}-${i}`} className="relative w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)]">
@@ -411,7 +437,7 @@ export default function EditPartListingPage() {
               {allPreviews.length < 8 && (
                 <label className="w-20 h-20 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-2xl text-[var(--text3)] cursor-pointer hover:border-[var(--gold)]">
                   +
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageSelect} />
+                  <input type="file" accept="image/*,.heic,.heif,.jpg,.jpeg,.png,.webp,.gif" multiple className="hidden" onChange={handleImageSelect} />
                 </label>
               )}
             </div>
