@@ -453,6 +453,112 @@ BEGIN
   RAISE NOTICE 'ok   successful claim seated, then removed the old membership and accepted the invite';
 END $$;
 
+-- A second claim by the same user does not raise the membership unique
+-- constraint, and an invite for another org rolls the insert back.
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_team_invite_seat(
+      '00000000-0000-4000-8000-000000008850',
+      8852,
+      'fse',
+      false,
+      false,
+      NULL,
+      8852
+    );
+    RAISE EXCEPTION 'second claim of an accepted invite committed';
+  EXCEPTION
+    WHEN unique_violation THEN
+      RAISE EXCEPTION 'second claim raised unique_violation';
+    WHEN OTHERS THEN
+      IF SQLERRM ILIKE '%second claim of an accepted invite committed%'
+         OR SQLERRM ILIKE '%unique_violation%' THEN
+        RAISE;
+      END IF;
+      IF SQLERRM ILIKE '%constraint%' OR SQLERRM ILIKE '%duplicate%' OR SQLERRM ILIKE '%organization_memberships%' THEN
+        RAISE EXCEPTION 'second claim leaked a constraint name: %', SQLERRM;
+      END IF;
+      IF SQLERRM NOT LIKE '%invite was not accepted%' THEN
+        RAISE EXCEPTION 'second claim unexpected error: %', SQLERRM;
+      END IF;
+  END;
+  IF (SELECT count(*) FROM public.organization_memberships
+      WHERE user_id = '00000000-0000-4000-8000-000000008850' AND organization_id = 8852) <> 1 THEN
+    RAISE EXCEPTION 'second claim changed the membership';
+  END IF;
+  RAISE NOTICE 'ok   second claim keeps one row and hides the constraint name';
+END $$;
+
+INSERT INTO public.organizations (id, name, is_premium, subscription_tier, plan)
+VALUES (8854, 'open again', true, 'team', 'team');
+INSERT INTO public.engineer_invitations (id, organization_id, email, role, accepted, expires_at)
+VALUES (8854, 8851, 'other@example.test', 'fse', false, now() + interval '7 days');
+DO $$
+BEGIN
+  BEGIN
+    PERFORM public.claim_team_invite_seat(
+      '00000000-0000-4000-8000-000000008854',
+      8854,
+      'fse',
+      false,
+      false,
+      NULL,
+      8854
+    );
+    RAISE EXCEPTION 'wrong-org invite was accepted';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF SQLERRM ILIKE '%wrong-org invite was accepted%' THEN
+        RAISE;
+      END IF;
+      IF SQLERRM NOT LIKE '%invite was not accepted%' THEN
+        RAISE EXCEPTION 'wrong-org invite unexpected error: %', SQLERRM;
+      END IF;
+  END;
+  IF EXISTS (
+    SELECT 1 FROM public.organization_memberships
+    WHERE user_id = '00000000-0000-4000-8000-000000008854'
+  ) THEN
+    RAISE EXCEPTION 'wrong-org invite left a membership';
+  END IF;
+  IF (SELECT accepted FROM public.engineer_invitations WHERE id = 8854) IS DISTINCT FROM false THEN
+    RAISE EXCEPTION 'wrong-org invite was marked accepted';
+  END IF;
+  RAISE NOTICE 'ok   invite for another org rolls the claim back';
+END $$;
+
+-- Already a member, invite still open: ON CONFLICT does not add a row and
+-- the open invite is accepted. The seat lock still applies to a new insert.
+INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+VALUES ('00000000-0000-4000-8000-000000008801', 8850, 'fse', false)
+ON CONFLICT (user_id, organization_id) DO NOTHING;
+INSERT INTO public.engineer_invitations (id, organization_id, email, role, accepted, expires_at)
+VALUES (8856, 8850, 'owner@example.test', 'fse', false, now() + interval '7 days');
+SELECT public.claim_team_invite_seat(
+  '00000000-0000-4000-8000-000000008801',
+  8850,
+  'fse',
+  false,
+  false,
+  NULL,
+  8856
+);
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM public.organization_memberships WHERE organization_id = 8850) <> 10 THEN
+    RAISE EXCEPTION 'already-member claim changed the full org';
+  END IF;
+  IF (SELECT count(*) FROM public.organization_memberships
+      WHERE user_id = '00000000-0000-4000-8000-000000008801' AND organization_id = 8850) <> 1 THEN
+    RAISE EXCEPTION 'already-member claim duplicated the row';
+  END IF;
+  IF (SELECT accepted FROM public.engineer_invitations WHERE id = 8856) IS DISTINCT FROM true THEN
+    RAISE EXCEPTION 'already-member claim left the invite open';
+  END IF;
+  RAISE NOTICE 'ok   already-member claim accepts the open invite without a second row';
+END $$;
+
 -- Rollback of 000966 restores the 000965 update behavior: the profile moves
 -- and no membership is added.
 \i web/supabase/migrations/20261119_000966_seat_cap_followups_rollback.sql

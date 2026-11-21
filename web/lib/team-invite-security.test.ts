@@ -1863,8 +1863,9 @@ test('a seat-cap rejection keeps the old membership and leaves the invite open',
   assert.equal(result.status, 403, JSON.stringify(result.body));
   assert.equal(result.body.ok, false);
   assert.equal(result.body.seat_limited, true);
-  assert.equal(result.body.upgrade_url, '/plans');
-  assert.match(String(result.body.error), /10 of 10 seats/);
+  assert.equal(result.body.upgrade_url, undefined);
+  assert.equal(result.body.error, 'This team has no open seats. Ask the person who invited you.');
+  assert.doesNotMatch(String(result.body.error), /\d|upgrade|\/plans/);
   assert.doesNotMatch(String(result.body.error), /2655|2656|2639/);
   assert.equal(result.invite.accepted, false);
   assert.equal(result.rpcCalls, 1);
@@ -1903,7 +1904,29 @@ test('a claim removes the old membership and accepts the invite only after the n
   );
 });
 
-async function postSeatClaim(opts: { rejectInsert: boolean }) {
+test('a claim database error does not show the constraint name', async () => {
+  const result = await postSeatClaim({
+    rejectInsert: false,
+    rawError: 'duplicate key value violates unique constraint "organization_memberships_user_id_organization_id_key"',
+  });
+  assert.equal(result.status, 503, JSON.stringify(result.body));
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.error, 'Could not join this team.');
+  assert.equal(result.body.seat_limited, undefined);
+  assert.equal(result.body.upgrade_url, undefined);
+  assert.doesNotMatch(String(result.body.error), /duplicate|constraint|organization_memberships|23505/i);
+  assert.equal(result.invite.accepted, false);
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_LEAVE),
+    true
+  );
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN),
+    false
+  );
+});
+
+async function postSeatClaim(opts: { rejectInsert: boolean; rawError?: string }) {
   const previous = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
     anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
@@ -2056,6 +2079,9 @@ async function postSeatClaim(opts: { rejectInsert: boolean }) {
               if (fn !== 'claim_team_invite_seat') {
                 return { data: null, error: { message: `unknown rpc ${fn}` } };
               }
+              if (opts.rawError) {
+                return { data: null, error: { code: '23505', message: opts.rawError } };
+              }
               if (opts.rejectInsert) {
                 return {
                   data: null,
@@ -2122,6 +2148,254 @@ async function postSeatClaim(opts: { rejectInsert: boolean }) {
       ops,
       rpcCalls,
       acceptedWhileSeated,
+    };
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
+}
+
+test('a profile write failure after a committed claim is still a success', async () => {
+  const result = await postFollowupClaim('profile');
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.claimed, true);
+  assert.equal(result.profileWrites, 2);
+  assert.equal(result.invite.accepted, true);
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN),
+    true
+  );
+});
+
+test('an active-organization write failure after a committed claim is still a success', async () => {
+  const result = await postFollowupClaim('active');
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.claimed, true);
+  assert.equal(result.activeWrites, 1);
+  assert.equal(result.invite.accepted, true);
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === CLAIM_JOIN),
+    true
+  );
+  assert.equal(
+    result.memberships.some((row) => row.user_id === 'auth-1' && row.organization_id === 2651),
+    false
+  );
+});
+
+async function postFollowupClaim(mode: 'profile' | 'active') {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const invite: Record<string, unknown> = {
+    id: 881,
+    email: INVITEE,
+    organization_id: CLAIM_JOIN,
+    role: 'fse',
+    accepted: false,
+    accepted_at: null,
+    expires_at: future,
+    created_at: '2026-10-08T00:00:00.000Z',
+    first_name: 'New',
+    last_name: 'Person',
+  };
+  const memberships: MembershipRow[] =
+    mode === 'profile'
+      ? []
+      : [
+          { user_id: 'auth-1', organization_id: CLAIM_HOME, role: 'fse', is_home: true },
+          { user_id: 'auth-1', organization_id: 2651, role: 'fse', is_home: false },
+        ];
+  const profileOrg = mode === 'profile' ? null : 2651;
+  let profileWrites = 0;
+  let activeWrites = 0;
+  try {
+    const response = await runTeamClaim(
+      new NextRequest('http://127.0.0.1/api/team/claim', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(mode === 'active' ? { leaveOrganizationId: 2651 } : {}),
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () =>
+          ({
+            from(table: string) {
+              const filters: Record<string, unknown> = {};
+              let op: 'select' | 'insert' | 'update' | 'upsert' = 'select';
+              const api = {
+                select() {
+                  return api;
+                },
+                insert(row: Record<string, unknown>) {
+                  op = 'insert';
+                  if (table === 'organization_memberships') {
+                    memberships.push({
+                      user_id: String(row.user_id),
+                      organization_id: Number(row.organization_id),
+                      role: String(row.role || 'fse'),
+                      is_home: !!row.is_home,
+                    });
+                  }
+                  return api;
+                },
+                update() {
+                  op = 'update';
+                  if (table === 'user_profiles') activeWrites += 1;
+                  return api;
+                },
+                upsert() {
+                  op = 'upsert';
+                  if (table === 'user_profiles') profileWrites += 1;
+                  return api;
+                },
+                delete() {
+                  return api;
+                },
+                eq(column: string, value: unknown) {
+                  filters[column] = value;
+                  return api;
+                },
+                neq() {
+                  return api;
+                },
+                ilike() {
+                  return api;
+                },
+                filter() {
+                  return api;
+                },
+                order() {
+                  return api;
+                },
+                limit() {
+                  return api;
+                },
+                maybeSingle() {
+                  return Promise.resolve(finish(true));
+                },
+                then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                  return Promise.resolve(finish(false)).then(onFulfilled, onRejected);
+                },
+              };
+              const finish = (single: boolean) => {
+                if (table === 'user_profiles' && (op === 'upsert' || op === 'update')) {
+                  return { data: null, error: { message: 'profiles_pkey' } };
+                }
+                if (table === 'organization_memberships') {
+                  const rows = memberships.filter((row) => {
+                    if (filters.user_id != null && row.user_id !== filters.user_id) return false;
+                    if (
+                      filters.organization_id != null &&
+                      String(row.organization_id) !== String(filters.organization_id)
+                    ) {
+                      return false;
+                    }
+                    return true;
+                  });
+                  return { data: single ? rows[0] || null : rows, error: null };
+                }
+                if (table === 'engineer_invitations') return { data: invite, error: null };
+                if (table === 'user_profiles') {
+                  return {
+                    data: {
+                      id: 'auth-1',
+                      email: INVITEE,
+                      organization_id: profileOrg,
+                      role: 'fse',
+                      onboarding_completed: true,
+                    },
+                    error: null,
+                  };
+                }
+                if (table === 'organizations') {
+                  return {
+                    data: {
+                      id: Number(filters.id),
+                      created_at: '2020-01-01T00:00:00.000Z',
+                      created_by: 'someone-else',
+                      is_premium: true,
+                      subscription_tier: 'team',
+                      plan: 'team',
+                    },
+                    error: null,
+                  };
+                }
+                return { data: single ? null : [], error: null };
+              };
+              return api;
+            },
+            async rpc(fn: string, args: Record<string, unknown>) {
+              if (fn !== 'claim_team_invite_seat') {
+                return { data: null, error: { message: `unknown rpc ${fn}` } };
+              }
+              memberships.push({
+                user_id: 'auth-1',
+                organization_id: Number(args.p_organization_id),
+                role: 'fse',
+                is_home: args.p_is_home === true,
+              });
+              if (args.p_leave_organization_id != null) {
+                const leaveAt = memberships.findIndex(
+                  (row) =>
+                    row.user_id === 'auth-1' &&
+                    String(row.organization_id) === String(args.p_leave_organization_id)
+                );
+                if (leaveAt >= 0) memberships.splice(leaveAt, 1);
+              }
+              invite.accepted = true;
+              return { data: null, error: null };
+            },
+          }) as never,
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: {
+                user: {
+                  id: 'auth-1',
+                  email: INVITEE,
+                  email_confirmed_at: '2026-10-01T00:00:00.000Z',
+                  user_metadata: {},
+                },
+              },
+              error: null,
+            }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: {
+                    organization_id: profileOrg,
+                    role: 'fse',
+                    onboarding_completed: true,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    );
+    return {
+      status: response.status,
+      body: (await response.json()) as Record<string, unknown>,
+      invite,
+      memberships,
+      profileWrites,
+      activeWrites,
     };
   } finally {
     if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;

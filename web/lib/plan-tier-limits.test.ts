@@ -292,6 +292,10 @@ test('000966 limits the signup skip to inserts and lets RLS deny strangers', () 
   assert.match(mig, /new row violates row-level security policy for table "organization_memberships"/);
   assert.match(mig, /RETURN NEW;/);
   assert.match(mig, /CREATE OR REPLACE FUNCTION public\.claim_team_invite_seat/);
+  assert.match(mig, /ON CONFLICT \(user_id, organization_id\) DO NOTHING/);
+  assert.match(mig, /AND organization_id = p_organization_id/);
+  assert.match(mig, /AND accepted IS NOT TRUE/);
+  assert.match(mig, /invite was not accepted/);
   assert.match(mig, /pg_advisory_xact_lock/);
   assert.match(
     mig,

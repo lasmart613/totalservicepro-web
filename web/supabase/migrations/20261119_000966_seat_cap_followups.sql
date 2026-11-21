@@ -265,6 +265,8 @@ SECURITY DEFINER
 SET search_path = ''
 SET row_security = off
 AS $function$
+DECLARE
+  accepted_rows integer;
 BEGIN
   IF p_user_id IS NULL OR p_organization_id IS NULL THEN
     RAISE EXCEPTION 'claim requires a user and an organization' USING ERRCODE = '22023';
@@ -291,7 +293,8 @@ BEGIN
       p_organization_id,
       COALESCE(NULLIF(pg_catalog.btrim(p_role), ''), 'fse'),
       false
-    );
+    )
+    ON CONFLICT (user_id, organization_id) DO NOTHING;
   END IF;
 
   IF p_leave_organization_id IS NOT NULL THEN
@@ -304,7 +307,13 @@ BEGIN
     UPDATE public.engineer_invitations
     SET accepted = true,
         accepted_at = pg_catalog.now()
-    WHERE id = p_invite_id;
+    WHERE id = p_invite_id
+      AND organization_id = p_organization_id
+      AND accepted IS NOT TRUE;
+    GET DIAGNOSTICS accepted_rows = ROW_COUNT;
+    IF accepted_rows <> 1 THEN
+      RAISE EXCEPTION 'invite was not accepted' USING ERRCODE = 'check_violation';
+    END IF;
   END IF;
 END;
 $function$;
