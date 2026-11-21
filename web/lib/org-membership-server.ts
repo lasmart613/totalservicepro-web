@@ -175,6 +175,63 @@ export async function orgInviteSeatCheck(
   return { ok: true, used, limit };
 }
 
+/**
+ * The seat trigger refuses with SQLSTATE 42501 and this text when the
+ * TypeScript check passed and a concurrent add took the last seat.
+ * A plain row-level denial uses 42501 too, and is left as-is.
+ */
+function isSeatCapDbError(error: { message?: string; code?: string } | null): boolean {
+  const message = error?.message || '';
+  if (/organization membership was not added/i.test(message)) return true;
+  if (String(error?.code || '') !== '42501') return false;
+  return !/row-level security|permission denied/i.test(message);
+}
+
+async function seatCapRaceResult(
+  admin: SupabaseClient,
+  organizationId: number | string,
+  userId: string | null | undefined,
+  error: { message?: string; code?: string } | null
+): Promise<{ ok: false; error: string; seatLimited: boolean } | null> {
+  if (!isSeatCapDbError(error)) return null;
+  const again = await orgSeatCheck(admin, organizationId, userId);
+  if (!again.ok) return { ok: false, error: again.error, seatLimited: true };
+  return { ok: false, error: 'That seat was just taken. Try again.', seatLimited: false };
+}
+
+export async function claimTeamInviteSeat(
+  admin: SupabaseClient,
+  input: {
+    userId: string;
+    organizationId: number | string;
+    role?: string | null;
+    isHome?: boolean;
+    syncProfile?: boolean;
+    leaveOrganizationId?: number | string | null;
+    inviteId?: number | string | null;
+  }
+): Promise<{ ok: true } | { ok: false; error: string; seatLimited?: boolean }> {
+  const organizationId = Number(input.organizationId);
+  const leave =
+    input.leaveOrganizationId == null || input.leaveOrganizationId === ''
+      ? null
+      : Number(input.leaveOrganizationId);
+  const inviteId = input.inviteId == null || input.inviteId === '' ? null : Number(input.inviteId);
+  const { error } = await admin.rpc('claim_team_invite_seat', {
+    p_user_id: input.userId,
+    p_organization_id: organizationId,
+    p_role: input.role ?? null,
+    p_is_home: input.isHome === true,
+    p_sync_profile: input.syncProfile === true,
+    p_leave_organization_id: leave,
+    p_invite_id: inviteId,
+  });
+  if (!error) return { ok: true };
+  const raced = await seatCapRaceResult(admin, organizationId, input.userId, error);
+  if (raced) return raced;
+  return { ok: false, error: error.message };
+}
+
 export async function upsertMembership(
   admin: SupabaseClient,
   input: {
@@ -198,7 +255,11 @@ export async function upsertMembership(
       p_role: role,
       p_sync_profile: input.syncProfile === true,
     });
-    if (error) return { ok: false, error: error.message };
+    if (error) {
+      const raced = await seatCapRaceResult(admin, organizationId, input.userId, error);
+      if (raced) return raced;
+      return { ok: false, error: error.message };
+    }
     return { ok: true };
   }
 
@@ -232,7 +293,11 @@ export async function upsertMembership(
     role,
     is_home: !!input.isHome,
   });
-  if (error) return { ok: false, error: error.message };
+  if (error) {
+    const raced = await seatCapRaceResult(admin, input.organizationId, input.userId, error);
+    if (raced) return raced;
+    return { ok: false, error: error.message };
+  }
   return { ok: true };
 }
 

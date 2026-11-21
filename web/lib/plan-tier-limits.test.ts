@@ -25,7 +25,14 @@ function fakeAdmin(
 ) {
   return {
     from(table: string) {
-      const q: any = {
+      const q: {
+        select: () => typeof q;
+        eq: () => typeof q;
+        maybeSingle: () => Promise<{ data: unknown; error: { message: string } | null }>;
+        insert: (row: unknown) => Promise<{ error: null }>;
+        delete: () => never;
+        then: (resolve: (value: { data: unknown; error: { message: string } | null }) => unknown) => unknown;
+      } = {
         select: () => q,
         eq: () => q,
         maybeSingle: async () => {
@@ -39,7 +46,7 @@ function fakeAdmin(
         delete: () => {
           throw new Error('seat code must never delete');
         },
-        then: (resolve: any) => {
+        then: (resolve) => {
           if (table === 'organization_memberships' && errors.members) {
             return resolve({ data: null, error: { message: 'member read failed' } });
           }
@@ -69,7 +76,7 @@ function fakeAdmin(
         },
       },
     },
-  } as any;
+  };
 }
 
 test('seat limits: Free and Premium 1, Team 10', () => {
@@ -208,6 +215,110 @@ test('invite seat check counts open invites and fails closed', async () => {
   }
   const missing = await orgInviteSeatCheck(fakeAdmin(null, [], []), 8801, 'new@example.test');
   assert.equal(missing.ok, false);
+});
+
+type SeatQuery = {
+  select: () => SeatQuery;
+  eq: () => SeatQuery;
+  maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: null }>;
+  insert: () => Promise<{ error: { code: string; message: string } }>;
+  then: (resolve: (value: { data: Array<{ user_id: string }>; error: null }) => void) => void;
+};
+
+test('a seat-trigger race becomes the seat message, not the database text', async () => {
+  const free = { is_premium: false, subscription_tier: 'free', plan: 'free' };
+  const db = (insertError: { code: string; message: string }, fillOnRecheck: boolean, firstReadEmpty: boolean) => {
+    let reads = 0;
+    return {
+      from(table: string): SeatQuery {
+        const q: SeatQuery = {
+          select: () => q,
+          eq: () => q,
+          maybeSingle: async () => ({ data: table === 'organizations' ? free : null, error: null }),
+          insert: async () => ({ error: insertError }),
+          then: (resolve) => {
+            reads += 1;
+            const members = reads === 1 && firstReadEmpty ? [] : fillOnRecheck ? ['a'] : [];
+            resolve({
+              data: table === 'organization_memberships' ? members.map((user_id) => ({ user_id })) : [],
+              error: null,
+            });
+          },
+        };
+        return q;
+      },
+      async rpc() {
+        return { error: insertError };
+      },
+    };
+  };
+  const cap = { code: '42501', message: 'organization membership was not added' };
+  const added = await upsertMembership(db(cap, true, true) as never, { userId: 'new', organizationId: 8801, role: 'fse' });
+  assert.equal(added.ok, false);
+  assert.equal(added.seatLimited, true);
+  if (!added.ok) {
+    assert.match(added.error || '', /1 of 1 seat — upgrade to Team/);
+    assert.doesNotMatch(added.error || '', /organization membership was not added/);
+  }
+  const freed = await upsertMembership(db(cap, false, true) as never, { userId: 'later', organizationId: 8801, role: 'fse' });
+  assert.equal(freed.ok, false);
+  assert.equal(freed.seatLimited, false);
+  if (!freed.ok) {
+    assert.equal(freed.error, 'That seat was just taken. Try again.');
+    assert.doesNotMatch(freed.error || '', /using \d+ of \d+/);
+  }
+  const home = await upsertMembership(db(cap, true, false) as never, {
+    userId: 'new',
+    organizationId: 8801,
+    role: 'fse',
+    isHome: true,
+  });
+  assert.equal(home.ok, false);
+  assert.equal(home.seatLimited, true);
+  if (!home.ok) assert.match(home.error || '', /upgrade to Team/);
+  const rls = await upsertMembership(
+    db({ code: '42501', message: 'new row violates row-level security policy' }, false, true) as never,
+    { userId: 'other', organizationId: 8801, role: 'fse' }
+  );
+  assert.equal(rls.ok, false);
+  assert.equal(rls.seatLimited, undefined);
+  if (!rls.ok) assert.match(rls.error || '', /row-level security/);
+});
+
+test('000966 limits the signup skip to inserts and lets RLS deny strangers', () => {
+  const mig = src('../supabase/migrations/20261119_000966_seat_cap_followups.sql');
+  assert.match(mig, /TG_OP <> 'INSERT'/);
+  assert.match(mig, /NOT public\.membership_insert_allowed\(NEW\.user_id/);
+  assert.match(mig, /new row violates row-level security policy for table "organization_memberships"/);
+  assert.match(mig, /RETURN NEW;/);
+  assert.match(mig, /CREATE OR REPLACE FUNCTION public\.claim_team_invite_seat/);
+  assert.match(mig, /ON CONFLICT \(user_id, organization_id\) DO NOTHING/);
+  assert.match(mig, /AND organization_id = p_organization_id/);
+  assert.match(mig, /AND accepted IS NOT TRUE/);
+  assert.match(mig, /invite was not accepted/);
+  assert.match(mig, /already_member/);
+  assert.match(mig, /i\.accepted IS TRUE/);
+  assert.match(mig, /pg_advisory_xact_lock/);
+  assert.match(
+    mig,
+    /REVOKE ALL ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) FROM PUBLIC, anon, authenticated/
+  );
+  assert.match(
+    mig,
+    /GRANT EXECUTE ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) TO service_role/
+  );
+  assert.doesNotMatch(
+    mig,
+    /GRANT EXECUTE ON FUNCTION public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\) TO (anon|authenticated|PUBLIC)/
+  );
+  const rollback = src('../supabase/migrations/20261119_000966_seat_cap_followups_rollback.sql');
+  assert.match(rollback, /000965: seat cap full/);
+  assert.match(
+    rollback,
+    /DROP FUNCTION IF EXISTS public\.claim_team_invite_seat\(uuid, bigint, text, boolean, boolean, bigint, bigint\)/
+  );
+  assert.doesNotMatch(rollback, /TG_OP <> 'INSERT'/);
+  assert.doesNotMatch(src('../supabase/migrations/20261119_000965_org_seat_cap.sql'), /TG_OP <> 'INSERT'/);
 });
 
 test('seat cap is enforced on invites, claims and membership adds', () => {

@@ -13,10 +13,9 @@ import {
 import { teamInviteJoinGate } from '@/lib/team-invite-guard';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
 import {
-  deleteMembership,
+  claimTeamInviteSeat,
   listMembershipsForUser,
   setActiveOrganization,
-  upsertMembership,
   orgSeatCheck,
 } from '@/lib/org-membership-server';
 
@@ -152,7 +151,7 @@ export async function runTeamClaim(
     const memberships = await listMembershipsForUser(admin, user.id);
 
     const emailConfirmedAt = user.email_confirmed_at ?? null;
-    let inv: any = null;
+    let inv: ClaimInvite | null = null;
     if (body.inviteId) {
       const { data: byId, error: byIdError } = await admin
         .from('engineer_invitations')
@@ -162,7 +161,7 @@ export async function runTeamClaim(
       if (byIdError) {
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
-      inv = byId;
+      inv = byId as ClaimInvite | null;
     }
     if (!inv) {
       const { data: openInv, error: openError } = await admin
@@ -176,7 +175,7 @@ export async function runTeamClaim(
       if (openError) {
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
-      if (emailsMatch(openInv?.email, email)) inv = openInv;
+      if (emailsMatch(openInv?.email, email)) inv = openInv as ClaimInvite;
     }
     if (!inv && !body.inviteId) {
       const { data: anyInv, error: anyError } = await admin
@@ -199,7 +198,7 @@ export async function runTeamClaim(
           callerEmail: email,
           emailConfirmedAt,
         });
-        if (historical.ok) inv = anyInv;
+        if (historical.ok) inv = anyInv as ClaimInvite;
       }
     }
 
@@ -341,35 +340,49 @@ export async function runTeamClaim(
     });
 
     // Seat cap (Free/Premium 1, Team 10). Members already on the org pass.
+    // An invitee is not a member, so the refusal names no count and no plan.
     const seats = await orgSeatCheck(admin, decision.add.organizationId, user.id);
     if (!seats.ok) {
+      if (seats.status === 403) {
+        return NextResponse.json(
+          { ok: false, error: INVITEE_NO_SEATS, seat_limited: true },
+          { status: 403 }
+        );
+      }
+      console.error('team claim seat check failed', seats.error);
       return NextResponse.json(
-        { ok: false, error: seats.error, seat_limited: seats.status === 403, upgrade_url: '/plans' },
+        { ok: false, error: 'Could not join this team.' },
         { status: seats.status }
       );
     }
-    const added = await upsertMembership(admin, {
+    // Insert, leave the old membership, and accept the invite in one transaction.
+    // A refused insert leaves the old membership and the open invite alone.
+    const added = await claimTeamInviteSeat(admin, {
       userId: user.id,
       organizationId: decision.add.organizationId,
       role: decision.add.role,
       isHome: moveHome,
       syncProfile: moveHome,
+      leaveOrganizationId: decision.leaveOrganizationId,
+      inviteId: inv.id,
     });
     if (!added.ok) {
-      if (moveHome) {
-        return NextResponse.json(
-          { ok: false, error: added.error || 'Could not move your home organization.' },
-          { status: 503 }
-        );
-      }
-      console.warn('claim membership upsert failed, attaching profile anyway', added.error);
-    }
-
-    if (decision.leaveOrganizationId) {
-      await deleteMembership(admin, {
-        userId: user.id,
-        organizationId: decision.leaveOrganizationId,
-      });
+      const seatLimited = added.seatLimited === true;
+      const safe =
+        seatLimited
+          ? INVITEE_NO_SEATS
+          : added.error === CLAIM_SEAT_RETRY
+            ? CLAIM_SEAT_RETRY
+            : '';
+      if (!safe) console.error('team claim failed', added.error);
+      return NextResponse.json(
+        {
+          ok: false,
+          error: safe || 'Could not join this team.',
+          ...(seatLimited ? { seat_limited: true } : {}),
+        },
+        { status: seatLimited ? 403 : 503 }
+      );
     }
 
     let activateId = decision.activateOrganizationId;
@@ -377,7 +390,7 @@ export async function runTeamClaim(
 
     if (activateId) {
       const alreadyDone = existingProf?.onboarding_completed === true;
-      const r = await ensureTeamMemberProfile(admin, {
+      const profileInput = {
         userId: user.id,
         email,
         organizationId: activateId,
@@ -386,23 +399,27 @@ export async function runTeamClaim(
         lastName: inv.last_name || meta.last_name || null,
         jobTitle: meta.job_title || null,
         onboardingCompleted: alreadyDone,
-      });
-      if (!r.ok) {
-        return NextResponse.json({ error: r.error || 'Profile upsert failed' }, { status: 400 });
+      };
+      let profile = await ensureTeamMemberProfile(admin, profileInput);
+      if (!profile.ok) profile = await ensureTeamMemberProfile(admin, profileInput);
+      if (!profile.ok) {
+        console.error(
+          'team claim profile write failed after the seat was committed',
+          profile.error
+        );
       }
     } else if (decision.leaveOrganizationId && sameActive(existingProf?.organization_id, decision.leaveOrganizationId)) {
-      await setActiveOrganization(admin, {
+      const active = await setActiveOrganization(admin, {
         userId: user.id,
         organizationId: decision.add.organizationId,
         role: decision.add.role,
       });
-    }
-
-    if (inv.id) {
-      await admin
-        .from('engineer_invitations')
-        .update({ accepted: true, accepted_at: new Date().toISOString() })
-        .eq('id', inv.id);
+      if (!active.ok) {
+        console.error(
+          'team claim active organization write failed after the seat was committed',
+          active.error
+        );
+      }
     }
 
     const { data: after } = await admin
@@ -422,12 +439,27 @@ export async function runTeamClaim(
       leftOrganizationId: decision.leaveOrganizationId,
       needsMemberOnboarding: after?.onboarding_completed !== true,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('team claim error', e);
-    return NextResponse.json({ error: e?.message || 'Claim failed' }, { status: 500 });
+    return NextResponse.json({ error: 'Claim failed' }, { status: 500 });
   }
 }
+
+type ClaimInvite = {
+  id?: number | null;
+  email?: string | null;
+  organization_id?: number | null;
+  role?: string | null;
+  accepted?: boolean | null;
+  expires_at?: string | null;
+  created_at?: string | null;
+  first_name?: string | null;
+  last_name?: string | null;
+};
 
 function sameActive(a: number | string | null | undefined, b: number | string | null | undefined) {
   return a != null && b != null && String(a) === String(b);
 }
+
+const INVITEE_NO_SEATS = 'This team has no open seats. Ask the person who invited you.';
+const CLAIM_SEAT_RETRY = 'That seat was just taken. Try again.';
