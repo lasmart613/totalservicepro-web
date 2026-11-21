@@ -7,6 +7,7 @@ import { imageHasInk } from '@/lib/signature-ink';
 import { Header } from '@/components/Header';
 import { ArrowLeft, Check, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useT } from '@/lib/fa/locale';
 import { toast } from 'sonner';
 import {
   CL_AESTHETIC,
@@ -198,6 +199,7 @@ export default function NewServiceReport() {
 
   const router = useRouter();
   const searchParams = useSearchParams();
+  const tr = useT();
   const editReportId = searchParams?.get('id') || null;
   const equipmentTypeParam = searchParams?.get('equipment_type') || searchParams?.get('type') || '';
   const ticketIdParam = editReportId
@@ -2193,9 +2195,9 @@ export default function NewServiceReport() {
                 void onEquipmentTypeChange(next);
               }}
             >
-              {EQUIPMENT_TYPES.map((t) => (
-                <option key={t.value} value={t.value}>
-                  {t.label}
+              {EQUIPMENT_TYPES.map((item) => (
+                <option key={item.value} value={item.value}>
+                  {tr(item.label)}
                 </option>
               ))}
             </select>

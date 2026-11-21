@@ -10,6 +10,7 @@ import {
   equipmentTypeLabel,
   equipmentTypeOrDefault,
   inferEquipmentType,
+  isHvPowerSupply,
   normalizeEquipmentType,
 } from './equipment-types.ts';
 import {
@@ -20,6 +21,16 @@ import {
 import { parseManualCatalogInsert } from './manual-catalog-admin.ts';
 import { catalogManualKind, isManualIncomplete, showOperatorBadge } from './manual-catalog.ts';
 import { CLINIC_LEAD_EQUIPMENT_TYPES } from './clinic-service-lead.ts';
+import { catalogModelsForManufacturer } from './equipment-catalog.ts';
+import { GAP_STRINGS } from './i18n/gap-copy.ts';
+import { FA_COPY } from './fa/copy.ts';
+import { ES_COPY } from './es/copy.ts';
+import { FR_COPY } from './fr/copy.ts';
+import { HE_COPY } from './he/copy.ts';
+import { IT_COPY } from './it/copy.ts';
+import { DE_COPY } from './de/copy.ts';
+import { PT_COPY } from './pt/copy.ts';
+import { AR_COPY } from './ar/copy.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +50,7 @@ test('equipment types match find-a-rep and default to Laser', () => {
       'sterile_processing',
       'ultrasound',
       'ventilator',
+      'hv_power_supply',
     ]
   );
   assert.ok(!EQUIPMENT_TYPE_VALUES.includes('other' as never));
@@ -55,6 +67,64 @@ test('equipment types match find-a-rep and default to Laser', () => {
   assert.equal(equipmentTypeOrDefault(null), 'laser');
   assert.equal(equipmentTypeLabel('c_arm'), 'C-arm');
   assert.equal(equipmentTypeLabel('ventilator'), 'Ventilator');
+  assert.equal(equipmentTypeLabel('hv_power_supply'), 'High Voltage Power Supply');
+});
+
+test('capacitor charger / HVPS manuals are their own room, not Laser', () => {
+  assert.equal(isHvPowerSupply('Candela capacitor charger'), true);
+  assert.equal(inferEquipmentType({ title: 'Candela GentleMax Capacitor Charger' }), 'hv_power_supply');
+  assert.equal(
+    inferEquipmentType({ title: 'Capacitor charging power supply', equipment_type: 'laser' }),
+    'hv_power_supply'
+  );
+  assert.equal(inferEquipmentType({ title: 'Cap charger service manual' }), 'hv_power_supply');
+  assert.equal(inferEquipmentType({ title: 'Alex HVPS', brand: 'Candela' }), 'hv_power_supply');
+  assert.equal(inferEquipmentType({ title: 'CCPS module' }), 'hv_power_supply');
+  assert.equal(inferEquipmentType({ title: 'High Voltage Power Supply' }), 'hv_power_supply');
+  assert.equal(inferEquipmentType({ title: 'High-voltage power supply' }), 'hv_power_supply');
+  assert.equal(
+    inferEquipmentType({ title: 'Laser power supply charger', equipment_type: 'laser' }),
+    'hv_power_supply'
+  );
+  assert.equal(
+    inferEquipmentType({ title: 'Quanta Litho capacitor charger', equipment_type: 'laser' }),
+    'hv_power_supply'
+  );
+  assert.equal(inferEquipmentType({ equipment_type: 'hv_power_supply', title: 'Service notes' }), 'hv_power_supply');
+  assert.equal(normalizeEquipmentType('HVPS'), 'hv_power_supply');
+  assert.equal(normalizeEquipmentType('CCPS'), 'hv_power_supply');
+  assert.equal(normalizeEquipmentType('high-voltage power supply'), 'hv_power_supply');
+  assert.equal(normalizeEquipmentType('capacitor charger'), 'hv_power_supply');
+  assert.equal(normalizeEquipmentType('cap charger'), 'hv_power_supply');
+  assert.equal(normalizeEquipmentType('laser power supply charger'), 'hv_power_supply');
+  // A laser manual that only mentions the supply, not a charger, stays Laser.
+  assert.equal(inferEquipmentType({ title: 'Check the laser power supply' }), 'laser');
+  assert.equal(inferEquipmentType({ title: 'VBeam Perfecta Service Manual' }), 'laser');
+  assert.ok(catalogModelsForManufacturer('Lumina Power', 'hv_power_supply').length > 0);
+});
+
+test('High Voltage Power Supply is translated in every supported locale', () => {
+  const label = 'High Voltage Power Supply';
+  const gap = GAP_STRINGS[label];
+  assert.ok(gap);
+  const copies = {
+    fa: FA_COPY,
+    es: ES_COPY,
+    fr: FR_COPY,
+    he: HE_COPY,
+    it: IT_COPY,
+    de: DE_COPY,
+    pt: PT_COPY,
+    ar: AR_COPY,
+  } as const;
+  for (const locale of Object.keys(copies) as Array<keyof typeof copies>) {
+    assert.equal(copies[locale][label], gap[locale]);
+    assert.notEqual(gap[locale], label, locale);
+    assert.ok(gap[locale].trim().length > 0, locale);
+  }
+  assert.match(gap.he, /[\u0590-\u05FF]/);
+  assert.match(gap.ar, /[\u0600-\u06FF]/);
+  assert.match(gap.fa, /[\u0600-\u06FF]/);
 });
 
 test('Quanta Litho / Cyber Ho / Litho IFU are laser; Dornier ESWL is lithotriptor', () => {
@@ -289,6 +359,13 @@ test('library rooms default to Laser and keep access + bookshelf', () => {
   assert.match(css, /flex-direction:\s*column/);
   assert.match(css, /flex-wrap:\s*nowrap/);
   assert.match(page, /manuals-rail|manuals-layout/);
+});
+
+test('service report form lists equipment types from EQUIPMENT_TYPES', () => {
+  const src = readFileSync(join(here, '../app/reports/new/NewServiceReportClient.tsx'), 'utf8');
+  assert.match(src, /EQUIPMENT_TYPES\.map/);
+  assert.match(src, /tr\(item\.label\)/);
+  assert.doesNotMatch(src, /<option[^>]*>Laser<\/option>/);
 });
 
 test('god catalog form requires equipment type and does not commit PDFs', () => {

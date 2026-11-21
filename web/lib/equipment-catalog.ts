@@ -117,6 +117,22 @@ const CORE_CATALOG: EquipmentCatalogManufacturer[] = [
   },
 ];
 
+/**
+ * Capacitor chargers / HVPS. Static picker only — not part of the 000937
+ * biomed seed (that list is locked to BIOMED_CATALOG). Lumina Power CCS is a
+ * capacitor-charging supply used with medical lasers.
+ */
+const HV_POWER_SUPPLY_CATALOG: EquipmentCatalogManufacturer[] = [
+  {
+    name: 'Lumina Power',
+    aliases: ['Lumina'],
+    models: [
+      { name: 'CCS-1500', label: 'CCS-1500', equipmentType: 'hv_power_supply' },
+      { name: 'CCS-3000', label: 'CCS-3000', equipmentType: 'hv_power_supply' },
+    ],
+  },
+];
+
 
 /**
  * Non-laser biomed catalog (000937 seeds the same rows into manufacturers +
@@ -414,7 +430,7 @@ export const BIOMED_CATALOG: EquipmentCatalogManufacturer[] = [
 /** Core holmium / C-arm seeds plus BIOMED_CATALOG, one entry per manufacturer. */
 export const EQUIPMENT_CATALOG: EquipmentCatalogManufacturer[] = (() => {
   const out = CORE_CATALOG.map((m) => ({ ...m, models: [...m.models] }));
-  for (const extra of BIOMED_CATALOG) {
+  for (const extra of [...BIOMED_CATALOG, ...HV_POWER_SUPPLY_CATALOG]) {
     const hit = out.find((m) => m.name.toLowerCase() === extra.name.toLowerCase());
     if (hit) hit.models.push(...extra.models);
     else out.push({ ...extra, models: [...extra.models] });

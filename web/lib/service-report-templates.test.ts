@@ -40,9 +40,12 @@ test('every non-laser equipment type has an editable starter with safety last an
   for (const { value } of EQUIPMENT_TYPES) {
     if (value === 'laser') continue;
     const t = starterTemplateFor(value);
-    assert.equal(t.equipment_type, value, `starter for ${value}`);
+    // No dedicated HV checklist yet: the general PM, never the laser form.
+    const expectedType = value === 'hv_power_supply' ? 'general' : value;
+    const expectedSlug = value === 'hv_power_supply' ? 'general-pm-default' : `${value.replace(/_/g, '-')}-pm-default`;
+    assert.equal(t.equipment_type, expectedType, `starter for ${value}`);
     assert.equal(t.editable_default, true);
-    assert.equal(t.slug, `${value.replace(/_/g, '-')}-pm-default`);
+    assert.equal(t.slug, expectedSlug);
     assert.equal(t.sections.at(-1)?.key, 'safety');
     for (const s of t.sections) {
       assert.ok(isValidSectionKey(s.key), s.key);
@@ -249,6 +252,24 @@ test('detectTemplateSchema: applied, missing, unknown', async () => {
     false
   );
   assert.equal(await detectTemplateSchema(mockSupabase({ probeError: { message: 'fetch failed' } }).client), null);
+});
+
+test('high voltage power supply uses the general checklist, not the laser form', () => {
+  const form = fallbackFormForType('hv_power_supply');
+  assert.equal(form.template?.slug, 'general-pm-default');
+  assert.equal(form.template?.equipment_type, 'general');
+  assert.notEqual(form.template?.slug, 'laser-pm-default');
+  assert.equal(reportHeaderTagline('hv_power_supply'), 'High Voltage Power Supply Service');
+  assert.equal(
+    resolveTemplate(
+      [
+        { slug: 'general', equipment_type: 'general', is_default: true, status: 'published' },
+        { slug: 'laser', equipment_type: 'laser', is_default: true, status: 'published' },
+      ],
+      { equipmentType: 'hv_power_supply' }
+    )?.slug,
+    'general'
+  );
 });
 
 test('report header uses the equipment type for non-laser reports', () => {
