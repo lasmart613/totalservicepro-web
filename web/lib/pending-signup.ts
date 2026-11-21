@@ -8,6 +8,7 @@ import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-
 import { postFounderOrganization } from '@/lib/org-founder-client';
 import { applyComplimentarySignupFields } from '@/lib/complimentary-premium';
 import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
+import { organizationWebsiteOrThrow, normalizeOrganizationWebsite } from '@/lib/organization-website';
 
 const KEY = 'tsp-pending-signup';
 
@@ -101,7 +102,7 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     city: pending.city || null,
     state: pending.state || null,
     phone: pending.phone || null,
-    website: pending.website || null,
+    website: organizationWebsiteOrThrow(pending.website),
     created_by: userId,
     // Repair companies get time-boxed complimentary Premium. Others stay Free.
     is_premium: false,
@@ -191,6 +192,7 @@ export function pendingSignupFromMetadata(user: {
   const resolvedRole =
     role ||
     (kind === 'company' ? 'company_admin' : kind === 'owner' ? 'owner' : 'parts_supplier');
+  const site = normalizeOrganizationWebsite(meta.website);
 
   return {
     kind,
@@ -202,7 +204,7 @@ export function pendingSignupFromMetadata(user: {
     address: meta.address || null,
     city: meta.city || null,
     state: meta.state || null,
-    website: meta.website || null,
+    website: site.ok ? site.website : null,
     role: resolvedRole,
     orgType: resolvedOrgType,
     extra: {

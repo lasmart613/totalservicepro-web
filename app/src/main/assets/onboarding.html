@@ -121,7 +121,7 @@
             <div class="form-group"><label>State</label><input type="text" class="form-input" id="companyState" maxlength="2" placeholder="CA" autocomplete="address-level1"></div>
         </div>
         <div class="form-group"><label>Company Phone</label><input type="tel" class="form-input" id="companyPhone" placeholder="+1 555-000-0000"></div>
-        <div class="form-group"><label>Company Website</label><input type="url" class="form-input" id="companyWebsite" placeholder="https://yourcompany.com" autocomplete="url"></div>
+        <div class="form-group"><label>Company Website</label><input type="text" inputmode="url" class="form-input" id="companyWebsite" placeholder="yourcompany.com" autocomplete="url" spellcheck="false"></div>
     </div>
 
     <!-- Step 3: Logo -->
@@ -378,6 +378,7 @@
 
         } catch(e) {
             console.log('Onboarding save error:', e);
+            showToast((e && e.message) ? e.message : 'Could not save your company details', 'error');
         }
     }
 
