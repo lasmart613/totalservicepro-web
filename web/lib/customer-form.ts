@@ -942,6 +942,31 @@ export async function findLinkedCustomerByName(
   return { ok: true, customer };
 }
 
+/**
+ * Shop-scoped exact name check before any insert. A thrown RPC, a missing
+ * function, or { ok: false } returns { ok: false } and does not call create.
+ * An exact linked match is reused. Punctuation and case stay in the name
+ * sent to find_linked_customer_by_name.
+ */
+export async function adoptLinkedCustomerOrCreate(
+  supabase: Parameters<typeof findLinkedCustomerByName>[0],
+  serviceOrgId: string | number,
+  name: string,
+  create: () => Promise<string | number>
+): Promise<{ ok: true; id: string | number; reused: boolean } | { ok: false }> {
+  let lookup: LinkedCustomerNameLookup;
+  try {
+    lookup = await findLinkedCustomerByName(supabase, serviceOrgId, name);
+  } catch (e) {
+    console.warn('linked customer exact name', e);
+    return { ok: false };
+  }
+  if (!lookup.ok) return { ok: false };
+  if (lookup.customer) return { ok: true, id: lookup.customer.id, reused: true };
+  const id = await create();
+  return { ok: true, id, reused: false };
+}
+
 export function filterLinkedCustomers(
   customers: LinkedCustomerOpt[],
   query: string,

@@ -1,6 +1,9 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
+import { mergePinnedSupplier, searchSupplierOrgs, type SupplierSearchRow } from '@/lib/supplier-search';
+import { useT } from '@/lib/fa/locale';
 import { toast } from 'sonner';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
@@ -24,6 +27,7 @@ export type VendorDraft = {
   url: string;
   notes: string;
   is_preferred: boolean;
+  supplierOrgId?: string | number | null;
 };
 
 export function emptyVendor(preferred = false): VendorDraft {
@@ -38,8 +42,6 @@ export function emptyVendor(preferred = false): VendorDraft {
     is_preferred: preferred,
   };
 }
-
-type SupplierOpt = { id: number | string; name: string };
 
 type Props = {
   onClose: () => void;
@@ -147,20 +149,38 @@ export function AddPartModal({ onClose, onCreated }: Props) {
   const [vendors, setVendors] = useState<VendorDraft[]>([emptyVendor(true)]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
-  const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
+  const [suppliers, setSuppliers] = useState<SupplierSearchRow[]>([]);
+  const [supplierError, setSupplierError] = useState(false);
+  const [activeVendor, setActiveVendor] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const supplierGen = useRef(0);
+  const supplierTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const t = useT();
 
-  useEffect(() => {
-    (async () => {
-      const { data } = await supabase
-        .from('organizations')
-        .select('id, name')
-        .in('type', ['parts_supplier', 'supplier', 'vendor'])
-        .order('name')
-        .limit(200);
-      setSuppliers((data || []).filter((o: any) => o?.name).map((o: any) => ({ id: o.id, name: o.name })));
-    })();
-  }, [supabase]);
+  function scheduleSupplierSearch(query: string, picked: SupplierSearchRow | null) {
+    if (supplierTimer.current) clearTimeout(supplierTimer.current);
+    supplierTimer.current = setTimeout(() => {
+      const gen = ++supplierGen.current;
+      void (async () => {
+        try {
+          const result = await searchSupplierOrgs(supabase, query);
+          if (gen !== supplierGen.current) return;
+          if (!result.ok) {
+            setSupplierError(true);
+            setSuppliers(mergePinnedSupplier([], picked));
+            return;
+          }
+          setSupplierError(false);
+          setSuppliers(mergePinnedSupplier(result.suppliers, picked));
+        } catch (e) {
+          console.warn('part supplier search', e);
+          if (gen !== supplierGen.current) return;
+          setSupplierError(true);
+          setSuppliers(mergePinnedSupplier([], picked));
+        }
+      })();
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
 
   useEffect(() => {
     return () => previews.forEach((url) => URL.revokeObjectURL(url));
@@ -455,11 +475,62 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                   </div>
                   <input
                     className="input"
-                    list="part-supplier-names"
                     value={v.vendor_name}
-                    onChange={(e) => updateVendor(v.key, { vendor_name: e.target.value })}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      supplierGen.current += 1;
+                      const still =
+                        v.supplierOrgId != null &&
+                        value.trim().toLowerCase() === v.vendor_name.trim().toLowerCase();
+                      const nextId = still ? v.supplierOrgId : null;
+                      updateVendor(v.key, { vendor_name: value, supplierOrgId: nextId });
+                      setActiveVendor(v.key);
+                      const picked =
+                        nextId != null
+                          ? suppliers.find((row) => String(row.id) === String(nextId)) || {
+                              id: nextId,
+                              name: value,
+                            }
+                          : null;
+                      scheduleSupplierSearch(value, picked);
+                    }}
+                    onFocus={() => {
+                      setActiveVendor(v.key);
+                      const picked =
+                        v.supplierOrgId != null
+                          ? { id: v.supplierOrgId, name: v.vendor_name }
+                          : null;
+                      scheduleSupplierSearch(v.vendor_name, picked);
+                    }}
                     placeholder="Vendor name *"
+                    role="combobox"
+                    aria-expanded={activeVendor === v.key}
+                    aria-autocomplete="list"
+                    autoComplete="off"
                   />
+                  {activeVendor === v.key && supplierError && (
+                    <p className="text-xs text-[var(--text3)]" role="alert">{t("Couldn't load suppliers. Try again.")}</p>
+                  )}
+                  {activeVendor === v.key && !supplierError && suppliers.length > 0 && (
+                    <ul role="listbox" className="max-h-40 overflow-auto rounded-lg border border-[var(--border)] bg-[var(--surface3)]">
+                      {suppliers.map((s) => (
+                        <li key={String(s.id)} role="option" aria-selected={String(s.id) === String(v.supplierOrgId)}>
+                          <button
+                            type="button"
+                            className="w-full text-left px-3 py-2 text-sm hover:bg-[var(--surface)]"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => {
+                              updateVendor(v.key, { vendor_name: s.name, supplierOrgId: s.id });
+                              setSuppliers(mergePinnedSupplier(suppliers, s));
+                              setActiveVendor(null);
+                            }}
+                          >
+                            {s.name}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <div className="grid grid-cols-2 gap-2">
                     <input className="input" value={v.vendor_part_number} onChange={(e) => updateVendor(v.key, { vendor_part_number: e.target.value })} placeholder="Vendor P/N" />
                     <input className="input" type="number" min="0" step="0.01" value={v.unit_cost} onChange={(e) => updateVendor(v.key, { unit_cost: e.target.value })} placeholder="Vendor cost USD" />
@@ -484,11 +555,6 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                   </label>
                 </div>
               ))}
-              <datalist id="part-supplier-names">
-                {suppliers.map((s) => (
-                  <option key={String(s.id)} value={s.name} />
-                ))}
-              </datalist>
             </div>
           </div>
 

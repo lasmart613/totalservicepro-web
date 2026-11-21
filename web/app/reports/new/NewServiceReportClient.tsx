@@ -56,7 +56,13 @@ import type { CustomerEquipment } from '@/lib/customer-equipment';
 
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
-import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
+import {
+  adoptLinkedCustomerOrCreate,
+  createShopCustomerOrg,
+  findLinkedCustomerByName,
+  LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
+  searchShopCustomers,
+} from '@/lib/customer-form';
 import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
 import {
   catalogManufacturerValue,
@@ -235,10 +241,14 @@ export default function NewServiceReport() {
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [techCompanyCache, setTechCompanyCache] = useState<any>({});
 
-  // Customer — full linked set (paged), typeahead is client-side only
   const [customerOptions, setCustomerOptions] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
+  const customerSearchGen = useRef(0);
+  const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const explicitPickRef = useRef(false);
+  const pickedNameRef = useRef('');
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
@@ -584,9 +594,6 @@ export default function NewServiceReport() {
         });
         // Default Service Engineer to signed-in tech (Android applyEngineerFieldAccess)
         setServiceEngineer((prev) => (prev && prev.trim() ? prev : techName));
-      }
-      if (profile?.organization_id) {
-        await loadCustomers(profile.organization_id);
       }
       let storedZone: string | null = null;
       let orgState: string | null = org?.state || null;
@@ -1222,22 +1229,41 @@ export default function NewServiceReport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCustomer?.id, customerPick, supabase]);
 
-  async function loadCustomers(orgId: any) {
-    try {
-      if (!orgId) {
-        setCustomerOptions([]);
-        return;
-      }
-      setCustomerOptions(await loadLinkedCustomerOrgs(supabase, orgId));
-    } catch (e) {
-      console.warn(e);
-      setCustomerOptions([]);
-    }
+  function scheduleCustomerSearch(query: string) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    const orgId = currentUserOrgId;
+    if (orgId == null || orgId === '') return;
+    customerSearchTimer.current = setTimeout(() => {
+      const gen = ++customerSearchGen.current;
+      void (async () => {
+        try {
+          const result = await searchShopCustomers(supabase, orgId, query);
+          if (gen !== customerSearchGen.current) return;
+          if (!result.ok) {
+            setCustomerSearchError(true);
+            setCustomerOptions([]);
+            return;
+          }
+          setCustomerSearchError(false);
+          setCustomerOptions(result.customers);
+        } catch (e) {
+          console.warn(e);
+          if (gen === customerSearchGen.current) {
+            setCustomerSearchError(true);
+            setCustomerOptions([]);
+          }
+        }
+      })();
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
   }
 
-  const filteredCustomers = filterLinkedCustomers(customerOptions, searchTerm, 12);
+  const filteredCustomers = customerOptions;
 
   const handleSelectCustomer = (customer: any) => {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    customerSearchGen.current += 1;
+    explicitPickRef.current = true;
+    pickedNameRef.current = customer.name || '';
     locationLoadRef.current = {
       preferredId: null,
       applyFields: true,
@@ -1304,6 +1330,17 @@ export default function NewServiceReport() {
     try {
       // Org + organization_customers link in one transaction (000917/000919).
       // Any error is shown; there is no unlinked half-create to clean up.
+      const existing = await findLinkedCustomerByName(supabase, currentUserOrgId, newCustomer.name);
+      if (!existing.ok) {
+        toast.error("Couldn't load customers. Try again.");
+        return;
+      }
+      if (existing.customer) {
+        handleSelectCustomer(existing.customer);
+        setShowAddModal(false);
+        setNewCustomer({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
+        return;
+      }
       const orgId = await createShopCustomerOrg(supabase, {
         serviceOrgId: currentUserOrgId,
         name: newCustomer.name,
@@ -1322,7 +1359,6 @@ export default function NewServiceReport() {
       const { data: org, error: readErr } = await supabase.from('organizations').select(ORG_READABLE_COLUMNS).eq('id', orgId).maybeSingle();
       if (readErr || !org) throw new Error(readErr?.message || 'Customer added, but it could not be loaded.');
 
-      await loadCustomers(currentUserOrgId);
       handleSelectCustomer(org);
       setShowAddModal(false);
       setNewCustomer({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
@@ -1505,16 +1541,23 @@ export default function NewServiceReport() {
 
   async function ensureCustomerOrg() {
     if (selectedCustomer?.id) return selectedCustomer.id;
-    if (!searchTerm.trim()) return null;
-    // create like Android ensureCustomerOrganization (with available contact fields)
-    const { data: exist } = await supabase.from('organizations').select('id').eq('name', searchTerm.trim()).eq('type', 'customer').maybeSingle();
-    if (exist) return exist.id;
-    // Org + link in one transaction (000917/000919); errors reach saveReport's
-    // catch and are shown. Never an unlinked customer org.
-    return createShopCustomerOrg(supabase, {
-      serviceOrgId: currentUserOrgId,
-      name: searchTerm,
-    });
+    const name = searchTerm.trim();
+    if (!name) return null;
+    if (currentUserOrgId == null || currentUserOrgId === '') {
+      throw new Error("Couldn't load customers. Try again.");
+    }
+    // Shop-scoped exact name. The SQL match is case-insensitive and keeps
+    // punctuation. A failed lookup throws before the insert, so saveReport
+    // never writes a report or a second organization. No match still creates,
+    // the same as the new-ticket submit. Draft and complete both come through here.
+    const adopted = await adoptLinkedCustomerOrCreate(supabase, currentUserOrgId, name, () =>
+      createShopCustomerOrg(supabase, {
+        serviceOrgId: currentUserOrgId,
+        name: searchTerm,
+      })
+    );
+    if (!adopted.ok) throw new Error("Couldn't load customers. Try again.");
+    return adopted.id;
   }
 
   async function ensureLinkedEquipment(orgId: any) {
@@ -1982,22 +2025,39 @@ export default function NewServiceReport() {
                 className="input w-full text-lg py-3"
                 value={searchTerm}
                 onChange={(e) => {
-                  setSearchTerm(e.target.value);
+                  const value = e.target.value;
+                  customerSearchGen.current += 1;
+                  setSearchTerm(value);
                   setShowCustDrop(true);
-                  if (!e.target.value) {
-                    setSelectedCustomer(null);
-                    setCustomerLocations([]);
-                    setSelectedLocationId('');
-                    setSiteName('');
-                    setCustomerEquipment([]);
-                    resetEquipmentPick();
+                  const still =
+                    explicitPickRef.current &&
+                    value.trim().toLowerCase() === pickedNameRef.current.trim().toLowerCase();
+                  if (!still) {
+                    explicitPickRef.current = false;
+                    if (!value) {
+                      setSelectedCustomer(null);
+                      setCustomerLocations([]);
+                      setSelectedLocationId('');
+                      setSiteName('');
+                      setCustomerEquipment([]);
+                      resetEquipmentPick();
+                    }
                   }
+                  scheduleCustomerSearch(value);
                 }}
-                onFocus={() => setShowCustDrop(true)}
+                onFocus={() => {
+                  setShowCustDrop(true);
+                  scheduleCustomerSearch(searchTerm);
+                }}
                 placeholder="Type clinic / facility name…"
                 autoComplete="off"
               />
-              {showCustDrop && filteredCustomers.length > 0 && (
+              {showCustDrop && customerSearchError && (
+                <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)] shadow-lg">
+                  Couldn't load customers. Try again.
+                </div>
+              )}
+              {showCustDrop && !customerSearchError && filteredCustomers.length > 0 && (
                 <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
                   {filteredCustomers.map((c: any) => (
                     <button

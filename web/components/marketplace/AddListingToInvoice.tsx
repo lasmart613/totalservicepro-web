@@ -15,11 +15,12 @@ import {
 } from '@/lib/billing/listing-invoice';
 import { money } from '@/lib/billing/save-helpers';
 import {
-  filterLinkedCustomers,
-  loadLinkedCustomerOrgs,
-  matchLinkedCustomer,
+  findLinkedCustomerByName,
+  LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS,
+  searchShopCustomers,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
+import { useT } from '@/lib/fa/locale';
 import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { formatListingPrice } from '@/lib/marketplace/parts';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -75,6 +76,7 @@ function AddListingToInvoiceDialog({
   onClose: () => void;
 }) {
   const router = useRouter();
+  const t = useT();
   const supabase = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -86,6 +88,11 @@ function AddListingToInvoiceDialog({
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customer, setCustomer] = useState<LinkedCustomerOpt | null>(null);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
+  const customerSearchGen = useRef(0);
+  const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const explicitPickRef = useRef(false);
+  const pickedNameRef = useRef('');
   const [qtyText, setQtyText] = useState('1');
 
   const preview = useMemo(() => listingToInvoiceLine(listing, parseInvoiceQty(qtyText) || 1, 'preview'), [listing, qtyText]);
@@ -93,10 +100,32 @@ function AddListingToInvoiceDialog({
     price: listing.price,
     price_type: listing.price_type,
   });
-  const filteredCustomers = useMemo(
-    () => filterLinkedCustomers(customers, custSearch, 12),
-    [customers, custSearch]
-  );
+  const filteredCustomers = customers;
+
+  function scheduleCustomerSearch(query: string) {
+    if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+    customerSearchTimer.current = setTimeout(() => {
+      const gen = ++customerSearchGen.current;
+      void (async () => {
+        try {
+          const result = await searchShopCustomers(supabase, orgId, query);
+          if (gen !== customerSearchGen.current) return;
+          if (!result.ok) {
+            setCustomerSearchError(true);
+            setCustomers([]);
+            return;
+          }
+          setCustomerSearchError(false);
+          setCustomers(result.customers);
+        } catch (e) {
+          console.warn('listing customer search', e);
+          if (gen !== customerSearchGen.current) return;
+          setCustomerSearchError(true);
+          setCustomers([]);
+        }
+      })();
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -111,22 +140,18 @@ function AddListingToInvoiceDialog({
     (async () => {
       setLoading(true);
       try {
-        const [draftRes, linked] = await Promise.all([
-          supabase
-            .from('service_invoices')
-            .select('id, customer_name, status, total, invoice_number, invoice_data, created_at')
-            .eq('organization_id', orgId)
-            .eq('status', 'draft')
-            .order('created_at', { ascending: false })
-            .limit(100),
-          loadLinkedCustomerOrgs(supabase, orgId),
-        ]);
+        const draftRes = await supabase
+          .from('service_invoices')
+          .select('id, customer_name, status, total, invoice_number, invoice_data, created_at')
+          .eq('organization_id', orgId)
+          .eq('status', 'draft')
+          .order('created_at', { ascending: false })
+          .limit(100);
         if (!alive) return;
         const rows = ((draftRes.data || []) as DraftRow[]).filter((row) =>
           isDraftInvoiceStatus(row.status)
         );
         setDrafts(rows);
-        setCustomers(linked);
         if (rows[0]) setDraftId(String(rows[0].id));
         if (!modeTouched.current) setMode(rows.length ? 'existing' : 'new');
       } catch (e) {
@@ -161,7 +186,16 @@ function AddListingToInvoiceDialog({
         }
         body = { listing_id: listing.id, qty, mode, invoice_id: draftId };
       } else {
-        const chosen = customer || matchLinkedCustomer(customers, custSearch);
+        let chosen = customer;
+        if (!chosen && custSearch.trim()) {
+          const lookup = await findLinkedCustomerByName(supabase, orgId, custSearch);
+          if (!lookup.ok) {
+            toast.error(t("Couldn't load customers. Try again."));
+            setSaving(false);
+            return;
+          }
+          chosen = lookup.customer;
+        }
         if (!chosen || !chosen.name.trim()) {
           toast.error('Choose a customer');
           setSaving(false);
@@ -319,15 +353,32 @@ function AddListingToInvoiceDialog({
               className="input"
               value={custSearch}
               onChange={(e) => {
-                setCustSearch(e.target.value);
-                setCustomer(null);
+                const value = e.target.value;
+                customerSearchGen.current += 1;
+                setCustSearch(value);
                 setShowCustDrop(true);
+                const still =
+                  explicitPickRef.current &&
+                  value.trim().toLowerCase() === pickedNameRef.current.trim().toLowerCase();
+                if (!still) {
+                  explicitPickRef.current = false;
+                  setCustomer(null);
+                }
+                scheduleCustomerSearch(value);
               }}
-              onFocus={() => setShowCustDrop(true)}
+              onFocus={() => {
+                setShowCustDrop(true);
+                scheduleCustomerSearch(custSearch);
+              }}
               placeholder="Type customer name…"
               autoComplete="off"
             />
-            {showCustDrop && filteredCustomers.length > 0 && (
+            {showCustDrop && customerSearchError && (
+              <div className="mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)]">
+                {t("Couldn't load customers. Try again.")}
+              </div>
+            )}
+            {showCustDrop && !customerSearchError && filteredCustomers.length > 0 && (
               <div className="mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)]">
                 {filteredCustomers.map((c) => (
                   <button
@@ -336,6 +387,10 @@ function AddListingToInvoiceDialog({
                     className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => {
+                      if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
+                      customerSearchGen.current += 1;
+                      explicitPickRef.current = true;
+                      pickedNameRef.current = c.name;
                       setCustomer(c);
                       setCustSearch(c.name);
                       setShowCustDrop(false);

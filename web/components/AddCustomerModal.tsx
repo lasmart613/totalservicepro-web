@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
 import {
+  adoptLinkedCustomerOrCreate,
   createLinkedCustomer,
   emptyCustomerForm,
   type CustomerInfoFormValues,
@@ -35,15 +36,35 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName
     if (saving) return;
     setSaving(true);
     try {
+      if (serviceOrgId == null || serviceOrgId === '') {
+        toast.error(t("Couldn't load customers. Try again."));
+        return;
+      }
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      const created = await createLinkedCustomer(supabase, {
-        serviceOrgId: serviceOrgId as string | number,
-        form,
-        createdBy: user?.id || null,
-        logoFile,
+      const box: { created: Awaited<ReturnType<typeof createLinkedCustomer>> | null } = { created: null };
+      const adopted = await adoptLinkedCustomerOrCreate(supabase, serviceOrgId, form.name, async () => {
+        box.created = await createLinkedCustomer(supabase, {
+          serviceOrgId: serviceOrgId as string | number,
+          form,
+          createdBy: user?.id || null,
+          logoFile,
+        });
+        return box.created.id;
       });
+      if (!adopted.ok) {
+        toast.error(t("Couldn't load customers. Try again."));
+        return;
+      }
+      if (adopted.reused) {
+        toast.success('That customer is already on your list.');
+        onCreated(adopted.id);
+        onClose();
+        return;
+      }
+      const created = box.created;
+      if (!created) throw new Error('Failed to add customer');
       if (created.detailsWarning) toast.error(created.detailsWarning);
       // Own toast (translated) so the logo outcome shows on every invite path.
       if (created.logoWarning) toast.error(t(created.logoWarning));

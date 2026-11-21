@@ -629,6 +629,7 @@ export default function ServiceTicketDetail() {
                     value={custSearch}
                     onChange={(e) => {
                       const value = e.target.value;
+                      customerSearchGen.current += 1;
                       setCustSearch(value);
                       setShowCustDrop(true);
                       handleInputChange('customer_name', value);

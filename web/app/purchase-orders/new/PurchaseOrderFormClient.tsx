@@ -13,7 +13,16 @@ import { orgTodayIso } from '@/lib/org-timezone';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { ccValueForDocumentSave, documentCcInputError, formatCcInput, parseDocumentCc } from '@/lib/billing/document-cc';
 import DocumentCcField from '@/components/billing/DocumentCcField';
-import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
+import { chunkIds } from '@/lib/supabase/paginate';
+import { LINKED_CUSTOMER_DROPDOWN_LIMIT, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS } from '@/lib/customer-form';
+import {
+  loadSupplierById,
+  mergePinnedSupplier,
+  searchSupplierOrgs,
+  supplierPickForCurrentText,
+  supplierResultPage,
+  type SupplierSearchRow,
+} from '@/lib/supplier-search';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -81,6 +90,17 @@ export default function PurchaseOrderFormClient() {
 
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
+  const [supplierSearchError, setSupplierSearchError] = useState(false);
+  const [supplierHasMore, setSupplierHasMore] = useState(false);
+  const [showSupDrop, setShowSupDrop] = useState(false);
+  const supplierSearchGen = useRef(0);
+  const supplierFetched = useRef(0);
+  const pinnedSupplierRef = useRef<SupplierSearchRow | null>(null);
+  const suppliersRef = useRef<SupplierOpt[]>([]);
+  const supplierSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const explicitSupplierRef = useRef(false);
+  const pickedSupplierNameRef = useRef('');
+  const supplierQueryRef = useRef('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierOrgId, setSupplierOrgId] = useState<string | number | null>(null);
   const [supAddress, setSupAddress] = useState('');
@@ -110,26 +130,7 @@ export default function PurchaseOrderFormClient() {
   );
   const total = totalOverride != null ? totalOverride : computedTotal;
 
-  const filteredSuppliers = useMemo(() => {
-    const q = supSearch.trim().toLowerCase();
-    const list = !q
-      ? suppliers
-      : suppliers.filter((s) =>
-          [s.name, s.city, s.state, s.email, s.phone]
-            .filter(Boolean)
-            .join(' ')
-            .toLowerCase()
-            .includes(q)
-        );
-    if (
-      supplierOrgId != null &&
-      !list.some((s) => String(s.id) === String(supplierOrgId))
-    ) {
-      const selected = suppliers.find((s) => String(s.id) === String(supplierOrgId));
-      if (selected) return [selected, ...list];
-    }
-    return list;
-  }, [suppliers, supSearch, supplierOrgId]);
+  const filteredSuppliers = suppliers;
 
   const loadPartSuggests = useCallback(async () => {
     const hits: PartSuggestHit[] = [];
@@ -199,21 +200,71 @@ export default function PurchaseOrderFormClient() {
     setPartHits(mergePartSuggests(hits));
   }, [supabase]);
 
-  const loadSuppliers = useCallback(async () => {
-    const { data, error } = await fetchAllPages<SupplierOpt>(async (from, to) => {
-      const res = await supabase
-        .from('organizations')
-        .select('id, name, address, city, state, phone, email')
-        .in('type', ['parts_supplier', 'vendor'])
-        .order('name', { ascending: true })
-        .range(from, to);
-      return { data: (res.data || []) as SupplierOpt[], error: res.error };
-    });
-    if (error) console.warn('load suppliers', error);
-    setSuppliers(data || []);
+  const refreshSuppliers = useCallback(async (query: string, offset = 0) => {
+    const gen = ++supplierSearchGen.current;
+    try {
+      const result = await searchSupplierOrgs(supabase, query, {
+        offset,
+        limit: LINKED_CUSTOMER_DROPDOWN_LIMIT + 1,
+      });
+      if (gen !== supplierSearchGen.current) return;
+      if (!result.ok) {
+        setSupplierSearchError(true);
+        setSupplierHasMore(false);
+        if (offset === 0) {
+          const kept = mergePinnedSupplier([], pinnedSupplierRef.current);
+          suppliersRef.current = kept;
+          setSuppliers(kept);
+        }
+        return;
+      }
+      const page = supplierResultPage(result.suppliers);
+      setSupplierSearchError(false);
+      setSupplierHasMore(page.hasMore);
+      supplierFetched.current = offset + page.shown.length;
+      const prior = offset === 0 ? [] : suppliersRef.current;
+      const seen = new Set<string>();
+      const unique = [...prior, ...page.shown].filter((row) => {
+        const key = String(row.id);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const merged = mergePinnedSupplier(unique, pinnedSupplierRef.current);
+      suppliersRef.current = merged;
+      setSuppliers(merged);
+      const match = supplierPickForCurrentText(unique, supplierQueryRef.current, explicitSupplierRef.current);
+      if (match) {
+        supplierQueryRef.current = match.name;
+        pinnedSupplierRef.current = match;
+        applySupplier(match);
+      }
+    } catch (e) {
+      console.warn('load suppliers', e);
+      if (gen === supplierSearchGen.current) {
+        setSupplierSearchError(true);
+        setSupplierHasMore(false);
+        if (offset === 0) {
+          const kept = mergePinnedSupplier([], pinnedSupplierRef.current);
+          suppliersRef.current = kept;
+          setSuppliers(kept);
+        }
+      }
+    }
   }, [supabase]);
 
+  function scheduleSupplierSearch(query: string) {
+    if (supplierSearchTimer.current) clearTimeout(supplierSearchTimer.current);
+    supplierSearchTimer.current = setTimeout(() => {
+      supplierFetched.current = 0;
+      void refreshSuppliers(query, 0);
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
+  }
+
   const applySupplier = (s: SupplierOpt) => {
+    explicitSupplierRef.current = true;
+    pickedSupplierNameRef.current = s.name;
+    supplierQueryRef.current = s.name;
     setSupplierName(s.name);
     setSupplierOrgId(s.id);
     setSupSearch(s.name);
@@ -253,8 +304,34 @@ export default function PurchaseOrderFormClient() {
       setStatus(data.status || 'draft');
       setSentAt(data.sent_at ? String(data.sent_at) : null);
       setSupplierName(data.supplier_name || '');
+      supplierQueryRef.current = data.supplier_name || '';
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
+      if (data.supplier_organization_id) {
+        const savedId = data.supplier_organization_id;
+        const snapshot: SupplierSearchRow = {
+          id: savedId,
+          name: String(data.supplier_name || '').trim() || 'Saved supplier',
+        };
+        pinnedSupplierRef.current = snapshot;
+        explicitSupplierRef.current = true;
+        pickedSupplierNameRef.current = snapshot.name;
+        setSuppliers((prev) => {
+          const next = mergePinnedSupplier(prev, snapshot);
+          suppliersRef.current = next;
+          return next;
+        });
+        const loaded = await loadSupplierById(supabase, savedId);
+        if (loaded.ok && loaded.supplier) {
+          const pinned = { ...loaded.supplier, name: snapshot.name };
+          pinnedSupplierRef.current = pinned;
+          setSuppliers((prev) => {
+            const next = mergePinnedSupplier(prev, pinned);
+            suppliersRef.current = next;
+            return next;
+          });
+        }
+      }
       setSupEmail(data.supplier_email || '');
       poDateTouched.current = true;
       setPoDate(data.po_date ? String(data.po_date).slice(0, 10) : orgTodayRef.current);
@@ -326,7 +403,7 @@ export default function PurchaseOrderFormClient() {
             .join(', ');
           setShipTo((prev) => prev || ship);
         }
-        await loadSuppliers();
+        scheduleSupplierSearch('');
         await loadPartSuggests();
         if (editIdParam && orgId) await loadPo(editIdParam, orgId);
       } catch (e) {
@@ -335,7 +412,7 @@ export default function PurchaseOrderFormClient() {
         setLoading(false);
       }
     })();
-  }, [supabase, router, editIdParam, loadSuppliers, loadPartSuggests, loadPo]);
+  }, [supabase, router, editIdParam, refreshSuppliers, loadPartSuggests, loadPo]);
 
   function updateLine(id: string, patch: Partial<LineItem>) {
     setTotalOverride(null);
@@ -521,67 +598,90 @@ export default function PurchaseOrderFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-[var(--gold)] mb-3">{t('Parts supplier')}</h2>
           <div>
-            <label className="text-xs text-[var(--text3)]">{t('Choose a parts supplier')}</label>
-            <select
-              className="input select mt-1"
-              data-field="supplier_organization_id"
-              value={supplierOrgId != null ? String(supplierOrgId) : ''}
-              disabled={supplierLocked}
-              aria-readonly={supplierLocked}
-              onChange={(e) => {
-                if (supplierLocked) return;
-                const id = e.target.value;
-                if (!id) {
-                  clearSupplier();
-                  return;
-                }
-                const s = suppliers.find((x) => String(x.id) === id);
-                if (s) applySupplier(s);
-              }}
-            >
-              <option value="">
-                {suppliers.length
-                  ? t('Choose a parts supplier ({count} shown)…').replace('{count}', String(filteredSuppliers.length))
-                  : t('No parts suppliers found')}
-              </option>
-              {filteredSuppliers.map((s) => (
-                <option key={String(s.id)} value={String(s.id)}>
-                  {s.name}
-                  {s.city || s.state ? ` — ${[s.city, s.state].filter(Boolean).join(', ')}` : ''}
-                  {s.email ? ` · ${s.email}` : ` · ${t('no email')}`}
-                </option>
-              ))}
-            </select>
-            <label className="text-xs text-[var(--text3)] mt-3 block">{t('Type to filter the list')}</label>
+            <label className="text-xs text-[var(--text3)]" htmlFor="po-supplier-search">{t('Choose a parts supplier')}</label>
+            <input type="hidden" data-field="supplier_organization_id" value={supplierOrgId != null ? String(supplierOrgId) : ''} disabled={supplierLocked} />
             <input
+              id="po-supplier-search"
               className="input mt-1"
+              role="combobox"
+              aria-expanded={showSupDrop && !supplierLocked}
+              aria-controls="po-supplier-listbox"
+              aria-autocomplete="list"
               data-field="supplier_name"
               value={supSearch}
               readOnly={supplierLocked}
+              disabled={supplierLocked}
               onChange={(e) => {
                 if (supplierLocked) return;
                 const v = e.target.value;
+                supplierQueryRef.current = v;
+                supplierSearchGen.current += 1;
                 setSupSearch(v);
-                const exact = suppliers.find(
-                  (s) => s.name.toLowerCase() === v.trim().toLowerCase()
-                );
-                if (exact) {
-                  applySupplier(exact);
-                  return;
+                setShowSupDrop(true);
+                const still =
+                  explicitSupplierRef.current &&
+                  v.trim().toLowerCase() === pickedSupplierNameRef.current.trim().toLowerCase();
+                if (!still) {
+                  explicitSupplierRef.current = false;
+                  pinnedSupplierRef.current = null;
+                  if (!v.trim()) clearSupplier();
+                  else setSupplierOrgId(null);
                 }
-                if (!v.trim()) clearSupplier();
+                scheduleSupplierSearch(v);
               }}
-              list="po-supplier-autofill"
+              onFocus={() => {
+                if (supplierLocked) return;
+                supplierQueryRef.current = supSearch;
+                setShowSupDrop(true);
+                scheduleSupplierSearch(supSearch);
+              }}
               placeholder={t('Start typing a supplier name…')}
               autoComplete="off"
             />
-            <datalist id="po-supplier-autofill">
-              {suppliers.map((s) => (
-                <option key={String(s.id)} value={s.name}>
-                  {s.email || [s.city, s.state].filter(Boolean).join(', ')}
-                </option>
-              ))}
-            </datalist>
+            {showSupDrop && !supplierLocked && supplierSearchError && (
+              <div className="mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)]" role="alert">
+                {t("Couldn't load suppliers. Try again.")}
+              </div>
+            )}
+            {showSupDrop && !supplierLocked && !supplierSearchError && (
+              <ul id="po-supplier-listbox" role="listbox" aria-label={t('Choose a parts supplier')} className="mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
+                {filteredSuppliers.length === 0 && (
+                  <li className="px-3 py-2 text-xs text-[var(--text3)]">{t('No parts suppliers found')}</li>
+                )}
+                {filteredSuppliers.map((s) => (
+                  <li key={String(s.id)} role="option" aria-selected={String(s.id) === String(supplierOrgId)}>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        pinnedSupplierRef.current = s;
+                        applySupplier(s);
+                        setShowSupDrop(false);
+                      }}
+                    >
+                      <div className="font-semibold">{s.name}</div>
+                      <div className="text-xs text-[var(--text3)]">
+                        {[s.city, s.state].filter(Boolean).join(', ')}
+                        {s.email ? ` · ${s.email}` : ''}
+                      </div>
+                    </button>
+                  </li>
+                ))}
+                {supplierHasMore && (
+                  <li>
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm text-[var(--gold)]"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => void refreshSuppliers(supSearch, supplierFetched.current)}
+                    >
+                      {t('Show more suppliers')}
+                    </button>
+                  </li>
+                )}
+              </ul>
+            )}
             <p className="text-[11px] text-[var(--text3)] mt-1">
               {supplierLocked
                 ? t('Sent purchase orders keep their supplier. Save draft updates the other fields.')

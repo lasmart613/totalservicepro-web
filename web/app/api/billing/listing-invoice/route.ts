@@ -8,7 +8,7 @@ import {
   type ListingInvoiceSource,
 } from '@/lib/billing/listing-invoice';
 import { coerceOrgId, writeWithColumnRetry } from '@/lib/billing/save-helpers';
-import { loadLinkedCustomerOrgs } from '@/lib/customer-form';
+import { loadLinkedCustomerOpt } from '@/lib/customer-form';
 import { sameOrg } from '@/lib/org-membership';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { loadListingPrivateFields } from '@/lib/marketplace/listing-columns';
@@ -169,13 +169,12 @@ async function loadDraft(
 }
 
 async function loadLinkedCustomer(
-  supabase: Parameters<typeof loadLinkedCustomerOrgs>[0],
+  supabase: Parameters<typeof loadLinkedCustomerOpt>[0],
   orgId: string | number,
   customerId: string | number
 ): Promise<ListingInvoiceCustomer | null> {
-  const linked = await loadLinkedCustomerOrgs(supabase, orgId);
-  const match = linked.find((row) => sameOrg(row.id, customerId));
-  if (!match) return null;
+  const match = await loadLinkedCustomerOpt(supabase, orgId, customerId);
+  if (!match || !sameOrg(match.id, customerId)) return null;
   return {
     id: match.id,
     name: match.name,

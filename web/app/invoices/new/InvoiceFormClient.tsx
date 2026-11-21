@@ -37,7 +37,7 @@ import { AddToOrgCheckbox } from '@/components/CustomerEquipmentPicker';
 import { useCustomerEquipment } from '@/lib/use-customer-equipment';
 import ClinicEquipmentSelect from '@/components/ClinicEquipmentSelect';
 import { NEW_EQUIPMENT_VALUE } from '@/lib/customer-equipment';
-import { filterLinkedCustomers, searchLinkedCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
+import { LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS, searchShopCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
   collectableInvoiceDataFields,
   estimatePartsDeposit,
@@ -125,6 +125,7 @@ export default function InvoiceFormClient() {
   routerRef.current = router;
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
+  const [customerSearchError, setCustomerSearchError] = useState(false);
   const [customerName, setCustomerName] = useState('');
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [custAddress, setCustAddress] = useState('');
@@ -208,10 +209,7 @@ export default function InvoiceFormClient() {
     depositMethod,
   ]);
 
-  const filteredCustomers = useMemo(
-    () => filterLinkedCustomers(customers, custSearch, 12),
-    [customers, custSearch]
-  );
+  const filteredCustomers = customers;
   const customerSearchGen = useRef(0);
   const customerSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -219,11 +217,20 @@ export default function InvoiceFormClient() {
     async (orgId: string | number, query: string) => {
       const gen = ++customerSearchGen.current;
       try {
-        const rows = await searchLinkedCustomers(supabase, orgId, query);
+        const result = await searchShopCustomers(supabase, orgId, query);
         if (gen !== customerSearchGen.current) return;
-        setCustomers(rows);
+        if (!result.ok) {
+          setCustomerSearchError(true);
+          setCustomers([]);
+          return;
+        }
+        setCustomerSearchError(false);
+        setCustomers(result.customers);
       } catch {
-        if (gen === customerSearchGen.current) setCustomers([]);
+        if (gen === customerSearchGen.current) {
+          setCustomerSearchError(true);
+          setCustomers([]);
+        }
       }
     },
     [supabase]
@@ -235,7 +242,7 @@ export default function InvoiceFormClient() {
     const orgId = userOrgId;
     customerSearchTimer.current = setTimeout(() => {
       void refreshCustomers(orgId, query);
-    }, 180);
+    }, LINKED_CUSTOMER_SEARCH_DEBOUNCE_MS);
   }
 
   const loadParts = useCallback(async () => {
@@ -1363,6 +1370,7 @@ export default function InvoiceFormClient() {
               value={custSearch}
               onChange={(e) => {
                 const next = e.target.value;
+                customerSearchGen.current += 1;
                 formTouchedRef.current = true;
                 const keepOrg = next.trim() !== '' && next.trim() === customerRef.current.name.trim();
                 customerRef.current = {
@@ -1377,11 +1385,19 @@ export default function InvoiceFormClient() {
                 if (next.trim()) scheduleCustomerSearch(next);
                 else if (customerSearchTimer.current) clearTimeout(customerSearchTimer.current);
               }}
-              onFocus={() => setShowCustDrop(true)}
+              onFocus={() => {
+                setShowCustDrop(true);
+                scheduleCustomerSearch(custSearch);
+              }}
               placeholder={t('Type customer name…')}
               autoComplete="off"
             />
-            {showCustDrop && filteredCustomers.length > 0 && (
+            {showCustDrop && customerSearchError && (
+              <div className="absolute z-20 left-0 right-0 mt-1 rounded-lg border border-[var(--border2)] bg-[var(--surface3)] px-3 py-2 text-xs text-[var(--text3)] shadow-lg">
+                {t("Couldn't load customers. Try again.")}
+              </div>
+            )}
+            {showCustDrop && !customerSearchError && filteredCustomers.length > 0 && (
               <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
                 {filteredCustomers.map((c) => (
                   <button
