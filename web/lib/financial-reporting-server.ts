@@ -5,7 +5,7 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { decideFinancialAccess } from './financial-reporting-auth.ts';
+import { decideFinancialAccess, decideHomepageFinancialAccess } from './financial-reporting-auth.ts';
 import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, reportingOrganizationId } from './org-role.ts';
 import {
   assembleFinancialReport,
@@ -42,7 +42,12 @@ export function userClientForToken(token: string): SupabaseClient | null {
 
 export async function loadAuthorizedFinancialReport(
   token: string,
-  options?: { detailRequested?: boolean; browserTimeZone?: string | null }
+  options?: {
+    detailRequested?: boolean;
+    browserTimeZone?: string | null;
+    /** homepage adds owner and billing_manager. The org id is still the active org only. */
+    access?: 'report' | 'homepage';
+  }
 ): Promise<AuthorizedFinancialReport> {
   const client = userClientForToken(token);
   if (!client) {
@@ -70,7 +75,10 @@ export async function loadAuthorizedFinancialReport(
   const orgRole = await getOrgRole(client, user.id, activeOrganizationId);
   if (!orgRole.ok) return { ok: false, status: orgRole.status, error: orgRole.error };
 
-  const access = decideFinancialAccess({
+  // Role is the membership in this active org. A clinic owner or billing
+  // manager of another org does not pass, and rows are read for this org id only.
+  const decide = options?.access === 'homepage' ? decideHomepageFinancialAccess : decideFinancialAccess;
+  const access = decide({
     user: { id: user.id, email: user.email },
     membershipRole: orgRole.role,
     isPlatformAdmin: orgRole.isPlatformAdmin,

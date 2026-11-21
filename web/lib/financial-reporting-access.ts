@@ -5,7 +5,7 @@
  * so this file does not read secrets or invent a role.
  */
 
-import { isAdmin, type RoleLike } from './roles.ts';
+import { isAdmin, normalizeRole, type RoleLike } from './roles.ts';
 
 export const FINANCIAL_REPORTING_PATH = '/business/financial-reporting';
 export const FINANCIAL_REPORTING_API = '/api/business/financial-reporting';
@@ -19,6 +19,19 @@ export function canAccessFinancialReporting(input: {
 }): boolean {
   if (input.god) return true;
   return isAdmin(input.role);
+}
+
+/**
+ * Homepage KPI totals. Membership role in the active org.
+ * admin and company_admin match Financial Reporting.
+ * owner is the clinic / facility roster role. billing_manager is the shop roster role.
+ * Stored strings: organization_memberships.role (admin on a membership is company_admin).
+ */
+export const HOMEPAGE_FINANCIAL_KPI_ROLES = ['admin', 'company_admin', 'owner', 'billing_manager'] as const;
+
+export function canAccessHomepageFinancialKpis(input: { role?: RoleLike; god?: boolean }): boolean {
+  if (input.god) return true;
+  return (HOMEPAGE_FINANCIAL_KPI_ROLES as readonly string[]).includes(normalizeRole(input.role));
 }
 
 export function financialReportingNavLink(input: {

@@ -11,7 +11,8 @@ import {
   getDashboardPersona,
   type DashboardPersona,
 } from '@/lib/roles';
-import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
+import { canAccessFinancialReporting, canAccessHomepageFinancialKpis } from '@/lib/financial-reporting-access';
+import { HomeFinancialKpis } from '@/components/home/HomeFinancialKpis';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { getOrgRole, reportingOrganizationId } from '@/lib/org-role';
 import {
@@ -522,6 +523,8 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
             </UpgradePlanLink>
           )}
         </div>
+
+        {canAccessHomepageFinancialKpis({ role: orgPowerRole, god }) && <HomeFinancialKpis />}
 
         {/* ── Owner / facility KPIs ── */}
         {persona === 'owner' && (
