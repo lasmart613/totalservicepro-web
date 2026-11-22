@@ -253,7 +253,9 @@ export async function POST(req: NextRequest) {
         manualId ?? null,
         manualId == null ? storagePath : null,
       );
-      if (scoped && !catalogCoversPath(scoped, storagePath)) {
+      // loadCatalogRow returns { row, unpublished }. Coverage uses the catalog
+      // row; a missing row fails closed and is not signed.
+      if (!scoped.row || !catalogCoversPath(scoped.row, storagePath)) {
         return NextResponse.json({ error: MANUAL_PATH_NOT_COVERED }, { status: 403 });
       }
     }

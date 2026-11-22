@@ -490,7 +490,8 @@ test('file_missing bodies carry no path, and uncovered keys are refused before s
   assert.ok(streamGate > 0 && streamGate < streamBytes);
 
   const route = readFileSync(join(here, '../app/api/manuals/file/route.ts'), 'utf8');
-  const preSign = route.indexOf('if (scoped && !catalogCoversPath(scoped, storagePath))');
+  const preSign = route.indexOf('if (!scoped.row || !catalogCoversPath(scoped.row, storagePath))');
+  assert.doesNotMatch(route, /catalogCoversPath\(scoped,/);
   const signed = route.indexOf('const resolved = await resolveSignedUrl');
   const blocked = route.indexOf('viewerBlockedUntilLibraryAdd(resolved.json)');
   const uncovered = route.indexOf('resolved.json?.error === MANUAL_PATH_NOT_COVERED');
