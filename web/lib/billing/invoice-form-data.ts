@@ -6,6 +6,7 @@
  */
 
 import { parseJsonField } from './save-helpers.ts';
+import { sealClientInvoicePaymentKeys } from './invoice-payment-fields.ts';
 
 type InvoiceDataClient = {
   from: (table: string) => any;
@@ -15,7 +16,7 @@ export function mergeFormInvoiceData(
   existing: unknown,
   formFields: Record<string, unknown>
 ): Record<string, unknown> {
-  return { ...parseJsonField(existing), ...formFields };
+  return sealClientInvoicePaymentKeys(existing, { ...parseJsonField(existing), ...formFields });
 }
 
 export async function loadStoredInvoiceData(

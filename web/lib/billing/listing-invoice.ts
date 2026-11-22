@@ -21,6 +21,7 @@ import {
   collectableInvoiceDataFields,
   resolveInvoiceCollectable,
 } from './invoice-collectable.ts';
+import { sealClientInvoicePaymentKeys } from './invoice-payment-fields.ts';
 import {
   lineItemsSubtotal,
   money,
@@ -283,7 +284,7 @@ export function mergeListingOntoDraft(
   if ('total' in stored) next.total = totals.total;
   if ('subtotal' in stored) next.subtotal = totals.subtotal;
   return {
-    invoice_data: next,
+    invoice_data: sealClientInvoicePaymentKeys(stored, next),
     subtotal: totals.subtotal,
     total: totals.total,
   };
