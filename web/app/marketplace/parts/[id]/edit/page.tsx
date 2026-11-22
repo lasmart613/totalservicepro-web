@@ -15,6 +15,7 @@ import {
 import { listManufacturers } from '@/lib/laser-catalog';
 import { toast } from 'sonner';
 import { StorageImage } from '@/components/StorageImage';
+import { inspectListingImage, LISTING_IMAGE_ACCEPT, LISTING_IMAGE_REJECTED } from '@/lib/marketplace/listing-image';
 
 const PART_CATEGORIES = [
   'Optical / Handpiece',
@@ -176,18 +177,35 @@ export default function EditPartListingPage() {
     };
   }, [id]);
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
     const left = 8 - existingImages.length - newFiles.length;
-    const slice = files.slice(0, left);
-    if (!slice.length) return;
-    setNewFiles((prev) => [...prev, ...slice]);
-    slice.forEach((file) => {
+    const accepted: File[] = [];
+    const errors = new Set<string>();
+    for (const file of files) {
+      if (accepted.length >= left) break;
+      try {
+        const inspected = await inspectListingImage(file);
+        if (!inspected.ok) {
+          errors.add(inspected.error);
+          continue;
+        }
+      } catch {
+        errors.add(LISTING_IMAGE_REJECTED);
+        continue;
+      }
+      accepted.push(file);
+    }
+    for (const message of errors) toast.error(message);
+    if (!accepted.length) return;
+    setNewFiles((prev) => [...prev, ...accepted]);
+    accepted.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => setNewPreviews((p) => [...p, String(reader.result || '')]);
       reader.readAsDataURL(file);
     });
-    e.target.value = '';
   };
 
   const removePreview = (index: number) => {
@@ -207,12 +225,16 @@ export default function EditPartListingPage() {
     const urls: string[] = [];
     for (let n = 0; n < newFiles.length; n++) {
       const file = newFiles[n];
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `${userId}/listings/${Date.now()}_${n}.${ext}`;
+      const inspected = await inspectListingImage(file);
+      if (!inspected.ok) {
+        toast.error(inspected.error);
+        continue;
+      }
+      const path = `${userId}/listings/${Date.now()}_${n}.${inspected.extension}`;
       for (const bucket of ['marketplace-images', 'equipment-photos', 'equipment']) {
         const { error } = await getSupabaseClient().storage.from(bucket).upload(path, file, {
           upsert: true,
-          contentType: file.type || `image/${ext}`,
+          contentType: inspected.contentType,
         });
         if (!error) {
           const { data } = getSupabaseClient().storage.from(bucket).getPublicUrl(path);
@@ -411,7 +433,7 @@ export default function EditPartListingPage() {
               {allPreviews.length < 8 && (
                 <label className="w-20 h-20 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-2xl text-[var(--text3)] cursor-pointer hover:border-[var(--gold)]">
                   +
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageSelect} />
+                  <input type="file" accept={LISTING_IMAGE_ACCEPT} multiple className="hidden" onChange={handleImageSelect} />
                 </label>
               )}
             </div>
