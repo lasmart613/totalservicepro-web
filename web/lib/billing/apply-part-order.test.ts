@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyPartCheckoutSession, PART_ORDER_REFUND_REVIEW_STATUS } from './apply-part-order.ts';
+import {
+  applyPartCheckoutSession,
+  PART_ORDER_REFUND_REVIEW_STATUS,
+  PART_ORDER_STOCK_PENDING_STATUS,
+  STOCK_CLAIM_ATTEMPT_CAP,
+} from './apply-part-order.ts';
 
 type Listing = {
   id: string;
@@ -21,10 +26,15 @@ type OrderRow = {
 
 type ClaimFilter = Record<string, unknown>;
 
-function createDb(listing: Listing, peerReads = 1) {
+function createDb(
+  listing: Listing,
+  peerReads = 1,
+  options: { failListingUpdates?: number; conflictAllUpdates?: boolean; zeroQuantityAtRead?: number } = {}
+) {
   const orders: OrderRow[] = [];
   const claims: ClaimFilter[] = [];
   let listingReads = 0;
+  let failListingUpdates = options.failListingUpdates ?? 0;
   const waiters: Array<() => void> = [];
 
   const writer = {
@@ -64,6 +74,7 @@ function createDb(listing: Listing, peerReads = 1) {
         }
         if (table === 'marketplace_listings' && op === 'select') {
           listingReads += 1;
+          if (options.zeroQuantityAtRead && listingReads >= options.zeroQuantityAtRead) listing.quantity = 0;
           if (peerReads > 1 && listingReads <= peerReads) {
             await new Promise<void>((resolve) => {
               waiters.push(resolve);
@@ -88,6 +99,11 @@ function createDb(listing: Listing, peerReads = 1) {
         }
         if (table === 'marketplace_listings' && op === 'update') {
           claims.push({ ...filters, ...Object.fromEntries(Object.entries(isFilters).map(([key, value]) => [`is:${key}`, value])) });
+          if (failListingUpdates > 0) {
+            failListingUpdates -= 1;
+            return { data: null, error: { message: 'db down' } };
+          }
+          if (options.conflictAllUpdates) return { data: [], error: null };
           if (filters.id != null && String(filters.id) !== listing.id) return { data: [], error: null };
           if (Object.prototype.hasOwnProperty.call(filters, 'quantity') && listing.quantity !== filters.quantity) {
             return { data: [], error: null };
@@ -172,22 +188,24 @@ const active = (quantity: number | null, extra?: Partial<Listing>): Listing => (
   ...extra,
 });
 
-async function withWarnings<T>(fn: () => Promise<T>): Promise<{ result: T; warnings: unknown[][] }> {
-  const warnings: unknown[][] = [];
-  const orig = console.warn;
-  console.warn = (...args: unknown[]) => {
-    warnings.push(args);
+const fastClock = { now: () => 0, sleep: async () => {}, random: () => 0 };
+
+async function withErrors<T>(fn: () => Promise<T>): Promise<{ result: T; errors: unknown[][] }> {
+  const errors: unknown[][] = [];
+  const orig = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args);
   };
   try {
-    return { result: await fn(), warnings };
+    return { result: await fn(), errors };
   } finally {
-    console.warn = orig;
+    console.error = orig;
   }
 }
 
 test('concurrent last-unit purchase fulfills once', { timeout: 2000 }, async () => {
   const db = createDb(active(1), 2);
-  const { result, warnings } = await withWarnings(() =>
+  const { result, errors } = await withErrors(() =>
     Promise.all([
       applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_last_a') }),
       applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_last_b') }),
@@ -205,7 +223,7 @@ test('concurrent last-unit purchase fulfills once', { timeout: 2000 }, async () 
   assert.equal(review?.payout_status, 'transferred');
   assert.ok(db.claims.some((claim) => claim.quantity === 1 && claim.id === 'listing-qa'));
   assert.ok(db.claims.every((claim) => Object.prototype.hasOwnProperty.call(claim, 'quantity')));
-  assert.ok(warnings.some((line) => String(line[0]).includes('marked for refund review')));
+  assert.ok(errors.some((line) => String(line[0]).includes('marked for refund review')));
 });
 
 test('two concurrent purchases both fulfill when stock covers both', { timeout: 2000 }, async () => {
@@ -224,7 +242,7 @@ test('two concurrent purchases both fulfill when stock covers both', { timeout: 
 
 test('insufficient stock does not fulfill or zero the listing', async () => {
   const short = createDb(active(1));
-  const { result, warnings } = await withWarnings(() =>
+  const { result, errors } = await withErrors(() =>
     applyPartCheckoutSession({ writer: short.writer as never, session: session('cs_short', 2) })
   );
   assert.equal(result.ok, true);
@@ -235,10 +253,10 @@ test('insufficient stock does not fulfill or zero the listing', async () => {
   assert.equal(short.listing.status, 'active');
   assert.equal(short.claims.length, 0);
   assert.equal(short.orders[0]?.status, PART_ORDER_REFUND_REVIEW_STATUS);
-  assert.ok(warnings.some((line) => (line[1] as { reason?: string } | undefined)?.reason === 'insufficient'));
+  assert.ok(errors.some((line) => (line[1] as { reason?: string } | undefined)?.reason === 'insufficient'));
 
   const none = createDb(active(0));
-  const emptyRun = await withWarnings(() =>
+  const emptyRun = await withErrors(() =>
     applyPartCheckoutSession({ writer: none.writer as never, session: session('cs_zero') })
   );
   const empty = emptyRun.result;
@@ -260,7 +278,7 @@ test('webhook retry is idempotent and does not decrement again', async () => {
   assert.equal(db.orders[0]?.status, 'paid');
 
   const raced = createDb(active(1), 2);
-  await withWarnings(() =>
+  await withErrors(() =>
     Promise.all([
       applyPartCheckoutSession({ writer: raced.writer as never, session: session('cs_retry_a') }),
       applyPartCheckoutSession({ writer: raced.writer as never, session: session('cs_retry_b') }),
@@ -300,4 +318,58 @@ test('qty and details-only stock still compare before they write', async () => {
   assert.equal(details.listing.quantity, 0);
   assert.equal(details.listing.status, 'sold');
   assert.ok(details.claims.some((claim) => claim['is:quantity'] === null));
+});
+
+test('conflicts with stock left stay pending instead of refund review', async () => {
+  const db = createDb(active(5), 1, { conflictAllUpdates: true });
+  const { result, errors } = await withErrors(() =>
+    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_busy'), ...fastClock })
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.retry, true);
+  assert.equal(result.reason, PART_ORDER_STOCK_PENDING_STATUS);
+  assert.equal(db.listing.quantity, 5);
+  assert.equal(db.orders.length, 1);
+  assert.equal(db.orders[0]?.status, PART_ORDER_STOCK_PENDING_STATUS);
+  assert.ok(db.claims.length > STOCK_CLAIM_ATTEMPT_CAP);
+  assert.ok(errors.some((line) => String(line[0]).includes('still pending')));
+});
+
+test('a later read that is short of stock is refund review, not pending', async () => {
+  const db = createDb(active(5), 1, { conflictAllUpdates: true, zeroQuantityAtRead: 3 });
+  const { result } = await withErrors(() =>
+    applyPartCheckoutSession({
+      writer: db.writer as never,
+      session: session('cs_dropped'),
+      ...fastClock,
+    })
+  );
+  assert.equal(result.ok && result.applied.fulfilled, false);
+  assert.equal(db.orders[0]?.status, PART_ORDER_REFUND_REVIEW_STATUS);
+  assert.notEqual(db.orders[0]?.status, PART_ORDER_STOCK_PENDING_STATUS);
+  assert.equal(db.listing.quantity, 0);
+});
+
+test('a write error stays stock_pending and the webhook retry claims once', async () => {
+  const db = createDb(active(4), 1, { failListingUpdates: 1 });
+  const { result, errors } = await withErrors(() =>
+    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_crash') })
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.retry, true);
+  assert.equal(db.listing.quantity, 4);
+  assert.equal(db.orders[0]?.status, PART_ORDER_STOCK_PENDING_STATUS);
+  assert.ok(errors.some((line) => String(line[0]).includes('quantity update failed')));
+
+  const retry = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_crash') });
+  assert.equal(retry.ok && retry.applied.fulfilled && retry.applied.alreadyApplied, true);
+  assert.equal(db.listing.quantity, 3);
+  assert.equal(db.orders[0]?.status, 'paid');
+  assert.equal(db.orders.length, 1);
+
+  const again = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_crash') });
+  assert.equal(again.ok && again.applied.alreadyApplied && again.applied.fulfilled, true);
+  assert.equal(db.listing.quantity, 3);
 });
