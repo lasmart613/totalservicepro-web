@@ -18,6 +18,8 @@ export const LISTING_IMAGE_REJECTED =
 
 export const LISTING_IMAGE_TOO_LARGE = 'Photo must be 5 MB or smaller.';
 
+export const LISTING_IMAGE_UPLOAD_FAILED = "Couldn't upload this photo.";
+
 export type ListingImageContentType = 'image/png' | 'image/jpeg' | 'image/webp';
 export type ListingImageExtension = 'png' | 'jpg' | 'webp';
 

@@ -13,7 +13,12 @@ import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
 import { rememberManufacturerName } from '@/lib/remember-manufacturer';
 import { FREE_LISTING_PHOTO_LIMIT, listingPhotoLimit } from '@/lib/marketplace/storefront';
-import { inspectListingImage, LISTING_IMAGE_ACCEPT, LISTING_IMAGE_REJECTED } from '@/lib/marketplace/listing-image';
+import {
+  inspectListingImage,
+  LISTING_IMAGE_ACCEPT,
+  LISTING_IMAGE_REJECTED,
+  LISTING_IMAGE_UPLOAD_FAILED,
+} from '@/lib/marketplace/listing-image';
 
 type ListingType = 'part' | 'consumable' | 'used' | 'request';
 
@@ -234,23 +239,24 @@ function MarketplaceListContent() {
         continue;
       }
       const path = `${userId}/listings/${Date.now()}_${n}.${inspected.extension}`;
-      const buckets = ['marketplace-images', 'equipment-photos', 'equipment'];
-      let uploaded = false;
-      for (const b of buckets) {
-        const { error } = await getSupabaseClient().storage.from(b).upload(path, file, {
+      try {
+        const { error } = await getSupabaseClient().storage.from('marketplace-images').upload(path, file, {
           upsert: true,
           contentType: inspected.contentType,
         });
-        if (!error) {
-          const { data } = getSupabaseClient().storage.from(b).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            uploaded = true;
-            break;
-          }
+        if (error) {
+          toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+          continue;
         }
+        const { data } = getSupabaseClient().storage.from('marketplace-images').getPublicUrl(path);
+        if (!data?.publicUrl) {
+          toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+          continue;
+        }
+        urls.push(data.publicUrl);
+      } catch {
+        toast.error(LISTING_IMAGE_UPLOAD_FAILED);
       }
-      if (!uploaded) console.warn('image upload failed', file.name);
     }
     return urls;
   };
