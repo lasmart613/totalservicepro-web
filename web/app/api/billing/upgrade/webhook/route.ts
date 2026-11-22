@@ -106,6 +106,7 @@ export async function POST(req: NextRequest) {
           listingId: part.applied.listingId,
           payoutStatus: part.applied.payoutStatus,
           alreadyApplied: part.applied.alreadyApplied,
+          fulfilled: part.applied.fulfilled,
         });
       }
       const invoicePay = await applyInvoiceCheckoutSession({ writer, session });
