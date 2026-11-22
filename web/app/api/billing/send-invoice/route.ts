@@ -54,6 +54,12 @@ import {
   planInvoicePayLink,
   type CheckoutSessionSnapshot,
 } from '@/lib/billing/invoice-pay-resend';
+import {
+  amountMeetsStripeMinimum,
+  exactStripeMinorUnits,
+  loadChargeCurrency,
+  stripeMinimumMajor,
+} from '@/lib/billing/stripe-currency';
 /** Same body for a missing invoice and an invoice owned by another shop. */
 const INVOICE_NOT_FOUND = 'Invoice not found.';
 
@@ -227,16 +233,41 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     let connectRequired = false;
     let stripeConnect: Record<string, unknown> | null = null;
     const stripeProblem = stripeSecretProblem();
+    const invoiceOrgId = inv.organization_id;
+    const sellerOrgId =
+      typeof invoiceOrgId === 'string' || typeof invoiceOrgId === 'number' ? invoiceOrgId : callerOrgId;
+    const charged = includePay ? await loadChargeCurrency(admin ?? supabase, sellerOrgId) : null;
+    const chargeCurrency = charged && charged.ok ? charged.currency : null;
+    const chargeMinor =
+      chargeCurrency != null ? exactStripeMinorUnits(payAmount, chargeCurrency) : null;
     if (isVoidInvoiceStatus(inv.status)) {
       stripeSkippedReason = VOIDED_INVOICE_MESSAGE;
-    } else if (includePay && payAmount >= 0.5 && invoiceAlreadyPaid(inv)) {
+    } else if (includePay && charged && !charged.ok) {
+      stripeSkippedReason =
+        charged.reason === 'unsupported_currency'
+          ? 'This currency is not supported for a Stripe pay link.'
+          : 'Invoice currency is unavailable, so no Stripe pay link was added.';
+    } else if (includePay && chargeCurrency && chargeMinor == null) {
+      stripeSkippedReason = `This invoice amount cannot be charged exactly in ${chargeCurrency.toUpperCase()}, so no pay link was added.`;
+    } else if (
+      includePay &&
+      chargeCurrency &&
+      chargeMinor != null &&
+      !amountMeetsStripeMinimum(payAmount, chargeCurrency)
+    ) {
+      stripeSkippedReason =
+        collectable.hasDeferredSplit && !collectable.deferredReleased && payAmount <= 0 && collectable.amountPaid > 0
+          ? 'Deposit is paid. Remaining balance is due on completion — use Collect remaining balance to enable Stripe.'
+          : `Amount due now is below the Stripe minimum of ${stripeMinimumMajor(chargeCurrency)} ${chargeCurrency.toUpperCase()}.`;
+    } else if (includePay && chargeMinor != null && invoiceAlreadyPaid(inv)) {
       stripeSkippedReason = INVOICE_ALREADY_PAID;
-    } else if (includePay && payAmount >= 0.5 && stripeProblem) {
+    } else if (includePay && chargeMinor != null && stripeProblem) {
       stripeSkippedReason = openPayLink(inv.invoice_data) ? INVOICE_PAY_LINK_UNVERIFIED : stripeProblem;
-    } else if (includePay && payAmount >= 0.5) {
+    } else if (includePay && chargeMinor != null && chargeCurrency) {
       const plan = await planInvoicePayLink({
         invoice: inv,
         payAmount,
+        chargeMinor,
         loadCheckout: deps.loadCheckout,
         expireCheckout: deps.expireCheckout,
         isSessionCredited: (sessionId) => checkoutSessionWasCredited(admin, inv, sessionId),
@@ -247,87 +278,79 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
         paymentUrl = plan.url;
         stripeSessionId = plan.sessionId;
       } else {
-        const amountCents = Math.round(payAmount * 100);
-        const invoiceOrgId = inv.organization_id;
-        const sellerOrgId =
-          typeof invoiceOrgId === 'string' || typeof invoiceOrgId === 'number'
-            ? invoiceOrgId
-            : callerOrgId;
-        const loaded = await loadSellerPayoutAccount(sellerOrgId);
-        const decision = decideSellerChargeRoute({
-          organizationId: sellerOrgId,
-          account: loaded.account,
-          amountCents,
-          schemaReady: loaded.schemaReady,
-        });
-        if (decision.mode === 'refuse') {
-          connectRequired = true;
-          stripeConnect = decision.prompt;
-          stripeSkippedReason = decision.message;
-        }
-        const pay =
-          decision.mode === 'refuse'
-            ? null
-            : await createInvoiceCheckoutSession({
-                amountCents,
-                description: invoiceCheckoutDescription(
-                  collectable,
-                  String(inv.invoice_number || `Invoice #${invoiceId}`)
-                ),
-                invoiceId,
-                invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
-                customerEmail: recipient.email,
-                companyName: invoiceChecksPayableName(inv, company.company_name) || null,
-                paymentKind: collectable.paymentKind,
-                ...(decision.mode === 'destination'
-                  ? {
-                      destinationAccountId: decision.accountId,
-                      payoutStatus: decision.payoutStatus,
-                      applicationFeeCents: decision.applicationFeeCents,
-                      organizationId: sellerOrgId,
-                    }
-                  : { legacyPlatformCharge: true as const }),
-              });
-        if (pay && !pay.ok && pay.code === CONNECT_REQUIRED_CODE) {
-          connectRequired = true;
-          stripeConnect = pay.prompt;
-          stripeSkippedReason = pay.message;
-        } else if (pay && !pay.ok) {
-          stripeSkippedReason = pay.message;
-        } else if (pay?.ok) {
-          checkoutSessionCreated = true;
-          paymentUrl = pay.url;
-          stripeSessionId = pay.sessionId;
-          if (invoiceId && inv) {
-            try {
-              const merged = mergePaymentFieldsIntoInvoiceData(inv, {
-                payment_url: pay.url,
-                stripe_checkout_session_id: pay.sessionId,
-                payment_amount: payAmount,
-                payment_kind: collectable.paymentKind,
-              });
-              if (merged) {
-                const writer = admin ?? supabase;
-                const { error: upErr } = await writer
-                  .from('service_invoices')
-                  .update({ invoice_data: merged, updated_at: new Date().toISOString() })
-                  .eq('id', invoiceId);
-                if (upErr) console.warn('could not persist payment_url', upErr.message);
-              } else {
-                console.warn('send-invoice: skipped payment_url persist; invoice_data was not loaded');
+          const amountCents = chargeMinor;
+          const loaded = await loadSellerPayoutAccount(sellerOrgId);
+          const decision = decideSellerChargeRoute({
+            organizationId: sellerOrgId,
+            account: loaded.account,
+            amountCents,
+            schemaReady: loaded.schemaReady,
+          });
+          if (decision.mode === 'refuse') {
+            connectRequired = true;
+            stripeConnect = decision.prompt;
+            stripeSkippedReason = decision.message;
+          }
+          const pay =
+            decision.mode === 'refuse'
+              ? null
+              : await createInvoiceCheckoutSession({
+                  amountCents,
+                  currency: chargeCurrency,
+                  description: invoiceCheckoutDescription(
+                    collectable,
+                    String(inv.invoice_number || `Invoice #${invoiceId}`)
+                  ),
+                  invoiceId,
+                  invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
+                  customerEmail: recipient.email,
+                  companyName: invoiceChecksPayableName(inv, company.company_name) || null,
+                  paymentKind: collectable.paymentKind,
+                  ...(decision.mode === 'destination'
+                    ? {
+                        destinationAccountId: decision.accountId,
+                        payoutStatus: decision.payoutStatus,
+                        applicationFeeCents: decision.applicationFeeCents,
+                        organizationId: sellerOrgId,
+                      }
+                    : { legacyPlatformCharge: true as const }),
+                });
+          if (pay && !pay.ok && pay.code === CONNECT_REQUIRED_CODE) {
+            connectRequired = true;
+            stripeConnect = pay.prompt;
+            stripeSkippedReason = pay.message;
+          } else if (pay && !pay.ok) {
+            stripeSkippedReason = pay.message;
+          } else if (pay?.ok) {
+            checkoutSessionCreated = true;
+            paymentUrl = pay.url;
+            stripeSessionId = pay.sessionId;
+            if (invoiceId && inv) {
+              try {
+                const merged = mergePaymentFieldsIntoInvoiceData(inv, {
+                  payment_url: pay.url,
+                  stripe_checkout_session_id: pay.sessionId,
+                  payment_amount: payAmount,
+                  payment_kind: collectable.paymentKind,
+                  payment_currency: chargeCurrency,
+                  payment_amount_minor: chargeMinor,
+                });
+                if (merged) {
+                  const writer = admin ?? supabase;
+                  const { error: upErr } = await writer
+                    .from('service_invoices')
+                    .update({ invoice_data: merged, updated_at: new Date().toISOString() })
+                    .eq('id', invoiceId);
+                  if (upErr) console.warn('could not persist payment_url', upErr.message);
+                } else {
+                  console.warn('send-invoice: skipped payment_url persist; invoice_data was not loaded');
+                }
+              } catch (e) {
+                console.warn('could not persist payment_url', e);
               }
-            } catch (e) {
-              console.warn('could not persist payment_url', e);
             }
           }
-        }
       }
-    } else if (includePay && payAmount < 0.5) {
-      stripeSkippedReason = collectable.hasDeferredSplit && !collectable.deferredReleased
-        ? collectable.amountPaid > 0
-          ? 'Deposit is paid. Remaining balance is due on completion — use Collect remaining balance to enable Stripe.'
-          : 'Amount due now is under $0.50 — no Stripe pay link added.'
-        : 'Balance due is under $0.50 — no Stripe pay link added.';
     }
 
     let mailLocale: string | null = request.locale;

@@ -15,6 +15,7 @@ import {
 } from './persist-invoice-payment.ts';
 import { buildNewListingInvoicePayload } from './listing-invoice.ts';
 import { buildVoidInvoicePatch } from './void-invoice.ts';
+import { runConfirmInvoice } from '../../app/api/billing/invoices/confirm/route.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -200,6 +201,11 @@ function memoryInvoice(initial: Record<string, unknown>) {
           return api;
         },
         maybeSingle: async () => {
+          if (table === 'service_invoice_stripe_payments') {
+            const payment = payments.get(String(filters.session_id || ''));
+            if (!payment) return { data: null, error: null };
+            return { data: { invoice_id: payment.invoiceId, outcome: payment.outcome }, error: null };
+          }
           if (table !== 'service_invoices') return { data: null, error: null };
           const idOk = filters.id == null || String(filters.id) === String(row.id);
           if (!idOk) return { data: null, error: null };
@@ -497,7 +503,7 @@ test('an unpaid or expired Checkout session never credits', async () => {
     session: { ...paidSession('cs_test_open', '44'), payment_status: 'no_payment_required' },
   });
   assert.equal(freeResult.ok, false);
-  if (!freeResult.ok) assert.equal(freeResult.reason, 'not_paid');
+  if (!freeResult.ok) assert.equal(freeResult.reason, 'no_payment_required');
   assert.equal(free.creditWrites, 0);
   assert.equal(free.row.amount_paid, 0);
 });
@@ -757,4 +763,171 @@ test('shop payment notices use the production notification allowlist', async () 
   await notifyShopOfPayment(failing as never, invoice, 'paid', 10);
   console.warn = original;
   assert.equal(warnings.some((line) => /notifications_type_check/.test(line)), true);
+});
+
+function chargedSession(id: string, invoiceId: string, currency: string, minor: number) {
+  return paidSession(id, invoiceId, minor, {
+    currency,
+    metadata: {
+      kind: 'invoice_pay',
+      invoice_id: invoiceId,
+      charge_currency: currency,
+      charge_amount_minor: String(minor),
+    },
+  });
+}
+
+function withErrors<T>(run: () => Promise<T>): Promise<{ result: T; reasons: string[] }> {
+  const reasons: string[] = [];
+  const original = console.error;
+  console.error = (...args: unknown[]) => {
+    const detail = args.find((arg) => arg && typeof arg === 'object') as { reason?: string } | undefined;
+    if (detail?.reason) reasons.push(String(detail.reason));
+  };
+  return run()
+    .then((result) => ({ result, reasons }))
+    .finally(() => {
+      console.error = original;
+    });
+}
+
+test('cash recorded after the link is reviewed as an overpayment, not left unpaid', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 100,
+      amount_paid: 40,
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 10000, payment_amount: 100 },
+    })
+  );
+  const { result, reasons } = await withErrors(() =>
+    applyInvoiceCheckoutSession({
+      writer: db.writer as never,
+      session: chargedSession('cs_test_cash', '44', 'usd', 10000),
+    })
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, 'overpaid_not_credited');
+  assert.deepEqual(reasons, []);
+  assert.equal(db.row.amount_paid, 40);
+});
+
+test('a deposit link still credits after the balance is released', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 1555,
+      amount_paid: 0,
+      status: 'sent',
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 65000, payment_amount: 650, deferredReleased: true },
+    })
+  );
+  const result = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session: chargedSession('cs_test_deposit', '44', 'usd', 65000),
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) {
+    assert.equal(result.applied.alreadyApplied, false);
+    assert.equal(result.applied.amountPaid, 650);
+    assert.equal(result.applied.status, 'partially_paid');
+  }
+});
+
+test('an organization currency change does not reject the stored charge currency', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 80,
+      amount_paid: 0,
+      invoice_data: { payment_currency: 'eur', payment_amount_minor: 8000, payment_amount: 80 },
+    })
+  );
+  const result = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session: chargedSession('cs_test_eur', '44', 'eur', 8000),
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.applied.amountPaid, 80);
+  assert.equal(db.creditWrites, 1);
+});
+
+test('a currency mismatch against the stored charge is logged and recorded', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 80,
+      invoice_data: { payment_currency: 'eur', payment_amount_minor: 8000, payment_amount: 80 },
+    })
+  );
+  const { result, reasons } = await withErrors(() =>
+    applyInvoiceCheckoutSession({
+      writer: db.writer as never,
+      session: chargedSession('cs_test_mismatch', '44', 'usd', 8000),
+    })
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, 'currency_mismatch');
+  assert.deepEqual(reasons, ['currency_mismatch']);
+  assert.equal(db.creditWrites, 0);
+  assert.equal(db.row.amount_paid, 0);
+  const list = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
+    .stripe_checkout_session_conflict;
+  assert.equal(list?.[0]?.reason, 'currency_mismatch');
+});
+
+test('a KWD charge credits the 3-decimal major amount', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 1.23,
+      amount_paid: 0,
+      invoice_data: { payment_currency: 'kwd', payment_amount_minor: 1230, payment_amount: 1.23 },
+    })
+  );
+  const result = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session: chargedSession('cs_test_kwd', '44', 'kwd', 1230),
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.applied.amountPaid, 1.23);
+});
+
+test('redelivery after the webhook returns success even if the stored charge was edited', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 10000, payment_amount: 100 },
+    })
+  );
+  const session = chargedSession('cs_test_replay', '44', 'usd', 10000);
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok && first.applied.alreadyApplied, false);
+  db.row.amount_paid = 0;
+  db.row.invoice_data = { payment_currency: 'jpy', payment_amount_minor: 1 };
+  const res = await runConfirmInvoice('cs_test_replay', {
+    serviceRole: true,
+    writer: db.writer as never,
+    retrieve: async () => session,
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.alreadyApplied, true);
+  assert.equal(db.creditWrites, 1);
+});
+
+test('no_payment_required is logged and not credited', async () => {
+  const db = memoryInvoice(openInvoice());
+  const warnings: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '));
+  };
+  try {
+    const result = await applyInvoiceCheckoutSession({
+      writer: db.writer as never,
+      session: { ...chargedSession('cs_test_free', '44', 'usd', 10000), payment_status: 'no_payment_required' },
+    });
+    assert.equal(result.ok, false);
+    if (!result.ok) assert.equal(result.reason, 'no_payment_required');
+    assert.equal(db.creditWrites, 0);
+    assert.equal(warnings.some((line) => line.includes('no_payment_required')), true);
+  } finally {
+    console.warn = original;
+  }
 });

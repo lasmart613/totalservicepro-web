@@ -268,6 +268,7 @@ test('a personal payee changes only the check line for any user and any organiza
     applicationFeeCents: 0,
     organizationId: 77,
     amountCents: 8000,
+    currency: 'usd',
     description: 'Invoice INV-9',
     invoiceId: 9,
     invoiceNumber: 'INV-9',

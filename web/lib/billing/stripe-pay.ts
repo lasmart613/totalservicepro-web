@@ -25,6 +25,7 @@ import {
   type StripeConnectPrompt,
 } from './stripe-connect.ts';
 import { classifyCheckoutExpire } from './void-invoice.ts';
+import { checkoutCurrencyCode, minorUnitsMeetMinimum } from './stripe-currency.ts';
 import { publicSiteOrigin } from '../site-origin.ts';
 
 export const STRIPE_SECRET_ENV_NAMES = ['STRIPE_SECRET_KEY', 'STRIPE_SECRET'] as const;
@@ -155,11 +156,12 @@ export type InvoicePayLinkResult = {
 export function buildLegacyInvoiceCheckoutParams(
   input: InvoicePayLinkInput
 ): URLSearchParams | null {
+  const currency = checkoutCurrencyCode(input.currency);
+  if (!currency) return null;
   const amount = Math.round(Number(input.amountCents) || 0);
-  if (amount < 50) return null;
+  if (!minorUnitsMeetMinimum(amount, currency)) return null;
 
   const site = stripeSiteOrigin();
-  const currency = (input.currency || 'usd').toLowerCase();
   const desc =
     input.description ||
     `Invoice ${input.invoiceNumber || ''}`.trim() ||
@@ -170,10 +172,14 @@ export function buildLegacyInvoiceCheckoutParams(
   params.set('success_url', `${site}/invoice-paid?session_id={CHECKOUT_SESSION_ID}`);
   params.set('cancel_url', `${site}/invoice-paid?canceled=1`);
   params.set('metadata[kind]', 'invoice_pay');
+  params.set('metadata[charge_currency]', currency);
+  params.set('metadata[charge_amount_minor]', String(amount));
   if (input.paymentKind) {
     params.set('metadata[payment_kind]', input.paymentKind);
     params.set('payment_intent_data[metadata][payment_kind]', input.paymentKind);
   }
+  params.set('payment_intent_data[metadata][charge_currency]', currency);
+  params.set('payment_intent_data[metadata][charge_amount_minor]', String(amount));
   params.set('line_items[0][quantity]', '1');
   params.set('line_items[0][price_data][currency]', currency);
   params.set('line_items[0][price_data][unit_amount]', String(amount));
@@ -205,11 +211,12 @@ export function buildLegacyInvoiceCheckoutParams(
 export function buildInvoiceCheckoutParams(input: InvoicePayLinkInput): URLSearchParams | null {
   const accountId = normalizeStripeAccountId(input.destinationAccountId);
   if (!accountId || !input.payoutStatus) return null;
+  const currency = checkoutCurrencyCode(input.currency);
+  if (!currency) return null;
   const amount = Math.round(Number(input.amountCents) || 0);
-  if (amount < 50) return null;
+  if (!minorUnitsMeetMinimum(amount, currency)) return null;
 
   const site = stripeSiteOrigin();
-  const currency = (input.currency || 'usd').toLowerCase();
   const desc =
     input.description ||
     `Invoice ${input.invoiceNumber || ''}`.trim() ||
@@ -222,10 +229,14 @@ export function buildInvoiceCheckoutParams(input: InvoicePayLinkInput): URLSearc
   params.set('success_url', `${site}/invoice-paid?session_id={CHECKOUT_SESSION_ID}`);
   params.set('cancel_url', `${site}/invoice-paid?canceled=1`);
   params.set('metadata[kind]', 'invoice_pay');
+  params.set('metadata[charge_currency]', currency);
+  params.set('metadata[charge_amount_minor]', String(amount));
   if (input.paymentKind) {
     params.set('metadata[payment_kind]', input.paymentKind);
     params.set('payment_intent_data[metadata][payment_kind]', input.paymentKind);
   }
+  params.set('payment_intent_data[metadata][charge_currency]', currency);
+  params.set('payment_intent_data[metadata][charge_amount_minor]', String(amount));
   params.set('line_items[0][quantity]', '1');
   params.set('line_items[0][price_data][currency]', currency);
   params.set('line_items[0][price_data][unit_amount]', String(amount));
@@ -274,12 +285,21 @@ function connectRefusal(destinationAccountId: string): InvoiceCheckoutOutcome {
 export async function createInvoiceCheckoutSession(
   input: InvoicePayLinkInput
 ): Promise<InvoiceCheckoutOutcome> {
+  const currency = checkoutCurrencyCode(input.currency);
+  if (!currency) {
+    return {
+      ok: false,
+      code: 'unsupported_currency',
+      message: 'Invoice currency is missing or not supported, so no pay link was created.',
+      prompt: null,
+    };
+  }
   const amount = Math.round(Number(input.amountCents) || 0);
-  if (amount < 50) {
+  if (!minorUnitsMeetMinimum(amount, currency)) {
     return {
       ok: false,
       code: 'amount_too_small',
-      message: 'Amount due now is under $0.50 — no Stripe pay link added.',
+      message: `Amount due now is below the Stripe minimum for ${currency.toUpperCase()}, so no pay link was created.`,
       prompt: null,
     };
   }

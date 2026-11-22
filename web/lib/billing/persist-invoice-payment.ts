@@ -8,8 +8,10 @@ import {
   checkoutLooksLikeInvoicePay,
   invoiceSessionClaimFilter,
   money2,
+  parseInvoiceData,
   type InvoicePaymentRow,
 } from './apply-invoice-payment.ts';
+import { checkoutCurrencyCode, currencyMajorScale, fromStripeMinorUnits } from './stripe-currency.ts';
 import type { StripeObject } from './stripe-subscription.ts';
 import { formatOrgMoney } from '../money-format.ts';
 import { loadOrgMoneyPrefs } from '../org-money.ts';
@@ -60,6 +62,7 @@ export const INVOICE_PAY_WEBHOOK_STATUS = {
   not_complete: 200,
   no_payment_required: 200,
   currency_mismatch: 200,
+  amount_mismatch: 200,
   missing_invoice_id: 200,
   invoice_mismatch: 200,
   bad_amount: 200,
@@ -121,6 +124,9 @@ export function invoiceCheckoutWebhookResult(
   // Unknown reasons stay on 500 so Stripe retries. Only the explicit list is 200.
   const status = known ?? 500;
   if (status === 500) return { status, body: { error: classified } };
+  if (classified === 'currency_mismatch' || classified === 'amount_mismatch') {
+    return { status: 200, body: { ok: true, review: classified, kind: 'invoice' } };
+  }
   return { status: 200, body: { ok: true, ignored: classified, kind: 'invoice' } };
 }
 
@@ -159,28 +165,111 @@ function readClaim(data: unknown): PaymentClaim | null {
   return null;
 }
 
+type StoredCharge =
+  | { kind: 'absent' }
+  | { kind: 'ready'; currency: string; minor: number }
+  | { kind: 'conflict' };
+
+function positiveInteger(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isInteger(n) || n <= 0) return null;
+  return n;
+}
+
+/** Amount and currency saved when the Checkout session was created. */
+export function readStoredCheckoutCharge(
+  metadata: Record<string, string>,
+  invoiceData: unknown
+): StoredCharge {
+  const data = parseInvoiceData(invoiceData);
+  const metaCurrency = checkoutCurrencyCode(metadata.charge_currency);
+  const metaMinor = positiveInteger(metadata.charge_amount_minor);
+  const dataCurrency = checkoutCurrencyCode(data.payment_currency);
+  const dataMinor = positiveInteger(data.payment_amount_minor);
+  const metaReady = Boolean(metaCurrency && metaMinor);
+  const dataReady = Boolean(dataCurrency && dataMinor);
+  if (metaReady && dataReady && (metaCurrency !== dataCurrency || metaMinor !== dataMinor)) {
+    return { kind: 'conflict' };
+  }
+  if (metaReady && metaCurrency && metaMinor) return { kind: 'ready', currency: metaCurrency, minor: metaMinor };
+  if (dataReady && dataCurrency && dataMinor) return { kind: 'ready', currency: dataCurrency, minor: dataMinor };
+  return { kind: 'absent' };
+}
+
+async function recordedCheckoutSession(
+  writer: SupabaseClient,
+  sessionId: string
+): Promise<{ invoiceId: string; outcome: string } | null> {
+  const { data, error } = await writer
+    .from('service_invoice_stripe_payments')
+    .select('invoice_id, outcome')
+    .eq('session_id', sessionId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const invoiceId = data.invoice_id == null ? '' : String(data.invoice_id);
+  if (!invoiceId) return null;
+  return { invoiceId, outcome: String(data.outcome || 'credited') };
+}
+
+async function recordChargeMismatch(
+  writer: SupabaseClient,
+  row: InvoicePaymentRow,
+  sessionId: string,
+  reason: 'currency_mismatch' | 'amount_mismatch',
+  detail: Record<string, unknown>
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const data = parseInvoiceData(row.invoice_data);
+  const existing = data[STRIPE_PAYMENT_CONFLICT_KEY];
+  const list = Array.isArray(existing) ? [...existing] : existing ? [existing] : [];
+  const seen = list.some(
+    (entry) =>
+      entry &&
+      typeof entry === 'object' &&
+      String((entry as { sessionId?: unknown }).sessionId || '') === sessionId &&
+      String((entry as { reason?: unknown }).reason || '') === reason
+  );
+  if (!seen) {
+    list.push({ reason, sessionId, at: new Date().toISOString(), ...detail });
+    data[STRIPE_PAYMENT_CONFLICT_KEY] = list;
+    const { error } = await writer
+      .from('service_invoices')
+      .update({ invoice_data: data })
+      .eq('id', row.id)
+      .select('id')
+      .maybeSingle();
+    if (error) return { ok: false, reason: classifyInvoicePayFailure(error.message || 'update_failed') };
+  }
+  return { ok: true };
+}
+
 export async function applyInvoiceCheckoutSession(input: {
   writer: SupabaseClient;
   session: StripeObject;
 }): Promise<{ ok: true; applied: AppliedInvoicePayment } | { ok: false; reason: string }> {
   const session = input.session;
   if (!checkoutLooksLikeInvoicePay(session)) return { ok: false, reason: 'not_invoice_checkout' };
-  if (String(session.payment_status || '') !== 'paid') return { ok: false, reason: 'not_paid' };
+  const paymentStatus = String(session.payment_status || '');
+  const m = meta(session);
+  const earlyId = String(m.invoice_id || session.client_reference_id || '').trim();
+  const earlySession = String(session.id || '').trim();
+  // A Checkout session with no charge is not a payment. It is logged and not
+  // credited, and it is not written as a review row. Stripe should not retry it.
+  if (paymentStatus === 'no_payment_required') {
+    console.warn('[billing] invoice checkout has no_payment_required; not credited', {
+      invoiceId: earlyId,
+      sessionId: earlySession,
+    });
+    return { ok: false, reason: 'no_payment_required' };
+  }
+  if (paymentStatus !== 'paid') return { ok: false, reason: 'not_paid' };
   if (String(session.status || '') !== 'complete') return { ok: false, reason: 'not_complete' };
 
-  const m = meta(session);
   const target = checkoutBelongsToInvoice({ metadata: m, client_reference_id: session.client_reference_id });
   if (!target.ok) return target;
   const invoiceId = target.invoiceId;
 
   const sessionId = String(session.id || '').trim();
   if (!invoiceSessionClaimFilter(sessionId)) return { ok: false, reason: 'bad_session_id' };
-
-  const currency = String(session.currency || '').trim().toLowerCase();
-  if (currency && currency !== 'usd') return { ok: false, reason: 'currency_mismatch' };
-
-  const amountCents = Number(session.amount_total);
-  if (!Number.isFinite(amountCents) || amountCents < 50) return { ok: false, reason: 'bad_amount' };
   const invoiceIdNum = Number(invoiceId);
   if (!Number.isSafeInteger(invoiceIdNum)) return { ok: false, reason: 'invoice_mismatch' };
 
@@ -189,11 +278,71 @@ export async function applyInvoiceCheckoutSession(input: {
   const row = loaded.row;
   if (String(row.id) !== invoiceId) return { ok: false, reason: 'invoice_mismatch' };
 
+  const recorded = await recordedCheckoutSession(input.writer, sessionId);
+  if (recorded) {
+    if (recorded.invoiceId !== String(row.id) && recorded.invoiceId !== invoiceId) {
+      return { ok: false, reason: 'invoice_mismatch' };
+    }
+    if (recorded.outcome === 'credited') {
+      return {
+        ok: true,
+        applied: {
+          invoiceId,
+          status: String(row.status || 'paid'),
+          amountPaid: money2(Number(row.amount_paid) || 0),
+          alreadyApplied: true,
+        },
+      };
+    }
+    if (
+      recorded.outcome === 'overpaid_not_credited' ||
+      recorded.outcome === 'possibly_already_credited' ||
+      recorded.outcome === 'currency_mismatch' ||
+      recorded.outcome === 'amount_mismatch'
+    ) {
+      return { ok: false, reason: recorded.outcome };
+    }
+  }
+
+  const sessionCurrency = checkoutCurrencyCode(session.currency) || (session.currency ? null : 'usd');
+  const amountTotal = Number(session.amount_total);
+  const stored = readStoredCheckoutCharge(m, row.invoice_data);
+  let mismatch: 'currency_mismatch' | 'amount_mismatch' | null = null;
+  if (!sessionCurrency || !Number.isInteger(amountTotal) || amountTotal <= 0) {
+    mismatch = sessionCurrency ? 'amount_mismatch' : 'currency_mismatch';
+  } else if (stored.kind === 'conflict') {
+    mismatch = 'currency_mismatch';
+  } else if (stored.kind === 'ready') {
+    if (sessionCurrency !== stored.currency) mismatch = 'currency_mismatch';
+    else if (amountTotal !== stored.minor) mismatch = 'amount_mismatch';
+  }
+  const chargeCurrency = sessionCurrency || 'usd';
+  const majorAmount = Number.isInteger(amountTotal)
+    ? fromStripeMinorUnits(amountTotal, chargeCurrency)
+    : Number.NaN;
+  if (mismatch) {
+    console.error('[billing] invoice payment not credited', {
+      reason: mismatch,
+      invoiceId,
+      sessionId,
+      sessionCurrency: sessionCurrency || String(session.currency ?? ''),
+      amountTotal,
+      stored,
+    });
+    const recordedReview = await recordChargeMismatch(input.writer, row, sessionId, mismatch, {
+      sessionCurrency: sessionCurrency || String(session.currency ?? ''),
+      amountTotal: Number.isFinite(amountTotal) ? amountTotal : null,
+    });
+    if (!recordedReview.ok) return recordedReview;
+    return { ok: false, reason: mismatch };
+  }
+
+  const roundedMajor = Number(majorAmount.toFixed(currencyMajorScale(chargeCurrency)));
   const { data, error } = await input.writer.rpc('apply_service_invoice_stripe_payment', {
     p_invoice_id: invoiceIdNum,
     p_session_id: sessionId,
-    p_amount: money2(amountCents / 100),
-    p_currency: currency || null,
+    p_amount: roundedMajor,
+    p_currency: chargeCurrency,
     p_extra: invoicePayoutRecord(m),
   });
   if (error) {
@@ -201,7 +350,7 @@ export async function applyInvoiceCheckoutSession(input: {
     return { ok: false, reason: classifyInvoicePayFailure(error.message || 'update_failed') };
   }
   const claim = readClaim(data);
-  const sessionAmount = money2(Number(claim?.session_amount) || amountCents / 100);
+  const sessionAmount = money2(Number(claim?.session_amount) || roundedMajor);
   if (claim?.ok === true && claim.reason === 'possibly_already_credited') {
     console.warn('[billing] Checkout session may already have been credited; not applied again', {
       invoiceId,
@@ -242,7 +391,7 @@ export async function applyInvoiceCheckoutSession(input: {
   const status = String(claim.status || row.status || 'paid');
   const amountPaid = money2(Number(claim.amount_paid) || 0);
   if (claim.claimed) {
-    await notifyShopOfPayment(input.writer, row, status, money2(amountCents / 100), 'payment', 0, {
+    await notifyShopOfPayment(input.writer, row, status, roundedMajor, 'payment', 0, {
       paid: amountPaid,
       total: money2(Number(row.total) || 0),
     });
