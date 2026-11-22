@@ -123,10 +123,12 @@ async function callFile(opts: {
   body: { manual_id?: number; storage_path?: string };
   inLibrary?: boolean;
   freeIncomplete?: boolean;
+  signedPath?: string;
 }) {
   const restoreEnv = installTestEnv();
   const previousFetch = globalThis.fetch;
   const calls: string[] = [];
+  const signedPaths: string[] = [];
   (globalThis as { __manualFileClient?: () => unknown }).__manualFileClient = () =>
     clientFor(opts.profile, opts.manual);
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -134,7 +136,8 @@ async function callFile(opts: {
     calls.push(url);
     if (url.endsWith('/functions/v1/get-manual-url')) {
       const sent = JSON.parse(String(init?.body || '{}')) as { storage_path?: string; manual_id?: number };
-      assert.equal(sent.storage_path, opts.body.storage_path);
+      signedPaths.push(String(sent.storage_path ?? ''));
+      assert.equal(sent.storage_path, opts.signedPath ?? opts.body.storage_path);
       assert.equal(sent.manual_id, opts.body.manual_id);
       return new Response(
         JSON.stringify({
@@ -154,7 +157,7 @@ async function callFile(opts: {
   try {
     const { POST } = await import('../app/api/manuals/file/route.ts');
     const res = await POST(request(opts.body));
-    return { res, calls };
+    return { res, calls, signedPaths };
   } finally {
     globalThis.fetch = previousFetch;
     delete (globalThis as { __manualFileClient?: unknown }).__manualFileClient;
@@ -212,6 +215,85 @@ test('a covered path still requires the manual to be in the library', async () =
     free_incomplete: true,
   });
   assert.deepEqual(calls, ['https://manuals-file.test/functions/v1/get-manual-url']);
+});
+
+const FOLDER = 'shared/qa/fixture/12';
+const CHAPTER = `${FOLDER}/ch1.pdf`;
+const FOLDER_ROW = {
+  id: 9002,
+  brand: 'QA',
+  title: 'QA fixture folder',
+  model: 'QA-12',
+  storage_path: FOLDER,
+  doc_kind: 'service',
+  is_folder: true,
+  entry_file_path: CHAPTER,
+  chapter_metadata: [{ storage_path: CHAPTER }],
+  published: true,
+};
+
+test('traversal with ../ and %2e%2e is refused before signing', async () => {
+  const paths = [
+    `${FOLDER}/../13/secret.pdf`,
+    `${FOLDER}/%2e%2e/%2e%2e/other/secret.pdf`,
+    '../secret.pdf',
+  ];
+  for (const storage_path of paths) {
+    const { res, calls } = await callFile({
+      profile: SERVICE_PROFILE,
+      manual: FOLDER_ROW,
+      body: { manual_id: 9002, storage_path },
+    });
+    assert.equal(res.status, 403, storage_path);
+    assert.deepEqual(await res.json(), { error: MANUAL_PATH_NOT_COVERED });
+    assert.deepEqual(calls, []);
+  }
+});
+
+test('query, fragment, and encoded-slash injection are not forwarded raw', async () => {
+  for (const storage_path of [`${CHAPTER}?x=../../13`, `${CHAPTER}#section`]) {
+    const { res, calls, signedPaths } = await callFile({
+      profile: SERVICE_PROFILE,
+      manual: FOLDER_ROW,
+      body: { manual_id: 9002, storage_path },
+      signedPath: CHAPTER,
+    });
+    assert.equal(res.status, 200, storage_path);
+    assert.equal(await res.text(), PDF);
+    assert.deepEqual(signedPaths, [CHAPTER]);
+    assert.equal(calls.includes(SIGNED), true);
+  }
+
+  const escaped = `${FOLDER}/ch1.pdf%2f..%2f..%2f13%2fsecret.pdf`;
+  const denied = await callFile({
+    profile: SERVICE_PROFILE,
+    manual: FOLDER_ROW,
+    body: { manual_id: 9002, storage_path: escaped },
+  });
+  assert.equal(denied.res.status, 403);
+  assert.deepEqual(await denied.res.json(), { error: MANUAL_PATH_NOT_COVERED });
+  assert.deepEqual(denied.calls, []);
+});
+
+test('folder 12 covers its own child and refuses sibling 123', async () => {
+  const child = `${FOLDER}/notes/extra.pdf`;
+  const opened = await callFile({
+    profile: SERVICE_PROFILE,
+    manual: FOLDER_ROW,
+    body: { manual_id: 9002, storage_path: child },
+    signedPath: child,
+  });
+  assert.equal(opened.res.status, 200);
+  assert.deepEqual(opened.signedPaths, [child]);
+
+  const sibling = await callFile({
+    profile: SERVICE_PROFILE,
+    manual: FOLDER_ROW,
+    body: { manual_id: 9002, storage_path: 'shared/qa/fixture/123/ch1.pdf' },
+  });
+  assert.equal(sibling.res.status, 403);
+  assert.deepEqual(await sibling.res.json(), { error: MANUAL_PATH_NOT_COVERED });
+  assert.deepEqual(sibling.calls, []);
 });
 
 test('a user who cannot open manuals is 403', async () => {
