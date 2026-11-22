@@ -246,6 +246,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Strip ?query and #fragment, then normalize once. The cover check and
+    // get-manual-url both receive this key, so a query cannot ride along on
+    // a path the row covers.
+    const asked = storagePath ? cleanStoragePath(storagePath) : storagePath;
     if (storagePath) {
       const reader = hasServiceRole() ? getSupabaseAdmin() : caller.supabase;
       const scoped = await loadCatalogRow(
@@ -253,7 +257,9 @@ export async function POST(req: NextRequest) {
         manualId ?? null,
         manualId == null ? storagePath : null,
       );
-      if (scoped && !catalogCoversPath(scoped, storagePath)) {
+      // loadCatalogRow returns { row, unpublished }. Coverage uses the catalog
+      // row; a missing row fails closed and is not signed.
+      if (!scoped.row || !catalogCoversPath(scoped.row, asked)) {
         return NextResponse.json({ error: MANUAL_PATH_NOT_COVERED }, { status: 403 });
       }
     }
@@ -263,7 +269,7 @@ export async function POST(req: NextRequest) {
       anon: caller.anon,
       token: caller.token,
       manualId,
-      storagePath,
+      storagePath: asked,
     });
     // Library membership is required for every manual, including incomplete
     // ones and responses that still carry a signed URL with in_library false.
