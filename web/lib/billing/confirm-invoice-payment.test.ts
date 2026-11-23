@@ -77,6 +77,9 @@ function memoryInvoice(initial: Record<string, unknown>) {
           return api;
         },
         maybeSingle: async () => {
+          if (table === 'organizations') {
+            return { data: { id: row.organization_id, currency_code: row.currency_code ?? null }, error: null };
+          }
           if (table !== 'service_invoices') return { data: null, error: null };
           if (filters.id != null && String(filters.id) !== String(row.id)) return { data: null, error: null };
           if (op === 'select') {
