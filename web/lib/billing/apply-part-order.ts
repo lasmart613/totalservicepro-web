@@ -11,7 +11,9 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { supabaseMarketplaceOrderAlertLedger } from '../marketplace/stuck-order-alert-ledger.ts';
 import { notifyStuckMarketplaceOrder, type StuckOrderAlertInput } from '../marketplace/stuck-orders.ts';
+import { hasServiceRole } from '../supabase/admin.ts';
 import { partOrderFromCheckoutSession, type PartOrderDraft } from './stripe-connect.ts';
 
 /** Paid order that did not get the stock. A person refunds it; the webhook must not fulfill it later. */
@@ -214,7 +216,13 @@ export async function applyPartCheckoutSession(input: {
 }): Promise<PartOrderApplyResult> {
   const parsed = partOrderFromCheckoutSession(input.session);
   if (!parsed.ok) return { ok: false, reason: parsed.reason, retry: false };
-  const notify = input.notifyStuck ?? notifyStuckMarketplaceOrder;
+  const notify =
+    input.notifyStuck ??
+    ((alert: StuckOrderAlertInput) =>
+      notifyStuckMarketplaceOrder({
+        ...alert,
+        ...(hasServiceRole() ? { ledger: supabaseMarketplaceOrderAlertLedger() } : {}),
+      }));
 
   const existing = await findExisting(input.writer, parsed.order.stripeCheckoutSessionId);
   if (existing.error) {

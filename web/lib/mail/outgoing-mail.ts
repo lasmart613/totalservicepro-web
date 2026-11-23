@@ -79,14 +79,18 @@ export async function postResendEmail(opts: {
   fetchImpl?: ResendFetch;
   signal?: AbortSignal;
   env?: EnvLike;
+  /** Resend drops a second POST that repeats this key. */
+  idempotencyKey?: string;
 }): Promise<Response> {
   const fetchImpl = opts.fetchImpl ?? (globalThis.fetch as ResendFetch);
   const message = withOpsBcc(opts.message, opts.env);
+  const key = String(opts.idempotencyKey || '').trim();
   return fetchImpl('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${opts.apiKey}`,
       'Content-Type': 'application/json',
+      ...(key ? { 'Idempotency-Key': key } : {}),
     },
     body: JSON.stringify(message),
     signal: opts.signal,
