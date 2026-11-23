@@ -14,6 +14,12 @@ import { loadServiceHistoryForLaser, loadServiceRequestsForLaser } from '@/lib/e
 import { StorageImage } from '@/components/StorageImage';
 import { LaserHistoryAccessPanel } from '@/components/LaserHistoryAccessPanel';
 import { formatDisplayDay, parseDisplayDate } from '@/lib/i18n/format-date';
+import {
+  EQUIPMENT_PHOTO_MAX_BYTES,
+  LISTING_IMAGE_ACCEPT,
+  LISTING_IMAGE_UPLOAD_FAILED,
+  inspectListingImage,
+} from '@/lib/marketplace/listing-image';
 
 type Laser = {
   id: number;
@@ -151,33 +157,20 @@ export default function LaserProfilePage() {
 
   async function uploadPhoto(file: File): Promise<string | null> {
     if (!userId || !laser) return null;
-    const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-    const path = `equipment/${orgId || 'x'}/${laser.id}_${Date.now()}.${ext}`;
-    // Prefer public buckets with authenticated write (equipment-photos created for this feature)
-    const buckets = ['equipment-photos', 'part-images', 'company-assets', 'logos'];
-    const errors: string[] = [];
-    for (const bucket of buckets) {
-      try {
-        const { error } = await supabase.storage.from(bucket).upload(path, file, {
-          upsert: true,
-          contentType: file.type || 'image/jpeg',
-        });
-        if (error) {
-          errors.push(`${bucket}: ${error.message}`);
-          continue;
-        }
-        const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-        if (data?.publicUrl) return data.publicUrl;
-      } catch (e: any) {
-        errors.push(`${bucket}: ${e?.message || e}`);
-      }
+    if (orgId == null || orgId === '' || !/^[1-9][0-9]{0,17}$/.test(String(orgId))) {
+      throw new Error('No organization linked to your profile.');
     }
-    console.warn('photo upload failed', errors);
-    throw new Error(
-      errors[0]
-        ? `Could not upload photo: ${errors[0]}`
-        : 'Could not upload photo (storage bucket)'
-    );
+    const inspected = await inspectListingImage(file, EQUIPMENT_PHOTO_MAX_BYTES);
+    if (!inspected.ok) throw new Error(inspected.error);
+    const path = `${orgId}/${laser.id}_${Date.now()}.${inspected.extension}`;
+    const { error } = await supabase.storage.from('equipment-photos').upload(path, file, {
+      upsert: false,
+      contentType: inspected.contentType,
+    });
+    if (error) throw new Error(LISTING_IMAGE_UPLOAD_FAILED);
+    const { data } = supabase.storage.from('equipment-photos').getPublicUrl(path);
+    if (!data?.publicUrl) throw new Error(LISTING_IMAGE_UPLOAD_FAILED);
+    return data.publicUrl;
   }
 
   async function saveEdit() {
@@ -395,8 +388,22 @@ export default function LaserProfilePage() {
                 <input
                   className="input"
                   type="file"
-                  accept="image/*"
-                  onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+                  accept={LISTING_IMAGE_ACCEPT}
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0] || null;
+                    if (!file) {
+                      setPhotoFile(null);
+                      return;
+                    }
+                    const inspected = await inspectListingImage(file, EQUIPMENT_PHOTO_MAX_BYTES);
+                    if (!inspected.ok) {
+                      e.target.value = '';
+                      setPhotoFile(null);
+                      toast.error(inspected.error);
+                      return;
+                    }
+                    setPhotoFile(file);
+                  }}
                 />
               </div>
             </div>

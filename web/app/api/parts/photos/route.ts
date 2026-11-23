@@ -1,13 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { detectListingImage, imageTooLargeMessage, LISTING_IMAGE_REJECTED } from '@/lib/marketplace/listing-image';
 import {
   PART_IMAGE_BUCKET,
   PART_PHOTO_MAX_BYTES,
   PART_PHOTO_MAX_FILES,
   PART_PHOTO_USER_STORED_MAX,
   livePartPhotoQuotaState,
-  partPhotoContentType,
   partPhotoPath,
   partPhotoQuotaAllows,
   partPhotoStoredAllows,
@@ -82,20 +82,20 @@ export async function POST(req: NextRequest) {
   for (let i = 0; i < files.length; i++) {
     const file = files[i];
     if (file.size > PART_PHOTO_MAX_BYTES) {
-      return NextResponse.json({ error: `${file.name} is over 5 MB` }, { status: 400 });
+      return NextResponse.json({ error: imageTooLargeMessage(PART_PHOTO_MAX_BYTES) }, { status: 400 });
     }
-    const contentType = partPhotoContentType(file.name, file.type || '');
-    if (!contentType) {
-      return NextResponse.json({ error: `${file.name} is not an image` }, { status: 400 });
-    }
-    const path = partPhotoPath(userId, i, file.name, now);
     const buffer = Buffer.from(await file.arrayBuffer());
+    const detected = detectListingImage(new Uint8Array(buffer.subarray(0, 16)));
+    if (!detected) {
+      return NextResponse.json({ error: LISTING_IMAGE_REJECTED }, { status: 400 });
+    }
+    const path = partPhotoPath(userId, i, `photo.${detected.extension}`, now);
     const { error } = await admin.storage.from(PART_IMAGE_BUCKET).upload(path, buffer, {
-      contentType,
+      contentType: detected.contentType,
       upsert: false,
     });
     if (error) {
-      console.error('[part-photos]', path, contentType, error.message);
+      console.error('[part-photos]', path, detected.contentType, error.message);
       return NextResponse.json({ error: UPLOAD_ERROR }, { status: 502 });
     }
     const { data } = admin.storage.from(PART_IMAGE_BUCKET).getPublicUrl(path);

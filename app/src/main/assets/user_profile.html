@@ -3,6 +3,7 @@
 <head>
     <!-- Centralized theme system -->
     <script src="theme.js"></script>
+    <script src="image-bytes.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Profile · Total Service Pro</title>
@@ -806,21 +807,20 @@
         const file = event.target.files[0];
         if (!file) return;
 
-        // Validate size (max 2MB)
-        if (file.size > 2 * 1024 * 1024) {
-            showToast('Image must be under 2MB', 'error');
+        const inspected = await tspInspectImage(file, 2 * 1024 * 1024);
+        if (!inspected.ok) {
+            showToast(inspected.error, 'error');
             return;
         }
 
         showToast('Uploading photo...', '');
 
         try {
-            const ext      = file.name.split('.').pop();
-            const path     = `avatars/${currentUser.id}.${ext}`;
+            const path = currentUser.id + '/avatar.' + inspected.extension;
 
             const { error: upErr } = await supabaseClient.storage
                 .from('user-avatars')
-                .upload(path, file, { upsert: true });
+                .upload(path, file, { upsert: true, contentType: inspected.contentType });
 
             if (upErr) throw upErr;
 

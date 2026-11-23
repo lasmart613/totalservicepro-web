@@ -10,6 +10,7 @@ import {
 } from '@/lib/parts-catalog-columns';
 import { listManufacturers } from '@/lib/laser-catalog';
 import { VENDOR_ADD_ERROR, postPartsJson } from '@/lib/part-catalog-manage';
+import { LISTING_IMAGE_ACCEPT, inspectListingImage, isStorageImageError } from '@/lib/marketplace/listing-image';
 
 export const PART_CATEGORIES = PARTS_CATALOG_CATEGORIES;
 
@@ -166,17 +167,14 @@ export function AddPartModal({ onClose, onCreated }: Props) {
     return () => previews.forEach((url) => URL.revokeObjectURL(url));
   }, [previews]);
 
-  function onPickImages(files: FileList | null) {
+  async function onPickImages(files: FileList | null) {
     if (!files?.length) return;
     const next: File[] = [];
     const urls: string[] = [];
     for (const file of Array.from(files).slice(0, 6)) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error(`${file.name} is over 5 MB`);
-        continue;
-      }
-      if (!/^image\/(png|jpe?g|webp|gif)$/i.test(file.type) && !/\.(png|jpe?g|webp|gif)$/i.test(file.name)) {
-        toast.error(`${file.name} is not an image`);
+      const inspected = await inspectListingImage(file);
+      if (!inspected.ok) {
+        toast.error(inspected.error);
         continue;
       }
       next.push(file);
@@ -303,7 +301,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : 'Failed to add part';
       console.error('[parts-catalog] save', raw);
-      toast.error(partCatalogSaveMessage(raw));
+      toast.error(isStorageImageError(raw) ? raw : partCatalogSaveMessage(raw));
     } finally {
       setSaving(false);
     }
@@ -411,7 +409,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
               <input
                 className="input"
                 type="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
+                accept={LISTING_IMAGE_ACCEPT}
                 multiple
                 onChange={(e) => onPickImages(e.target.files)}
               />

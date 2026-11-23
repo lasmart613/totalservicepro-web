@@ -3,6 +3,7 @@
 <head>
     <!-- Centralized theme system -->
     <script src="theme.js"></script>
+    <script src="image-bytes.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Company Profile · Total Service Pro</title>
@@ -545,12 +546,13 @@ function renderLogo(name) {
 async function handleLogoUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
-    if (file.size > 3 * 1024 * 1024) { showToast('Image must be under 3MB', 'error'); return; }
+    const inspected = await tspInspectImage(file, 3 * 1024 * 1024);
+    if (!inspected.ok) { showToast(inspected.error, 'error'); return; }
+    if (!currentProfile || !currentProfile.organization_id) { showToast('No organization linked to your profile.', 'error'); return; }
     showToast('Uploading logo...', '');
     try {
-        const ext  = file.name.split('.').pop();
-        const path = `logos/${currentProfile.organization_id}.${ext}`;
-        const { error } = await supabaseClient.storage.from('company-assets').upload(path, file, { upsert: true });
+        const path = currentProfile.organization_id + '/logo.' + inspected.extension;
+        const { error } = await supabaseClient.storage.from('company-assets').upload(path, file, { upsert: true, contentType: inspected.contentType });
         if (error) throw error;
         const { data: urlData } = supabaseClient.storage.from('company-assets').getPublicUrl(path);
         logoUrl = urlData.publicUrl + '?t=' + Date.now();

@@ -3,6 +3,7 @@
 <head>
     <!-- Centralized theme system -->
     <script src="theme.js"></script>
+    <script src="image-bytes.js"></script>
     <script>
         var _pendingSession=null,_sessionRestored=false;
         (function(){try{const p=new URLSearchParams(window.location.search),enc=p.get('_s');if(enc){const s=JSON.parse(atob(enc));if(s&&s.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return}}const raw=localStorage.getItem('tsp-auth-token');if(raw){const p2=JSON.parse(raw),ss=(p2&&p2.currentSession)?p2.currentSession:(p2&&p2.access_token)?p2:null;if(ss&&ss.access_token)_pendingSession=ss;}}catch(e){}})();
@@ -419,17 +420,23 @@
         }
         container.innerHTML = html;
     }
-    function handlePhotos(e) {
+    async function handlePhotos(e) {
         const files = Array.from(e.target.files);
         const remaining = 6 - uploadedPhotos.length;
-        files.slice(0, remaining).forEach(file => {
-            const reader = new FileReader();
-            reader.onload = ev => {
-                uploadedPhotos.push({ file, preview: ev.target.result });
-                renderPhotoSlots();
-            };
-            reader.readAsDataURL(file);
-        });
+        for (const file of files.slice(0, remaining)) {
+            const inspected = await tspInspectImage(file, 5 * 1024 * 1024);
+            if (!inspected.ok) {
+                showToast(inspected.error, 'error');
+                continue;
+            }
+            const preview = await new Promise(function (resolve) {
+                const reader = new FileReader();
+                reader.onload = function (ev) { resolve(ev.target.result); };
+                reader.readAsDataURL(file);
+            });
+            uploadedPhotos.push({ file, preview });
+            renderPhotoSlots();
+        }
         e.target.value = '';
     }
     function removePhoto(i) {
@@ -449,10 +456,11 @@
             // Upload photos
             const photoPaths = [];
             for (const p of uploadedPhotos) {
-                const ext = p.file.name.split('.').pop();
-                const path = `${currentUser.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-                const { error } = await supabaseClient.storage.from('marketplace-images').upload(path, p.file, { cacheControl: '3600', upsert: false });
-                if (error) { console.log('TSP: upload error:', error.message); continue; }
+                const inspected = await tspInspectImage(p.file, 5 * 1024 * 1024);
+                if (!inspected.ok) throw new Error(inspected.error);
+                const path = currentUser.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2) + '.' + inspected.extension;
+                const { error } = await supabaseClient.storage.from('marketplace-images').upload(path, p.file, { cacheControl: '3600', upsert: false, contentType: inspected.contentType });
+                if (error) throw new Error("Couldn't upload this photo.");
                 photoPaths.push(path);
             }
 

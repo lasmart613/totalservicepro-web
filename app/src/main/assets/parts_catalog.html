@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <script src="theme.js"></script>
+    <script src="image-bytes.js"></script>
     <script>
         // Restore session from URL param (passed during navigation between pages)
         (function() {
@@ -1040,16 +1041,30 @@
         const imgEl = document.getElementById('newPartImage');
         const imgFile = imgEl && imgEl.files && imgEl.files[0];
         if (imgFile && uid) {
-            const ext = (imgFile.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-            const path = 'parts/' + uid + '/' + Date.now() + '.' + ext;
-            const buckets = ['marketplace-images', 'equipment-photos', 'equipment', 'logos'];
-            for (const b of buckets) {
-                const up = await supabaseClient.storage.from(b).upload(path, imgFile, { upsert: true, contentType: imgFile.type || 'image/' + ext });
-                if (!up.error) {
-                    imageUrl = supabaseClient.storage.from(b).getPublicUrl(path).data.publicUrl;
-                    break;
-                }
+            const inspected = await tspInspectImage(imgFile, 5 * 1024 * 1024);
+            if (!inspected.ok) {
+                errEl.textContent = inspected.error;
+                return;
             }
+            const { data: sessionData } = await supabaseClient.auth.getSession();
+            const token = sessionData && sessionData.session && sessionData.session.access_token;
+            if (!token) {
+                errEl.textContent = 'Sign in to add a photo.';
+                return;
+            }
+            const body = new FormData();
+            body.append('file', imgFile);
+            const res = await fetch(partsApiOrigin() + '/api/parts/photos', {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + token },
+                body
+            });
+            const json = await res.json().catch(function () { return {}; });
+            if (!res.ok || !json.urls || !json.urls[0]) {
+                errEl.textContent = json.error || "Couldn't upload this photo.";
+                return;
+            }
+            imageUrl = json.urls[0];
         }
 
         const insert = {
