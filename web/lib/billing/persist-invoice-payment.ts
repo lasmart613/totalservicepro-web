@@ -226,6 +226,15 @@ async function recordChargeMismatch(
   reason: 'currency_mismatch' | 'amount_mismatch',
   detail: Record<string, unknown>
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
+  // A conflict marker can be saved before the payments insert. The payments
+  // row is what means this session was already handled. A retry after a
+  // failed insert must still insert and notify.
+  const recorded = await recordedCheckoutSession(writer, sessionId);
+  if (recorded) {
+    if (recorded.invoiceId !== String(row.id)) return { ok: false, reason: 'invoice_mismatch' };
+    return { ok: true };
+  }
+
   const data = parseInvoiceData(row.invoice_data);
   const existing = data[STRIPE_PAYMENT_CONFLICT_KEY];
   const list = Array.isArray(existing) ? [...existing] : existing ? [existing] : [];
@@ -236,7 +245,7 @@ async function recordChargeMismatch(
       String((entry as { sessionId?: unknown }).sessionId || '') === sessionId &&
       String((entry as { reason?: unknown }).reason || '') === reason
   );
-    if (!seen) {
+  if (!seen) {
     list.push({ reason, sessionId, at: new Date().toISOString(), ...detail });
     data[STRIPE_PAYMENT_CONFLICT_KEY] = list;
     const { error } = await writer
@@ -246,24 +255,25 @@ async function recordChargeMismatch(
       .select('id')
       .maybeSingle();
     if (error) return { ok: false, reason: classifyInvoicePayFailure(error.message || 'update_failed') };
-    const amount = Number(detail.amount);
-    const { error: payErr } = await writer.from('service_invoice_stripe_payments').insert({
-      invoice_id: row.id,
-      session_id: sessionId,
-      amount: Number.isFinite(amount) ? amount : 0,
-      outcome: 'charge_mismatch',
-    });
-    if (payErr && !/duplicate|unique|23505/i.test(payErr.message || '')) {
-      return { ok: false, reason: classifyInvoicePayFailure(payErr.message || 'update_failed') };
-    }
-    await notifyShopOfPayment(
-      writer,
-      row,
-      String(row.status || 'sent'),
-      Number.isFinite(amount) ? amount : 0,
-      'charge_mismatch'
-    );
   }
+  const amount = Number(detail.amount);
+  const { error: payErr } = await writer.from('service_invoice_stripe_payments').insert({
+    invoice_id: row.id,
+    session_id: sessionId,
+    amount: Number.isFinite(amount) ? amount : 0,
+    outcome: 'charge_mismatch',
+  });
+  if (payErr) {
+    if (/duplicate|unique|23505/i.test(payErr.message || '')) return { ok: true };
+    return { ok: false, reason: classifyInvoicePayFailure(payErr.message || 'update_failed') };
+  }
+  await notifyShopOfPayment(
+    writer,
+    row,
+    String(row.status || 'sent'),
+    Number.isFinite(amount) ? amount : 0,
+    'charge_mismatch'
+  );
   return { ok: true };
 }
 
