@@ -287,6 +287,12 @@ INSERT INTO proof (label, ok) VALUES
   ('AFTER anon reads a sold listing image', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/sold.jpg') = 1),
   ('AFTER anon cannot read a draft listing image', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/draft.jpg') = 0),
   ('AFTER anon cannot read an unreferenced or other-seller path', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/secret.jpg') = 0),
+  ('AFTER company public select unchanged', pg_temp.fp('storage.objects', 'Company assets are publicly viewable') = 'ff4a9e1a393148b403a8c54941fe7f3e'),
+  ('AFTER avatar public select unchanged', pg_temp.fp('storage.objects', 'Avatars are publicly viewable') = 'fba55b5b38dc6edfba51d1aa8404069f'),
+  ('AFTER anon still reads legacy logos/ object', pg_temp.see('anon', '', 'company-assets', 'logos/2655.png') = 1),
+  ('AFTER anon still reads legacy avatars/ object', pg_temp.see('anon', '', 'user-avatars', 'avatars/aaaaaaaa-0000-0000-0000-000000000001.jpg') = 1),
+  ('AFTER prior marker records live state a', (SELECT prior = 'a' FROM public.storage_000974_marketplace_prior WHERE id = 1)),
+  ('AFTER anon cannot read the prior marker', NOT has_table_privilege('anon', 'public.storage_000974_marketplace_prior', 'SELECT')),
   ('AFTER other bucket still has no write', NOT pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('other','2655/x.png')$q$));
 
 \ir ../migrations/20261122_000974_storage_bucket_hardening_rollback.sql
@@ -313,7 +319,8 @@ INSERT INTO proof (label, ok) VALUES
   ('ROLLBACK marketplace mime is jpeg/jpg and size NULL', (SELECT allowed_mime_types = ARRAY['image/jpeg','image/jpg']::text[] AND file_size_limit IS NULL AND public IS FALSE FROM storage.buckets WHERE id = 'marketplace-images')),
   ('ROLLBACK listing insert is authenticated', (SELECT polcmd = 'a' AND polroles = ARRAY['authenticated'::regrole]::oid[] FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Authenticated users can upload listing images')),
   ('ROLLBACK public listing select is public', (SELECT polcmd = 'r' AND polroles = ARRAY[0::oid] FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Public can view listing images')),
-  ('ROLLBACK index 0 is back on the listing insert', (SELECT pg_get_expr(polwithcheck, polrelid) LIKE '%[0]%' FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Authenticated users can upload listing images'));
+  ('ROLLBACK index 0 is back on the listing insert', (SELECT pg_get_expr(polwithcheck, polrelid) LIKE '%[0]%' FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Authenticated users can upload listing images')),
+  ('ROLLBACK prior marker dropped', to_regclass('public.storage_000974_marketplace_prior') IS NULL);
 
 \ir ../migrations/20261122_000974_storage_bucket_hardening.sql
 INSERT INTO proof (label, ok) VALUES

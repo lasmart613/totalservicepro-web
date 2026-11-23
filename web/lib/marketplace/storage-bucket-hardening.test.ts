@@ -8,14 +8,19 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '../../supabase');
 const forward = readFileSync(join(root, 'migrations/20261122_000974_storage_bucket_hardening.sql'), 'utf8');
 const rollback = readFileSync(join(root, 'migrations/20261122_000974_storage_bucket_hardening_rollback.sql'), 'utf8');
 const proof = readFileSync(join(root, 'tests/20261122_storage_bucket_hardening.sql'), 'utf8');
+const proofB = readFileSync(join(root, 'tests/20261122_storage_bucket_hardening_after_000970.sql'), 'utf8');
 
 const COMPANY_PRIOR = "ARRAY['image/png','image/jpeg','image/jpg','image/svg+xml','image/webp']::text[]";
 const MARKET_PRIOR = "ARRAY['image/jpeg','image/jpg']::text[]";
 const TARGET = "ARRAY['image/png', 'image/jpeg', 'image/webp']::text[]";
 
-test('000974 guards on the live mime lists and never uses folder index 0', () => {
-  assert.doesNotMatch(forward, /\[0\]/);
-  assert.match(forward, /parts\[1\]/);
+test('000974 guards on live text, the 000970 text, and its own target', () => {
+  const created = forward.slice(forward.indexOf('CREATE OR REPLACE FUNCTION public.storage_caller_owns_prefix'));
+  assert.match(forward, /\[0\]/);
+  assert.match(forward, /\[1\]/);
+  assert.doesNotMatch(created, /\[0\]/);
+  assert.match(created, /parts\[1\]/);
+  assert.match(forward, /storage_000974_marketplace_prior/);
   assert.match(forward, /\(storage\.foldername\(object_name\)\)\[1\]/);
   assert.ok(forward.includes(COMPANY_PRIOR));
   assert.ok(forward.includes(MARKET_PRIOR));
@@ -47,4 +52,9 @@ test('000974 rollback restores the recorded live bucket rows and index 0 policie
   assert.match(proof, /ROLLBACK marketplace mime is jpeg\/jpg and size NULL/);
   assert.match(proof, /2655/);
   assert.doesNotMatch(proof, /\b(153|154|1005|2616|5509|5515|5516|5517)\b/);
+  assert.match(rollback, /storage_000974_marketplace_prior/);
+  assert.match(proofB, /94e71a7c51d1b31e75768e25ffc6187a/);
+  assert.match(proofB, /prior = 'b'/);
+  assert.match(proofB, /000968 then 000970/);
+  assert.doesNotMatch(proofB, /\b(153|154|1005|2616|5509|5515|5516|5517)\b/);
 });

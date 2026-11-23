@@ -56,12 +56,28 @@ SET LOCAL lock_timeout = '5s';
 -- already cannot load this private bucket, and this migration does not change
 -- that.
 --
--- 000968 and 000970 are a separate unapplied PR. Do not apply them if this
--- migration is applied: 000968 would no longer see {image/jpeg,image/jpg},
--- and 000970 would recreate the three write policies without the owner-prefix
--- helper. Apply 000974 on its own, in one transaction, then deploy the app.
--- Until the app is deployed, company-assets uploads that still use logos/
--- fail closed.
+-- marketplace-images accepts exactly one of these priors, and raises otherwise.
+-- The bucket row and the three write policies must agree; a mix is refused.
+--   (a) live, read 2026-11-23: mime {image/jpeg,image/jpg}, file_size_limit
+--       NULL, write policies use (storage.foldername(name))[0].
+--   (b) after 000968 then 000970 (frozen #402, cursor/marketplace-image-mime-b81b
+--       @ b5d2f146): mime {image/png,image/jpeg,image/webp}, file_size_limit
+--       5242880, write policies use (storage.foldername(name))[1] =
+--       auth.uid()::text. pg_get_expr of those policies is
+--       ((bucket_id = 'marketplace-images'::text) AND
+--        ((storage.foldername(name))[1] = (auth.uid())::text)).
+--       000970 does not change "Public can view listing images".
+--   (target) this migration already applied: png/jpeg/webp, 5 MB, owner
+--       policies, and the private marker row still present.
+-- The first apply records (a) or (b) in public.storage_000974_marketplace_prior
+-- (one row, RLS on, no grants to anon or authenticated). Rollback reads that
+-- row and restores that marketplace state. It does not guess.
+--
+-- Release when #402 is in the package: apply 000968, then 000970, merge #402,
+-- then this file, then deploy the app. If #402 has not shipped, this file
+-- still applies on live state (a); do not skip 000968 or 000970 when they
+-- are already in the release. One transaction. Until the app is deployed,
+-- company-assets uploads that still use logos/ fail closed.
 --
 -- Rollback: 20261122_000974_storage_bucket_hardening_rollback.sql
 -- Proof: web/supabase/tests/20261122_storage_bucket_hardening.sql
@@ -85,16 +101,18 @@ BEGIN
   END IF;
 END $$;
 
--- Drift guards. A replaced policy must be absent, the recorded live form, or
--- (for the listing SELECT, which keeps its name) already this migration.
+-- Drift guards. Non-marketplace policies must match the live fingerprint.
+-- Marketplace write policies must match live text (a) or the exact 000970
+-- text (b). The public listing SELECT must be the live blanket text or
+-- already this migration.
 DO $$
 DECLARE
   r record;
+  expr text;
+  a_expr text := '((bucket_id = ''marketplace-images''::text) AND ((storage.foldername(name))[0] = (auth.uid())::text))';
+  b_expr text := '((bucket_id = ''marketplace-images''::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))';
+  blanket text := '(bucket_id = ''marketplace-images''::text)';
   expected jsonb := jsonb_build_object(
-    'Authenticated users can upload listing images', 'bf674bf17bee483a7d413de54f481767',
-    'Users can delete own listing images', '28eeb053229caa1fb44b0cd85ee4e944',
-    'Users can update own listing images', '28eeb053229caa1fb44b0cd85ee4e944',
-    'Public can view listing images', '3d4d064c1a4c4114021b519a1855db36',
     'Users can update own avatar', 'fba55b5b38dc6edfba51d1aa8404069f',
     'Users can upload own avatar', 'a22e713d7957d5a86dce3772bc9ab998',
     'Users can manage their own logos', '0e7f201834ef33417b800bb66227645c',
@@ -108,15 +126,38 @@ BEGIN
     SELECT pol.polname::text AS name,
            md5(coalesce(pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), '') || '|' ||
                coalesce(pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid), '')) AS fp,
-           coalesce(pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), '') AS qual
+           coalesce(pg_catalog.pg_get_expr(pol.polqual, pol.polrelid), '') AS qual,
+           coalesce(pg_catalog.pg_get_expr(pol.polwithcheck, pol.polrelid), '') AS chk
     FROM pg_catalog.pg_policy pol
     WHERE pol.polrelid = 'storage.objects'::regclass
-      AND pol.polname IN (SELECT jsonb_object_keys(expected))
+      AND (
+        pol.polname IN (SELECT jsonb_object_keys(expected))
+        OR pol.polname IN (
+          'Authenticated users can upload listing images',
+          'Users can delete own listing images',
+          'Users can update own listing images',
+          'Public can view listing images'
+        )
+      )
   LOOP
-    IF r.fp = (expected ->> r.name) THEN
-      CONTINUE;
+    IF r.name IN (
+      'Authenticated users can upload listing images',
+      'Users can delete own listing images',
+      'Users can update own listing images'
+    ) THEN
+      expr := CASE WHEN r.chk <> '' THEN r.chk ELSE r.qual END;
+      IF expr = a_expr OR expr = b_expr THEN
+        CONTINUE;
+      END IF;
+      RAISE EXCEPTION '000974: marketplace policy % is not live [0] text or 000970 [1] text (%); refusing', r.name, expr;
     END IF;
-    IF r.name = 'Public can view listing images' AND r.qual LIKE '%marketplace_image_public_read(%' THEN
+    IF r.name = 'Public can view listing images' THEN
+      IF r.qual = blanket OR r.qual LIKE '%marketplace_image_public_read(%' THEN
+        CONTINUE;
+      END IF;
+      RAISE EXCEPTION '000974: Public can view listing images is not the live text or the 000974 predicate (%); refusing', r.qual;
+    END IF;
+    IF r.fp = (expected ->> r.name) THEN
       CONTINUE;
     END IF;
     RAISE EXCEPTION '000974: storage.objects policy % differs from the recorded live form (%); refusing to replace', r.name, r.fp;
@@ -186,7 +227,94 @@ BEGIN
         OR (b.file_size_limit = 5242880 AND b.allowed_mime_types IS NOT DISTINCT FROM ARRAY['image/png','image/jpeg','image/webp']::text[])
       )
   ) THEN
-    RAISE EXCEPTION '000974: marketplace-images public/mime/size differs from the recorded live value ({image/jpeg,image/jpg}, no size limit) or the 000974 target';
+    RAISE EXCEPTION '000974: marketplace-images public/mime/size is not live (a), post-000968 (b), or the 000974 target';
+  END IF;
+END $$;
+
+-- Record which marketplace prior we found. Re-run keeps the original row.
+-- A mix (for example [1] policies with the live MIME list) raises.
+DO $$
+DECLARE
+  ins text;
+  upd text;
+  del text;
+  pub text;
+  q text;
+  c text;
+  marker text;
+  detected text;
+  mime text[];
+  lim bigint;
+  a_expr text := '((bucket_id = ''marketplace-images''::text) AND ((storage.foldername(name))[0] = (auth.uid())::text))';
+  b_expr text := '((bucket_id = ''marketplace-images''::text) AND ((storage.foldername(name))[1] = (auth.uid())::text))';
+  blanket text := '(bucket_id = ''marketplace-images''::text)';
+BEGIN
+  SELECT coalesce(pg_get_expr(polqual, polrelid), ''), coalesce(pg_get_expr(polwithcheck, polrelid), '')
+    INTO q, c
+  FROM pg_policy
+  WHERE polrelid = 'storage.objects'::regclass
+    AND polname = 'Authenticated users can upload listing images';
+  IF NOT FOUND THEN ins := NULL; ELSE ins := CASE WHEN c <> '' THEN c ELSE q END; END IF;
+
+  SELECT coalesce(pg_get_expr(polqual, polrelid), ''), coalesce(pg_get_expr(polwithcheck, polrelid), '')
+    INTO q, c
+  FROM pg_policy
+  WHERE polrelid = 'storage.objects'::regclass
+    AND polname = 'Users can update own listing images';
+  IF NOT FOUND THEN upd := NULL; ELSE upd := CASE WHEN c <> '' THEN c ELSE q END; END IF;
+
+  SELECT coalesce(pg_get_expr(polqual, polrelid), ''), coalesce(pg_get_expr(polwithcheck, polrelid), '')
+    INTO q, c
+  FROM pg_policy
+  WHERE polrelid = 'storage.objects'::regclass
+    AND polname = 'Users can delete own listing images';
+  IF NOT FOUND THEN del := NULL; ELSE del := CASE WHEN c <> '' THEN c ELSE q END; END IF;
+
+  SELECT coalesce(pg_get_expr(polqual, polrelid), '') INTO pub
+  FROM pg_policy
+  WHERE polrelid = 'storage.objects'::regclass
+    AND polname = 'Public can view listing images';
+  IF NOT FOUND THEN pub := NULL; END IF;
+
+  SELECT b.allowed_mime_types, b.file_size_limit INTO mime, lim
+  FROM storage.buckets b
+  WHERE b.id = 'marketplace-images';
+
+  IF ins = a_expr AND upd = a_expr AND del = a_expr AND pub = blanket
+     AND lim IS NULL
+     AND mime IS NOT DISTINCT FROM ARRAY['image/jpeg','image/jpg']::text[] THEN
+    detected := 'a';
+  ELSIF ins = b_expr AND upd = b_expr AND del = b_expr AND pub = blanket
+     AND lim = 5242880
+     AND mime IS NOT DISTINCT FROM ARRAY['image/png','image/jpeg','image/webp']::text[] THEN
+    detected := 'b';
+  ELSIF ins IS NULL AND upd IS NULL AND del IS NULL
+     AND pub LIKE '%marketplace_image_public_read(%'
+     AND lim = 5242880
+     AND mime IS NOT DISTINCT FROM ARRAY['image/png','image/jpeg','image/webp']::text[] THEN
+    detected := '974';
+  ELSE
+    RAISE EXCEPTION '000974: marketplace-images policies and bucket row are not a consistent live (a), post-000968+000970 (b), or 000974 state';
+  END IF;
+
+  CREATE TABLE IF NOT EXISTS public.storage_000974_marketplace_prior (
+    id integer PRIMARY KEY CHECK (id = 1),
+    prior text NOT NULL CHECK (prior IN ('a', 'b'))
+  );
+  ALTER TABLE public.storage_000974_marketplace_prior ENABLE ROW LEVEL SECURITY;
+  REVOKE ALL ON TABLE public.storage_000974_marketplace_prior FROM PUBLIC, anon, authenticated;
+  COMMENT ON TABLE public.storage_000974_marketplace_prior IS
+    '000974 private marker. prior a = live marketplace-images ({image/jpeg,image/jpg}, NULL size, folder index 0). prior b = after 000968+000970 (png/jpeg/webp, 5 MB, folder index 1). Rollback reads this row and drops the table.';
+
+  SELECT p.prior INTO marker FROM public.storage_000974_marketplace_prior p WHERE p.id = 1;
+  IF detected IN ('a', 'b') THEN
+    IF marker IS NULL THEN
+      INSERT INTO public.storage_000974_marketplace_prior (id, prior) VALUES (1, detected);
+    ELSIF marker <> detected THEN
+      RAISE EXCEPTION '000974: stored marketplace prior % does not match the policies now present (%)', marker, detected;
+    END IF;
+  ELSIF marker IS NULL THEN
+    RAISE EXCEPTION '000974: marketplace-images is already the 000974 target but the prior marker is missing; refusing to guess a rollback';
   END IF;
 END $$;
 
