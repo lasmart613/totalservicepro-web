@@ -24,11 +24,14 @@ function psqlFile(database: string, file: string) {
   );
 }
 
-test('local postgres: 000968 priors and 000970 folder index', () => {
+test('local postgres: 000968 priors and 000970 folder index', (t) => {
   const probe = spawnSync('sudo', ['-u', 'postgres', 'psql', '-d', 'postgres', '-c', 'SELECT 1'], {
     encoding: 'utf8',
   });
-  if (probe.status !== 0) return;
+  if (probe.status !== 0) {
+    t.skip('no local postgres');
+    return;
+  }
 
   const name = 'marketplace_images_mime_proof';
   psql('postgres', `DROP DATABASE IF EXISTS ${name}; CREATE DATABASE ${name};`);

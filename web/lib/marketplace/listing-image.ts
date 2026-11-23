@@ -1,5 +1,5 @@
 /**
- * Marketplace listing photos (public `marketplace-images` bucket).
+ * Marketplace listing photos (private `marketplace-images` bucket).
  *
  * Type comes from the file bytes, not the filename or the browser-reported
  * MIME. SVG can carry script, and a renamed `.png` still has SVG bytes, so
