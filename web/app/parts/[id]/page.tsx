@@ -22,6 +22,7 @@ import {
 } from '@/lib/part-catalog-manage';
 import { partCatalogSaveMessage, partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
 import { StorageImage } from '@/components/StorageImage';
+import { LISTING_IMAGE_ACCEPT, inspectListingImage, isStorageImageError } from '@/lib/marketplace/listing-image';
 
 type PartRow = Record<string, any>;
 type VendorRow = {
@@ -217,7 +218,7 @@ export default function PartDetailPage() {
     } catch (e: unknown) {
       const raw = e instanceof Error ? e.message : 'Save failed';
       console.error('[parts-catalog] save', raw);
-      toast.error(partCatalogSaveMessage(raw));
+      toast.error(isStorageImageError(raw) ? raw : partCatalogSaveMessage(raw));
     } finally {
       setSaving(false);
     }
@@ -574,10 +575,19 @@ export default function PartDetailPage() {
                   <input
                     className="input"
                     type="file"
-                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    accept={LISTING_IMAGE_ACCEPT}
                     multiple
-                    onChange={(e) => {
-                      const files = Array.from(e.target.files || []).slice(0, 6);
+                    onChange={async (e) => {
+                      const picked = Array.from(e.target.files || []).slice(0, 6);
+                      const files: File[] = [];
+                      for (const file of picked) {
+                        const inspected = await inspectListingImage(file);
+                        if (!inspected.ok) {
+                          toast.error(inspected.error);
+                          continue;
+                        }
+                        files.push(file);
+                      }
                       previews.forEach((u) => URL.revokeObjectURL(u));
                       setImageFiles(files);
                       setPreviews(files.map((f) => URL.createObjectURL(f)));

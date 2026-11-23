@@ -13,6 +13,11 @@ import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
 import { rememberManufacturerName } from '@/lib/remember-manufacturer';
 import { FREE_LISTING_PHOTO_LIMIT, listingPhotoLimit } from '@/lib/marketplace/storefront';
+import {
+  LISTING_IMAGE_ACCEPT,
+  LISTING_IMAGE_UPLOAD_FAILED,
+  inspectListingImage,
+} from '@/lib/marketplace/listing-image';
 
 type ListingType = 'part' | 'consumable' | 'used' | 'request';
 
@@ -179,10 +184,20 @@ function MarketplaceListContent() {
     return form.model.trim();
   };
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files || []);
+    e.target.value = '';
     const left = Math.max(0, photoLimit - images.length);
-    const slice = files.slice(0, left);
+    const slice: File[] = [];
+    for (const file of picked) {
+      if (slice.length >= left) break;
+      const inspected = await inspectListingImage(file);
+      if (!inspected.ok) {
+        toast.error(inspected.error);
+        continue;
+      }
+      slice.push(file);
+    }
     if (!slice.length) return;
     setImages((prev) => [...prev, ...slice]);
     slice.forEach((file) => {
@@ -190,7 +205,6 @@ function MarketplaceListContent() {
       reader.onload = () => setPreviews((p) => [...p, String(reader.result || '')]);
       reader.readAsDataURL(file);
     });
-    e.target.value = '';
   };
 
   const removeImage = (index: number) => {
@@ -210,25 +224,17 @@ function MarketplaceListContent() {
     }
     for (let n = 0; n < ordered.length; n++) {
       const file = ordered[n].f;
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `${userId}/listings/${Date.now()}_${n}.${ext}`;
-      const buckets = ['marketplace-images', 'equipment-photos', 'equipment'];
-      let uploaded = false;
-      for (const b of buckets) {
-        const { error } = await getSupabaseClient().storage.from(b).upload(path, file, {
-          upsert: true,
-          contentType: file.type || `image/${ext}`,
-        });
-        if (!error) {
-          const { data } = getSupabaseClient().storage.from(b).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            uploaded = true;
-            break;
-          }
-        }
-      }
-      if (!uploaded) console.warn('image upload failed', file.name);
+      const inspected = await inspectListingImage(file);
+      if (!inspected.ok) throw new Error(inspected.error);
+      const path = `${userId}/listings/${Date.now()}_${n}.${inspected.extension}`;
+      const { error } = await getSupabaseClient().storage.from('marketplace-images').upload(path, file, {
+        upsert: false,
+        contentType: inspected.contentType,
+      });
+      if (error) throw new Error(LISTING_IMAGE_UPLOAD_FAILED);
+      const { data } = getSupabaseClient().storage.from('marketplace-images').getPublicUrl(path);
+      if (!data?.publicUrl) throw new Error(LISTING_IMAGE_UPLOAD_FAILED);
+      urls.push(data.publicUrl);
     }
     return urls;
   };
@@ -660,7 +666,7 @@ function MarketplaceListContent() {
                 {images.length < photoLimit && (
                   <label className="w-20 h-20 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-2xl text-[var(--text3)] cursor-pointer hover:border-[var(--gold)]">
                     +
-                    <input type="file" accept="image/*" multiple={photoLimit > 1} className="hidden" onChange={handleImageSelect} />
+                    <input type="file" accept={LISTING_IMAGE_ACCEPT} multiple={photoLimit > 1} className="hidden" onChange={handleImageSelect} />
                   </label>
                 )}
               </div>

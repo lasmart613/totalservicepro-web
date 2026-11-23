@@ -84,13 +84,12 @@ const EXT_TYPE: Record<string, string> = {
   jpg: 'image/jpeg',
   jpeg: 'image/jpeg',
   webp: 'image/webp',
-  gif: 'image/gif',
 };
 
 export function partPhotoContentType(fileName: string, browserType: string): string | null {
   const type = String(browserType || '').toLowerCase();
   if (type === 'image/jpg' || type === 'image/jpeg') return 'image/jpeg';
-  if (type === 'image/png' || type === 'image/webp' || type === 'image/gif') return type;
+  if (type === 'image/png' || type === 'image/webp') return type;
   const ext = String(fileName || '').split('.').pop()?.toLowerCase() || '';
   return EXT_TYPE[ext] || null;
 }

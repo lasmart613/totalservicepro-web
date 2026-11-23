@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome · Total Service Pro</title>
     <script src="theme.js"></script>
+    <script src="image-bytes.js"></script>
     <script>
         var _pendingSession = null;
         (function() {
@@ -249,7 +250,8 @@
     async function handleLogoUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-        if (file.size > 5 * 1024 * 1024) { showToast('File too large — max 5MB', 'error'); return; }
+        const inspected = await tspInspectImage(file, 5 * 1024 * 1024);
+        if (!inspected.ok) { showToast(inspected.error, 'error'); event.target.value = ''; return; }
         logoFile = file;
         const reader = new FileReader();
         reader.onload = e => {
@@ -276,17 +278,22 @@
         try {
             // Upload logo if provided
             if (logoFile) {
-                const ext = logoFile.name.split('.').pop();
-                const path = 'logos/' + currentUser.id + '.' + ext;
+                const inspected = await tspInspectImage(logoFile, 5 * 1024 * 1024);
+                if (!inspected.ok) {
+                    showToast(inspected.error, 'error');
+                } else {
+                const path = currentUser.id + '/logo.' + inspected.extension;
                 const { data: uploadData, error: uploadError } = await supabaseClient.storage
                     .from('company-assets')
-                    .upload(path, logoFile, { upsert: true, contentType: logoFile.type });
+                    .upload(path, logoFile, { upsert: true, contentType: inspected.contentType });
                 if (!uploadError) {
                     const { data: { publicUrl } } = supabaseClient.storage.from('company-assets').getPublicUrl(path);
                     logoUrl = publicUrl;
                 } else {
                     console.error('Logo upload failed:', uploadError.message);
+                    showToast("Couldn't upload this photo.", 'error');
                     // Continue without logo — user can re-upload from company profile
+                }
                 }
             }
 
