@@ -11,6 +11,12 @@
 -- Repo only. Do not apply this file to production from the pull request.
 -- Rollback: 20261122_000975_invoice_charge_mismatch_rollback.sql
 -- restores the 000971 function body and the previous outcome check.
+--
+-- One transaction, so a failure does not leave the constraint dropped.
+-- Run with: psql -1 -v ON_ERROR_STOP=1 -f <this file>
+-- or paste the whole file into the Supabase SQL editor.
+
+BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
@@ -501,3 +507,5 @@ BEGIN
 END $$;
 
 NOTIFY pgrst, 'reload schema';
+
+COMMIT;

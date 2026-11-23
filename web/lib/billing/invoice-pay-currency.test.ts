@@ -159,7 +159,19 @@ test('a stored-charge mismatch is a review result, not an ignored webhook', () =
   assert.ok(sql.indexOf('IF FOUND THEN') < sql.indexOf("reason', 'bad_amount'"));
   assert.match(sql, /SET search_path = public, pg_temp/);
   const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION'));
-  assert.equal(mismatchRollback.slice(mismatchRollback.indexOf('CREATE OR REPLACE FUNCTION')).trim(), fn.trim());
+  const notify = "NOTIFY pgrst, 'reload schema';";
+  const throughNotify = (text: string) => {
+    const start = text.indexOf('CREATE OR REPLACE FUNCTION');
+    const end = text.indexOf(notify, start);
+    return text.slice(start, end + notify.length).trim();
+  };
+  assert.equal(throughNotify(mismatchRollback), throughNotify(sql));
+  for (const file of [mismatch, mismatchRollback]) {
+    assert.ok(file.indexOf('\nBEGIN;\n') !== -1);
+    assert.ok(file.trimEnd().endsWith('COMMIT;'));
+    assert.ok(file.indexOf('\nBEGIN;\n') < file.indexOf('SET LOCAL lock_timeout'));
+    assert.ok(file.indexOf(notify) < file.lastIndexOf('\nCOMMIT;'));
+  }
   assert.doesNotMatch(fn, /SECURITY DEFINER/);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.apply_service_invoice_stripe_payment/);
   const originalFn = original.slice(original.indexOf('CREATE OR REPLACE FUNCTION public.apply_service_invoice_stripe_payment'));

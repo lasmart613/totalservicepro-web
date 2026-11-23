@@ -11,6 +11,13 @@
 -- UPDATE public.service_invoice_stripe_payments
 -- SET outcome = 'possibly_already_credited'
 -- WHERE outcome = 'charge_mismatch';
+--
+-- The statements below are one transaction. If the guard raises, psql does
+-- not keep going and drop the outcome check. Run with:
+--   psql -1 -v ON_ERROR_STOP=1 -f <this file>
+-- or paste the whole file into the Supabase SQL editor.
+
+BEGIN;
 
 SET LOCAL lock_timeout = '5s';
 
@@ -476,3 +483,5 @@ BEGIN
 END $$;
 
 NOTIFY pgrst, 'reload schema';
+
+COMMIT;
