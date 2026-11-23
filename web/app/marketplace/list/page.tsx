@@ -13,6 +13,12 @@ import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
 import { rememberManufacturerName } from '@/lib/remember-manufacturer';
 import { FREE_LISTING_PHOTO_LIMIT, listingPhotoLimit } from '@/lib/marketplace/storefront';
+import {
+  inspectListingImage,
+  LISTING_IMAGE_ACCEPT,
+  LISTING_IMAGE_REJECTED,
+  LISTING_IMAGE_UPLOAD_FAILED,
+} from '@/lib/marketplace/listing-image';
 
 type ListingType = 'part' | 'consumable' | 'used' | 'request';
 
@@ -179,18 +185,35 @@ function MarketplaceListContent() {
     return form.model.trim();
   };
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
     const left = Math.max(0, photoLimit - images.length);
-    const slice = files.slice(0, left);
-    if (!slice.length) return;
-    setImages((prev) => [...prev, ...slice]);
-    slice.forEach((file) => {
+    const accepted: File[] = [];
+    const errors = new Set<string>();
+    for (const file of files) {
+      if (accepted.length >= left) break;
+      try {
+        const inspected = await inspectListingImage(file);
+        if (!inspected.ok) {
+          errors.add(inspected.error);
+          continue;
+        }
+      } catch {
+        errors.add(LISTING_IMAGE_REJECTED);
+        continue;
+      }
+      accepted.push(file);
+    }
+    for (const message of errors) toast.error(message);
+    if (!accepted.length) return;
+    setImages((prev) => [...prev, ...accepted]);
+    accepted.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => setPreviews((p) => [...p, String(reader.result || '')]);
       reader.readAsDataURL(file);
     });
-    e.target.value = '';
   };
 
   const removeImage = (index: number) => {
@@ -210,25 +233,30 @@ function MarketplaceListContent() {
     }
     for (let n = 0; n < ordered.length; n++) {
       const file = ordered[n].f;
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `${userId}/listings/${Date.now()}_${n}.${ext}`;
-      const buckets = ['marketplace-images', 'equipment-photos', 'equipment'];
-      let uploaded = false;
-      for (const b of buckets) {
-        const { error } = await getSupabaseClient().storage.from(b).upload(path, file, {
-          upsert: true,
-          contentType: file.type || `image/${ext}`,
-        });
-        if (!error) {
-          const { data } = getSupabaseClient().storage.from(b).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            uploaded = true;
-            break;
-          }
-        }
+      const inspected = await inspectListingImage(file);
+      if (!inspected.ok) {
+        toast.error(inspected.error);
+        continue;
       }
-      if (!uploaded) console.warn('image upload failed', file.name);
+      const path = `${userId}/listings/${Date.now()}_${n}.${inspected.extension}`;
+      try {
+        const { error } = await getSupabaseClient().storage.from('marketplace-images').upload(path, file, {
+          upsert: true,
+          contentType: inspected.contentType,
+        });
+        if (error) {
+          toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+          continue;
+        }
+        const { data } = getSupabaseClient().storage.from('marketplace-images').getPublicUrl(path);
+        if (!data?.publicUrl) {
+          toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+          continue;
+        }
+        urls.push(data.publicUrl);
+      } catch {
+        toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+      }
     }
     return urls;
   };
@@ -660,7 +688,7 @@ function MarketplaceListContent() {
                 {images.length < photoLimit && (
                   <label className="w-20 h-20 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-2xl text-[var(--text3)] cursor-pointer hover:border-[var(--gold)]">
                     +
-                    <input type="file" accept="image/*" multiple={photoLimit > 1} className="hidden" onChange={handleImageSelect} />
+                    <input type="file" accept={LISTING_IMAGE_ACCEPT} multiple={photoLimit > 1} className="hidden" onChange={handleImageSelect} />
                   </label>
                 )}
               </div>

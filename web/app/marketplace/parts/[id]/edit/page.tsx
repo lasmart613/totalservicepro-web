@@ -15,6 +15,14 @@ import {
 import { listManufacturers } from '@/lib/laser-catalog';
 import { toast } from 'sonner';
 import { StorageImage } from '@/components/StorageImage';
+import {
+  inspectListingImage,
+  LISTING_IMAGE_ACCEPT,
+  LISTING_IMAGE_REJECTED,
+  LISTING_IMAGE_UPLOAD_FAILED,
+} from '@/lib/marketplace/listing-image';
+import { FREE_LISTING_PHOTO_LIMIT, listingPhotoLimit } from '@/lib/marketplace/storefront';
+import type { OrgPlanFields } from '@/lib/org-plan';
 
 const PART_CATEGORIES = [
   'Optical / Handpiece',
@@ -124,6 +132,7 @@ export default function EditPartListingPage() {
   const [newFiles, setNewFiles] = useState<File[]>([]);
   const [newPreviews, setNewPreviews] = useState<string[]>([]);
   const [featuredIndex, setFeaturedIndex] = useState(0);
+  const [photoLimit, setPhotoLimit] = useState(FREE_LISTING_PHOTO_LIMIT);
 
   const mfrOptions = useMemo(() => {
     const list = listManufacturers();
@@ -141,6 +150,17 @@ export default function EditPartListingPage() {
     (async () => {
       setLoading(true);
       try {
+        const { data: auth } = await getSupabaseClient().auth.getUser();
+        if (auth.user?.id) {
+          const { data: profile } = await getSupabaseClient()
+            .from('user_profiles')
+            .select('organizations(is_premium, subscription_tier, plan, premium_until, premium_grant)')
+            .eq('id', auth.user.id)
+            .maybeSingle();
+          const raw = (profile as { organizations?: OrgPlanFields | OrgPlanFields[] | null } | null)?.organizations ?? null;
+          const org = Array.isArray(raw) ? raw[0] ?? null : raw;
+          if (!cancelled) setPhotoLimit(listingPhotoLimit(org));
+        }
         const headers = await marketplaceAuthHeaders();
         const res = await fetch(`/api/marketplace/parts/${encodeURIComponent(id)}`, {
           method: 'GET',
@@ -176,18 +196,35 @@ export default function EditPartListingPage() {
     };
   }, [id]);
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
-    const left = 8 - existingImages.length - newFiles.length;
-    const slice = files.slice(0, left);
-    if (!slice.length) return;
-    setNewFiles((prev) => [...prev, ...slice]);
-    slice.forEach((file) => {
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (!files.length) return;
+    const left = photoLimit - existingImages.length - newFiles.length;
+    const accepted: File[] = [];
+    const errors = new Set<string>();
+    for (const file of files) {
+      if (accepted.length >= left) break;
+      try {
+        const inspected = await inspectListingImage(file);
+        if (!inspected.ok) {
+          errors.add(inspected.error);
+          continue;
+        }
+      } catch {
+        errors.add(LISTING_IMAGE_REJECTED);
+        continue;
+      }
+      accepted.push(file);
+    }
+    for (const message of errors) toast.error(message);
+    if (!accepted.length) return;
+    setNewFiles((prev) => [...prev, ...accepted]);
+    accepted.forEach((file) => {
       const reader = new FileReader();
       reader.onload = () => setNewPreviews((p) => [...p, String(reader.result || '')]);
       reader.readAsDataURL(file);
     });
-    e.target.value = '';
   };
 
   const removePreview = (index: number) => {
@@ -207,20 +244,29 @@ export default function EditPartListingPage() {
     const urls: string[] = [];
     for (let n = 0; n < newFiles.length; n++) {
       const file = newFiles[n];
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `${userId}/listings/${Date.now()}_${n}.${ext}`;
-      for (const bucket of ['marketplace-images', 'equipment-photos', 'equipment']) {
-        const { error } = await getSupabaseClient().storage.from(bucket).upload(path, file, {
+      const inspected = await inspectListingImage(file);
+      if (!inspected.ok) {
+        toast.error(inspected.error);
+        continue;
+      }
+      const path = `${userId}/listings/${Date.now()}_${n}.${inspected.extension}`;
+      try {
+        const { error } = await getSupabaseClient().storage.from('marketplace-images').upload(path, file, {
           upsert: true,
-          contentType: file.type || `image/${ext}`,
+          contentType: inspected.contentType,
         });
-        if (!error) {
-          const { data } = getSupabaseClient().storage.from(bucket).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            break;
-          }
+        if (error) {
+          toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+          continue;
         }
+        const { data } = getSupabaseClient().storage.from('marketplace-images').getPublicUrl(path);
+        if (!data?.publicUrl) {
+          toast.error(LISTING_IMAGE_UPLOAD_FAILED);
+          continue;
+        }
+        urls.push(data.publicUrl);
+      } catch {
+        toast.error(LISTING_IMAGE_UPLOAD_FAILED);
       }
     }
     return urls;
@@ -384,7 +430,11 @@ export default function EditPartListingPage() {
         <form onSubmit={save} className="space-y-6">
           <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-3">
             <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Photos</h3>
-            <p className="text-xs text-[var(--text3)]">Up to 8 photos. First / starred photo is the cover.</p>
+            {photoLimit > FREE_LISTING_PHOTO_LIMIT ? (
+              <p className="text-xs text-[var(--text3)]">Up to {photoLimit} photos. First / starred photo is the cover.</p>
+            ) : (
+              <p className="text-xs text-[var(--text3)]">Free plan: 1 photo.</p>
+            )}
             <div className="flex flex-wrap gap-2">
               {allPreviews.map((src, i) => (
                 <div key={`${src}-${i}`} className="relative w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)]">
@@ -408,10 +458,10 @@ export default function EditPartListingPage() {
                   </button>
                 </div>
               ))}
-              {allPreviews.length < 8 && (
+              {allPreviews.length < photoLimit && (
                 <label className="w-20 h-20 rounded-lg border border-dashed border-[var(--border)] flex items-center justify-center text-2xl text-[var(--text3)] cursor-pointer hover:border-[var(--gold)]">
                   +
-                  <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageSelect} />
+                  <input type="file" accept={LISTING_IMAGE_ACCEPT} multiple={photoLimit > 1} className="hidden" onChange={handleImageSelect} />
                 </label>
               )}
             </div>
