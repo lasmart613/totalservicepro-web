@@ -40,10 +40,11 @@ function orMatches(row: Record<string, unknown>, filter: string): boolean {
   });
 }
 
-function memoryInvoice(initial: Record<string, unknown>) {
+function memoryInvoice(initial: Record<string, unknown>, options: { failPaymentInserts?: number } = {}) {
   const row = cloneInvoice(initial);
   let creditWrites = 0;
   let notes = 0;
+  let paymentInsertFailures = options.failPaymentInserts ?? 0;
   let lastFilter = '';
   let reads = 0;
   const payments = new Map<
@@ -183,6 +184,10 @@ function memoryInvoice(initial: Record<string, unknown>) {
           if (table === 'notifications') {
             notes += 1;
             if (next?.message) messages.push(String(next.message));
+          }
+          if (table === 'service_invoice_stripe_payments' && paymentInsertFailures > 0) {
+            paymentInsertFailures -= 1;
+            return Promise.resolve({ error: { message: 'connection terminated unexpectedly' } });
           }
           if (table === 'service_invoice_stripe_payments' && next?.session_id) {
             const outcome = String(next.outcome || 'credited');
@@ -951,6 +956,41 @@ test('a currency mismatch against the stored charge is logged, notified, and rec
   assert.equal(again.ok, false);
   if (!again.ok) assert.equal(again.reason, 'charge_mismatch');
   assert.equal(db.notes, 1);
+});
+
+test('a payments insert failure still records the mismatch and notifies on retry', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 80,
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 8000, payment_amount: 80 },
+    }),
+    { failPaymentInserts: 1 }
+  );
+  const session = chargedSession('cs_test_retry', '44', 'eur', 8000);
+  session.currency = 'usd';
+  const first = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(first.ok, false);
+  if (!first.ok) assert.equal(first.reason, 'update_failed');
+  assert.equal(invoiceCheckoutWebhookResult('update_failed')?.status, 500);
+  assert.equal(db.notes, 0);
+  assert.equal(db.creditWrites, 0);
+  const conflicts = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
+    .stripe_checkout_session_conflict;
+  assert.equal(conflicts?.length, 1);
+  const second = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(second.ok, false);
+  if (!second.ok) assert.equal(second.reason, 'currency_mismatch');
+  assert.equal(db.notes, 1);
+  const conflictsAfter = (db.row.invoice_data as { stripe_checkout_session_conflict?: unknown[] })
+    .stripe_checkout_session_conflict;
+  assert.equal(conflictsAfter?.length, 1);
+  assert.match(db.messages[0] || '', /doesn't match this invoice's amount or currency/);
+  assert.doesNotMatch(db.messages[0] || '', /paid twice/);
+  const third = await applyInvoiceCheckoutSession({ writer: db.writer as never, session });
+  assert.equal(third.ok, false);
+  if (!third.ok) assert.equal(third.reason, 'charge_mismatch');
+  assert.equal(db.notes, 1);
+  assert.equal(db.row.amount_paid, 0);
 });
 
 test('an amount mismatch is labelled amount_mismatch and notifies the shop', async () => {
