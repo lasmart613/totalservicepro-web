@@ -2,12 +2,13 @@
  * God view and admin alert for marketplace orders that did not finish.
  * stock_pending is waiting on a claim. refund_review needs a person.
  * Buyers and sellers are never emailed. A sweep of orders older than N hours
- * is not built here: it would need a scheduled job and a durable send log.
+ * is not built here: it would need a scheduled job.
  *
- * Durable dedupe across instances is deferred pending Larry. Do not add it
- * until he asks. Option: unapplied migration 000973, an alert row keyed
- * (order_id, status) with insert-on-conflict, so a second process does not
- * send the same status again. This file keeps an in-memory set only.
+ * Durable dedupe is marketplace_order_alerts (000973, not applied with this
+ * change). The claim is an insert of (order_id, status) on conflict do
+ * nothing. Admins are emailed only when that insert created a row. A failed
+ * send deletes the row so the next retry can alert again. The in-memory set
+ * is only a fast path for this process.
  */
 
 import { productIssuesFromAddress, productIssuesTeamRecipients } from '../product-issues.ts';
@@ -217,6 +218,15 @@ export function stuckOrderAlertText(input: {
   ].join('\n');
 }
 
+/**
+ * Durable claim. `claim` is insert ... on conflict do nothing and is true
+ * only when a row was inserted. `release` deletes that row.
+ */
+export type StuckOrderAlertLedger = {
+  claim(orderId: string, status: string): Promise<boolean>;
+  release(orderId: string, status: string): Promise<void>;
+};
+
 export type StuckOrderAlertInput = {
   orderId: string;
   listingId: string;
@@ -228,6 +238,8 @@ export type StuckOrderAlertInput = {
   amountCents?: number | null;
   currency?: string | null;
   seen?: Set<string>;
+  /** Shared across instances. Omit for the in-memory fast path only. */
+  ledger?: StuckOrderAlertLedger;
   /** Test override. Production uses STUCK_ORDER_ALERT_TIMEOUT_MS. */
   timeoutMs?: number;
   send?: (message: { to: string[]; subject: string; text: string }, signal: AbortSignal) => Promise<void>;
@@ -253,16 +265,52 @@ async function sendAlert(
   }
 }
 
+async function releaseAlertClaim(
+  orderId: string,
+  status: string,
+  seen: Set<string>,
+  ledger: StuckOrderAlertLedger | undefined,
+  held: boolean
+): Promise<void> {
+  releaseStuckOrderAlert(orderId, status, seen);
+  if (!held || !ledger) return;
+  await ledger.release(orderId, status);
+}
+
 export async function notifyStuckMarketplaceOrder(
   input: StuckOrderAlertInput
 ): Promise<{ sent: boolean; reason: 'sent' | 'duplicate' | 'no_recipient' | 'error' }> {
   const seen = input.seen ?? liveStuckOrderAlerts;
-  if (!claimStuckOrderAlert(input.orderId, input.status, seen)) return { sent: false, reason: 'duplicate' };
   const to = stuckOrderAlertRecipients([input.buyerEmail]);
-  if (!to.length) {
-    releaseStuckOrderAlert(input.orderId, input.status, seen);
-    return { sent: false, reason: 'no_recipient' };
+  if (!to.length) return { sent: false, reason: 'no_recipient' };
+  if (!input.send && !String(process.env.RESEND_API_KEY || '').trim()) {
+    return { sent: false, reason: 'error' };
   }
+  if (seen.has(stuckOrderAlertKey(input.orderId, input.status))) {
+    return { sent: false, reason: 'duplicate' };
+  }
+
+  let held = false;
+  let remembered = false;
+  try {
+    if (input.ledger) {
+      const inserted = await input.ledger.claim(input.orderId, input.status);
+      if (!inserted) return { sent: false, reason: 'duplicate' };
+      held = true;
+    }
+    remembered = claimStuckOrderAlert(input.orderId, input.status, seen);
+    if (!remembered) {
+      if (held && input.ledger) await input.ledger.release(input.orderId, input.status);
+      return { sent: false, reason: 'duplicate' };
+    }
+  } catch {
+    if (remembered) releaseStuckOrderAlert(input.orderId, input.status, seen);
+    if (held && input.ledger) {
+      await input.ledger.release(input.orderId, input.status).catch(() => {});
+    }
+    return { sent: false, reason: 'error' };
+  }
+
   const subject = stuckOrderAlertSubject(input.orderId, input.status);
   const text = stuckOrderAlertText(input);
   const timeoutMs = input.timeoutMs ?? STUCK_ORDER_ALERT_TIMEOUT_MS;
@@ -272,10 +320,6 @@ export async function notifyStuckMarketplaceOrder(
       await sendAlert(timeoutMs, (signal) => send({ to, subject, text }, signal));
     } else {
       const apiKey = String(process.env.RESEND_API_KEY || '').trim();
-      if (!apiKey) {
-        releaseStuckOrderAlert(input.orderId, input.status, seen);
-        return { sent: false, reason: 'error' };
-      }
       await sendAlert(timeoutMs, async (signal) => {
         const res = await postResendEmail({
           apiKey,
@@ -292,7 +336,7 @@ export async function notifyStuckMarketplaceOrder(
     }
     return { sent: true, reason: 'sent' };
   } catch {
-    releaseStuckOrderAlert(input.orderId, input.status, seen);
+    await releaseAlertClaim(input.orderId, input.status, seen, input.ledger, held).catch(() => {});
     return { sent: false, reason: 'error' };
   }
 }

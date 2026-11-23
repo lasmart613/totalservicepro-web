@@ -12,8 +12,10 @@ import {
   notifyStuckMarketplaceOrder,
   STUCK_ORDER_ALERT_TIMEOUT_MS,
   stuckOrderAgeLabel,
+  stuckOrderAlertKey,
   stuckOrderAlertRecipients,
   stuckOrderAlertText,
+  type StuckOrderAlertLedger,
 } from './stuck-orders.ts';
 
 const here = new URL('.', import.meta.url);
@@ -228,4 +230,158 @@ test('a refund review from checkout alerts admins once for that order', async ()
   assert.equal(first.ok && first.applied.fulfilled, false);
   assert.equal(second.ok && second.applied.fulfilled, false);
   assert.equal(sent.length, 1);
+});
+
+const ALERT_ORDER = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+
+function sharedAlertLedger(): { ledger: StuckOrderAlertLedger; rows: Set<string>; claims: { n: number } } {
+  const rows = new Set<string>();
+  const claims = { n: 0 };
+  let tail = Promise.resolve();
+  const exclusive = <T>(fn: () => T): Promise<T> => {
+    const run = tail.then(fn, fn);
+    tail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  };
+  return {
+    rows,
+    claims,
+    ledger: {
+      claim(orderId, status) {
+        return exclusive(() => {
+          claims.n += 1;
+          const key = stuckOrderAlertKey(orderId, status);
+          if (rows.has(key)) return false;
+          rows.add(key);
+          return true;
+        });
+      },
+      release(orderId, status) {
+        return exclusive(() => {
+          rows.delete(stuckOrderAlertKey(orderId, status));
+        });
+      },
+    },
+  };
+}
+
+test('two instances insert one alert row and the memory set skips a repeat', async () => {
+  const { ledger, claims } = sharedAlertLedger();
+  const seenA = new Set<string>();
+  const seenB = new Set<string>();
+  let sends = 0;
+  const base = {
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'stock_pending' as const,
+    ledger,
+    send: async () => {
+      sends += 1;
+    },
+  };
+  const [first, second] = await Promise.all([
+    notifyStuckMarketplaceOrder({ ...base, seen: seenA }),
+    notifyStuckMarketplaceOrder({ ...base, seen: seenB }),
+  ]);
+  assert.equal(sends, 1);
+  assert.equal(Number(first.sent) + Number(second.sent), 1);
+  const winner = first.sent ? seenA : seenB;
+  const repeat = await notifyStuckMarketplaceOrder({ ...base, seen: winner });
+  assert.deepEqual(repeat, { sent: false, reason: 'duplicate' });
+  assert.equal(sends, 1);
+  assert.equal(claims.n, 2);
+  const ledgerSrc = readFileSync(new URL('./stuck-order-alert-ledger.ts', here), 'utf8');
+  assert.match(ledgerSrc, /onConflict:\s*'order_id,status'/);
+  assert.match(ledgerSrc, /ignoreDuplicates:\s*true/);
+  assert.match(ledgerSrc, /\.delete\(\)/);
+  const migration = readFileSync(
+    new URL('../../supabase/migrations/20261122_000973_marketplace_order_alerts.sql', here),
+    'utf8'
+  );
+  assert.match(migration, /NOT APPLIED/);
+  assert.match(migration, /PRIMARY KEY \(order_id, status\)/);
+  assert.match(migration, /alerted_at/);
+  assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
+  assert.doesNotMatch(migration, /CREATE POLICY/);
+  assert.match(migration, /GRANT SELECT, INSERT, DELETE ON TABLE public\.marketplace_order_alerts TO service_role/);
+  assert.match(migration, /REVOKE ALL ON TABLE public\.marketplace_order_alerts FROM PUBLIC, anon, authenticated/);
+  const rollback = readFileSync(
+    new URL('../../supabase/migrations/20261122_000973_marketplace_order_alerts_rollback.sql', here),
+    'utf8'
+  );
+  assert.match(rollback, /DROP TABLE IF EXISTS public\.marketplace_order_alerts/);
+  const apply = readFileSync(new URL('../billing/apply-part-order.ts', here), 'utf8');
+  assert.match(apply, /hasServiceRole\(\)/);
+  assert.match(apply, /supabaseMarketplaceOrderAlertLedger\(\)/);
+});
+
+test('a status change on the same order inserts a second alert', async () => {
+  const { ledger, rows } = sharedAlertLedger();
+  let sends = 0;
+  const send = async () => {
+    sends += 1;
+  };
+  const pending = await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'stock_pending',
+    seen: new Set(),
+    ledger,
+    send,
+  });
+  const review = await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'refund_review',
+    seen: new Set(),
+    ledger,
+    send,
+  });
+  assert.equal(pending.sent, true);
+  assert.equal(review.sent, true);
+  assert.equal(sends, 2);
+  assert.equal(rows.size, 2);
+  const again = await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'refund_review',
+    seen: new Set(),
+    ledger,
+    send,
+  });
+  assert.deepEqual(again, { sent: false, reason: 'duplicate' });
+  assert.equal(sends, 2);
+});
+
+test('a failed send releases the alert row so another instance can send', async () => {
+  const { ledger, rows } = sharedAlertLedger();
+  const failed = await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'refund_review',
+    seen: new Set(),
+    ledger,
+    send: async () => {
+      throw new Error('resend down');
+    },
+  });
+  assert.deepEqual(failed, { sent: false, reason: 'error' });
+  assert.equal(rows.size, 0);
+  let sends = 0;
+  const retry = await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'refund_review',
+    seen: new Set(),
+    ledger,
+    send: async () => {
+      sends += 1;
+    },
+  });
+  assert.equal(retry.sent, true);
+  assert.equal(sends, 1);
+  assert.equal(rows.size, 1);
 });
