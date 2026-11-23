@@ -109,7 +109,7 @@ async function renderSignedInPlans(org: OrgRow) {
   document.body.appendChild(el);
   const root = createRoot(el);
   const router = { push() {}, replace() {}, prefetch() {}, back() {}, forward() {}, refresh() {} };
-  const errors: unknown[] = [];
+  const errors: unknown[][] = [];
   const origError = console.error;
   console.error = (...args: unknown[]) => {
     errors.push(args);
@@ -146,9 +146,36 @@ async function renderSignedInPlans(org: OrgRow) {
   }
 }
 
+/**
+ * Node 24's default warning handler writes through console.error
+ * (`lib/internal/process/warning.js` writeOut). This test patches
+ * console.error around render, so an ExperimentalWarning emitted while the
+ * page renders (for example type stripping) would fail the empty-errors
+ * assertion. Drop only that warning class. ReferenceError and React logs stay.
+ */
+function isNodeExperimentalWarning(args: unknown[]): boolean {
+  if (args.length === 1 && args[0] instanceof Error) return args[0].name === 'ExperimentalWarning';
+  if (args.length !== 1 || typeof args[0] !== 'string') return false;
+  return args[0].includes('ExperimentalWarning');
+}
+
+function reactRenderErrors(errors: unknown[][]): unknown[][] {
+  return errors.filter((args) => !isNodeExperimentalWarning(args));
+}
+
+test('console.error filter keeps ReferenceError and drops ExperimentalWarning', () => {
+  const warning = [
+    '(node:1) ExperimentalWarning: Transform Types is an experimental feature and might change at any time\n' +
+      '(Use `node --trace-warnings ...` to show where the warning was created)',
+  ];
+  const reference = [new ReferenceError('t is not defined')];
+  const reactLog = ['The above error occurred in the <SignedInPlans> component:'];
+  assert.deepEqual(reactRenderErrors([warning, reference, reactLog]), [reference, reactLog]);
+});
+
 test('signed-in free user: /plans renders the upgrade page without throwing', async () => {
   const { text, reads, errors } = await renderSignedInPlans({ name: 'Acme Lasers', is_premium: false });
-  assert.deepEqual(errors, [], 'no React render errors (ReferenceError: t is not defined)');
+  assert.deepEqual(reactRenderErrors(errors), [], 'no React render errors (ReferenceError: t is not defined)');
   assert.match(text, /Plans and prices/, 'SignedInPlans rendered, not the public page');
   assert.match(text, /Acme Lasers is on Free\./);
   assert.match(text, /Upgrade from this page without creating a second account\./);
@@ -165,7 +192,7 @@ test('signed-in Premium user: /plans shows Premium as current and offers Team', 
     plan: 'premium',
     subscription_tier: 'premium',
   });
-  assert.deepEqual(errors, [], 'no React render errors');
+  assert.deepEqual(reactRenderErrors(errors), [], 'no React render errors');
   assert.match(text, /Plans and prices/);
   assert.match(text, /Acme Lasers is on Premium\./);
   assert.match(text, /Upgrade to Team on this same account/);
