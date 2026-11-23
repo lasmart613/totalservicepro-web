@@ -1,20 +1,17 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   applyPartCheckoutSession,
+  PART_ORDER_ALREADY_SETTLED,
+  PART_ORDER_CLAIM_RPC,
+  PART_ORDER_CLAIMED,
   PART_ORDER_REFUND_REVIEW_STATUS,
   PART_ORDER_STOCK_PENDING_STATUS,
-  STOCK_CLAIM_ATTEMPT_CAP,
+  partOrderRouteOutcome,
 } from './apply-part-order.ts';
 
-type Listing = {
-  id: string;
-  quantity: number | null;
-  qty: number | null;
-  status: string;
-  details: Record<string, unknown> | null;
-};
-
+type Listing = { id: string; quantity: number | null; status: string };
 type OrderRow = {
   id: string;
   stripe_checkout_session_id: string;
@@ -24,113 +21,41 @@ type OrderRow = {
   quantity: number;
 };
 
-type ClaimFilter = Record<string, unknown>;
-
-function createDb(
-  listing: Listing,
-  peerReads = 1,
-  options: { failListingUpdates?: number; conflictAllUpdates?: boolean; zeroQuantityAtRead?: number } = {}
-) {
+function createDb(listing: Listing, options: { rpcFailures?: number } = {}) {
   const orders: OrderRow[] = [];
-  const claims: ClaimFilter[] = [];
-  let listingReads = 0;
-  let failListingUpdates = options.failListingUpdates ?? 0;
-  const waiters: Array<() => void> = [];
+  const rpcResults: string[] = [];
+  let rpcFailures = options.rpcFailures ?? 0;
 
   const writer = {
     from(table: string) {
       const filters: Record<string, unknown> = {};
-      const isFilters: Record<string, unknown> = {};
-      let op: 'select' | 'update' | 'insert' = 'select';
+      let op: 'select' | 'insert' = 'select';
       let payload: Record<string, unknown> | null = null;
-
       const run = async () => {
-        if (table === 'marketplace_orders' && op === 'select') {
-          const row = orders.find((o) => o.stripe_checkout_session_id === filters.stripe_checkout_session_id) || null;
+        if (table !== 'marketplace_orders') {
+          return { data: null, error: { message: `unexpected ${table}` } };
+        }
+        if (op === 'select') {
+          const row = orders.find((item) => item.stripe_checkout_session_id === filters.stripe_checkout_session_id) || null;
           return { data: row, error: null };
         }
-        if (table === 'marketplace_orders' && op === 'insert') {
-          const sessionId = String(payload?.stripe_checkout_session_id || '');
-          if (orders.some((o) => o.stripe_checkout_session_id === sessionId)) {
-            return { data: null, error: { message: 'duplicate key value violates unique constraint 23505' } };
-          }
-          const row: OrderRow = {
-            id: `ord-${orders.length + 1}`,
-            stripe_checkout_session_id: sessionId,
-            listing_id: String(payload?.listing_id || ''),
-            status: String(payload?.status || 'paid'),
-            payout_status: String(payload?.payout_status || 'held'),
-            quantity: Number(payload?.quantity || 1),
-          };
-          orders.push(row);
-          return { data: { id: row.id }, error: null };
+        const sessionId = String(payload?.stripe_checkout_session_id || '');
+        if (orders.some((item) => item.stripe_checkout_session_id === sessionId)) {
+          return { data: null, error: { message: 'duplicate key value violates unique constraint 23505' } };
         }
-        if (table === 'marketplace_orders' && op === 'update') {
-          const row = orders.find((o) => o.id === filters.id);
-          if (!row) return { data: null, error: { message: 'missing order' } };
-          if (payload?.status != null) row.status = String(payload.status);
-          if (payload?.payout_status != null) row.payout_status = String(payload.payout_status);
-          return { data: row, error: null };
-        }
-        if (table === 'marketplace_listings' && op === 'select') {
-          listingReads += 1;
-          if (options.zeroQuantityAtRead && listingReads >= options.zeroQuantityAtRead) listing.quantity = 0;
-          if (peerReads > 1 && listingReads <= peerReads) {
-            await new Promise<void>((resolve) => {
-              waiters.push(resolve);
-              if (waiters.length >= peerReads) {
-                const ready = waiters.splice(0);
-                queueMicrotask(() => {
-                  for (const wake of ready) wake();
-                });
-              }
-            });
-          }
-          return {
-            data: {
-              id: listing.id,
-              quantity: listing.quantity,
-              qty: listing.qty,
-              status: listing.status,
-              details: listing.details,
-            },
-            error: null,
-          };
-        }
-        if (table === 'marketplace_listings' && op === 'update') {
-          claims.push({ ...filters, ...Object.fromEntries(Object.entries(isFilters).map(([key, value]) => [`is:${key}`, value])) });
-          if (failListingUpdates > 0) {
-            failListingUpdates -= 1;
-            return { data: null, error: { message: 'db down' } };
-          }
-          if (options.conflictAllUpdates) return { data: [], error: null };
-          if (filters.id != null && String(filters.id) !== listing.id) return { data: [], error: null };
-          if (Object.prototype.hasOwnProperty.call(filters, 'quantity') && listing.quantity !== filters.quantity) {
-            return { data: [], error: null };
-          }
-          if (Object.prototype.hasOwnProperty.call(filters, 'qty') && listing.qty !== filters.qty) {
-            return { data: [], error: null };
-          }
-          if (Object.prototype.hasOwnProperty.call(isFilters, 'quantity') && listing.quantity !== isFilters.quantity) {
-            return { data: [], error: null };
-          }
-          if (payload && Object.prototype.hasOwnProperty.call(payload, 'quantity')) {
-            listing.quantity = payload.quantity as number | null;
-          }
-          if (payload && Object.prototype.hasOwnProperty.call(payload, 'qty')) listing.qty = payload.qty as number | null;
-          if (payload?.status != null) listing.status = String(payload.status);
-          return { data: [{ id: listing.id, quantity: listing.quantity, status: listing.status }], error: null };
-        }
-        return { data: null, error: { message: `unexpected ${table} ${op}` } };
+        const row: OrderRow = {
+          id: `ord-${orders.length + 1}`,
+          stripe_checkout_session_id: sessionId,
+          listing_id: String(payload?.listing_id || ''),
+          status: String(payload?.status || PART_ORDER_STOCK_PENDING_STATUS),
+          payout_status: String(payload?.payout_status || 'held'),
+          quantity: Number(payload?.quantity || 1),
+        };
+        orders.push(row);
+        return { data: { id: row.id }, error: null };
       };
-
       const api = {
         select() {
-          return api;
-        },
-        update(next: Record<string, unknown>) {
-          op = 'update';
-          payload = next;
           return api;
         },
         insert(next: Record<string, unknown>) {
@@ -142,10 +67,6 @@ function createDb(
           filters[col] = val;
           return api;
         },
-        is(col: string, val: unknown) {
-          isFilters[col] = val;
-          return api;
-        },
         maybeSingle() {
           return run();
         },
@@ -155,12 +76,43 @@ function createDb(
       };
       return api;
     },
+    rpc(name: string, args: { p_order_id: string; p_listing_id: string; p_quantity: number }) {
+      if (name !== PART_ORDER_CLAIM_RPC) return Promise.resolve({ data: null, error: { message: 'missing function' } });
+      if (rpcFailures > 0) {
+        rpcFailures -= 1;
+        return Promise.resolve({ data: null, error: { message: 'db down' } });
+      }
+      const order = orders.find((item) => item.id === args.p_order_id);
+      if (!order) return Promise.resolve({ data: null, error: { message: 'missing order' } });
+      if (order.status === 'paid') {
+        rpcResults.push(PART_ORDER_ALREADY_SETTLED);
+        return Promise.resolve({ data: PART_ORDER_ALREADY_SETTLED, error: null });
+      }
+      if (order.status === PART_ORDER_REFUND_REVIEW_STATUS) {
+        rpcResults.push(PART_ORDER_REFUND_REVIEW_STATUS);
+        return Promise.resolve({ data: PART_ORDER_REFUND_REVIEW_STATUS, error: null });
+      }
+      if (order.status !== PART_ORDER_STOCK_PENDING_STATUS) {
+        return Promise.resolve({ data: null, error: { message: 'not claimable' } });
+      }
+      order.status = 'paid';
+      const n = args.p_quantity;
+      if (listing.id !== args.p_listing_id || listing.quantity == null || listing.quantity < n) {
+        order.status = PART_ORDER_REFUND_REVIEW_STATUS;
+        rpcResults.push(PART_ORDER_REFUND_REVIEW_STATUS);
+        return Promise.resolve({ data: PART_ORDER_REFUND_REVIEW_STATUS, error: null });
+      }
+      listing.quantity -= n;
+      if (listing.quantity === 0) listing.status = 'sold';
+      rpcResults.push(PART_ORDER_CLAIMED);
+      return Promise.resolve({ data: PART_ORDER_CLAIMED, error: null });
+    },
   };
 
-  return { writer, orders, listing, claims };
+  return { writer, orders, listing, rpcResults };
 }
 
-function session(id: string, quantity = 1) {
+function session(id: string, quantity = 1, listingId = 'listing-qa') {
   return {
     id,
     status: 'complete',
@@ -171,24 +123,13 @@ function session(id: string, quantity = 1) {
     customer_details: { email: 'buyer@qa.example' },
     metadata: {
       marketplace_kind: 'part',
-      marketplace_listing_id: 'listing-qa',
+      marketplace_listing_id: listingId,
       quantity: String(quantity),
       seller_organization_id: '2655',
       stripe_destination_account: 'acct_qa2655',
     },
   };
 }
-
-const active = (quantity: number | null, extra?: Partial<Listing>): Listing => ({
-  id: 'listing-qa',
-  quantity,
-  qty: null,
-  status: 'active',
-  details: null,
-  ...extra,
-});
-
-const fastClock = { now: () => 0, sleep: async () => {}, random: () => 0 };
 
 async function withErrors<T>(fn: () => Promise<T>): Promise<{ result: T; errors: unknown[][] }> {
   const errors: unknown[][] = [];
@@ -203,15 +144,62 @@ async function withErrors<T>(fn: () => Promise<T>): Promise<{ result: T; errors:
   }
 }
 
-test('concurrent last-unit purchase fulfills once', { timeout: 2000 }, async () => {
-  const db = createDb(active(1), 2);
-  const { result, errors } = await withErrors(() =>
+test('one session re-delivered together decrements stock 5 to 4 once', async () => {
+  const db = createDb({ id: 'listing-qa', quantity: 5, status: 'active' });
+  const [first, second] = await Promise.all([
+    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_same') }),
+    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_same') }),
+  ]);
+  assert.equal(db.listing.quantity, 4);
+  assert.equal(db.listing.status, 'active');
+  assert.equal(db.orders.length, 1);
+  assert.equal(db.orders[0]?.status, 'paid');
+  assert.deepEqual(db.rpcResults.slice().sort(), [PART_ORDER_ALREADY_SETTLED, PART_ORDER_CLAIMED]);
+  for (const result of [first, second]) {
+    assert.equal(result.ok && result.applied.fulfilled, true);
+  }
+  const outcomes = [first, second].map((result) => (result.ok ? partOrderRouteOutcome(result) : null));
+  assert.ok(outcomes.every((outcome) => outcome?.httpStatus === 200 && outcome.body.fulfilled === true));
+});
+
+test('a missed listing ends refund_review and the route does not say fulfilled', async () => {
+  const db = createDb({ id: 'listing-qa', quantity: 0, status: 'active' });
+  const { result } = await withErrors(() =>
+    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_miss', 1) })
+  );
+  assert.equal(result.ok && result.applied.fulfilled, false);
+  assert.equal(db.listing.quantity, 0);
+  assert.equal(db.listing.status, 'active');
+  assert.equal(db.orders[0]?.status, PART_ORDER_REFUND_REVIEW_STATUS);
+  assert.equal(db.rpcResults[0], PART_ORDER_REFUND_REVIEW_STATUS);
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  const outcome = partOrderRouteOutcome(result);
+  assert.equal(outcome.httpStatus, 200);
+  assert.equal(outcome.body.fulfilled, false);
+  assert.equal(outcome.body.applied, true);
+});
+
+test('a repeat of a claimed session is already_settled and does not decrement', async () => {
+  const db = createDb({ id: 'listing-qa', quantity: 5, status: 'active' });
+  const first = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_once') });
+  const second = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_once') });
+  assert.equal(first.ok && first.applied.fulfilled && !first.applied.alreadyApplied, true);
+  assert.equal(second.ok && second.applied.fulfilled && second.applied.alreadyApplied, true);
+  assert.equal(db.listing.quantity, 4);
+  assert.equal(db.orders.length, 1);
+  assert.deepEqual(db.rpcResults, [PART_ORDER_CLAIMED, PART_ORDER_ALREADY_SETTLED]);
+});
+
+test('two buyers of the last unit fulfill once', async () => {
+  const db = createDb({ id: 'listing-qa', quantity: 1, status: 'active' });
+  const { result } = await withErrors(() =>
     Promise.all([
-      applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_last_a') }),
-      applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_last_b') }),
+      applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_a') }),
+      applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_b') }),
     ])
   );
-  const fulfilled = result.filter((row) => row.ok && row.applied.fulfilled && !row.applied.alreadyApplied);
+  const fulfilled = result.filter((row) => row.ok && row.applied.fulfilled);
   const refused = result.filter((row) => row.ok && !row.applied.fulfilled);
   assert.equal(fulfilled.length, 1);
   assert.equal(refused.length, 1);
@@ -219,157 +207,85 @@ test('concurrent last-unit purchase fulfills once', { timeout: 2000 }, async () 
   assert.equal(db.listing.status, 'sold');
   assert.equal(db.orders.filter((row) => row.status === 'paid').length, 1);
   assert.equal(db.orders.filter((row) => row.status === PART_ORDER_REFUND_REVIEW_STATUS).length, 1);
-  const review = db.orders.find((row) => row.status === PART_ORDER_REFUND_REVIEW_STATUS);
-  assert.equal(review?.payout_status, 'transferred');
-  assert.ok(db.claims.some((claim) => claim.quantity === 1 && claim.id === 'listing-qa'));
-  assert.ok(db.claims.every((claim) => Object.prototype.hasOwnProperty.call(claim, 'quantity')));
-  assert.ok(errors.some((line) => String(line[0]).includes('marked for refund review')));
 });
 
-test('two concurrent purchases both fulfill when stock covers both', { timeout: 2000 }, async () => {
-  const db = createDb(active(5), 2);
-  const [first, second] = await Promise.all([
-    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_both_a') }),
-    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_both_b') }),
-  ]);
-  assert.equal(first.ok && first.applied.fulfilled && !first.applied.alreadyApplied, true);
-  assert.equal(second.ok && second.applied.fulfilled && !second.applied.alreadyApplied, true);
-  assert.equal(db.listing.quantity, 3);
-  assert.equal(db.listing.status, 'active');
-  assert.equal(db.orders.filter((row) => row.status === 'paid').length, 2);
-  assert.equal(db.orders.filter((row) => row.status === PART_ORDER_REFUND_REVIEW_STATUS).length, 0);
-});
-
-test('insufficient stock does not fulfill or zero the listing', async () => {
-  const short = createDb(active(1));
+test('a claim error stays unfulfilled and the retry claims once', async () => {
+  const db = createDb({ id: 'listing-qa', quantity: 4, status: 'active' }, { rpcFailures: 1 });
   const { result, errors } = await withErrors(() =>
-    applyPartCheckoutSession({ writer: short.writer as never, session: session('cs_short', 2) })
-  );
-  assert.equal(result.ok, true);
-  if (!result.ok) return;
-  assert.equal(result.applied.fulfilled, false);
-  assert.equal(result.applied.alreadyApplied, false);
-  assert.equal(short.listing.quantity, 1);
-  assert.equal(short.listing.status, 'active');
-  assert.equal(short.claims.length, 0);
-  assert.equal(short.orders[0]?.status, PART_ORDER_REFUND_REVIEW_STATUS);
-  assert.ok(errors.some((line) => (line[1] as { reason?: string } | undefined)?.reason === 'insufficient'));
-
-  const none = createDb(active(0));
-  const emptyRun = await withErrors(() =>
-    applyPartCheckoutSession({ writer: none.writer as never, session: session('cs_zero') })
-  );
-  const empty = emptyRun.result;
-  assert.equal(empty.ok && empty.applied.fulfilled, false);
-  assert.equal(none.listing.quantity, 0);
-  assert.equal(none.listing.status, 'active');
-  assert.equal(none.orders[0]?.status, PART_ORDER_REFUND_REVIEW_STATUS);
-});
-
-test('webhook retry is idempotent and does not decrement again', async () => {
-  const db = createDb(active(3));
-  const first = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_retry') });
-  const second = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_retry') });
-  assert.equal(first.ok && first.applied.fulfilled && !first.applied.alreadyApplied, true);
-  assert.equal(second.ok && second.applied.alreadyApplied && second.applied.fulfilled, true);
-  assert.equal(second.ok && second.applied.orderId, first.ok ? first.applied.orderId : null);
-  assert.equal(db.listing.quantity, 2);
-  assert.equal(db.orders.length, 1);
-  assert.equal(db.orders[0]?.status, 'paid');
-
-  const raced = createDb(active(1), 2);
-  await withErrors(() =>
-    Promise.all([
-      applyPartCheckoutSession({ writer: raced.writer as never, session: session('cs_retry_a') }),
-      applyPartCheckoutSession({ writer: raced.writer as never, session: session('cs_retry_b') }),
-    ])
-  );
-  assert.equal(raced.listing.quantity, 0);
-  const paid = raced.orders.find((row) => row.status === 'paid');
-  const review = raced.orders.find((row) => row.status === PART_ORDER_REFUND_REVIEW_STATUS);
-  assert.ok(paid && review);
-  const againPaid = await applyPartCheckoutSession({
-    writer: raced.writer as never,
-    session: session(paid.stripe_checkout_session_id),
-  });
-  const againReview = await applyPartCheckoutSession({
-    writer: raced.writer as never,
-    session: session(review.stripe_checkout_session_id),
-  });
-  assert.equal(againPaid.ok && againPaid.applied.alreadyApplied && againPaid.applied.fulfilled, true);
-  assert.equal(againReview.ok && againReview.applied.alreadyApplied && !againReview.applied.fulfilled, true);
-  assert.equal(raced.listing.quantity, 0);
-  assert.equal(raced.orders.length, 2);
-  assert.equal(raced.orders.filter((row) => row.status === 'paid').length, 1);
-});
-
-test('qty and details-only stock still compare before they write', async () => {
-  const qty = createDb(active(null, { qty: 1 }));
-  const fromQty = await applyPartCheckoutSession({ writer: qty.writer as never, session: session('cs_qty') });
-  assert.equal(fromQty.ok && fromQty.applied.fulfilled, true);
-  assert.equal(qty.listing.quantity, 0);
-  assert.equal(qty.listing.qty, 0);
-  assert.equal(qty.listing.status, 'sold');
-  assert.ok(qty.claims.some((claim) => claim.qty === 1));
-
-  const details = createDb(active(null, { details: { quantity_available: 1 } }));
-  const fromDetails = await applyPartCheckoutSession({ writer: details.writer as never, session: session('cs_details') });
-  assert.equal(fromDetails.ok && fromDetails.applied.fulfilled, true);
-  assert.equal(details.listing.quantity, 0);
-  assert.equal(details.listing.status, 'sold');
-  assert.ok(details.claims.some((claim) => claim['is:quantity'] === null));
-});
-
-test('conflicts with stock left stay pending instead of refund review', async () => {
-  const db = createDb(active(5), 1, { conflictAllUpdates: true });
-  const { result, errors } = await withErrors(() =>
-    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_busy'), ...fastClock })
+    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_retry') })
   );
   assert.equal(result.ok, false);
   if (result.ok) return;
   assert.equal(result.retry, true);
-  assert.equal(result.reason, PART_ORDER_STOCK_PENDING_STATUS);
-  assert.equal(db.listing.quantity, 5);
-  assert.equal(db.orders.length, 1);
-  assert.equal(db.orders[0]?.status, PART_ORDER_STOCK_PENDING_STATUS);
-  assert.ok(db.claims.length > STOCK_CLAIM_ATTEMPT_CAP);
-  assert.ok(errors.some((line) => String(line[0]).includes('still pending')));
-});
-
-test('a later read that is short of stock is refund review, not pending', async () => {
-  const db = createDb(active(5), 1, { conflictAllUpdates: true, zeroQuantityAtRead: 3 });
-  const { result } = await withErrors(() =>
-    applyPartCheckoutSession({
-      writer: db.writer as never,
-      session: session('cs_dropped'),
-      ...fastClock,
-    })
-  );
-  assert.equal(result.ok && result.applied.fulfilled, false);
-  assert.equal(db.orders[0]?.status, PART_ORDER_REFUND_REVIEW_STATUS);
-  assert.notEqual(db.orders[0]?.status, PART_ORDER_STOCK_PENDING_STATUS);
-  assert.equal(db.listing.quantity, 0);
-});
-
-test('a write error stays stock_pending and the webhook retry claims once', async () => {
-  const db = createDb(active(4), 1, { failListingUpdates: 1 });
-  const { result, errors } = await withErrors(() =>
-    applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_crash') })
-  );
-  assert.equal(result.ok, false);
-  if (result.ok) return;
-  assert.equal(result.retry, true);
+  assert.equal(partOrderRouteOutcome(result).httpStatus, 500);
   assert.equal(db.listing.quantity, 4);
   assert.equal(db.orders[0]?.status, PART_ORDER_STOCK_PENDING_STATUS);
-  assert.ok(errors.some((line) => String(line[0]).includes('quantity update failed')));
+  assert.ok(errors.some((line) => String(line[0]).includes('stock claim failed')));
 
-  const retry = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_crash') });
-  assert.equal(retry.ok && retry.applied.fulfilled && retry.applied.alreadyApplied, true);
+  const retry = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_retry') });
+  assert.equal(retry.ok && retry.applied.fulfilled, true);
   assert.equal(db.listing.quantity, 3);
-  assert.equal(db.orders[0]?.status, 'paid');
   assert.equal(db.orders.length, 1);
 
-  const again = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_crash') });
-  assert.equal(again.ok && again.applied.alreadyApplied && again.applied.fulfilled, true);
+  const again = await applyPartCheckoutSession({ writer: db.writer as never, session: session('cs_retry') });
+  assert.equal(again.ok && again.applied.fulfilled && again.applied.alreadyApplied, true);
   assert.equal(db.listing.quantity, 3);
+});
+
+test('an unexpected claim result is not fulfilled', async () => {
+  const writer = {
+    from() {
+      let op: 'select' | 'insert' = 'select';
+      const api = {
+        select() {
+          return api;
+        },
+        insert() {
+          op = 'insert';
+          return api;
+        },
+        eq() {
+          return api;
+        },
+        maybeSingle: async () => (op === 'insert' ? { data: { id: 'ord-x' }, error: null } : { data: null, error: null }),
+      };
+      return api;
+    },
+    rpc: async () => ({ data: 'nope', error: null }),
+  };
+  const { result } = await withErrors(() =>
+    applyPartCheckoutSession({ writer: writer as never, session: session('cs_odd') })
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.retry, true);
+  assert.equal(partOrderRouteOutcome(result).body.fulfilled, undefined);
+});
+
+test('the claim path is only the stock function, and checkout stays behind its flag', () => {
+  const src = readFileSync(new URL('./apply-part-order.ts', import.meta.url), 'utf8');
+  assert.match(src, /rpc\(PART_ORDER_CLAIM_RPC/);
+  assert.doesNotMatch(src, /from\('marketplace_listings'\)/);
+  assert.doesNotMatch(src, /from\('marketplace_orders'\)[\s\S]{0,80}\.update\(/);
+  assert.doesNotMatch(src, /STOCK_CLAIM_ATTEMPT_CAP|claimListingStockOnce/);
+  assert.match(src, /result === PART_ORDER_CLAIMED \|\| result === PART_ORDER_ALREADY_SETTLED/);
+  const route = readFileSync(new URL('../../app/api/billing/upgrade/webhook/route.ts', import.meta.url), 'utf8');
+  assert.match(route, /partOrderRouteOutcome\(part\)/);
+  const checkout = readFileSync(new URL('../../app/api/marketplace/parts/[id]/checkout/route.ts', import.meta.url), 'utf8');
+  assert.match(checkout, /isMarketplaceCheckoutEnabled\(\)/);
+  assert.doesNotMatch(checkout, /marketplace_order_claim_stock/);
+  const migration = readFileSync(
+    new URL('../../supabase/migrations/20261122_000972_marketplace_order_claim_stock.sql', import.meta.url),
+    'utf8'
+  );
+  assert.match(migration, /SECURITY DEFINER/);
+  assert.match(migration, /SET search_path = ''/);
+  assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.marketplace_order_claim_stock\(uuid, uuid, integer\) TO service_role/);
+  assert.match(migration, /REVOKE ALL ON FUNCTION public\.marketplace_order_claim_stock\(uuid, uuid, integer\) FROM PUBLIC/);
+  assert.match(migration, /NOT APPLIED/);
+  const rollback = readFileSync(
+    new URL('../../supabase/migrations/20261122_000972_marketplace_order_claim_stock_rollback.sql', import.meta.url),
+    'utf8'
+  );
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public\.marketplace_order_claim_stock\(uuid, uuid, integer\)/);
 });
