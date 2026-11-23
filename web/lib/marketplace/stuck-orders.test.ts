@@ -10,13 +10,16 @@ import {
   clearStuckOrderAlertsForTests,
   marketplaceOrdersAuthStatus,
   notifyStuckMarketplaceOrder,
+  releaseStuckOrderAlert,
   STUCK_ORDER_ALERT_TIMEOUT_MS,
   stuckOrderAgeLabel,
+  stuckOrderAlertIdempotencyKey,
   stuckOrderAlertKey,
   stuckOrderAlertRecipients,
   stuckOrderAlertText,
   type StuckOrderAlertLedger,
 } from './stuck-orders.ts';
+import { marketplaceOrderAlertLedger, STUCK_ORDER_ALERT_CLAIM_TTL_MS } from './stuck-order-alert-ledger.ts';
 
 const here = new URL('.', import.meta.url);
 
@@ -38,7 +41,7 @@ test('non-admin gets 403 on the marketplace order list', () => {
   const page = readFileSync(new URL('../../app/admin/god/marketplace-orders/page.tsx', here), 'utf8');
   assert.match(page, /stuck-orders-truncated/);
   const lib = readFileSync(new URL('./stuck-orders.ts', here), 'utf8');
-  assert.match(lib, /AbortSignal\.timeout\(ms\)/);
+  assert.match(lib, /AbortSignal\.timeout\(timeoutMs\)/);
   assert.equal(STUCK_ORDER_ALERT_TIMEOUT_MS, 3000);
   assert.match(lib, /000973/);
   assert.match(lib, /order_id, status/);
@@ -302,17 +305,22 @@ test('two instances insert one alert row and the memory set skips a repeat', asy
     'utf8'
   );
   assert.match(migration, /NOT APPLIED/);
+  assert.match(migration, /CREATE TABLE IF NOT EXISTS/);
   assert.match(migration, /PRIMARY KEY \(order_id, status\)/);
   assert.match(migration, /alerted_at/);
+  assert.match(migration, /sent_at/);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(migration, /DROP POLICY IF EXISTS/);
   assert.doesNotMatch(migration, /CREATE POLICY/);
   assert.match(migration, /GRANT SELECT, INSERT, DELETE ON TABLE public\.marketplace_order_alerts TO service_role/);
   assert.match(migration, /REVOKE ALL ON TABLE public\.marketplace_order_alerts FROM PUBLIC, anon, authenticated/);
+  assert.match(migration, /REVOKE UPDATE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public\.marketplace_order_alerts FROM service_role/);
   const rollback = readFileSync(
     new URL('../../supabase/migrations/20261122_000973_marketplace_order_alerts_rollback.sql', here),
     'utf8'
   );
   assert.match(rollback, /DROP TABLE IF EXISTS public\.marketplace_order_alerts/);
+  assert.match(rollback, /REVOKE UPDATE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public\.marketplace_order_alerts FROM service_role/);
   const apply = readFileSync(new URL('../billing/apply-part-order.ts', here), 'utf8');
   assert.match(apply, /hasServiceRole\(\)/);
   assert.match(apply, /supabaseMarketplaceOrderAlertLedger\(\)/);
@@ -384,4 +392,275 @@ test('a failed send releases the alert row so another instance can send', async 
   assert.equal(retry.sent, true);
   assert.equal(sends, 1);
   assert.equal(rows.size, 1);
+});
+
+function hangOn(signal: AbortSignal | undefined, ms = 10_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    const fail = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? new Error('aborted'));
+    };
+    if (signal?.aborted) fail();
+    else signal?.addEventListener('abort', fail, { once: true });
+  });
+}
+
+test('the alert send uses one Resend idempotency key per order and status', async () => {
+  const seen = new Set<string>();
+  const keys: string[] = [];
+  await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'refund_review',
+    seen,
+    send: async (message) => {
+      keys.push(message.idempotencyKey);
+    },
+  });
+  releaseStuckOrderAlert(ALERT_ORDER, 'refund_review', seen);
+  await notifyStuckMarketplaceOrder({
+    orderId: ALERT_ORDER,
+    listingId: 'listing-1',
+    status: 'refund_review',
+    seen,
+    send: async (message) => {
+      keys.push(message.idempotencyKey);
+    },
+  });
+  const expected = `stuck-order/${ALERT_ORDER}/refund_review`;
+  assert.equal(stuckOrderAlertIdempotencyKey(ALERT_ORDER, 'refund_review'), expected);
+  assert.deepEqual(keys, [expected, expected]);
+  const mail = readFileSync(new URL('../mail/outgoing-mail.ts', here), 'utf8');
+  assert.match(mail, /'Idempotency-Key': key/);
+  const src = readFileSync(new URL('./stuck-orders.ts', here), 'utf8');
+  assert.match(src, /idempotencyKey/);
+});
+
+test('a missing alert table is logged and the in-memory claim still sends once', async () => {
+  const seen = new Set<string>();
+  const errors: string[] = [];
+  const warns: string[] = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(' '));
+  };
+  console.warn = (...args: unknown[]) => {
+    warns.push(args.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(' '));
+  };
+  try {
+    let sends = 0;
+    const ledger: StuckOrderAlertLedger = {
+      async claim() {
+        throw new Error('relation marketplace_order_alerts does not exist');
+      },
+      async release() {},
+    };
+    const first = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'stock_pending',
+      seen,
+      ledger,
+      send: async () => {
+        sends += 1;
+      },
+    });
+    const second = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'stock_pending',
+      seen,
+      ledger,
+      send: async () => {
+        sends += 1;
+      },
+    });
+    assert.equal(first.sent, true);
+    assert.deepEqual(second, { sent: false, reason: 'duplicate' });
+    assert.equal(sends, 1);
+    assert.ok(errors.some((line) => line.includes('alert claim failed') && line.includes('marketplace_order_alerts')));
+    assert.ok(warns.some((line) => line.includes('duplicate')));
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+});
+
+test('a hung claim stays inside the alert timeout and does not send', async () => {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((item) => String(item)).join(' '));
+  };
+  const started = Date.now();
+  try {
+    let sends = 0;
+    let claimSignal: AbortSignal | undefined;
+    const result = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'stock_pending',
+      seen: new Set(),
+      timeoutMs: 40,
+      ledger: {
+        claim(_orderId, _status, signal) {
+          claimSignal = signal;
+          return hangOn(signal).then(() => true);
+        },
+        async release() {},
+      },
+      send: async () => {
+        sends += 1;
+      },
+    });
+    assert.deepEqual(result, { sent: false, reason: 'error' });
+    assert.equal(sends, 0);
+    assert.ok(Date.now() - started < 1000);
+    assert.ok(claimSignal);
+    assert.equal(STUCK_ORDER_ALERT_TIMEOUT_MS, 3000);
+    assert.ok(errors.some((line) => line.includes('alert claim failed')));
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('claim, send, and release share one signal and a failed release is logged', async () => {
+  const errors: string[] = [];
+  const originalError = console.error;
+  console.error = (...args: unknown[]) => {
+    errors.push(args.map((item) => (typeof item === 'string' ? item : JSON.stringify(item))).join(' '));
+  };
+  const started = Date.now();
+  try {
+    let claimSignal: AbortSignal | undefined;
+    let sendSignal: AbortSignal | undefined;
+    let releaseSignal: AbortSignal | undefined;
+    const result = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'refund_review',
+      seen: new Set(),
+      timeoutMs: 50,
+      ledger: {
+        async claim(_orderId, _status, signal) {
+          claimSignal = signal;
+          return true;
+        },
+        release(_orderId, _status, signal) {
+          releaseSignal = signal;
+          return hangOn(signal);
+        },
+      },
+      send: async (_message, signal) => {
+        sendSignal = signal;
+        throw new Error('resend down');
+      },
+    });
+    assert.deepEqual(result, { sent: false, reason: 'error' });
+    assert.ok(claimSignal && claimSignal === sendSignal && claimSignal === releaseSignal);
+    assert.ok(Date.now() - started < 1000);
+    assert.ok(errors.some((line) => line.includes('alert release failed')));
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('a stale unsent claim can be taken again and a sent claim cannot', async () => {
+  assert.equal(STUCK_ORDER_ALERT_CLAIM_TTL_MS, 60 * 60 * 1000);
+  const now = Date.parse('2026-11-23T12:00:00.000Z');
+  type AlertRow = { order_id: string; status: string; alerted_at: string; sent_at: string | null };
+  const rows: AlertRow[] = [];
+  const writer = {
+    from() {
+      const filters: Record<string, unknown> = {};
+      let nullColumn: string | null = null;
+      let op: 'upsert' | 'delete' | 'select' = 'select';
+      let values: Partial<AlertRow> | null = null;
+      const matches = (row: AlertRow) =>
+        Object.entries(filters).every(([key, value]) => row[key as keyof AlertRow] === value) &&
+        (nullColumn == null || row[nullColumn as keyof AlertRow] == null);
+      const run = async () => {
+        if (op === 'delete') {
+          for (let i = rows.length - 1; i >= 0; i -= 1) if (matches(rows[i])) rows.splice(i, 1);
+          return { data: null, error: null };
+        }
+        if (op === 'select') {
+          return { data: rows.find(matches) ?? null, error: null };
+        }
+        const existing = rows.find((row) => row.order_id === values?.order_id && row.status === values?.status);
+        if (existing) return { data: [], error: null };
+        const row: AlertRow = {
+          order_id: String(values?.order_id),
+          status: String(values?.status),
+          alerted_at: values?.alerted_at || new Date(now).toISOString(),
+          sent_at: values?.sent_at ?? null,
+        };
+        rows.push(row);
+        return { data: [row], error: null };
+      };
+      const api = {
+        upsert(next: Partial<AlertRow>) {
+          op = 'upsert';
+          values = next;
+          return api;
+        },
+        select() {
+          if (op !== 'upsert') op = 'select';
+          return api;
+        },
+        delete() {
+          op = 'delete';
+          return api;
+        },
+        eq(column: string, value: string) {
+          filters[column] = value;
+          return api;
+        },
+        is(column: string, value: null) {
+          if (value === null) nullColumn = column;
+          return api;
+        },
+        abortSignal() {
+          return api;
+        },
+        maybeSingle() {
+          return run();
+        },
+        then(resolve: (value: unknown) => unknown, reject: (error: unknown) => unknown) {
+          return run().then(resolve, reject);
+        },
+      };
+      return api;
+    },
+  };
+  const ledger = marketplaceOrderAlertLedger(writer, () => now);
+  rows.push({
+    order_id: ALERT_ORDER,
+    status: 'stock_pending',
+    alerted_at: '2026-11-23T09:00:00.000Z',
+    sent_at: null,
+  });
+  assert.equal(await ledger.claim(ALERT_ORDER, 'stock_pending'), true);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.sent_at, null);
+
+  rows[0] = {
+    order_id: ALERT_ORDER,
+    status: 'stock_pending',
+    alerted_at: '2026-11-23T11:30:00.000Z',
+    sent_at: null,
+  };
+  assert.equal(await ledger.claim(ALERT_ORDER, 'stock_pending'), false);
+  assert.equal(rows[0]?.alerted_at, '2026-11-23T11:30:00.000Z');
+
+  rows[0] = {
+    order_id: ALERT_ORDER,
+    status: 'stock_pending',
+    alerted_at: '2026-11-23T09:00:00.000Z',
+    sent_at: '2026-11-23T09:05:00.000Z',
+  };
+  assert.equal(await ledger.claim(ALERT_ORDER, 'stock_pending'), false);
+  assert.equal(rows[0]?.sent_at, '2026-11-23T09:05:00.000Z');
 });

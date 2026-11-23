@@ -7,8 +7,10 @@
  * Durable dedupe is marketplace_order_alerts (000973, not applied with this
  * change). The claim is an insert of (order_id, status) on conflict do
  * nothing. Admins are emailed only when that insert created a row. A failed
- * send deletes the row so the next retry can alert again. The in-memory set
- * is only a fast path for this process.
+ * send deletes the row so the next retry can alert again. An unsent row
+ * older than an hour can be claimed again. If the ledger errors, this
+ * process still sends once from the in-memory set. That set is otherwise
+ * only a fast path.
  */
 
 import { productIssuesFromAddress, productIssuesTeamRecipients } from '../product-issues.ts';
@@ -220,11 +222,14 @@ export function stuckOrderAlertText(input: {
 
 /**
  * Durable claim. `claim` is insert ... on conflict do nothing and is true
- * only when a row was inserted. `release` deletes that row.
+ * only when this caller owns the row. `release` deletes an unsent row.
+ * `markSent` records that Resend accepted the email. `signal` is the one
+ * webhook deadline shared with the send.
  */
 export type StuckOrderAlertLedger = {
-  claim(orderId: string, status: string): Promise<boolean>;
-  release(orderId: string, status: string): Promise<void>;
+  claim(orderId: string, status: string, signal?: AbortSignal): Promise<boolean>;
+  release(orderId: string, status: string, signal?: AbortSignal): Promise<void>;
+  markSent?(orderId: string, status: string, signal?: AbortSignal): Promise<void>;
 };
 
 export type StuckOrderAlertInput = {
@@ -242,101 +247,143 @@ export type StuckOrderAlertInput = {
   ledger?: StuckOrderAlertLedger;
   /** Test override. Production uses STUCK_ORDER_ALERT_TIMEOUT_MS. */
   timeoutMs?: number;
-  send?: (message: { to: string[]; subject: string; text: string }, signal: AbortSignal) => Promise<void>;
+  send?: (
+    message: { to: string[]; subject: string; text: string; idempotencyKey: string },
+    signal: AbortSignal
+  ) => Promise<void>;
 };
 
-async function sendAlert(
-  ms: number,
-  work: (signal: AbortSignal) => Promise<void>
-): Promise<void> {
-  const signal = AbortSignal.timeout(ms);
+/** Resend idempotency key. A late post after abort and the retry share it. */
+export function stuckOrderAlertIdempotencyKey(orderId: string, status: string): string {
+  return `stuck-order/${String(orderId || '').trim()}/${String(status || '').trim()}`;
+}
+
+type AlertOutcome = { sent: boolean; reason: 'sent' | 'duplicate' | 'no_recipient' | 'error' };
+
+function logNotSent(
+  input: StuckOrderAlertInput,
+  reason: AlertOutcome['reason'],
+  error?: unknown
+): AlertOutcome {
+  const detail = {
+    orderId: input.orderId,
+    status: input.status,
+    reason,
+    ...(error ? { error: error instanceof Error ? error.message : String(error) } : {}),
+  };
+  if (reason === 'error' || error) console.error('[stuck-order] alert not sent', detail);
+  else console.warn('[stuck-order] alert not sent', detail);
+  return { sent: false, reason };
+}
+
+async function untilAbort<T>(signal: AbortSignal, work: () => Promise<T>): Promise<T> {
   let onAbort: (() => void) | undefined;
   const aborted = new Promise<never>((_, reject) => {
-    onAbort = () => reject(signal.reason ?? new Error('alert send timed out'));
+    onAbort = () => reject(signal.reason ?? new Error('alert timed out'));
     if (signal.aborted) onAbort();
     else signal.addEventListener('abort', onAbort, { once: true });
   });
-  const pending = work(signal);
+  const pending = work();
   pending.catch(() => {});
   try {
-    await Promise.race([pending, aborted]);
+    return await Promise.race([pending, aborted]);
   } finally {
     if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
 async function releaseAlertClaim(
-  orderId: string,
-  status: string,
+  input: StuckOrderAlertInput,
   seen: Set<string>,
   ledger: StuckOrderAlertLedger | undefined,
-  held: boolean
+  held: boolean,
+  signal: AbortSignal
 ): Promise<void> {
-  releaseStuckOrderAlert(orderId, status, seen);
+  releaseStuckOrderAlert(input.orderId, input.status, seen);
   if (!held || !ledger) return;
-  await ledger.release(orderId, status);
+  try {
+    await untilAbort(signal, () => ledger.release(input.orderId, input.status, signal));
+  } catch (error) {
+    console.error('[stuck-order] alert release failed', {
+      orderId: input.orderId,
+      status: input.status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
-export async function notifyStuckMarketplaceOrder(
-  input: StuckOrderAlertInput
-): Promise<{ sent: boolean; reason: 'sent' | 'duplicate' | 'no_recipient' | 'error' }> {
+export async function notifyStuckMarketplaceOrder(input: StuckOrderAlertInput): Promise<AlertOutcome> {
   const seen = input.seen ?? liveStuckOrderAlerts;
   const to = stuckOrderAlertRecipients([input.buyerEmail]);
-  if (!to.length) return { sent: false, reason: 'no_recipient' };
+  if (!to.length) return logNotSent(input, 'no_recipient');
   if (!input.send && !String(process.env.RESEND_API_KEY || '').trim()) {
-    return { sent: false, reason: 'error' };
+    return logNotSent(input, 'error', new Error('RESEND_API_KEY is not set'));
   }
   if (seen.has(stuckOrderAlertKey(input.orderId, input.status))) {
-    return { sent: false, reason: 'duplicate' };
+    return logNotSent(input, 'duplicate');
   }
 
+  const timeoutMs = input.timeoutMs ?? STUCK_ORDER_ALERT_TIMEOUT_MS;
+  const signal = AbortSignal.timeout(timeoutMs);
   let held = false;
-  let remembered = false;
-  try {
-    if (input.ledger) {
-      const inserted = await input.ledger.claim(input.orderId, input.status);
-      if (!inserted) return { sent: false, reason: 'duplicate' };
+  if (input.ledger) {
+    try {
+      const inserted = await untilAbort(signal, () => input.ledger!.claim(input.orderId, input.status, signal));
+      if (!inserted) return logNotSent(input, 'duplicate');
       held = true;
+    } catch (error) {
+      console.error('[stuck-order] alert claim failed', {
+        orderId: input.orderId,
+        status: input.status,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      held = false;
+      if (signal.aborted) return logNotSent(input, 'error', error);
     }
-    remembered = claimStuckOrderAlert(input.orderId, input.status, seen);
-    if (!remembered) {
-      if (held && input.ledger) await input.ledger.release(input.orderId, input.status);
-      return { sent: false, reason: 'duplicate' };
-    }
-  } catch {
-    if (remembered) releaseStuckOrderAlert(input.orderId, input.status, seen);
-    if (held && input.ledger) {
-      await input.ledger.release(input.orderId, input.status).catch(() => {});
-    }
-    return { sent: false, reason: 'error' };
+  }
+  if (!claimStuckOrderAlert(input.orderId, input.status, seen)) {
+    await releaseAlertClaim(input, seen, input.ledger, held, signal);
+    return logNotSent(input, 'duplicate');
   }
 
   const subject = stuckOrderAlertSubject(input.orderId, input.status);
   const text = stuckOrderAlertText(input);
-  const timeoutMs = input.timeoutMs ?? STUCK_ORDER_ALERT_TIMEOUT_MS;
+  const idempotencyKey = stuckOrderAlertIdempotencyKey(input.orderId, input.status);
   try {
-    if (input.send) {
-      const send = input.send;
-      await sendAlert(timeoutMs, (signal) => send({ to, subject, text }, signal));
-    } else {
+    await untilAbort(signal, async () => {
+      if (input.send) {
+        await input.send({ to, subject, text, idempotencyKey }, signal);
+        return;
+      }
       const apiKey = String(process.env.RESEND_API_KEY || '').trim();
-      await sendAlert(timeoutMs, async (signal) => {
-        const res = await postResendEmail({
-          apiKey,
-          signal,
-          message: {
-            from: productIssuesFromAddress(),
-            to,
-            subject,
-            text,
-          },
-        });
-        if (!res.ok) throw new Error('alert send failed');
+      const res = await postResendEmail({
+        apiKey,
+        signal,
+        idempotencyKey,
+        message: {
+          from: productIssuesFromAddress(),
+          to,
+          subject,
+          text,
+        },
+      });
+      if (!res.ok) throw new Error('alert send failed');
+    });
+  } catch (error) {
+    await releaseAlertClaim(input, seen, input.ledger, held, signal);
+    return logNotSent(input, 'error', error);
+  }
+
+  if (held && input.ledger?.markSent) {
+    try {
+      await untilAbort(signal, () => input.ledger!.markSent!(input.orderId, input.status, signal));
+    } catch (error) {
+      console.error('[stuck-order] alert sent marker failed', {
+        orderId: input.orderId,
+        status: input.status,
+        error: error instanceof Error ? error.message : String(error),
       });
     }
-    return { sent: true, reason: 'sent' };
-  } catch {
-    await releaseAlertClaim(input.orderId, input.status, seen, input.ledger, held).catch(() => {});
-    return { sent: false, reason: 'error' };
   }
+  return { sent: true, reason: 'sent' };
 }

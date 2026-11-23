@@ -65,9 +65,23 @@ BEGIN
 
   IF has_table_privilege('authenticated', 'public.marketplace_order_alerts', 'INSERT')
      OR has_table_privilege('anon', 'public.marketplace_order_alerts', 'SELECT')
+     OR NOT has_table_privilege('service_role', 'public.marketplace_order_alerts', 'SELECT')
      OR NOT has_table_privilege('service_role', 'public.marketplace_order_alerts', 'INSERT')
-     OR NOT has_table_privilege('service_role', 'public.marketplace_order_alerts', 'DELETE') THEN
-    RAISE EXCEPTION 'marketplace_order_alerts grants are not service_role only';
+     OR NOT has_table_privilege('service_role', 'public.marketplace_order_alerts', 'DELETE')
+     OR has_table_privilege('service_role', 'public.marketplace_order_alerts', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.marketplace_order_alerts', 'TRUNCATE')
+     OR has_table_privilege('service_role', 'public.marketplace_order_alerts', 'REFERENCES')
+     OR has_table_privilege('service_role', 'public.marketplace_order_alerts', 'TRIGGER') THEN
+    RAISE EXCEPTION 'marketplace_order_alerts grants are not select/insert/delete for service_role only';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'marketplace_order_alerts'
+      AND column_name = 'sent_at'
+  ) THEN
+    RAISE EXCEPTION 'marketplace_order_alerts.sent_at is missing';
   END IF;
 
   INSERT INTO public.marketplace_order_alerts (order_id, status)
@@ -176,5 +190,34 @@ END $$;
 INSERT INTO public.marketplace_order_alerts (order_id, status)
 VALUES ('cccccccc-cccc-4ccc-8ccc-cccccccccccc', 'stock_pending')
 ON CONFLICT (order_id, status) DO NOTHING;
+
+-- Second apply must not fail and must not drop the row or widen grants.
+\ir ../migrations/20261122_000973_marketplace_order_alerts.sql
+
+DO $$
+DECLARE
+  v_rows integer;
+  v_policies integer;
+BEGIN
+  SELECT count(*) INTO v_rows FROM public.marketplace_order_alerts
+  WHERE order_id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+    AND status = 'stock_pending';
+  IF v_rows <> 1 THEN
+    RAISE EXCEPTION 're-running 000973 changed alert rows to %', v_rows;
+  END IF;
+  SELECT count(*) INTO v_policies
+  FROM pg_catalog.pg_policy p
+  JOIN pg_catalog.pg_class c ON c.oid = p.polrelid
+  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+  WHERE n.nspname = 'public' AND c.relname = 'marketplace_order_alerts';
+  IF v_policies <> 0 THEN
+    RAISE EXCEPTION 're-running 000973 left % policies', v_policies;
+  END IF;
+  IF has_table_privilege('service_role', 'public.marketplace_order_alerts', 'UPDATE')
+     OR has_table_privilege('service_role', 'public.marketplace_order_alerts', 'TRUNCATE')
+     OR NOT has_table_privilege('service_role', 'public.marketplace_order_alerts', 'DELETE') THEN
+    RAISE EXCEPTION 're-running 000973 changed service_role grants';
+  END IF;
+END $$;
 
 SELECT '000973 proof ok' AS status;

@@ -103,6 +103,29 @@ function walk(dir: string, out: string[]) {
   }
 }
 
+test('postResendEmail sends an Idempotency-Key only when one is given', async () => {
+  const headers: Record<string, string>[] = [];
+  const fetchImpl: typeof fetch = async (_url, init) => {
+    headers.push((init?.headers || {}) as Record<string, string>);
+    return new Response('{}', { status: 200 });
+  };
+  await postResendEmail({
+    apiKey: 'resend-test-key',
+    env: { APP_MAIL_BCC: 'off' },
+    fetchImpl,
+    idempotencyKey: 'stuck-order/ord-1/stock_pending',
+    message: { from: 'a@b.co', to: ['c@d.co'], subject: 'S', text: 't' },
+  });
+  await postResendEmail({
+    apiKey: 'resend-test-key',
+    env: { APP_MAIL_BCC: 'off' },
+    fetchImpl,
+    message: { from: 'a@b.co', to: ['c@d.co'], subject: 'S', text: 't' },
+  });
+  assert.equal(headers[0]?.['Idempotency-Key'], 'stuck-order/ord-1/stock_pending');
+  assert.equal(headers[1]?.['Idempotency-Key'], undefined);
+});
+
 test('the Resend URL and ops address live only in the central mailer', () => {
   const files: string[] = [];
   walk(webRoot, files);
