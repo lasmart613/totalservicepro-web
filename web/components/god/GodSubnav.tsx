@@ -23,6 +23,7 @@ const LINKS = [
   { href: '/admin/god/manuals', label: 'Manuals' },
   { href: '/admin/god/directory', label: 'Directory' },
   { href: '/admin/god/reviews', label: 'Reviews' },
+  { href: '/admin/god/marketplace-orders', label: 'Marketplace orders' },
 ];
 
 export function GodSubnav() {
