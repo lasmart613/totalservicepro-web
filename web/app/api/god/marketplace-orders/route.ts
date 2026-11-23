@@ -3,6 +3,7 @@ import { requireGodCaller } from '@/lib/god-auth';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   STUCK_MARKETPLACE_ORDER_STATUSES,
+  STUCK_ORDER_LIST_LIMIT,
   assembleStuckOrders,
   marketplaceOrdersAuthStatus,
   type StuckOrderListing,
@@ -30,7 +31,6 @@ export async function GET(req: NextRequest) {
   const gate = await requireGodCaller(req);
   if (!gate.ok) {
     const status = marketplaceOrdersAuthStatus({ ok: false, httpStatus: gate.response.status });
-    if (status === gate.response.status) return gate.response;
     const payload = await gate.response.json().catch(() => ({ error: 'Forbidden', god: false }));
     return json(payload, status);
   }
@@ -42,10 +42,12 @@ export async function GET(req: NextRequest) {
     .select(ORDER_COLUMNS)
     .in('status', [...STUCK_MARKETPLACE_ORDER_STATUSES])
     .order('updated_at', { ascending: true })
-    .limit(200);
+    .limit(STUCK_ORDER_LIST_LIMIT + 1);
   if (error) return json({ error: 'Marketplace orders unavailable' }, 503);
 
-  const orders = (data || []) as StuckOrderSource[];
+  const loaded = (data || []) as StuckOrderSource[];
+  const truncated = loaded.length > STUCK_ORDER_LIST_LIMIT;
+  const orders = truncated ? loaded.slice(0, STUCK_ORDER_LIST_LIMIT) : loaded;
   const listingIds = [...new Set(orders.map((order) => String(order.listing_id || '')).filter(Boolean))];
   const orgIds = [...new Set(orders.map((order) => String(order.seller_organization_id || '')).filter(Boolean))];
   const [listingsRes, orgsRes] = await Promise.all([
@@ -65,5 +67,6 @@ export async function GET(req: NextRequest) {
       organizations: (orgsRes.data || []) as StuckOrderOrg[],
     }),
     readOnly: true,
+    truncated,
   });
 }

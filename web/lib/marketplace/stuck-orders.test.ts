@@ -10,6 +10,7 @@ import {
   clearStuckOrderAlertsForTests,
   marketplaceOrdersAuthStatus,
   notifyStuckMarketplaceOrder,
+  STUCK_ORDER_ALERT_TIMEOUT_MS,
   stuckOrderAgeLabel,
   stuckOrderAlertRecipients,
   stuckOrderAlertText,
@@ -27,8 +28,18 @@ test('non-admin gets 403 on the marketplace order list', () => {
   const queryAt = route.indexOf("from('marketplace_orders')");
   assert.ok(gateAt > 0 && statusAt > gateAt && queryAt > statusAt);
   assert.match(route, /status: 403|marketplaceOrdersAuthStatus/);
+  assert.match(route, /Cache-Control': 'no-store'/);
+  assert.doesNotMatch(route, /return gate\.response/);
+  assert.match(route, /truncated/);
+  assert.match(route, /STUCK_ORDER_LIST_LIMIT \+ 1/);
   assert.doesNotMatch(route, /export async function POST|export async function PATCH|export async function DELETE/);
   const page = readFileSync(new URL('../../app/admin/god/marketplace-orders/page.tsx', here), 'utf8');
+  assert.match(page, /stuck-orders-truncated/);
+  const lib = readFileSync(new URL('./stuck-orders.ts', here), 'utf8');
+  assert.match(lib, /AbortSignal\.timeout\(ms\)/);
+  assert.equal(STUCK_ORDER_ALERT_TIMEOUT_MS, 3000);
+  assert.match(lib, /000973/);
+  assert.match(lib, /order_id, status/);
   assert.match(page, /overflow-x-auto/);
   assert.match(page, /min-w-\[1100px\]/);
   assert.doesNotMatch(page, /scrollbar-width:\s*none/);
@@ -99,7 +110,45 @@ test('admin alert dedupes per order and never addresses the buyer or seller', as
   assert.deepEqual(stuckOrderAlertRecipients(['buyer@qa.example', 'seller@qa.example']), productIssuesTeamRecipients());
   assert.match(sent[0]?.text || '', /reverse transfer/);
   assert.match(stuckOrderAlertText(input), /not a recipient/);
-  assert.equal(claimStuckOrderAlert('ord-dedupe', seen), false);
+  assert.equal(claimStuckOrderAlert('ord-dedupe', 'refund_review', seen), false);
+  const pending = await notifyStuckMarketplaceOrder({ ...input, status: 'stock_pending' });
+  assert.equal(pending.sent, true);
+  assert.equal(sent.length, 2);
+  const pendingAgain = await notifyStuckMarketplaceOrder({ ...input, status: 'stock_pending' });
+  assert.deepEqual(pendingAgain, { sent: false, reason: 'duplicate' });
+});
+
+test('a hung alert send times out and stays non-fatal', async () => {
+  const seen = new Set<string>();
+  const started = Date.now();
+  const result = await notifyStuckMarketplaceOrder({
+    orderId: 'ord-timeout',
+    listingId: 'listing-1',
+    status: 'stock_pending',
+    seen,
+    timeoutMs: 40,
+    send: (_message, signal) =>
+      new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, 10_000);
+        const fail = () => {
+          clearTimeout(timer);
+          reject(signal.reason ?? new Error('aborted'));
+        };
+        if (signal.aborted) fail();
+        else signal.addEventListener('abort', fail, { once: true });
+      }),
+  });
+  assert.deepEqual(result, { sent: false, reason: 'error' });
+  assert.ok(Date.now() - started < 1000);
+  const retry = await notifyStuckMarketplaceOrder({
+    orderId: 'ord-timeout',
+    listingId: 'listing-1',
+    status: 'stock_pending',
+    seen,
+    timeoutMs: 40,
+    send: async () => {},
+  });
+  assert.equal(retry.sent, true);
 });
 
 test('a refund review from checkout alerts admins once for that order', async () => {

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { fetchGodMe, godAuthHeader } from '@/lib/god-client';
-import { DESTINATION_REFUND_NOTE } from '@/lib/marketplace/stuck-orders';
+import { DESTINATION_REFUND_NOTE, STUCK_ORDER_LIST_LIMIT } from '@/lib/marketplace/stuck-orders';
 
 type Row = {
   id: string;
@@ -42,6 +42,7 @@ const COLUMNS: { key: keyof Row; label: string }[] = [
 export default function GodMarketplaceOrdersPage() {
   const [allowed, setAllowed] = useState<boolean | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  const [truncated, setTruncated] = useState(false);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -60,6 +61,7 @@ export default function GodMarketplaceOrdersPage() {
         return;
       }
       setRows(Array.isArray(json.orders) ? json.orders : []);
+      setTruncated(json.truncated === true);
     })();
     return () => {
       cancelled = true;
@@ -87,6 +89,11 @@ export default function GodMarketplaceOrdersPage() {
       <p className="text-sm mb-6 max-w-3xl" data-testid="destination-refund-note">
         {DESTINATION_REFUND_NOTE}
       </p>
+      {truncated ? (
+        <p className="text-sm mb-4" data-testid="stuck-orders-truncated">
+          Showing the first {STUCK_ORDER_LIST_LIMIT}. More orders are waiting than this list holds.
+        </p>
+      ) : null}
       {message ? <p className="text-sm mb-4 text-red-300">{message}</p> : null}
       {rows.length === 0 ? (
         <p className="text-sm text-[var(--text3)]">No marketplace orders are waiting.</p>

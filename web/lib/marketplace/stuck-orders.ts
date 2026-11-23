@@ -3,6 +3,11 @@
  * stock_pending is waiting on a claim. refund_review needs a person.
  * Buyers and sellers are never emailed. A sweep of orders older than N hours
  * is not built here: it would need a scheduled job and a durable send log.
+ *
+ * Durable dedupe across instances is deferred pending Larry. Do not add it
+ * until he asks. Option: unapplied migration 000973, an alert row keyed
+ * (order_id, status) with insert-on-conflict, so a second process does not
+ * send the same status again. This file keeps an in-memory set only.
  */
 
 import { productIssuesFromAddress, productIssuesTeamRecipients } from '../product-issues.ts';
@@ -13,6 +18,11 @@ export type StuckMarketplaceOrderStatus = (typeof STUCK_MARKETPLACE_ORDER_STATUS
 
 export const DESTINATION_REFUND_NOTE =
   'Refunds on destination charges need a reverse transfer before the buyer is refunded. This list does not refund or reverse anything.';
+
+export const STUCK_ORDER_LIST_LIMIT = 200;
+
+/** Resend must not hold the Stripe webhook open. */
+export const STUCK_ORDER_ALERT_TIMEOUT_MS = 3000;
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -60,16 +70,31 @@ export function clearStuckOrderAlertsForTests(): void {
   liveStuckOrderAlerts.clear();
 }
 
-/** True the first time this order should email admins. */
-export function claimStuckOrderAlert(orderId: string, seen: Set<string> = liveStuckOrderAlerts): boolean {
+/** In-memory key. A later status on the same order is a new alert. */
+export function stuckOrderAlertKey(orderId: string, status: string): string {
+  return `${String(orderId || '').trim()}:${String(status || '').trim()}`;
+}
+
+/** True the first time this order and status should email admins. */
+export function claimStuckOrderAlert(
+  orderId: string,
+  status: string,
+  seen: Set<string> = liveStuckOrderAlerts
+): boolean {
   const id = String(orderId || '').trim();
-  if (!id || seen.has(id)) return false;
-  seen.add(id);
+  const state = String(status || '').trim();
+  const key = stuckOrderAlertKey(id, state);
+  if (!id || !state || seen.has(key)) return false;
+  seen.add(key);
   return true;
 }
 
-export function releaseStuckOrderAlert(orderId: string, seen: Set<string> = liveStuckOrderAlerts): void {
-  seen.delete(String(orderId || '').trim());
+export function releaseStuckOrderAlert(
+  orderId: string,
+  status: string,
+  seen: Set<string> = liveStuckOrderAlerts
+): void {
+  seen.delete(stuckOrderAlertKey(orderId, status));
 }
 
 export function isStuckMarketplaceOrderStatus(status: unknown): status is StuckMarketplaceOrderStatus {
@@ -203,47 +228,71 @@ export type StuckOrderAlertInput = {
   amountCents?: number | null;
   currency?: string | null;
   seen?: Set<string>;
-  send?: (message: { to: string[]; subject: string; text: string }) => Promise<void>;
+  /** Test override. Production uses STUCK_ORDER_ALERT_TIMEOUT_MS. */
+  timeoutMs?: number;
+  send?: (message: { to: string[]; subject: string; text: string }, signal: AbortSignal) => Promise<void>;
 };
+
+async function sendAlert(
+  ms: number,
+  work: (signal: AbortSignal) => Promise<void>
+): Promise<void> {
+  const signal = AbortSignal.timeout(ms);
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_, reject) => {
+    onAbort = () => reject(signal.reason ?? new Error('alert send timed out'));
+    if (signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, { once: true });
+  });
+  const pending = work(signal);
+  pending.catch(() => {});
+  try {
+    await Promise.race([pending, aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
 
 export async function notifyStuckMarketplaceOrder(
   input: StuckOrderAlertInput
 ): Promise<{ sent: boolean; reason: 'sent' | 'duplicate' | 'no_recipient' | 'error' }> {
   const seen = input.seen ?? liveStuckOrderAlerts;
-  if (!claimStuckOrderAlert(input.orderId, seen)) return { sent: false, reason: 'duplicate' };
+  if (!claimStuckOrderAlert(input.orderId, input.status, seen)) return { sent: false, reason: 'duplicate' };
   const to = stuckOrderAlertRecipients([input.buyerEmail]);
   if (!to.length) {
-    releaseStuckOrderAlert(input.orderId, seen);
+    releaseStuckOrderAlert(input.orderId, input.status, seen);
     return { sent: false, reason: 'no_recipient' };
   }
   const subject = stuckOrderAlertSubject(input.orderId, input.status);
   const text = stuckOrderAlertText(input);
+  const timeoutMs = input.timeoutMs ?? STUCK_ORDER_ALERT_TIMEOUT_MS;
   try {
     if (input.send) {
-      await input.send({ to, subject, text });
+      const send = input.send;
+      await sendAlert(timeoutMs, (signal) => send({ to, subject, text }, signal));
     } else {
       const apiKey = String(process.env.RESEND_API_KEY || '').trim();
       if (!apiKey) {
-        releaseStuckOrderAlert(input.orderId, seen);
+        releaseStuckOrderAlert(input.orderId, input.status, seen);
         return { sent: false, reason: 'error' };
       }
-      const res = await postResendEmail({
-        apiKey,
-        message: {
-          from: productIssuesFromAddress(),
-          to,
-          subject,
-          text,
-        },
+      await sendAlert(timeoutMs, async (signal) => {
+        const res = await postResendEmail({
+          apiKey,
+          signal,
+          message: {
+            from: productIssuesFromAddress(),
+            to,
+            subject,
+            text,
+          },
+        });
+        if (!res.ok) throw new Error('alert send failed');
       });
-      if (!res.ok) {
-        releaseStuckOrderAlert(input.orderId, seen);
-        return { sent: false, reason: 'error' };
-      }
     }
     return { sent: true, reason: 'sent' };
   } catch {
-    releaseStuckOrderAlert(input.orderId, seen);
+    releaseStuckOrderAlert(input.orderId, input.status, seen);
     return { sent: false, reason: 'error' };
   }
 }
