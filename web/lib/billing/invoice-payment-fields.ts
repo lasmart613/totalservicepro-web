@@ -13,7 +13,10 @@ export function isClientLockedInvoicePaymentKey(key: string): boolean {
     name.includes('payment_intent') ||
     name === 'stripe_checkout_expired_ids' ||
     name === 'stripe_checkout_expired_at' ||
-    name === 'stripe_session_id'
+    name === 'stripe_session_id' ||
+    name === 'payment_amount' ||
+    name === 'payment_amount_minor' ||
+    name === 'payment_currency'
   );
 }
 

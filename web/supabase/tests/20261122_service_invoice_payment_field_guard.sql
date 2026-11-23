@@ -46,6 +46,9 @@ VALUES (
     'stripe_checkout_session_id', 'cs_live_1',
     'replaced_checkout_session_ids', json_build_array('cs_old'),
     'stripe_payment_intent_id', 'pi_live_1',
+    'payment_amount', 100,
+    'payment_amount_minor', 10000,
+    'payment_currency', 'usd',
     'note', 'keep me'
   ),
   'sent'
@@ -59,17 +62,20 @@ CREATE TEMP TABLE fn_after_969 (body text);
 INSERT INTO fn_after_969
 SELECT pg_get_functiondef('public.service_invoices_guard_stripe_session()'::regprocedure);
 
-CREATE FUNCTION pg_temp.attempt(role_name text, stmt text) RETURNS text
+CREATE FUNCTION pg_temp.attempt(role_name text, stmt text, jwt_sub text DEFAULT NULL) RETURNS text
 LANGUAGE plpgsql AS $$
 DECLARE
   result text;
 BEGIN
   -- 000962 still bypasses when auth.uid() is null. A client attempt needs a sub
   -- so the rollback check is actually running as a signed-in user.
+  -- jwt_sub overrides that, including for a non-client role that is standing
+  -- in for a postgres-owned SECURITY DEFINER caller.
   PERFORM set_config(
     'request.jwt.claim.sub',
-    CASE WHEN role_name IN ('authenticated', 'anon')
-      THEN 'aaaaaaaa-0000-0000-0000-000000000001'
+    CASE
+      WHEN jwt_sub IS NOT NULL THEN jwt_sub
+      WHEN role_name IN ('authenticated', 'anon') THEN 'aaaaaaaa-0000-0000-0000-000000000001'
       ELSE ''
     END,
     true
@@ -92,7 +98,7 @@ FROM pg_proc
 WHERE oid = 'public.service_invoices_guard_stripe_session()'::regprocedure;
 
 INSERT INTO proof (label, ok)
-SELECT 'client can edit a non-payment key',
+SELECT 'U1 client can edit a non-payment key',
   pg_temp.attempt('authenticated', $q$
     UPDATE public.service_invoices
     SET invoice_data = (invoice_data::jsonb || jsonb_build_object('note', 'edited'))::json
@@ -106,14 +112,83 @@ SELECT 'that edit kept the pay link',
 FROM public.service_invoices WHERE id = 1;
 
 INSERT INTO proof (label, ok)
-SELECT 'client payment_url is stripped back',
+SELECT 'U3 client payment_url change raises',
   pg_temp.attempt('authenticated', $q$
     UPDATE public.service_invoices
     SET invoice_data = jsonb_set(invoice_data::jsonb, '{payment_url}', '"https://evil.example/phish"')::json
     WHERE id = 1
-  $q$) = 'ok'
-  AND (SELECT invoice_data::jsonb ->> 'payment_url' FROM public.service_invoices WHERE id = 1)
-      = 'https://checkout.stripe.com/c/pay/cs_live_1';
+  $q$) = 'invoice payment fields cannot be changed by the client';
+
+INSERT INTO proof (label, ok)
+SELECT 'U3 payment_url unchanged',
+  invoice_data::jsonb ->> 'payment_url' = 'https://checkout.stripe.com/c/pay/cs_live_1'
+FROM public.service_invoices WHERE id = 1;
+
+INSERT INTO proof (label, ok)
+SELECT 'U5 client cannot drop payment_url',
+  pg_temp.attempt('authenticated', $q$
+    UPDATE public.service_invoices
+    SET invoice_data = (invoice_data::jsonb - 'payment_url')::json
+    WHERE id = 1
+  $q$) = 'invoice payment fields cannot be changed by the client';
+
+INSERT INTO proof (label, ok)
+SELECT 'U6 client stripe_checkout_session_id change raises',
+  pg_temp.attempt('authenticated', $q$
+    UPDATE public.service_invoices
+    SET invoice_data = jsonb_set(invoice_data::jsonb, '{stripe_checkout_session_id}', '"cs_evil"')::json
+    WHERE id = 1
+  $q$) = 'invoice payment fields cannot be changed by the client';
+
+INSERT INTO proof (label, ok)
+SELECT 'U9 client stripe_session_id change raises',
+  pg_temp.attempt('authenticated', $q$
+    UPDATE public.service_invoices SET stripe_session_id = 'cs_evil' WHERE id = 1
+  $q$) = 'stripe_session_id cannot be changed by the client';
+
+INSERT INTO proof (label, ok)
+SELECT 'U10 client insert of payment_url raises',
+  pg_temp.attempt('authenticated', $q$
+    INSERT INTO public.service_invoices (id, invoice_data, status)
+    VALUES (8, '{"payment_url":"https://evil.example"}'::json, 'draft')
+  $q$) = 'invoice payment fields cannot be set by the client';
+
+INSERT INTO proof (label, ok)
+SELECT 'I1 client insert without locked keys is allowed',
+  pg_temp.attempt('authenticated', $q$
+    INSERT INTO public.service_invoices (id, invoice_data, status)
+    VALUES (
+      9,
+      '{"note":"draft","payment_amount_minor":5000,"payment_currency":"eur","payment_amount":50}'::json,
+      'draft'
+    )
+  $q$) = 'ok';
+
+INSERT INTO proof (label, ok)
+SELECT 'I1 stored charge was stripped on insert',
+  invoice_data::jsonb ->> 'note' = 'draft'
+  AND NOT (invoice_data::jsonb ? 'payment_amount_minor')
+  AND NOT (invoice_data::jsonb ? 'payment_currency')
+  AND NOT (invoice_data::jsonb ? 'payment_amount')
+FROM public.service_invoices WHERE id = 9;
+
+CREATE FUNCTION pg_temp.plant_url() RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  UPDATE public.service_invoices
+  SET invoice_data = jsonb_set(invoice_data::jsonb, '{payment_url}', '"https://evil.example/definer"')::json
+  WHERE id = 1;
+END $$;
+ALTER FUNCTION pg_temp.plant_url() OWNER TO postgres;
+GRANT EXECUTE ON FUNCTION pg_temp.plant_url() TO authenticated;
+
+INSERT INTO proof (label, ok)
+SELECT 'postgres-owned definer called by a member cannot change payment_url',
+  pg_temp.attempt('authenticated', $q$ SELECT pg_temp.plant_url() $q$)
+    = 'invoice payment fields cannot be changed by the client';
 
 INSERT INTO proof (label, ok)
 SELECT 'client payment key overlay is accepted',
@@ -124,6 +199,9 @@ SELECT 'client payment key overlay is accepted',
       || jsonb_build_object(
         'stripe_payment_intent_id', 'pi_evil',
         'replaced_checkout_session_ids', jsonb_build_array('cs_evil'),
+        'payment_amount', 50,
+        'payment_amount_minor', 5000,
+        'payment_currency', 'eur',
         'note', 'still here'
       )
     )::json
@@ -137,11 +215,15 @@ SELECT 'payment_intent and replaced session ids stayed stored and the note saved
   || ' replaced=' || COALESCE(invoice_data::jsonb ->> 'replaced_checkout_session_ids', 'null'),
   invoice_data::jsonb ->> 'stripe_payment_intent_id' = 'pi_live_1'
   AND invoice_data::jsonb -> 'replaced_checkout_session_ids' = jsonb_build_array('cs_old')
+  AND (invoice_data::jsonb ->> 'payment_amount')::numeric = 100
+  AND (invoice_data::jsonb ->> 'payment_amount_minor')::numeric = 10000
+  AND invoice_data::jsonb ->> 'payment_currency' = 'usd'
+  AND invoice_data::jsonb ->> 'payment_url' = 'https://checkout.stripe.com/c/pay/cs_live_1'
   AND invoice_data::jsonb ->> 'note' = 'still here'
 FROM public.service_invoices WHERE id = 1;
 
 INSERT INTO proof (label, ok)
-SELECT 'client cannot replace invoice_data with a string',
+SELECT 'I3 client cannot replace invoice_data with a string',
   pg_temp.attempt('authenticated', $q$
     UPDATE public.service_invoices
     SET invoice_data = to_json('{"payment_url":"https://evil.example/phish"}'::text)
@@ -149,7 +231,7 @@ SELECT 'client cannot replace invoice_data with a string',
   $q$) = 'invoice_data must be a JSON object';
 
 INSERT INTO proof (label, ok)
-SELECT 'client cannot replace invoice_data with an array',
+SELECT 'I4 client cannot replace invoice_data with an array',
   pg_temp.attempt('authenticated', $q$
     UPDATE public.service_invoices
     SET invoice_data = '[{"payment_url":"https://evil.example/phish"}]'::json

@@ -15,6 +15,9 @@ test('a client form cannot replace payment_url, session ids, or payment_intent',
     stripe_checkout_session_id: 'cs_test_abc',
     replaced_checkout_session_ids: ['cs_old'],
     stripe_payment_intent_id: 'pi_test_abc',
+    payment_amount: 100,
+    payment_amount_minor: 10000,
+    payment_currency: 'usd',
     deposit: 10,
   };
   const merged = mergeFormInvoiceData(stored, {
@@ -22,12 +25,18 @@ test('a client form cannot replace payment_url, session ids, or payment_intent',
     payment_url: 'https://evil.example/phish',
     replaced_checkout_session_ids: ['cs_evil'],
     stripe_payment_intent_id: 'pi_evil',
+    payment_amount: 50,
+    payment_amount_minor: 5000,
+    payment_currency: 'eur',
     deposit: 0,
   });
   assert.equal(merged.payment_url, stored.payment_url);
   assert.equal(merged.stripe_checkout_session_id, 'cs_test_abc');
   assert.deepEqual(merged.replaced_checkout_session_ids, ['cs_old']);
   assert.equal(merged.stripe_payment_intent_id, 'pi_test_abc');
+  assert.equal(merged.payment_amount, 100);
+  assert.equal(merged.payment_amount_minor, 10000);
+  assert.equal(merged.payment_currency, 'usd');
   assert.equal(merged.deposit, 0);
   const created = sealClientInvoicePaymentKeys(undefined, {
     note: 'new',
@@ -52,9 +61,12 @@ test('000969 builds on 000962 and its rollback is that function', () => {
     join(here, '../../supabase/migrations/20261117_000962_service_invoice_payment_url_guard.sql'),
     'utf8'
   );
-  assert.match(guard, /current_user NOT IN \('authenticated', 'anon'\)/);
+  assert.match(guard, /current_user NOT IN \('authenticated', 'anon'\) AND auth\.uid\(\) IS NULL/);
   assert.match(guard, /SECURITY INVOKER/);
-  assert.doesNotMatch(guard.slice(guard.indexOf('CREATE OR REPLACE FUNCTION')), /auth\.uid\(\) IS NULL/);
+  assert.match(guard, /invoice payment fields cannot be changed by the client/);
+  assert.match(guard, /000962 guard is not installed/);
+  assert.match(guard, /payment_amount_minor/);
+  assert.doesNotMatch(guard, /GRANT EXECUTE ON FUNCTION public\.service_invoices_guard_stripe_session\(\) TO authenticated/);
   assert.match(guard, /invoice_data must be a JSON object/);
   assert.match(guard, /position\('checkout_session' IN lower\(e\.key\)\)/);
   assert.match(guard, /position\('payment_intent' IN lower\(e\.key\)\)/);
