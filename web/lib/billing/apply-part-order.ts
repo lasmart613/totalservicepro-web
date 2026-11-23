@@ -11,6 +11,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { notifyStuckMarketplaceOrder, type StuckOrderAlertInput } from '../marketplace/stuck-orders.ts';
 import { partOrderFromCheckoutSession, type PartOrderDraft } from './stripe-connect.ts';
 
 /** Paid order that did not get the stock. A person refunds it; the webhook must not fulfill it later. */
@@ -96,11 +97,38 @@ export function partOrderRouteOutcome(part: PartOrderApplyResult): {
   };
 }
 
+async function alertStuck(
+  orderId: string,
+  order: PartOrderDraft,
+  status: 'stock_pending' | 'refund_review',
+  notify: (input: StuckOrderAlertInput) => Promise<unknown>
+): Promise<void> {
+  try {
+    await notify({
+      orderId,
+      listingId: order.listingId,
+      status,
+      sessionId: order.stripeCheckoutSessionId,
+      buyerEmail: order.buyerEmail,
+      sellerOrganizationId: order.sellerOrganizationId,
+      payoutStatus: order.payoutStatus,
+      amountCents: order.amountCents,
+      currency: order.currency,
+    });
+  } catch (e) {
+    logClaim('[part-order] admin alert failed', {
+      orderId,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 async function claimOrder(
   writer: SupabaseClient,
   orderId: string,
   order: PartOrderDraft,
-  existingRow: boolean
+  existingRow: boolean,
+  notify: (input: StuckOrderAlertInput) => Promise<unknown>
 ): Promise<PartOrderApplyResult> {
   const sold = Math.max(1, Math.floor(order.quantity) || 1);
   let data: unknown;
@@ -120,6 +148,7 @@ async function claimOrder(
       sessionId: order.stripeCheckoutSessionId,
       error: e instanceof Error ? e.message : String(e),
     });
+    await alertStuck(orderId, order, 'stock_pending', notify);
     return { ok: false, reason: PART_ORDER_STOCK_PENDING_STATUS, retry: true };
   }
   if (error) {
@@ -129,6 +158,7 @@ async function claimOrder(
       sessionId: order.stripeCheckoutSessionId,
       message: error.message,
     });
+    await alertStuck(orderId, order, 'stock_pending', notify);
     return { ok: false, reason: PART_ORDER_STOCK_PENDING_STATUS, retry: true };
   }
 
@@ -154,6 +184,7 @@ async function claimOrder(
       quantity: order.quantity,
       payoutStatus: order.payoutStatus,
     });
+    await alertStuck(orderId, order, 'refund_review', notify);
     return {
       ok: true,
       applied: {
@@ -172,22 +203,25 @@ async function claimOrder(
     sessionId: order.stripeCheckoutSessionId,
     result,
   });
+  await alertStuck(orderId, order, 'stock_pending', notify);
   return { ok: false, reason: PART_ORDER_STOCK_PENDING_STATUS, retry: true };
 }
 
 export async function applyPartCheckoutSession(input: {
   writer: SupabaseClient;
   session: unknown;
+  notifyStuck?: (alert: StuckOrderAlertInput) => Promise<unknown>;
 }): Promise<PartOrderApplyResult> {
   const parsed = partOrderFromCheckoutSession(input.session);
   if (!parsed.ok) return { ok: false, reason: parsed.reason, retry: false };
+  const notify = input.notifyStuck ?? notifyStuckMarketplaceOrder;
 
   const existing = await findExisting(input.writer, parsed.order.stripeCheckoutSessionId);
   if (existing.error) {
     return { ok: false, reason: existing.error.message || 'load_failed', retry: true };
   }
   if (existing.row?.id) {
-    return claimOrder(input.writer, String(existing.row.id), parsed.order, true);
+    return claimOrder(input.writer, String(existing.row.id), parsed.order, true, notify);
   }
 
   const inserted = await input.writer
@@ -201,7 +235,7 @@ export async function applyPartCheckoutSession(input: {
       if (!again.row?.id) {
         return { ok: false, reason: PART_ORDER_STOCK_PENDING_STATUS, retry: true };
       }
-      return claimOrder(input.writer, String(again.row.id), parsed.order, true);
+      return claimOrder(input.writer, String(again.row.id), parsed.order, true, notify);
     }
     return { ok: false, reason: inserted.error.message || 'insert_failed', retry: true };
   }
@@ -215,5 +249,5 @@ export async function applyPartCheckoutSession(input: {
     });
     return { ok: false, reason: PART_ORDER_STOCK_PENDING_STATUS, retry: true };
   }
-  return claimOrder(input.writer, orderId, parsed.order, false);
+  return claimOrder(input.writer, orderId, parsed.order, false, notify);
 }
