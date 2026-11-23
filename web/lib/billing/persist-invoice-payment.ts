@@ -11,7 +11,7 @@ import {
   parseInvoiceData,
   type InvoicePaymentRow,
 } from './apply-invoice-payment.ts';
-import { checkoutCurrencyCode, currencyMajorScale, fromStripeMinorUnits } from './stripe-currency.ts';
+import { checkoutCurrencyCode, currencyMajorScale, fromStripeMinorUnits, loadChargeCurrency } from './stripe-currency.ts';
 import type { StripeObject } from './stripe-subscription.ts';
 import { formatOrgMoney } from '../money-format.ts';
 import { loadOrgMoneyPrefs } from '../org-money.ts';
@@ -168,7 +168,11 @@ function readClaim(data: unknown): PaymentClaim | null {
 type StoredCharge =
   | { kind: 'absent' }
   | { kind: 'ready'; currency: string; minor: number }
-  | { kind: 'conflict' };
+  | { kind: 'unusable' };
+
+function metadataHasCharge(metadata: Record<string, string>): boolean {
+  return String(metadata.charge_currency || '').trim() !== '' || String(metadata.charge_amount_minor || '').trim() !== '';
+}
 
 function positiveInteger(value: unknown): number | null {
   const n = Number(value);
@@ -176,23 +180,26 @@ function positiveInteger(value: unknown): number | null {
   return n;
 }
 
-/** Amount and currency saved when the Checkout session was created. */
+/**
+ * Charge saved when the Checkout session was created.
+ * Session metadata is the trusted copy. invoice_data is only for an older
+ * session that has no charge metadata. A member edit of payment_amount_minor
+ * does not override metadata, including after a link is re-issued.
+ */
 export function readStoredCheckoutCharge(
   metadata: Record<string, string>,
   invoiceData: unknown
 ): StoredCharge {
+  if (metadataHasCharge(metadata)) {
+    const metaCurrency = checkoutCurrencyCode(metadata.charge_currency);
+    const metaMinor = positiveInteger(metadata.charge_amount_minor);
+    if (metaCurrency && metaMinor) return { kind: 'ready', currency: metaCurrency, minor: metaMinor };
+    return { kind: 'unusable' };
+  }
   const data = parseInvoiceData(invoiceData);
-  const metaCurrency = checkoutCurrencyCode(metadata.charge_currency);
-  const metaMinor = positiveInteger(metadata.charge_amount_minor);
   const dataCurrency = checkoutCurrencyCode(data.payment_currency);
   const dataMinor = positiveInteger(data.payment_amount_minor);
-  const metaReady = Boolean(metaCurrency && metaMinor);
-  const dataReady = Boolean(dataCurrency && dataMinor);
-  if (metaReady && dataReady && (metaCurrency !== dataCurrency || metaMinor !== dataMinor)) {
-    return { kind: 'conflict' };
-  }
-  if (metaReady && metaCurrency && metaMinor) return { kind: 'ready', currency: metaCurrency, minor: metaMinor };
-  if (dataReady && dataCurrency && dataMinor) return { kind: 'ready', currency: dataCurrency, minor: dataMinor };
+  if (dataCurrency && dataMinor) return { kind: 'ready', currency: dataCurrency, minor: dataMinor };
   return { kind: 'absent' };
 }
 
@@ -228,7 +235,7 @@ async function recordChargeMismatch(
       String((entry as { sessionId?: unknown }).sessionId || '') === sessionId &&
       String((entry as { reason?: unknown }).reason || '') === reason
   );
-  if (!seen) {
+    if (!seen) {
     list.push({ reason, sessionId, at: new Date().toISOString(), ...detail });
     data[STRIPE_PAYMENT_CONFLICT_KEY] = list;
     const { error } = await writer
@@ -238,6 +245,23 @@ async function recordChargeMismatch(
       .select('id')
       .maybeSingle();
     if (error) return { ok: false, reason: classifyInvoicePayFailure(error.message || 'update_failed') };
+    const amount = Number(detail.amount);
+    const { error: payErr } = await writer.from('service_invoice_stripe_payments').insert({
+      invoice_id: row.id,
+      session_id: sessionId,
+      amount: Number.isFinite(amount) ? amount : 0,
+      outcome: 'possibly_already_credited',
+    });
+    if (payErr && !/duplicate|unique|23505/i.test(payErr.message || '')) {
+      return { ok: false, reason: classifyInvoicePayFailure(payErr.message || 'update_failed') };
+    }
+    await notifyShopOfPayment(
+      writer,
+      row,
+      String(row.status || 'sent'),
+      Number.isFinite(amount) ? amount : 0,
+      'verify'
+    );
   }
   return { ok: true };
 }
@@ -294,12 +318,7 @@ export async function applyInvoiceCheckoutSession(input: {
         },
       };
     }
-    if (
-      recorded.outcome === 'overpaid_not_credited' ||
-      recorded.outcome === 'possibly_already_credited' ||
-      recorded.outcome === 'currency_mismatch' ||
-      recorded.outcome === 'amount_mismatch'
-    ) {
+    if (recorded.outcome === 'overpaid_not_credited' || recorded.outcome === 'possibly_already_credited') {
       return { ok: false, reason: recorded.outcome };
     }
   }
@@ -308,13 +327,19 @@ export async function applyInvoiceCheckoutSession(input: {
   const amountTotal = Number(session.amount_total);
   const stored = readStoredCheckoutCharge(m, row.invoice_data);
   let mismatch: 'currency_mismatch' | 'amount_mismatch' | null = null;
-  if (!sessionCurrency || !Number.isInteger(amountTotal) || amountTotal <= 0) {
-    mismatch = sessionCurrency ? 'amount_mismatch' : 'currency_mismatch';
-  } else if (stored.kind === 'conflict') {
+  if (!sessionCurrency) {
     mismatch = 'currency_mismatch';
+  } else if (!Number.isInteger(amountTotal) || amountTotal <= 0) {
+    mismatch = 'amount_mismatch';
+  } else if (stored.kind === 'unusable') {
+    mismatch = String(m.charge_amount_minor || '').trim() === '' ? 'amount_mismatch' : 'currency_mismatch';
   } else if (stored.kind === 'ready') {
     if (sessionCurrency !== stored.currency) mismatch = 'currency_mismatch';
     else if (amountTotal !== stored.minor) mismatch = 'amount_mismatch';
+  } else {
+    const orgCurrency = await loadChargeCurrency(input.writer, row.organization_id);
+    const expected = orgCurrency.ok ? orgCurrency.currency : null;
+    if (!expected || sessionCurrency !== expected) mismatch = 'currency_mismatch';
   }
   const chargeCurrency = sessionCurrency || 'usd';
   const majorAmount = Number.isInteger(amountTotal)
@@ -332,6 +357,7 @@ export async function applyInvoiceCheckoutSession(input: {
     const recordedReview = await recordChargeMismatch(input.writer, row, sessionId, mismatch, {
       sessionCurrency: sessionCurrency || String(session.currency ?? ''),
       amountTotal: Number.isFinite(amountTotal) ? amountTotal : null,
+      amount: Number.isFinite(majorAmount) ? majorAmount : 0,
     });
     if (!recordedReview.ok) return recordedReview;
     return { ok: false, reason: mismatch };
@@ -376,6 +402,13 @@ export async function applyInvoiceCheckoutSession(input: {
   }
   if (!claim || claim.ok !== true) {
     const reason = String(claim?.reason || 'update_failed');
+    if (reason === 'currency_mismatch' || reason === 'amount_mismatch') {
+      console.error('[billing] invoice payment not credited', { reason, invoiceId, sessionId });
+      if (claim?.notify) {
+        await notifyShopOfPayment(input.writer, row, String(row.status || 'sent'), sessionAmount, 'verify');
+      }
+      return { ok: false, reason };
+    }
     if (reason === 'different_paid_session') {
       console.warn('[billing] paid Checkout session was not applied; invoice already credited to a different session', {
         invoiceId,

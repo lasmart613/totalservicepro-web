@@ -174,9 +174,22 @@ function memoryInvoice(initial: Record<string, unknown>) {
           payload = next;
           return api;
         },
-        insert() {
+        insert(next?: Record<string, unknown>) {
           op = 'insert';
           if (table === 'notifications') notes += 1;
+          if (table === 'service_invoice_stripe_payments' && next?.session_id) {
+            const outcome = String(next.outcome || 'credited');
+            if (
+              outcome === 'credited' ||
+              outcome === 'overpaid_not_credited' ||
+              outcome === 'possibly_already_credited'
+            ) {
+              payments.set(String(next.session_id), {
+                invoiceId: String(next.invoice_id),
+                outcome,
+              });
+            }
+          }
           return Promise.resolve({ error: null });
         },
         eq(col: string, val: unknown) {
@@ -201,6 +214,12 @@ function memoryInvoice(initial: Record<string, unknown>) {
           return api;
         },
         maybeSingle: async () => {
+          if (table === 'organizations') {
+            return {
+              data: { id: row.organization_id, currency_code: row.currency_code ?? null },
+              error: null,
+            };
+          }
           if (table === 'service_invoice_stripe_payments') {
             const payment = payments.get(String(filters.session_id || ''));
             if (!payment) return { data: null, error: null };
@@ -849,27 +868,118 @@ test('an organization currency change does not reject the stored charge currency
   assert.equal(db.creditWrites, 1);
 });
 
-test('a currency mismatch against the stored charge is logged and recorded', async () => {
+test('session metadata is trusted when invoice_data disagrees', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 100,
+      amount_paid: 0,
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 5000, payment_amount: 50 },
+    })
+  );
+  const result = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session: chargedSession('cs_test_meta_wins', '44', 'usd', 10000),
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.applied.amountPaid, 100);
+  assert.equal(db.creditWrites, 1);
+  assert.equal(db.row.amount_paid, 100);
+});
+
+test('a re-issued link uses the new session metadata, not the previous invoice_data amount', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 200,
+      amount_paid: 0,
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 10000, payment_amount: 100 },
+    })
+  );
+  const result = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session: chargedSession('cs_test_reissue', '44', 'usd', 20000),
+  });
+  assert.equal(result.ok, true);
+  if (result.ok) assert.equal(result.applied.amountPaid, 200);
+});
+
+test('a currency mismatch against the stored charge is logged, notified, and recorded', async () => {
   const db = memoryInvoice(
     openInvoice({
       total: 80,
-      invoice_data: { payment_currency: 'eur', payment_amount_minor: 8000, payment_amount: 80 },
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 8000, payment_amount: 80 },
     })
   );
+  const session = chargedSession('cs_test_mismatch', '44', 'eur', 8000);
+  session.currency = 'usd';
   const { result, reasons } = await withErrors(() =>
     applyInvoiceCheckoutSession({
       writer: db.writer as never,
-      session: chargedSession('cs_test_mismatch', '44', 'usd', 8000),
+      session,
     })
   );
   assert.equal(result.ok, false);
   if (!result.ok) assert.equal(result.reason, 'currency_mismatch');
   assert.deepEqual(reasons, ['currency_mismatch']);
   assert.equal(db.creditWrites, 0);
+  assert.equal(db.notes, 1);
   assert.equal(db.row.amount_paid, 0);
   const list = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
     .stripe_checkout_session_conflict;
   assert.equal(list?.[0]?.reason, 'currency_mismatch');
+  const again = await applyInvoiceCheckoutSession({
+    writer: db.writer as never,
+    session,
+  });
+  assert.equal(again.ok, false);
+  if (!again.ok) assert.equal(again.reason, 'possibly_already_credited');
+  assert.equal(db.notes, 1);
+});
+
+test('an amount mismatch is labelled amount_mismatch and notifies the shop', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 100,
+      invoice_data: { payment_currency: 'usd', payment_amount_minor: 10000, payment_amount: 100 },
+    })
+  );
+  const session = chargedSession('cs_test_amount', '44', 'usd', 10000);
+  session.amount_total = 5000;
+  const { result, reasons } = await withErrors(() =>
+    applyInvoiceCheckoutSession({ writer: db.writer as never, session })
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, 'amount_mismatch');
+  assert.deepEqual(reasons, ['amount_mismatch']);
+  assert.equal(db.notes, 1);
+  assert.equal(db.creditWrites, 0);
+  const list = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
+    .stripe_checkout_session_conflict;
+  assert.equal(list?.[0]?.reason, 'amount_mismatch');
+});
+
+test('a legacy session with no stored charge must match the organization currency', async () => {
+  const db = memoryInvoice(
+    openInvoice({
+      total: 100,
+      currency_code: 'USD',
+      invoice_data: { line_items: [{ description: 'Service' }] },
+    })
+  );
+  const { result, reasons } = await withErrors(() =>
+    applyInvoiceCheckoutSession({
+      writer: db.writer as never,
+      session: paidSession('cs_test_legacy_eur', '44', 10000, {
+        currency: 'eur',
+        metadata: { kind: 'invoice_pay', invoice_id: '44' },
+      }),
+    })
+  );
+  assert.equal(result.ok, false);
+  if (!result.ok) assert.equal(result.reason, 'currency_mismatch');
+  assert.deepEqual(reasons, ['currency_mismatch']);
+  assert.equal(db.creditWrites, 0);
+  assert.equal(db.notes, 1);
+  assert.equal(db.row.amount_paid, 0);
 });
 
 test('a KWD charge credits the 3-decimal major amount', async () => {

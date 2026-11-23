@@ -109,6 +109,9 @@ export function toStripeMinorUnits(major: number, currency: string): number | nu
   if (THREE_DECIMAL.has(code)) {
     const thousandths = scaledInteger(major, 1000);
     if (thousandths == null || thousandths % 10 !== 0) return null;
+    // total, amount_paid, and service_invoice_stripe_payments.amount are numeric(12,2).
+    const cents = scaledInteger(major, 100);
+    if (cents == null || thousandths !== cents * 10) return null;
     return thousandths;
   }
   return scaledInteger(major, 100);

@@ -10,6 +10,15 @@
 -- 3 decimals for BHD, JOD, KWD, OMR, and TND, and 2 decimals otherwise.
 -- A non-USD currency is no longer refused.
 --
+-- service_invoices.total, service_invoices.amount_paid, and
+-- service_invoice_stripe_payments.amount are numeric(12,2). This migration
+-- does not change those column types. A 3-decimal currency is only charged
+-- when the major amount is exact at 2 decimal places (Stripe already requires
+-- the last thousandth to be 0), so nothing is lost when it is stored.
+-- A legacy session with no payment_currency / payment_amount_minor must use
+-- the organization's currency_code (empty means usd) or it is recorded for
+-- review and not credited.
+--
 -- Repo only. Do not apply this file to production from the pull request.
 -- Rollback: 20261122_000971_invoice_claim_currency_rollback.sql
 -- restores the 000963 function body.
@@ -51,6 +60,7 @@ DECLARE
   v_amount numeric;
   v_eps numeric;
   v_over numeric;
+  v_org_currency text;
 BEGIN
   v_session := btrim(COALESCE(p_session_id, ''));
   IF v_session = '' OR v_session !~ '^[A-Za-z0-9_]+$' THEN
@@ -119,6 +129,56 @@ BEGIN
     WHEN jsonb_typeof(v_row.invoice_data::jsonb) = 'object' THEN v_row.invoice_data::jsonb
     ELSE '{}'::jsonb
   END;
+
+  -- Legacy rows have no stored charge. Match the organization currency.
+  -- A stored payment_currency belongs to the Checkout session metadata path
+  -- and is not compared here.
+  IF btrim(COALESCE(v_data->>'payment_currency', '')) = ''
+     AND btrim(COALESCE(v_data->>'payment_amount_minor', '')) = '' THEN
+    v_org_currency := NULL;
+    BEGIN
+      SELECT lower(btrim(currency_code::text)) INTO v_org_currency
+      FROM public.organizations
+      WHERE id = v_row.organization_id;
+    EXCEPTION
+      WHEN undefined_table OR undefined_column THEN
+        v_org_currency := 'usd';
+    END;
+    IF v_org_currency IS NULL OR v_org_currency = '' THEN
+      v_org_currency := 'usd';
+    END IF;
+    IF lower(btrim(COALESCE(p_currency, 'usd'))) IS DISTINCT FROM v_org_currency THEN
+      INSERT INTO public.service_invoice_stripe_payments (invoice_id, session_id, amount, outcome)
+      VALUES (p_invoice_id, v_session, v_amount, 'possibly_already_credited');
+      v_entry := jsonb_build_object(
+        'reason', 'currency_mismatch',
+        'sessionId', v_session,
+        'sessionCurrency', lower(btrim(COALESCE(p_currency, 'usd'))),
+        'expectedCurrency', v_org_currency,
+        'at', to_jsonb(pg_catalog.now())
+      );
+      v_list := v_data->'stripe_checkout_session_conflict';
+      IF jsonb_typeof(v_list) = 'array' THEN
+        NULL;
+      ELSIF jsonb_typeof(v_list) = 'object' THEN
+        v_list := jsonb_build_array(v_list);
+      ELSE
+        v_list := '[]'::jsonb;
+      END IF;
+      v_list := v_list || jsonb_build_array(v_entry);
+      UPDATE public.service_invoices
+      SET invoice_data = v_data || jsonb_build_object('stripe_checkout_session_conflict', v_list),
+          updated_at = pg_catalog.now()
+      WHERE id = p_invoice_id;
+      RETURN jsonb_build_object(
+        'ok', false,
+        'reason', 'currency_mismatch',
+        'notify', true,
+        'session_amount', v_amount,
+        'invoice_id', p_invoice_id
+      );
+    END IF;
+  END IF;
 
   IF lower(btrim(COALESCE(v_row.status, ''))) IN ('void', 'voided') THEN
     v_attempts := COALESCE(v_data->'void_payment_attempts', '[]'::jsonb);

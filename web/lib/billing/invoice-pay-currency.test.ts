@@ -29,6 +29,8 @@ test('minor units are exact for USD, JPY, ISK, and KWD', () => {
   assert.equal(toStripeMinorUnits(5.2, 'isk'), null);
   assert.equal(toStripeMinorUnits(5, 'ugx'), 500);
   assert.equal(exactStripeMinorUnits(1.23, 'kwd'), 1230);
+  assert.equal(exactStripeMinorUnits(1.230, 'kwd'), 1230);
+  assert.equal(exactStripeMinorUnits(1.231, 'kwd'), null);
   assert.equal(exactStripeMinorUnits(1.234, 'kwd'), null);
   assert.equal(fromStripeMinorUnits(1050, 'usd'), 10.5);
   assert.equal(fromStripeMinorUnits(1234, 'jpy'), 1234);
@@ -128,6 +130,8 @@ test('a stored-charge mismatch is a review result, not an ignored webhook', () =
   );
   assert.doesNotMatch(sql, /lower\(btrim\(p_currency\)\) <> 'usd'/);
   assert.match(sql, /'bhd', 'jod', 'kwd', 'omr', 'tnd'/);
+  assert.match(sql, /numeric\(12,2\)/);
+  assert.match(sql, /FROM public\.organizations/);
   assert.ok(sql.indexOf('IF FOUND THEN') < sql.indexOf("reason', 'bad_amount'"));
   assert.match(sql, /SET search_path = public, pg_temp/);
   const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION'));
