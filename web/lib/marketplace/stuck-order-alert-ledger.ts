@@ -104,6 +104,8 @@ export function marketplaceOrderAlertLedger(
       if (result.error) throw new Error(result.error.message || 'alert release failed');
     },
     async markSent(orderId, status, signal) {
+      // Gap left as-is: the unsent row is deleted, then a sent row is inserted.
+      // The key is free between those two calls, so another instance can claim it.
       const id = String(orderId || '').trim();
       const state = String(status || '').trim();
       const stamp = new Date(now()).toISOString();

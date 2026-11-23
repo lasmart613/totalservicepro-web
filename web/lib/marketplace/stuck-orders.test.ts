@@ -11,6 +11,10 @@ import {
   marketplaceOrdersAuthStatus,
   notifyStuckMarketplaceOrder,
   releaseStuckOrderAlert,
+  STUCK_ORDER_ALERT_BUDGET_MS,
+  STUCK_ORDER_ALERT_CLAIM_TIMEOUT_MS,
+  STUCK_ORDER_ALERT_MARK_TIMEOUT_MS,
+  STUCK_ORDER_ALERT_RELEASE_TIMEOUT_MS,
   STUCK_ORDER_ALERT_TIMEOUT_MS,
   stuckOrderAgeLabel,
   stuckOrderAlertIdempotencyKey,
@@ -41,8 +45,18 @@ test('non-admin gets 403 on the marketplace order list', () => {
   const page = readFileSync(new URL('../../app/admin/god/marketplace-orders/page.tsx', here), 'utf8');
   assert.match(page, /stuck-orders-truncated/);
   const lib = readFileSync(new URL('./stuck-orders.ts', here), 'utf8');
-  assert.match(lib, /AbortSignal\.timeout\(timeoutMs\)/);
+  assert.match(lib, /AbortSignal\.timeout\(ms\)/);
+  assert.equal(STUCK_ORDER_ALERT_CLAIM_TIMEOUT_MS, 1000);
   assert.equal(STUCK_ORDER_ALERT_TIMEOUT_MS, 3000);
+  assert.equal(STUCK_ORDER_ALERT_RELEASE_TIMEOUT_MS, 1000);
+  assert.equal(STUCK_ORDER_ALERT_MARK_TIMEOUT_MS, 1000);
+  assert.equal(STUCK_ORDER_ALERT_BUDGET_MS, 5000);
+  assert.ok(
+    STUCK_ORDER_ALERT_CLAIM_TIMEOUT_MS + STUCK_ORDER_ALERT_TIMEOUT_MS + STUCK_ORDER_ALERT_RELEASE_TIMEOUT_MS <=
+      STUCK_ORDER_ALERT_BUDGET_MS
+  );
+  assert.equal(STUCK_ORDER_ALERT_TIMEOUT_MS, 3000);
+  assert.match(lib, /409 is not treated as already delivered/);
   assert.match(lib, /000973/);
   assert.match(lib, /order_id, status/);
   assert.match(page, /overflow-x-auto/);
@@ -297,6 +311,7 @@ test('two instances insert one alert row and the memory set skips a repeat', asy
   assert.equal(sends, 1);
   assert.equal(claims.n, 2);
   const ledgerSrc = readFileSync(new URL('./stuck-order-alert-ledger.ts', here), 'utf8');
+  assert.match(ledgerSrc, /Gap left as-is/);
   assert.match(ledgerSrc, /onConflict:\s*'order_id,status'/);
   assert.match(ledgerSrc, /ignoreDuplicates:\s*true/);
   assert.match(ledgerSrc, /\.delete\(\)/);
@@ -488,7 +503,7 @@ test('a missing alert table is logged and the in-memory claim still sends once',
   }
 });
 
-test('a hung claim stays inside the alert timeout and does not send', async () => {
+test('a hung claim times out on its own clock and the send still goes out', async () => {
   const errors: string[] = [];
   const originalError = console.error;
   console.error = (...args: unknown[]) => {
@@ -497,16 +512,14 @@ test('a hung claim stays inside the alert timeout and does not send', async () =
   const started = Date.now();
   try {
     let sends = 0;
-    let claimSignal: AbortSignal | undefined;
     const result = await notifyStuckMarketplaceOrder({
       orderId: ALERT_ORDER,
       listingId: 'listing-1',
       status: 'stock_pending',
       seen: new Set(),
-      timeoutMs: 40,
+      claimTimeoutMs: 40,
       ledger: {
         claim(_orderId, _status, signal) {
-          claimSignal = signal;
           return hangOn(signal).then(() => true);
         },
         async release() {},
@@ -515,18 +528,86 @@ test('a hung claim stays inside the alert timeout and does not send', async () =
         sends += 1;
       },
     });
-    assert.deepEqual(result, { sent: false, reason: 'error' });
-    assert.equal(sends, 0);
+    assert.equal(result.sent, true);
+    assert.equal(sends, 1);
     assert.ok(Date.now() - started < 1000);
-    assert.ok(claimSignal);
-    assert.equal(STUCK_ORDER_ALERT_TIMEOUT_MS, 3000);
     assert.ok(errors.some((line) => line.includes('alert claim failed')));
   } finally {
     console.error = originalError;
   }
 });
 
-test('claim, send, and release share one signal and a failed release is logged', async () => {
+test('a send timeout releases the row and the retry alerts', async () => {
+  const { ledger, rows } = sharedAlertLedger();
+  const originalError = console.error;
+  console.error = () => {};
+  const started = Date.now();
+  try {
+    const first = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'refund_review',
+      seen: new Set(),
+      ledger,
+      timeoutMs: 40,
+      send: (_message, signal) => hangOn(signal),
+    });
+    assert.deepEqual(first, { sent: false, reason: 'error' });
+    assert.equal(rows.size, 0);
+    assert.ok(Date.now() - started < 1000);
+    let sends = 0;
+    const retry = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'refund_review',
+      seen: new Set(),
+      ledger,
+      send: async () => {
+        sends += 1;
+      },
+    });
+    assert.equal(retry.sent, true);
+    assert.equal(sends, 1);
+    assert.equal(rows.size, 1);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('a slow claim does not starve the send', async () => {
+  const originalError = console.error;
+  console.error = () => {};
+  let sendWait = 0;
+  const started = Date.now();
+  try {
+    const result = await notifyStuckMarketplaceOrder({
+      orderId: ALERT_ORDER,
+      listingId: 'listing-1',
+      status: 'stock_pending',
+      seen: new Set(),
+      claimTimeoutMs: 500,
+      timeoutMs: 80,
+      ledger: {
+        claim: () => new Promise((resolve) => setTimeout(() => resolve(true), 50)),
+        async release() {},
+      },
+      send: (_message, signal) => {
+        const began = Date.now();
+        return hangOn(signal).finally(() => {
+          sendWait = Date.now() - began;
+        });
+      },
+    });
+    assert.deepEqual(result, { sent: false, reason: 'error' });
+    assert.ok(sendWait >= 60, `send waited ${sendWait}ms`);
+    assert.ok(Date.now() - started >= 110);
+    assert.ok(Date.now() - started < 500);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test('a failed release is logged on its own timeout', async () => {
   const errors: string[] = [];
   const originalError = console.error;
   console.error = (...args: unknown[]) => {
@@ -542,7 +623,7 @@ test('claim, send, and release share one signal and a failed release is logged',
       listingId: 'listing-1',
       status: 'refund_review',
       seen: new Set(),
-      timeoutMs: 50,
+      releaseTimeoutMs: 40,
       ledger: {
         async claim(_orderId, _status, signal) {
           claimSignal = signal;
@@ -559,7 +640,9 @@ test('claim, send, and release share one signal and a failed release is logged',
       },
     });
     assert.deepEqual(result, { sent: false, reason: 'error' });
-    assert.ok(claimSignal && claimSignal === sendSignal && claimSignal === releaseSignal);
+    assert.ok(claimSignal && sendSignal && releaseSignal);
+    assert.notEqual(claimSignal, sendSignal);
+    assert.notEqual(sendSignal, releaseSignal);
     assert.ok(Date.now() - started < 1000);
     assert.ok(errors.some((line) => line.includes('alert release failed')));
   } finally {
