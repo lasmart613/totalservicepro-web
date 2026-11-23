@@ -109,13 +109,37 @@ test('checkout stores the charge currency and minor amount and refuses an inexac
 });
 
 test('a stored-charge mismatch is a review result, not an ignored webhook', () => {
-  for (const reason of ['currency_mismatch', 'amount_mismatch'] as const) {
+  for (const reason of ['currency_mismatch', 'amount_mismatch', 'charge_mismatch'] as const) {
     const result = invoiceCheckoutWebhookResult(reason);
     assert.equal(result?.status, 200);
     assert.equal(result?.body.review, reason);
     assert.equal(result?.body.ignored, undefined);
     assert.equal(result?.body.kind, 'invoice');
   }
+  const mismatch = readFileSync(
+    join(here, '../../supabase/migrations/20261122_000975_invoice_charge_mismatch.sql'),
+    'utf8'
+  );
+  const mismatchRollback = readFileSync(
+    join(here, '../../supabase/migrations/20261122_000975_invoice_charge_mismatch_rollback.sql'),
+    'utf8'
+  );
+  assert.match(mismatch, /'charge_mismatch'/);
+  assert.match(
+    mismatch,
+    /CHECK \(outcome IN \(\s*'credited',\s*'overpaid_not_credited',\s*'possibly_already_credited',\s*'charge_mismatch'\s*\)\)/
+  );
+  assert.match(
+    mismatchRollback,
+    /CHECK \(outcome IN \('credited', 'overpaid_not_credited', 'possibly_already_credited'\)\)/
+  );
+  assert.match(mismatchRollback, /000975 rollback aborted: % charge_mismatch row/);
+  assert.match(mismatchRollback, /-- UPDATE public\.service_invoice_stripe_payments/);
+  assert.match(mismatchRollback, /-- SET outcome = 'possibly_already_credited'/);
+  assert.ok(
+    mismatchRollback.indexOf('000975 rollback aborted') <
+      mismatchRollback.indexOf('DROP CONSTRAINT IF EXISTS service_invoice_stripe_payments_outcome_check')
+  );
   const sql = readFileSync(
     join(here, '../../supabase/migrations/20261122_000971_invoice_claim_currency.sql'),
     'utf8'
@@ -135,6 +159,19 @@ test('a stored-charge mismatch is a review result, not an ignored webhook', () =
   assert.ok(sql.indexOf('IF FOUND THEN') < sql.indexOf("reason', 'bad_amount'"));
   assert.match(sql, /SET search_path = public, pg_temp/);
   const fn = sql.slice(sql.indexOf('CREATE OR REPLACE FUNCTION'));
+  const notify = "NOTIFY pgrst, 'reload schema';";
+  const throughNotify = (text: string) => {
+    const start = text.indexOf('CREATE OR REPLACE FUNCTION');
+    const end = text.indexOf(notify, start);
+    return text.slice(start, end + notify.length).trim();
+  };
+  assert.equal(throughNotify(mismatchRollback), throughNotify(sql));
+  for (const file of [mismatch, mismatchRollback]) {
+    assert.ok(file.indexOf('\nBEGIN;\n') !== -1);
+    assert.ok(file.trimEnd().endsWith('COMMIT;'));
+    assert.ok(file.indexOf('\nBEGIN;\n') < file.indexOf('SET LOCAL lock_timeout'));
+    assert.ok(file.indexOf(notify) < file.lastIndexOf('\nCOMMIT;'));
+  }
   assert.doesNotMatch(fn, /SECURITY DEFINER/);
   assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.apply_service_invoice_stripe_payment/);
   const originalFn = original.slice(original.indexOf('CREATE OR REPLACE FUNCTION public.apply_service_invoice_stripe_payment'));

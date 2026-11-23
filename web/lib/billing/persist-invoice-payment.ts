@@ -63,6 +63,7 @@ export const INVOICE_PAY_WEBHOOK_STATUS = {
   no_payment_required: 200,
   currency_mismatch: 200,
   amount_mismatch: 200,
+  charge_mismatch: 200,
   missing_invoice_id: 200,
   invoice_mismatch: 200,
   bad_amount: 200,
@@ -124,7 +125,7 @@ export function invoiceCheckoutWebhookResult(
   // Unknown reasons stay on 500 so Stripe retries. Only the explicit list is 200.
   const status = known ?? 500;
   if (status === 500) return { status, body: { error: classified } };
-  if (classified === 'currency_mismatch' || classified === 'amount_mismatch') {
+  if (classified === 'currency_mismatch' || classified === 'amount_mismatch' || classified === 'charge_mismatch') {
     return { status: 200, body: { ok: true, review: classified, kind: 'invoice' } };
   }
   return { status: 200, body: { ok: true, ignored: classified, kind: 'invoice' } };
@@ -250,7 +251,7 @@ async function recordChargeMismatch(
       invoice_id: row.id,
       session_id: sessionId,
       amount: Number.isFinite(amount) ? amount : 0,
-      outcome: 'possibly_already_credited',
+      outcome: 'charge_mismatch',
     });
     if (payErr && !/duplicate|unique|23505/i.test(payErr.message || '')) {
       return { ok: false, reason: classifyInvoicePayFailure(payErr.message || 'update_failed') };
@@ -260,7 +261,7 @@ async function recordChargeMismatch(
       row,
       String(row.status || 'sent'),
       Number.isFinite(amount) ? amount : 0,
-      'verify'
+      'charge_mismatch'
     );
   }
   return { ok: true };
@@ -318,7 +319,11 @@ export async function applyInvoiceCheckoutSession(input: {
         },
       };
     }
-    if (recorded.outcome === 'overpaid_not_credited' || recorded.outcome === 'possibly_already_credited') {
+    if (
+      recorded.outcome === 'overpaid_not_credited' ||
+      recorded.outcome === 'possibly_already_credited' ||
+      recorded.outcome === 'charge_mismatch'
+    ) {
       return { ok: false, reason: recorded.outcome };
     }
   }
@@ -402,10 +407,10 @@ export async function applyInvoiceCheckoutSession(input: {
   }
   if (!claim || claim.ok !== true) {
     const reason = String(claim?.reason || 'update_failed');
-    if (reason === 'currency_mismatch' || reason === 'amount_mismatch') {
+    if (reason === 'currency_mismatch' || reason === 'amount_mismatch' || reason === 'charge_mismatch') {
       console.error('[billing] invoice payment not credited', { reason, invoiceId, sessionId });
       if (claim?.notify) {
-        await notifyShopOfPayment(input.writer, row, String(row.status || 'sent'), sessionAmount, 'verify');
+        await notifyShopOfPayment(input.writer, row, String(row.status || 'sent'), sessionAmount, 'charge_mismatch');
       }
       return { ok: false, reason };
     }
@@ -460,7 +465,7 @@ export async function notifyShopOfPayment(
   inv: InvoicePaymentRow,
   _status: string,
   amount: number,
-  notice: 'payment' | 'overpaid' | 'verify' = 'payment',
+  notice: 'payment' | 'overpaid' | 'verify' | 'charge_mismatch' = 'payment',
   balanceDue = 0,
   ledger?: { paid?: number; total?: number }
 ): Promise<void> {
@@ -509,7 +514,9 @@ export async function notifyShopOfPayment(
       ? `Overpayment on invoice ${num} needs a manual refund. ${who} sent ${shown}, which is more than the balance due (${balanceShown}). It was not applied.`
       : notice === 'verify'
         ? `Check Stripe: invoice ${num} may have been paid twice.`
-        : `${shown} payment received on invoice ${num} (${paidShown} of ${totalShown} paid).`;
+        : notice === 'charge_mismatch'
+          ? `Invoice ${num}: A payment came in that doesn't match this invoice's amount or currency. We didn't apply it. Please check it in Stripe before crediting the invoice.`
+          : `${shown} payment received on invoice ${num} (${paidShown} of ${totalShown} paid).`;
   const link = `/invoices/new?id=${inv.id}`;
   for (const userId of ids) {
     try {

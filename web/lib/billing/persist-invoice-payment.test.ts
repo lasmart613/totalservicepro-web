@@ -46,7 +46,11 @@ function memoryInvoice(initial: Record<string, unknown>) {
   let notes = 0;
   let lastFilter = '';
   let reads = 0;
-  const payments = new Map<string, { invoiceId: string; outcome: 'credited' | 'overpaid_not_credited' | 'possibly_already_credited' }>();
+  const payments = new Map<
+    string,
+    { invoiceId: string; outcome: 'credited' | 'overpaid_not_credited' | 'possibly_already_credited' | 'charge_mismatch' }
+  >();
+  const messages: string[] = [];
   const writer = {
     rpc(_fn: string, args: Record<string, unknown>) {
       const sessionId = String(args.p_session_id || '');
@@ -176,13 +180,17 @@ function memoryInvoice(initial: Record<string, unknown>) {
         },
         insert(next?: Record<string, unknown>) {
           op = 'insert';
-          if (table === 'notifications') notes += 1;
+          if (table === 'notifications') {
+            notes += 1;
+            if (next?.message) messages.push(String(next.message));
+          }
           if (table === 'service_invoice_stripe_payments' && next?.session_id) {
             const outcome = String(next.outcome || 'credited');
             if (
               outcome === 'credited' ||
               outcome === 'overpaid_not_credited' ||
-              outcome === 'possibly_already_credited'
+              outcome === 'possibly_already_credited' ||
+              outcome === 'charge_mismatch'
             ) {
               payments.set(String(next.session_id), {
                 invoiceId: String(next.invoice_id),
@@ -254,6 +262,9 @@ function memoryInvoice(initial: Record<string, unknown>) {
     },
     get notes() {
       return notes;
+    },
+    get messages() {
+      return messages;
     },
     get lastFilter() {
       return lastFilter;
@@ -737,16 +748,21 @@ test('shop payment notices use the production notification allowlist', async () 
   await notifyShopOfPayment(writer as never, invoice, 'partially_paid', 300, 'payment', 0, { paid: 600, total: 1000 });
   await notifyShopOfPayment(writer as never, invoice, 'partially_paid', 585, 'overpaid', 485);
   await notifyShopOfPayment(writer as never, invoice, 'paid', 800, 'verify');
+  await notifyShopOfPayment(writer as never, invoice, 'sent', 80, 'charge_mismatch');
   assert.equal(tables.includes('user_profiles'), false);
   assert.equal(tables.includes('organization_memberships'), true);
   assert.deepEqual(
     inserted.map((row) => row.user_id),
-    ['user-a', 'user-b', 'user-a', 'user-b', 'user-a', 'user-b']
+    ['user-a', 'user-b', 'user-a', 'user-b', 'user-a', 'user-b', 'user-a', 'user-b']
   );
   assert.equal(inserted[0].type, 'general');
   assert.match(String(inserted[0].message), /^\$300\.00 payment received on invoice 1044 \(\$600\.00 of \$1,000\.00 paid\)/);
   assert.match(String(inserted[2].message), /^Overpayment on invoice 1044 needs a manual refund/);
   assert.equal(String(inserted[4].message), 'Check Stripe: invoice 1044 may have been paid twice.');
+  assert.equal(
+    String(inserted[6].message),
+    "Invoice 1044: A payment came in that doesn't match this invoice's amount or currency. We didn't apply it. Please check it in Stripe before crediting the invoice."
+  );
   assert.equal(inserted[0].link, '/invoices/new?id=44');
   for (const row of inserted) {
     assert.equal(NOTIFICATION_TYPE_ALLOWLIST.includes(row.type as (typeof NOTIFICATION_TYPE_ALLOWLIST)[number]), true);
@@ -926,12 +942,14 @@ test('a currency mismatch against the stored charge is logged, notified, and rec
   const list = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
     .stripe_checkout_session_conflict;
   assert.equal(list?.[0]?.reason, 'currency_mismatch');
+  assert.match(db.messages[0] || '', /doesn't match this invoice's amount or currency/);
+  assert.doesNotMatch(db.messages[0] || '', /paid twice/);
   const again = await applyInvoiceCheckoutSession({
     writer: db.writer as never,
     session,
   });
   assert.equal(again.ok, false);
-  if (!again.ok) assert.equal(again.reason, 'possibly_already_credited');
+  if (!again.ok) assert.equal(again.reason, 'charge_mismatch');
   assert.equal(db.notes, 1);
 });
 
@@ -955,6 +973,8 @@ test('an amount mismatch is labelled amount_mismatch and notifies the shop', asy
   const list = (db.row.invoice_data as { stripe_checkout_session_conflict?: { reason?: string }[] })
     .stripe_checkout_session_conflict;
   assert.equal(list?.[0]?.reason, 'amount_mismatch');
+  assert.match(db.messages[0] || '', /doesn't match this invoice's amount or currency/);
+  assert.doesNotMatch(db.messages[0] || '', /paid twice/);
 });
 
 test('a legacy session with no stored charge must match the organization currency', async () => {
