@@ -3,7 +3,7 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
-import { VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
+import { invoicePayPageAction } from '@/lib/billing/invoice-payment-url';
 
 function PayInvoiceInner() {
   const params = useParams<{ id: string }>();
@@ -23,16 +23,17 @@ function PayInvoiceInner() {
         const res = await fetch('/api/billing/invoices/pay-status?' + qs.toString());
         const json = await res.json().catch(() => ({}));
         if (gone) return;
-        if (json.voided) {
+        const action = invoicePayPageAction(json);
+        if (action.type === 'voided') {
           setVoided(true);
-          setMessage(VOIDED_INVOICE_MESSAGE);
+          setMessage(action.message);
           return;
         }
-        if (json.payable && typeof json.paymentUrl === 'string' && json.paymentUrl) {
-          window.location.assign(json.paymentUrl);
+        if (action.type === 'redirect') {
+          window.location.assign(action.url);
           return;
         }
-        setMessage(typeof json.message === 'string' ? json.message : 'This invoice cannot be paid from this link.');
+        setMessage(action.message);
       } catch {
         if (!gone) setMessage('This invoice cannot be paid from this link.');
       }

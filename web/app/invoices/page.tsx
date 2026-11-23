@@ -15,6 +15,7 @@ import {
   parseJsonField,
 } from '@/lib/billing/save-helpers';
 import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/apply-invoice-payment';
+import { sealClientInvoicePaymentKeys } from '@/lib/billing/invoice-payment-fields';
 import { canVoidInvoice, isVoidInvoiceStatus } from '@/lib/billing/void-invoice';
 import { getOrgRole, voidInvoiceRole } from '@/lib/org-role';
 import {
@@ -310,6 +311,7 @@ export default function InvoicesListPage() {
         addAmount,
         method,
       });
+      patch.invoice_data = sealClientInvoicePaymentKeys(inv.invoice_data, patch.invoice_data);
       const payload: Record<string, unknown> = { ...patch };
       let lastErr: { message?: string } | null = null;
       for (let i = 0; i < 8; i++) {
@@ -355,7 +357,8 @@ export default function InvoicesListPage() {
       return;
     }
     try {
-      const idata = releaseDeferredBalance(parseJsonField(inv.invoice_data));
+      const storedInvoiceData = parseJsonField(inv.invoice_data);
+      const idata = sealClientInvoicePaymentKeys(storedInvoiceData, releaseDeferredBalance(storedInvoiceData));
       const { error } = await supabase
         .from('service_invoices')
         .update({ invoice_data: idata, updated_at: new Date().toISOString() })
