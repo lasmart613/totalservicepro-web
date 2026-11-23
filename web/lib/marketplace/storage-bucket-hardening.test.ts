@@ -36,6 +36,11 @@ test('000974 guards on live text, the 000970 text, and its own target', () => {
   assert.match(forward, /000973 is/);
   assert.doesNotMatch(forward, /20261122_000973/);
   assert.match(forward, /NOT APPLIED/);
+  assert.match(forward, /jsonb_array_elements/);
+  assert.doesNotMatch(forward, /strpos\(blob/);
+  assert.match(forward, /LOW 4, left as-is/);
+  assert.match(forward, /CREATE INDEX IF NOT EXISTS marketplace_listings_created_by_idx/);
+  assert.match(rollback, /DROP INDEX IF EXISTS public\.marketplace_listings_created_by_idx/);
   assert.doesNotMatch(forward, /CREATE POLICY[^;]*part-images/i);
 });
 

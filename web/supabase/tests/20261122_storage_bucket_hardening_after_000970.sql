@@ -180,6 +180,7 @@ INSERT INTO proof (label, ok) VALUES
   ('B AFTER company public select unchanged', pg_temp.fp('Company assets are publicly viewable') = 'ff4a9e1a393148b403a8c54941fe7f3e'),
   ('B AFTER avatar public select unchanged', pg_temp.fp('Avatars are publicly viewable') = 'fba55b5b38dc6edfba51d1aa8404069f'),
   ('B AFTER equipment member read unchanged', pg_temp.fp('equipment_photos_member_read') = 'd37a11a8435025658fb1bced2c4d9ec5'),
+  ('B AFTER created_by index exists', EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'marketplace_listings_created_by_idx')),
   ('B AFTER anon still reads legacy logos/', pg_temp.see('anon', '', 'company-assets', 'logos/2655.png') = 1),
   ('B AFTER anon still reads legacy avatars/', pg_temp.see('anon', '', 'user-avatars', 'avatars/aaaaaaaa-0000-0000-0000-000000000001.jpg') = 1),
   ('B AFTER member still reads legacy equipment/', pg_temp.see('authenticated', 'aaaaaaaa-0000-0000-0000-000000000001', 'equipment-photos', 'equipment/2655/laser.jpg') = 1);
@@ -188,6 +189,7 @@ INSERT INTO proof (label, ok) VALUES
 
 INSERT INTO proof (label, ok) VALUES
   ('B ROLLBACK marker dropped', to_regclass('public.storage_000974_marketplace_prior') IS NULL),
+  ('B ROLLBACK created_by index dropped', NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'marketplace_listings_created_by_idx')),
   ('B ROLLBACK 000974 functions gone', to_regprocedure('public.storage_caller_owns_prefix(text)') IS NULL AND to_regprocedure('public.marketplace_image_public_read(text)') IS NULL),
   ('B ROLLBACK owner policies gone', NOT EXISTS (SELECT 1 FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname LIKE '%_owner_%')),
   ('B ROLLBACK listing insert fp is 000970', pg_temp.fp('Authenticated users can upload listing images') = '94e71a7c51d1b31e75768e25ffc6187a'),

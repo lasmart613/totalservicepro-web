@@ -261,7 +261,22 @@ INSERT INTO proof (label, ok) VALUES
   ('AFTER equipment is png/jpeg/webp at 8 MiB and still private', (SELECT public IS FALSE AND file_size_limit = 8388608 AND allowed_mime_types = ARRAY['image/png','image/jpeg','image/webp']::text[] FROM storage.buckets WHERE id = 'equipment-photos')),
   ('AFTER part-images is png/jpeg/webp at 5 MB and still public', (SELECT public IS TRUE AND file_size_limit = 5242880 AND allowed_mime_types = ARRAY['image/png','image/jpeg','image/webp']::text[] FROM storage.buckets WHERE id = 'part-images')),
   ('AFTER marketplace is png/jpeg/webp at 5 MB and still private', (SELECT public IS FALSE AND file_size_limit = 5242880 AND allowed_mime_types = ARRAY['image/png','image/jpeg','image/webp']::text[] FROM storage.buckets WHERE id = 'marketplace-images')),
+  ('AFTER created_by index exists', EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'marketplace_listings_created_by_idx')),
   ('AFTER other bucket untouched', (SELECT public IS FALSE AND file_size_limit IS NULL AND allowed_mime_types IS NULL FROM storage.buckets WHERE id = 'other'));
+
+ALTER TABLE public.marketplace_listings ADD COLUMN IF NOT EXISTS description text;
+ALTER TABLE public.marketplace_listings ADD COLUMN IF NOT EXISTS notes text;
+INSERT INTO storage.objects (bucket_id, name)
+VALUES ('marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/mentioned.jpg');
+UPDATE public.marketplace_listings
+SET description = 'see aaaaaaaa-0000-0000-0000-000000000001/listings/mentioned.jpg',
+    notes = 'aaaaaaa-0000-0000-0000-000000000001/listings/mentioned.jpg',
+    details = jsonb_build_object(
+      'note', 'aaaaaaaa-0000-0000-0000-000000000001/listings/mentioned.jpg',
+      'photos', jsonb_build_array('https://db.example/storage/v1/object/public/marketplace-images/aaaaaaaa-0000-0000-0000-000000000001/listings/pub.jpg')
+    )
+WHERE seller_id = 'aaaaaaaa-0000-0000-0000-000000000001'
+  AND status = 'active';
 
 INSERT INTO proof (label, ok) VALUES
   ('AFTER owner inserts own avatar folder', pg_temp.try_as('aaaaaaaa-0000-0000-0000-000000000001', $q$INSERT INTO storage.objects (bucket_id, name) VALUES ('user-avatars','aaaaaaaa-0000-0000-0000-000000000001/avatar-2.jpg')$q$)),
@@ -287,6 +302,7 @@ INSERT INTO proof (label, ok) VALUES
   ('AFTER anon reads a sold listing image', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/sold.jpg') = 1),
   ('AFTER anon cannot read a draft listing image', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/draft.jpg') = 0),
   ('AFTER anon cannot read an unreferenced or other-seller path', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/secret.jpg') = 0),
+  ('AFTER anon cannot read a path only mentioned in description or details note', pg_temp.see('anon', '', 'marketplace-images', 'aaaaaaaa-0000-0000-0000-000000000001/listings/mentioned.jpg') = 0),
   ('AFTER company public select unchanged', pg_temp.fp('storage.objects', 'Company assets are publicly viewable') = 'ff4a9e1a393148b403a8c54941fe7f3e'),
   ('AFTER avatar public select unchanged', pg_temp.fp('storage.objects', 'Avatars are publicly viewable') = 'fba55b5b38dc6edfba51d1aa8404069f'),
   ('AFTER anon still reads legacy logos/ object', pg_temp.see('anon', '', 'company-assets', 'logos/2655.png') = 1),
@@ -320,7 +336,9 @@ INSERT INTO proof (label, ok) VALUES
   ('ROLLBACK listing insert is authenticated', (SELECT polcmd = 'a' AND polroles = ARRAY['authenticated'::regrole]::oid[] FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Authenticated users can upload listing images')),
   ('ROLLBACK public listing select is public', (SELECT polcmd = 'r' AND polroles = ARRAY[0::oid] FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Public can view listing images')),
   ('ROLLBACK index 0 is back on the listing insert', (SELECT pg_get_expr(polwithcheck, polrelid) LIKE '%[0]%' FROM pg_policy WHERE polrelid = 'storage.objects'::regclass AND polname = 'Authenticated users can upload listing images')),
-  ('ROLLBACK prior marker dropped', to_regclass('public.storage_000974_marketplace_prior') IS NULL);
+  ('ROLLBACK prior marker dropped', to_regclass('public.storage_000974_marketplace_prior') IS NULL),
+  ('ROLLBACK created_by index dropped', NOT EXISTS (SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = 'marketplace_listings_created_by_idx')),
+  ('ROLLBACK image match helper gone', to_regprocedure('public.marketplace_image_stored_value_matches(text,text)') IS NULL);
 
 \ir ../migrations/20261122_000974_storage_bucket_hardening.sql
 INSERT INTO proof (label, ok) VALUES

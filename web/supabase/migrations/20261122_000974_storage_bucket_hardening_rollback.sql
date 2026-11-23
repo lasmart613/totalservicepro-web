@@ -248,7 +248,9 @@ BEGIN
 END $$;
 
 DROP FUNCTION IF EXISTS public.marketplace_image_public_read(text);
+DROP FUNCTION IF EXISTS public.marketplace_image_stored_value_matches(text, text);
 DROP FUNCTION IF EXISTS public.storage_caller_owns_prefix(text);
+DROP INDEX IF EXISTS public.marketplace_listings_created_by_idx;
 
 CREATE POLICY "Users can upload own avatar" ON storage.objects
   FOR INSERT TO authenticated

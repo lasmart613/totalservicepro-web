@@ -168,10 +168,10 @@ BEGIN
     FROM pg_catalog.pg_proc p
     JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
     WHERE n.nspname = 'public'
-      AND p.proname IN ('storage_caller_owns_prefix', 'marketplace_image_public_read')
+      AND p.proname IN ('storage_caller_owns_prefix', 'marketplace_image_public_read', 'marketplace_image_stored_value_matches')
       AND coalesce(pg_catalog.obj_description(p.oid, 'pg_proc'), '') NOT LIKE '000974:%'
   ) THEN
-    RAISE EXCEPTION '000974: storage_caller_owns_prefix / marketplace_image_public_read exists and is not from 000974';
+    RAISE EXCEPTION '000974: storage_caller_owns_prefix / marketplace_image_public_read / marketplace_image_stored_value_matches exists and is not from 000974';
   END IF;
 
   IF NOT EXISTS (
@@ -335,6 +335,8 @@ BEGIN
     RETURN false;
   END IF;
   -- First folder is storage.foldername index 1. Index 0 is always NULL.
+  -- LOW 4, left as-is: '..' anywhere in the name is refused, including inside
+  -- a folder the caller owns. '{orgId}/a/../other.png' is not writable.
   IF position('..' in object_name) > 0
      OR left(object_name, 1) = '/'
      OR position(chr(92) in object_name) > 0 THEN
@@ -365,6 +367,43 @@ COMMENT ON FUNCTION public.storage_caller_owns_prefix(text) IS
 REVOKE ALL ON FUNCTION public.storage_caller_owns_prefix(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.storage_caller_owns_prefix(text) TO authenticated;
 
+-- True when one stored image value is exactly this object: the raw path, or a
+-- URL whose path after /marketplace-images/ is exactly this object. A longer
+-- string that merely contains the path does not match.
+CREATE OR REPLACE FUNCTION public.marketplace_image_stored_value_matches(raw text, object_name text)
+RETURNS boolean
+LANGUAGE plpgsql
+IMMUTABLE
+SET search_path = ''
+AS $$
+DECLARE
+  cleaned text;
+  mark constant text := '/marketplace-images/';
+  at integer;
+  path text;
+BEGIN
+  IF raw IS NULL OR object_name IS NULL OR btrim(raw) = '' THEN
+    RETURN false;
+  END IF;
+  cleaned := split_part(split_part(btrim(raw), '?', 1), '#', 1);
+  IF cleaned = object_name THEN
+    RETURN true;
+  END IF;
+  at := position(mark in cleaned);
+  IF at = 0 THEN
+    RETURN false;
+  END IF;
+  path := substring(cleaned from at + char_length(mark));
+  RETURN path = object_name;
+END;
+$$;
+
+COMMENT ON FUNCTION public.marketplace_image_stored_value_matches(text, text) IS
+  '000974: exact image value. Equals the object path, or the URL path after /marketplace-images/ equals it. Not a substring.';
+
+REVOKE ALL ON FUNCTION public.marketplace_image_stored_value_matches(text, text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.marketplace_image_stored_value_matches(text, text) TO anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public.marketplace_image_public_read(object_name text)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -374,12 +413,11 @@ SET search_path = ''
 AS $$
 DECLARE
   head text;
-  blob text;
-  listing record;
 BEGIN
   IF object_name IS NULL OR btrim(object_name) = '' THEN
     RETURN false;
   END IF;
+  -- LOW 4, left as-is: '..' anywhere in the name is refused.
   IF position('..' in object_name) > 0 OR left(object_name, 1) = '/' THEN
     RETURN false;
   END IF;
@@ -390,35 +428,51 @@ BEGIN
   IF head !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
     RETURN false;
   END IF;
-  FOR listing IN
-    SELECT ml.status, ml.seller_id, ml.created_by, ml.images, ml.photos, ml.details
+  -- Image fields the app writes: images, photos, and details.images / details.photos
+  -- (string or {url}). Description, notes, and other details keys are not scanned.
+  RETURN EXISTS (
+    SELECT 1
     FROM public.marketplace_listings ml
+    CROSS JOIN LATERAL (
+      SELECT e.elem
+      FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(ml.images) = 'array' THEN ml.images ELSE '[]'::jsonb END
+      ) AS e(elem)
+      UNION ALL
+      SELECT e.elem
+      FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(ml.photos) = 'array' THEN ml.photos ELSE '[]'::jsonb END
+      ) AS e(elem)
+      UNION ALL
+      SELECT e.elem
+      FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(ml.details -> 'images') = 'array' THEN ml.details -> 'images' ELSE '[]'::jsonb END
+      ) AS e(elem)
+      UNION ALL
+      SELECT e.elem
+      FROM jsonb_array_elements(
+        CASE WHEN jsonb_typeof(ml.details -> 'photos') = 'array' THEN ml.details -> 'photos' ELSE '[]'::jsonb END
+      ) AS e(elem)
+    ) fields
     WHERE lower(btrim(coalesce(ml.status, ''))) NOT IN ('removed', 'expired', 'inactive', 'closed', 'draft')
       AND (
         lower(coalesce(ml.seller_id::text, '')) = lower(head)
         OR lower(coalesce(ml.created_by::text, '')) = lower(head)
       )
-  LOOP
-    blob := concat_ws(
-      E'\n',
-      coalesce(listing.images::text, ''),
-      coalesce(listing.photos::text, ''),
-      coalesce(listing.details::text, '')
-    );
-    -- The path must end at a URL or JSON boundary, so "a.jpg" does not match "a.jpg2".
-    IF strpos(blob, object_name || '"') > 0
-       OR strpos(blob, object_name || '?') > 0
-       OR strpos(blob, object_name || '#') > 0
-       OR right(blob, length(object_name)) = object_name THEN
-      RETURN true;
-    END IF;
-  END LOOP;
-  RETURN false;
+      AND public.marketplace_image_stored_value_matches(
+        CASE
+          WHEN jsonb_typeof(fields.elem) = 'string' THEN fields.elem #>> '{}'
+          WHEN jsonb_typeof(fields.elem) = 'object' THEN fields.elem ->> 'url'
+          ELSE NULL
+        END,
+        object_name
+      )
+  );
 END;
 $$;
 
 COMMENT ON FUNCTION public.marketplace_image_public_read(text) IS
-  '000974: anon read of a private marketplace-images object only when a public listing (not removed, expired, inactive, closed, or draft) references that path and the first folder is the listing seller or creator. Listing pages themselves use signed URLs.';
+  '000974: anon read of a private marketplace-images object only when an exact element of a public listing image field (images, photos, details.images, details.photos) is that path or its URL, and the first folder is the listing seller or creator. Listing pages themselves use signed URLs.';
 
 REVOKE ALL ON FUNCTION public.marketplace_image_public_read(text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.marketplace_image_public_read(text) TO anon, authenticated;
@@ -583,5 +637,25 @@ BEGIN
     RAISE EXCEPTION '000974: marketplace-images update did not match the recorded live row';
   END IF;
 END $$;
+
+-- No created_by index existed on 2026-11-23. The public-read lookup filters on it.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class c ON c.oid = i.indexrelid
+    JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'marketplace_listings_created_by_idx'
+      AND pg_catalog.pg_get_indexdef(i.indexrelid) IS DISTINCT FROM
+          'CREATE INDEX marketplace_listings_created_by_idx ON public.marketplace_listings USING btree (created_by)'
+  ) THEN
+    RAISE EXCEPTION '000974: marketplace_listings_created_by_idx exists with a different definition; refusing';
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS marketplace_listings_created_by_idx
+  ON public.marketplace_listings (created_by);
 
 SELECT '000974 ok' AS status;
