@@ -40,6 +40,7 @@ export type OpenPayLink = {
   sessionId: string;
   url: string;
   amount: number | null;
+  amountMinor: number | null;
 };
 
 export type PayLinkPlan =
@@ -108,7 +109,13 @@ export function openPayLink(invoiceData: unknown): OpenPayLink | null {
   const url = String(data.payment_url || '').trim();
   if (!CHECKOUT_SESSION_ID.test(sessionId) || !url) return null;
   const amount = Number(data.payment_amount);
-  return { sessionId, url, amount: Number.isFinite(amount) ? amount : null };
+  const minor = Number(data.payment_amount_minor);
+  return {
+    sessionId,
+    url,
+    amount: Number.isFinite(amount) ? amount : null,
+    amountMinor: Number.isInteger(minor) && minor > 0 ? minor : null,
+  };
 }
 
 function sessionSettled(snapshot: CheckoutSessionSnapshot): boolean {
@@ -120,7 +127,20 @@ function sessionOpen(snapshot: CheckoutSessionSnapshot): boolean {
   return String(snapshot.status || '') === 'open' && String(snapshot.payment_status || '') !== 'paid';
 }
 
-function sameCharge(payAmount: number, snapshot: CheckoutSessionSnapshot | null, storedAmount: number | null): boolean {
+function sameCharge(
+  payAmount: number,
+  snapshot: CheckoutSessionSnapshot | null,
+  storedAmount: number | null,
+  chargeMinor: number | null,
+  storedMinor: number | null
+): boolean {
+  if (chargeMinor != null) {
+    if (storedMinor != null && storedMinor !== chargeMinor) return false;
+    if (snapshot && snapshot.amount_total != null && Number.isFinite(Number(snapshot.amount_total))) {
+      return Math.round(Number(snapshot.amount_total)) === chargeMinor;
+    }
+    return storedMinor === chargeMinor;
+  }
   if (snapshot && snapshot.amount_total != null && Number.isFinite(Number(snapshot.amount_total))) {
     return Math.round(Number(snapshot.amount_total)) === Math.round(payAmount * 100);
   }
@@ -148,6 +168,8 @@ async function defaultExpireCheckout(sessionId: string): Promise<CheckoutExpireC
 export async function planInvoicePayLink(input: {
   invoice: PayLinkInvoice;
   payAmount: number;
+  /** Minor units of the charge about to be created. Used to reuse a matching open session. */
+  chargeMinor?: number | null;
   loadCheckout?: LoadCheckout;
   expireCheckout?: ExpireCheckout;
   isSessionCredited?: (sessionId: string) => boolean | Promise<boolean>;
@@ -183,7 +205,11 @@ export async function planInvoicePayLink(input: {
     return { action: 'skip', reason: INVOICE_CHECKOUT_ALREADY_PAID };
   }
 
-  if (snapshot && sessionOpen(snapshot) && sameCharge(input.payAmount, snapshot, open.amount)) {
+  if (
+    snapshot &&
+    sessionOpen(snapshot) &&
+    sameCharge(input.payAmount, snapshot, open.amount, input.chargeMinor ?? null, open.amountMinor)
+  ) {
     return { action: 'reuse', sessionId: open.sessionId, url: open.url };
   }
 

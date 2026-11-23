@@ -91,6 +91,7 @@ test('missing Connect account does not build a platform charge', async () => {
   try {
     const outcome = await createInvoiceCheckoutSession({
       amountCents: 2500,
+      currency: 'usd',
       description: 'Invoice 9',
       invoiceId: 9,
       destinationAccountId: 'not-an-account',
@@ -155,6 +156,7 @@ test('invoice and parts routes use the connected account when it can charge', ()
 
   const params = buildInvoiceCheckoutParams({
     amountCents: 10000,
+    currency: 'usd',
     description: 'Invoice 12',
     invoiceId: 12,
     invoiceNumber: 'INV-12',
@@ -200,6 +202,7 @@ test('platform fee defaults to 0 and stays below the charge', () => {
   if (!route.ok) return;
   const params = buildInvoiceCheckoutParams({
     amountCents: 10000,
+    currency: 'usd',
     description: 'Fee',
     destinationAccountId: 'acct_shop123',
     payoutStatus: 'transferred',
@@ -540,8 +543,12 @@ function mainInvoiceParams(input: {
   params.set('success_url', `${site}/invoice-paid?session_id={CHECKOUT_SESSION_ID}`);
   params.set('cancel_url', `${site}/invoice-paid?canceled=1`);
   params.set('metadata[kind]', 'invoice_pay');
+  params.set('metadata[charge_currency]', 'usd');
+  params.set('metadata[charge_amount_minor]', String(input.amountCents));
   params.set('metadata[payment_kind]', input.paymentKind);
   params.set('payment_intent_data[metadata][payment_kind]', input.paymentKind);
+  params.set('payment_intent_data[metadata][charge_currency]', 'usd');
+  params.set('payment_intent_data[metadata][charge_amount_minor]', String(input.amountCents));
   params.set('line_items[0][quantity]', '1');
   params.set('line_items[0][price_data][currency]', 'usd');
   params.set('line_items[0][price_data][unit_amount]', String(input.amountCents));
@@ -594,6 +601,7 @@ function mainPartFields(input: {
 
 const invoiceSample = {
   amountCents: 2500,
+  currency: 'usd',
   description: 'Invoice INV-9',
   invoiceId: 9,
   invoiceNumber: 'INV-9',
@@ -766,6 +774,7 @@ test('enforce on with a connected seller uses a destination charge', () => {
   assert.equal(decision.fields['payment_intent_data[application_fee_amount]'], undefined);
   const params = buildInvoiceCheckoutParams({
     amountCents: 10000,
+    currency: 'usd',
     description: 'Invoice 99',
     invoiceId: 99,
     destinationAccountId: decision.accountId,

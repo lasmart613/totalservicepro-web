@@ -468,6 +468,8 @@ describe('send invoice', { concurrency: false }, () => {
         assert.equal(checkout.calls[0].companyName, 'Priya Shah');
         assert.equal(checkout.calls[0].destinationAccountId, undefined);
         assert.equal(checkout.calls[0].legacyPlatformCharge, true);
+        assert.equal(checkout.calls[0].currency, 'usd');
+        assert.equal(checkout.calls[0].amountCents, 12000);
         assert.equal(checkout.calls[0].organizationId, undefined);
         assert.ok(mailed);
         assert.equal(mailed.subject, 'Invoice INV-100 from Cedar Laser Service');
@@ -848,5 +850,59 @@ describe('send invoice', { concurrency: false }, () => {
     } finally {
       fetchLog.restore();
     }
+  });
+
+  test('pay link uses the org currency in minor units and skips an unsupported currency', async () => {
+    resetDocumentSendRateLimit();
+    const qaOrg = { ...shopOrg, id: 2655, currency_code: 'EUR' };
+    const qaProfile = { ...profile, organization_id: 2655 };
+    const eurInvoice = { ...invoiceRow(), organization_id: 2655, total: 80 };
+    const yenInvoice = { ...invoiceRow(), organization_id: 2655, total: 1500 };
+    const badInvoice = { ...invoiceRow(), organization_id: 2655, total: 80 };
+
+    async function send(currency: string, row: ReturnType<typeof invoiceRow>) {
+      const db = memoryClient({
+        user_profiles: [qaProfile],
+        organizations: [{ ...qaOrg, currency_code: currency }],
+        service_invoices: [row],
+      });
+      const checkout = checkoutSpy();
+      const fetchLog = installFetch(() => {
+        return new Response(JSON.stringify({ id: 'msg-currency' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+      try {
+        const res = await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, () =>
+          runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: checkout.createCheckout as never,
+          })
+        );
+        const json = await res.json();
+        return { status: res.status, json, calls: checkout.calls };
+      } finally {
+        fetchLog.restore();
+      }
+    }
+
+    const eur = await send('EUR', eurInvoice);
+    assert.equal(eur.status, 200);
+    assert.equal(eur.calls.length, 1);
+    assert.equal(eur.calls[0].currency, 'eur');
+    assert.equal(eur.calls[0].amountCents, 8000);
+
+    const yen = await send('JPY', yenInvoice);
+    assert.equal(yen.status, 200);
+    assert.equal(yen.calls.length, 1);
+    assert.equal(yen.calls[0].currency, 'jpy');
+    assert.equal(yen.calls[0].amountCents, 1500);
+
+    const bad = await send('USDX', badInvoice);
+    assert.equal(bad.status, 200);
+    assert.equal(bad.calls.length, 0);
+    assert.match(String(bad.json.stripeSkippedReason || ''), /not supported/);
   });
 });
