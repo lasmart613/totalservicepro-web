@@ -2,8 +2,34 @@
 -- check from before charge_mismatch.
 -- Does not drop service_invoice_stripe_payments.
 -- Repo only. Do not run against production from the pull request.
+--
+-- The restored check rejects charge_mismatch. If any row already has that
+-- outcome, the guard below stops this file and reports the count. Relabel
+-- is opt-in and is not run unless you uncomment it. Review the rows, run
+-- the UPDATE once, then run the rest of this file.
+--
+-- UPDATE public.service_invoice_stripe_payments
+-- SET outcome = 'possibly_already_credited'
+-- WHERE outcome = 'charge_mismatch';
 
 SET LOCAL lock_timeout = '5s';
+
+DO $$
+DECLARE
+  v_count bigint;
+BEGIN
+  IF to_regclass('public.service_invoice_stripe_payments') IS NULL THEN
+    RETURN;
+  END IF;
+  SELECT count(*) INTO v_count
+  FROM public.service_invoice_stripe_payments
+  WHERE outcome = 'charge_mismatch';
+  IF COALESCE(v_count, 0) > 0 THEN
+    RAISE EXCEPTION
+      '000975 rollback aborted: % charge_mismatch row(s) are stored. Relabel them to possibly_already_credited with the commented UPDATE at the top of this file, then run the rollback again.',
+      v_count;
+  END IF;
+END $$;
 
 ALTER TABLE public.service_invoice_stripe_payments
   DROP CONSTRAINT IF EXISTS service_invoice_stripe_payments_outcome_check;

@@ -133,6 +133,13 @@ test('a stored-charge mismatch is a review result, not an ignored webhook', () =
     mismatchRollback,
     /CHECK \(outcome IN \('credited', 'overpaid_not_credited', 'possibly_already_credited'\)\)/
   );
+  assert.match(mismatchRollback, /000975 rollback aborted: % charge_mismatch row/);
+  assert.match(mismatchRollback, /-- UPDATE public\.service_invoice_stripe_payments/);
+  assert.match(mismatchRollback, /-- SET outcome = 'possibly_already_credited'/);
+  assert.ok(
+    mismatchRollback.indexOf('000975 rollback aborted') <
+      mismatchRollback.indexOf('DROP CONSTRAINT IF EXISTS service_invoice_stripe_payments_outcome_check')
+  );
   const sql = readFileSync(
     join(here, '../../supabase/migrations/20261122_000971_invoice_claim_currency.sql'),
     'utf8'
