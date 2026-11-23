@@ -468,6 +468,8 @@ describe('send invoice', { concurrency: false }, () => {
         assert.equal(checkout.calls[0].companyName, 'Priya Shah');
         assert.equal(checkout.calls[0].destinationAccountId, undefined);
         assert.equal(checkout.calls[0].legacyPlatformCharge, true);
+        assert.equal(checkout.calls[0].currency, 'usd');
+        assert.equal(checkout.calls[0].amountCents, 12000);
         assert.equal(checkout.calls[0].organizationId, undefined);
         assert.ok(mailed);
         assert.equal(mailed.subject, 'Invoice INV-100 from Cedar Laser Service');
@@ -580,5 +582,327 @@ describe('send invoice', { concurrency: false }, () => {
       if (previousBcc == null) delete process.env.APP_MAIL_BCC;
       else process.env.APP_MAIL_BCC = previousBcc;
     }
+  });
+
+  test('a credited deposit gets a new Checkout session for the remaining balance', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.status = 'partially_paid';
+    row.total = 1000;
+    row.amount_paid = 300;
+    row.stripe_session_id = 'cs_test_deposit';
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_deposit',
+      stripe_checkout_session_id: 'cs_test_deposit',
+      payment_amount: 300,
+      deferredReleased: true,
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const checkout = checkoutSpy();
+    let expired = 0;
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify({ id: 'msg-balance' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => ({ status: 'complete', payment_status: 'paid', url: null, amount_total: 30000 }),
+          expireCheckout: async () => {
+            expired += 1;
+            return 'completed';
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(checkout.calls.length, 1);
+        assert.equal(checkout.calls[0].amountCents, 70000);
+        assert.equal(expired, 0);
+        assert.equal(json.stripeSessionId, 'session-1');
+      });
+    } finally {
+      fetchLog.restore();
+    }
+  });
+
+  test('without a Stripe key an existing pay link is not resent', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+      stripe_checkout_session_id: 'cs_test_open',
+      payment_amount: 120,
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const checkout = checkoutSpy();
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify({ id: 'msg-nostripe' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: null }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => {
+            throw new Error('stripe lookup');
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.paymentUrl, null);
+        assert.equal(json.stripeSessionId, null);
+        assert.match(json.stripeSkippedReason, /could not be checked and was not resent/);
+        assert.equal(checkout.calls.length, 0);
+      });
+    } finally {
+      fetchLog.restore();
+    }
+  });
+
+  test('resend after payment refuses a new Checkout session and still sends the invoice', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.status = 'paid';
+    row.amount_paid = 0;
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const checkout = checkoutSpy();
+    let stripeCalls = 0;
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify({ id: 'msg-paid' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => {
+            stripeCalls += 1;
+            throw new Error('lookup');
+          },
+          expireCheckout: async () => {
+            stripeCalls += 1;
+            return 'failed';
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.paymentUrl, null);
+        assert.equal(json.stripeSessionId, null);
+        assert.match(json.stripeSkippedReason, /already paid/i);
+        assert.equal(checkout.calls.length, 0);
+        assert.equal(stripeCalls, 0);
+        assert.equal(db.updates.length, 0);
+      });
+    } finally {
+      fetchLog.restore();
+    }
+  });
+
+  test('resend with an open Checkout session reuses it instead of creating a second one', async () => {
+    resetDocumentSendRateLimit();
+    const row = invoiceRow();
+    row.invoice_data = {
+      ...(row.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+      stripe_checkout_session_id: 'cs_test_open',
+      payment_amount: 120,
+    };
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [row],
+    });
+    const checkout = checkoutSpy();
+    let expired = 0;
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify({ id: 'msg-reuse' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const res = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: db as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => ({
+            status: 'open',
+            payment_status: 'unpaid',
+            url: 'https://checkout.stripe.com/c/pay/cs_test_open',
+            amount_total: 12000,
+          }),
+          expireCheckout: async () => {
+            expired += 1;
+            return 'expired';
+          },
+        });
+        const json = await res.json();
+        assert.equal(res.status, 200);
+        assert.equal(json.emailSent, true);
+        assert.equal(json.stripeSessionId, 'cs_test_open');
+        assert.equal(json.paymentUrl, 'https://checkout.stripe.com/c/pay/cs_test_open');
+        assert.equal(checkout.calls.length, 0);
+        assert.equal(expired, 0);
+        assert.equal(db.updates.length, 0);
+      });
+    } finally {
+      fetchLog.restore();
+    }
+  });
+
+  test('resend does not create a session when the open Checkout session is already paid or cannot be expired', async () => {
+    resetDocumentSendRateLimit();
+    const paidRow = invoiceRow();
+    paidRow.invoice_data = {
+      ...(paidRow.invoice_data as Record<string, unknown>),
+      payment_url: 'https://checkout.stripe.com/c/pay/cs_test_paid',
+      stripe_checkout_session_id: 'cs_test_paid',
+      payment_amount: 120,
+    };
+    const paidDb = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg],
+      service_invoices: [paidRow],
+    });
+    const checkout = checkoutSpy();
+    const fetchLog = installFetch(() => {
+      return new Response(JSON.stringify({ id: 'msg-skip' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    try {
+      await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, async () => {
+        const paid = await runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+          userClient: paidDb as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => ({ status: 'complete', payment_status: 'paid', url: null, amount_total: 12000 }),
+          expireCheckout: async () => {
+            throw new Error('paid session must not be expired');
+          },
+        });
+        const paidJson = await paid.json();
+        assert.equal(paid.status, 200);
+        assert.equal(paidJson.emailSent, true);
+        assert.equal(paidJson.paymentUrl, null);
+        assert.match(paidJson.stripeSkippedReason, /paid Checkout session/);
+        assert.equal(checkout.calls.length, 0);
+
+        const stuckRow = invoiceRow();
+        stuckRow.id = 43;
+        stuckRow.invoice_data = {
+          ...(stuckRow.invoice_data as Record<string, unknown>),
+          payment_url: 'https://checkout.stripe.com/c/pay/cs_test_stuck',
+          stripe_checkout_session_id: 'cs_test_stuck',
+          payment_amount: 120,
+        };
+        const stuckDb = memoryClient({
+          user_profiles: [profile],
+          organizations: [shopOrg],
+          service_invoices: [stuckRow],
+        });
+        const stuck = await runSendInvoice(request({ invoice_id: 43, include_payment_link: true }), {
+          userClient: stuckDb as never,
+          adminClient: null,
+          createCheckout: checkout.createCheckout as never,
+          loadCheckout: async () => null,
+          expireCheckout: async () => 'failed',
+        });
+        const stuckJson = await stuck.json();
+        assert.equal(stuck.status, 200);
+        assert.equal(stuckJson.paymentUrl, null);
+        assert.match(stuckJson.stripeSkippedReason, /could not be replaced/);
+        assert.equal(checkout.calls.length, 0);
+        assert.equal(stuckDb.updates.length, 0);
+      });
+    } finally {
+      fetchLog.restore();
+    }
+  });
+
+  test('pay link uses the org currency in minor units and skips an unsupported currency', async () => {
+    resetDocumentSendRateLimit();
+    const qaOrg = { ...shopOrg, id: 2655, currency_code: 'EUR' };
+    const qaProfile = { ...profile, organization_id: 2655 };
+    const eurInvoice = { ...invoiceRow(), organization_id: 2655, total: 80 };
+    const yenInvoice = { ...invoiceRow(), organization_id: 2655, total: 1500 };
+    const badInvoice = { ...invoiceRow(), organization_id: 2655, total: 80 };
+
+    async function send(currency: string, row: ReturnType<typeof invoiceRow>) {
+      const db = memoryClient({
+        user_profiles: [qaProfile],
+        organizations: [{ ...qaOrg, currency_code: currency }],
+        service_invoices: [row],
+      });
+      const checkout = checkoutSpy();
+      const fetchLog = installFetch(() => {
+        return new Response(JSON.stringify({ id: 'msg-currency' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      });
+      try {
+        const res = await withEnv({ resend: 'resend-test', stripe: 'unit-stripe' }, () =>
+          runSendInvoice(request({ invoice_id: 42, include_payment_link: true }), {
+            userClient: db as never,
+            adminClient: null,
+            createCheckout: checkout.createCheckout as never,
+          })
+        );
+        const json = await res.json();
+        return { status: res.status, json, calls: checkout.calls };
+      } finally {
+        fetchLog.restore();
+      }
+    }
+
+    const eur = await send('EUR', eurInvoice);
+    assert.equal(eur.status, 200);
+    assert.equal(eur.calls.length, 1);
+    assert.equal(eur.calls[0].currency, 'eur');
+    assert.equal(eur.calls[0].amountCents, 8000);
+
+    const yen = await send('JPY', yenInvoice);
+    assert.equal(yen.status, 200);
+    assert.equal(yen.calls.length, 1);
+    assert.equal(yen.calls[0].currency, 'jpy');
+    assert.equal(yen.calls[0].amountCents, 1500);
+
+    const bad = await send('USDX', badInvoice);
+    assert.equal(bad.status, 200);
+    assert.equal(bad.calls.length, 0);
+    assert.match(String(bad.json.stripeSkippedReason || ''), /not supported/);
   });
 });

@@ -9,7 +9,7 @@
  */
 
 export const INVOICE_ROW_SELECTS = [
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status',
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status, stripe_session_id',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, status',
   'id, created_by, organization_id, customer_name, total, amount_paid, invoice_data, status',
   'id, created_by, organization_id, customer_organization_id, total, invoice_data, status',
@@ -47,6 +47,8 @@ export type StripeLinkFields = {
   stripe_checkout_session_id: string | null;
   payment_amount: number;
   payment_kind: string;
+  payment_currency?: string;
+  payment_amount_minor?: number;
 };
 
 /**
@@ -66,6 +68,8 @@ export function mergePaymentFieldsIntoInvoiceData(
     stripe_checkout_session_id: fields.stripe_checkout_session_id,
     payment_amount: fields.payment_amount,
     payment_kind: fields.payment_kind,
+    ...(fields.payment_currency ? { payment_currency: fields.payment_currency } : {}),
+    ...(fields.payment_amount_minor != null ? { payment_amount_minor: fields.payment_amount_minor } : {}),
   };
 }
 
