@@ -925,6 +925,17 @@ function showUpgradeOptions() {
     showToast('Upgrade plans coming soon!', '');
 }
 
+function faxFieldError(value) {
+    var raw = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return '';
+    var digits = raw.replace(/\D/g, '').length;
+    var shape = /^[0-9+().\-\s]+(\s*(x|ext\.?)\s*\d{1,6})?$/i;
+    if (raw.length > 50 || digits < 7 || digits > 20 || !shape.test(raw)) {
+        return 'Fax must look like a phone number (7–20 digits).';
+    }
+    return '';
+}
+
 // ── Save ──
 async function saveCompany() {
     const btn = document.getElementById('saveCompanyBtn');
@@ -936,15 +947,26 @@ async function saveCompany() {
             showToast('Ticket prefix must be exactly 3 letters', 'error');
             return;
         }
+        var faxRaw = (document.getElementById('companyFax') || { value: '' }).value.trim();
+        var faxError = faxFieldError(faxRaw);
+        if (faxError) {
+            showToast(faxError, 'error');
+            return;
+        }
+        var line2Raw = (document.getElementById('companyAddressLine2') || { value: '' }).value.trim();
+        if (line2Raw.length > 200) {
+            showToast('Address line 2 is too long (max 200 characters).', 'error');
+            return;
+        }
 
         const updates = {
             name:               document.getElementById('companyName').value.trim(),
             website:            document.getElementById('companyWebsite').value.trim(),
             phone:              document.getElementById('companyPhone').value.trim(),
-            fax:                (document.getElementById('companyFax') || {}).value ? document.getElementById('companyFax').value.trim() : null,
+            fax:                faxRaw || null,
             email:              document.getElementById('companyEmail').value.trim(),
             address:            document.getElementById('companyAddress').value.trim(),
-            address_line2:      (document.getElementById('companyAddressLine2') || {}).value ? document.getElementById('companyAddressLine2').value.trim() : null,
+            address_line2:      line2Raw || null,
             city:               document.getElementById('companyCity').value.trim(),
             state:              document.getElementById('companyState').value.trim(),
             zip:                document.getElementById('companyZip').value.trim(),

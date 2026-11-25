@@ -11,6 +11,7 @@ import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
+import { optionalContactError, optionalContactValues } from '@/lib/fax-address';
 
 const SERVICES_OFFERED = [
   'Preventive Maintenance (PM)', 'Emergency / On-Call Repair', 'Install / Deinstall',
@@ -50,6 +51,7 @@ export default function CompanySignup() {
   };
 
   function pendingPayload(): PendingSignup {
+    const contact = optionalContactValues({ fax, address_line2: addressLine2 });
     return {
       kind: 'company',
       name: companyName,
@@ -57,9 +59,9 @@ export default function CompanySignup() {
       lastName,
       email,
       phone: phone || null,
-      fax: fax || null,
+      fax: contact.fax,
       address: address || null,
-      addressLine2: addressLine2 || null,
+      addressLine2: contact.address_line2,
       city: city || null,
       state: state || null,
       website: website || null,
@@ -92,6 +94,11 @@ export default function CompanySignup() {
     }
     if (password !== confirmPassword) {
       setMessage('Passwords do not match.');
+      return;
+    }
+    const contactError = optionalContactError({ fax, address_line2: addressLine2 });
+    if (contactError) {
+      setMessage(contactError);
       return;
     }
     setLoading(true);

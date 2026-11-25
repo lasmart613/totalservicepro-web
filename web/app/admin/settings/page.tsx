@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, ORG_READABLE_COLUMNS_WITHOUT_FAX } from '@/lib/org-columns';
+import { missingFaxOrAddressLine2 } from '@/lib/fax-address';
 
 export default function AdminSettings() {
   const [org, setOrg] = useState<any>(null);
@@ -23,13 +24,20 @@ export default function AdminSettings() {
         .single();
 
       if (profile?.organization_id) {
-        const { data } = await supabase
+        let orgRes = await supabase
           .from('organizations')
           .select(ORG_READABLE_COLUMNS)
           .eq('id', profile.organization_id)
           .single();
+        if (orgRes.error && missingFaxOrAddressLine2(orgRes.error)) {
+          orgRes = await supabase
+            .from('organizations')
+            .select(ORG_READABLE_COLUMNS_WITHOUT_FAX as typeof ORG_READABLE_COLUMNS)
+            .eq('id', profile.organization_id)
+            .single();
+        }
 
-        setOrg(data);
+        setOrg(orgRes.data);
       }
       setLoading(false);
     };

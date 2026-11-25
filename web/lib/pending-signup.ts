@@ -7,6 +7,7 @@ import {
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
 import { postFounderOrganization } from '@/lib/org-founder-client';
 import { applyComplimentarySignupFields } from '@/lib/complimentary-premium';
+import { optionalContactError, optionalContactValues } from '@/lib/fax-address';
 import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
 
 const KEY = 'tsp-pending-signup';
@@ -96,15 +97,18 @@ export type PendingEquipmentItem = {
  *  Sending a prefix skips that path. See set_org_ticket_prefix (char(3) only).
  */
 export function organizationInsertFromPending(pending: PendingSignup, userId: string): Record<string, unknown> {
+  const contactError = optionalContactError({ fax: pending.fax, address_line2: pending.addressLine2 });
+  if (contactError) throw new Error(contactError);
+  const contact = optionalContactValues({ fax: pending.fax, address_line2: pending.addressLine2 });
   const orgInsert: Record<string, unknown> = {
     name: pending.name,
     type: pending.orgType,
     address: pending.address || null,
-    address_line2: pending.addressLine2 || null,
+    address_line2: contact.address_line2,
     city: pending.city || null,
     state: pending.state || null,
     phone: pending.phone || null,
-    fax: pending.fax || null,
+    fax: contact.fax,
     website: pending.website || null,
     created_by: userId,
     // Repair companies get time-boxed complimentary Premium. Others stay Free.

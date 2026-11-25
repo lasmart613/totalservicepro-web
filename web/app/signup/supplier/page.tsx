@@ -10,6 +10,7 @@ import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import { PublicLink, useT } from '@/lib/fa/locale';
+import { optionalContactError, optionalContactValues } from '@/lib/fax-address';
 import { useRouter } from 'next/navigation';
 
 const PARTS_OPTIONS = [
@@ -68,6 +69,7 @@ export default function SupplierSignup() {
   };
 
   function pendingPayload(): PendingSignup {
+    const contact = optionalContactValues({ fax, address_line2: addressLine2 });
     return {
       kind: 'supplier',
       name: companyName,
@@ -75,9 +77,9 @@ export default function SupplierSignup() {
       lastName,
       email,
       phone: phone || null,
-      fax: fax || null,
+      fax: contact.fax,
       address: address || null,
-      addressLine2: addressLine2 || null,
+      addressLine2: contact.address_line2,
       city: city || null,
       state: state || null,
       website: website || null,
@@ -112,6 +114,11 @@ export default function SupplierSignup() {
     }
     if (password !== confirmPassword) {
       setMessage('Passwords do not match.');
+      return;
+    }
+    const contactError = optionalContactError({ fax, address_line2: addressLine2 });
+    if (contactError) {
+      setMessage(contactError);
       return;
     }
     setLoading(true);

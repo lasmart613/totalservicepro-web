@@ -828,10 +828,12 @@ export async function syncPrimaryLocationFromForm(
   const draft = emptyLocationDraft({
     name: PRIMARY_LOCATION_NAME,
     address: String(form.address || ''),
+    address_line2: normalizeAddressLine2(form.address_line2) || '',
     city: String(form.city || ''),
     state: region.state || String(form.state || ''),
     zip: String(form.zip || ''),
     phone: String(form.phone || ''),
+    fax: normalizeFax(form.fax) || '',
     is_primary: true,
   });
   const primary = loaded.locations.find((loc) => loc.is_primary) || null;

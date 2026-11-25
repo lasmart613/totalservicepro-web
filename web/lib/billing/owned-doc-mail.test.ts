@@ -644,6 +644,40 @@ test('sender company is read from the caller organization id', async () => {
   assert.deepEqual(seen, [{ table: 'organizations', id: 7 }]);
 });
 
+test('sender company retries without fax and address line 2 when those columns are missing', async () => {
+  const selects: string[] = [];
+  const client = {
+    from() {
+      const api = {
+        cols: '',
+        select(cols: string) {
+          api.cols = cols;
+          return api;
+        },
+        eq() {
+          return api;
+        },
+        maybeSingle: async () => {
+          selects.push(api.cols);
+          if (/\bfax\b|address_line2/.test(api.cols)) {
+            return { data: null, error: { message: "Could not find the 'fax' column of 'organizations' in the schema cache" } };
+          }
+          return { data: { name: 'Owned Shop', phone: '480-555-0100', email: 'shop@owned.test' }, error: null };
+        },
+      };
+      return api;
+    },
+  };
+  const company = await loadSenderCompany(client, 7, 'Ada');
+  assert.equal(company.company_name, 'Owned Shop');
+  assert.equal(company.fax, '');
+  assert.equal(company.address_line2, '');
+  assert.match(selects[0], /\bfax\b/);
+  assert.match(selects[0], /address_line2/);
+  assert.doesNotMatch(selects[1], /\bfax\b/);
+  assert.doesNotMatch(selects[1], /address_line2/);
+});
+
 test('send routes stay locked to owned-document mail', () => {
   for (const rel of ROUTES) {
     const src = routeSource(rel);

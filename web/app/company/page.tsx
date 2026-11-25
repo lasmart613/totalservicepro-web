@@ -39,7 +39,8 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 import { showCompanyJustSetupBanner } from '@/lib/customer-invite-client';
-import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, privateFieldsPatch, type OrgPrivateFields } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, ORG_READABLE_COLUMNS_WITHOUT_FAX, loadOrgPrivateFields, privateFieldsPatch, type OrgPrivateFields } from '@/lib/org-columns';
+import { addressLine2FieldError, faxFieldError, missingFaxOrAddressLine2, normalizeAddressLine2, normalizeFax } from '@/lib/fax-address';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -255,11 +256,19 @@ function CompanyProfile() {
 
       if (prof?.organization_id) {
         setLinkedOrgId(prof.organization_id);
-        const { data: orgData } = await supabase
+        let orgRes = await supabase
           .from('organizations')
           .select(ORG_READABLE_COLUMNS)
           .eq('id', prof.organization_id)
           .single();
+        if (orgRes.error && missingFaxOrAddressLine2(orgRes.error)) {
+          orgRes = await supabase
+            .from('organizations')
+            .select(ORG_READABLE_COLUMNS_WITHOUT_FAX as typeof ORG_READABLE_COLUMNS)
+            .eq('id', prof.organization_id)
+            .single();
+        }
+        const orgData = orgRes.data;
         if (orgData) {
           // 000932: notes / tax_id are not selectable; members get them from org_private_fields.
           // privateBaseline null = not loaded: the editor is read-only and saves never send notes.
@@ -516,6 +525,12 @@ function CompanyProfile() {
         updateData.number_format = currentOrg.number_format || 'auto';
       }
       updateData.timezone = currentOrg.timezone || null;
+      const faxError = faxFieldError(updateData.fax);
+      if (faxError) throw new Error(faxError);
+      const lineError = addressLine2FieldError(updateData.address_line2);
+      if (lineError) throw new Error(lineError);
+      updateData.fax = normalizeFax(updateData.fax);
+      updateData.address_line2 = normalizeAddressLine2(updateData.address_line2);
 
       // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
       // Same service-role path as invite/claim — only the caller's linked org.
@@ -705,6 +720,11 @@ function CompanyProfile() {
       toast.error('Contact first name is required.');
       return;
     }
+    const contactFaxError = faxFieldError(newContact.fax);
+    if (contactFaxError) {
+      toast.error(contactFaxError);
+      return;
+    }
     setSavingContact(true);
     try {
       const { error } = await supabase.from('contacts').insert({
@@ -713,7 +733,7 @@ function CompanyProfile() {
         last_name: newContact.last_name.trim() || null,
         title: newContact.title.trim() || null,
         phone: newContact.phone.trim() || null,
-        fax: newContact.fax.trim() || null,
+        fax: normalizeFax(newContact.fax),
         email: newContact.email.trim() || null,
       });
       if (error) throw error;

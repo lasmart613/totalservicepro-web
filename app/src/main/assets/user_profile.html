@@ -968,6 +968,17 @@
     // ═══════════════════════════════════════════════════
     //  SAVE PROFILE
     // ═══════════════════════════════════════════════════
+    function faxFieldError(value) {
+        var raw = String(value || '').replace(/\s+/g, ' ').trim();
+        if (!raw) return '';
+        var digits = raw.replace(/\D/g, '').length;
+        var shape = /^[0-9+().\-\s]+(\s*(x|ext\.?)\s*\d{1,6})?$/i;
+        if (raw.length > 50 || digits < 7 || digits > 20 || !shape.test(raw)) {
+            return 'Fax must look like a phone number (7–20 digits).';
+        }
+        return '';
+    }
+
     async function saveProfile() {
         const btn = document.getElementById('saveBtn');
         btn.disabled = true;
@@ -976,6 +987,17 @@
         try {
             const firstName = document.getElementById('firstName').value.trim();
             const lastName  = document.getElementById('lastName').value.trim();
+            var faxRaw = (document.getElementById('fax') || { value: '' }).value.trim();
+            var faxError = faxFieldError(faxRaw);
+            if (faxError) {
+                showToast(faxError, 'error');
+                return;
+            }
+            var line2Raw = (document.getElementById('addressLine2') || { value: '' }).value.trim();
+            if (line2Raw.length > 200) {
+                showToast('Address line 2 is too long (max 200 characters).', 'error');
+                return;
+            }
 
             // Collect notification prefs
             const notifKeys = [
@@ -992,14 +1014,14 @@
                 first_name:         firstName,
                 last_name:          lastName,
                 phone:              document.getElementById('phone').value.trim(),
-                fax:                (document.getElementById('fax') || { value: '' }).value.trim(),
+                fax:                faxRaw || null,
                 employee_id:        document.getElementById('employeeId').value.trim(),
                 website:            document.getElementById('website').value.trim(),
                 bio:                document.getElementById('bio').value.trim(),
                 job_title:          document.getElementById('jobTitle').value.trim(),
                 territory:                 document.getElementById('territory').value.trim(),
                 address_line1:             document.getElementById('addressLine1').value.trim(),
-                address_line2:             (document.getElementById('addressLine2') || { value: '' }).value.trim(),
+                address_line2:             line2Raw || null,
                 city:                      document.getElementById('city').value.trim(),
                 state:                     document.getElementById('state').value.trim().toUpperCase(),
                 postal_code:               document.getElementById('postalCode').value.trim(),

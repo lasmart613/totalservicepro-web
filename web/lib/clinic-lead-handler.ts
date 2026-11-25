@@ -59,6 +59,7 @@ export async function handleClinicLeadPost(
       contactName: body.contactName ?? body.contact_name ?? body.name,
       email: body.email,
       phone: body.phone,
+      fax: body.fax,
       equipmentType: body.equipmentType ?? body.equipment_type,
       equipmentTypeOther: body.equipmentTypeOther ?? body.equipment_type_other,
       manufacturer: body.manufacturer ?? body.brand,
@@ -110,7 +111,6 @@ export async function handleClinicLeadPost(
           contact_name: lead.contactName,
           email: lead.email,
           phone: lead.phone,
-          fax: lead.fax,
           equipment_type: lead.equipmentType,
           equipment_type_other: lead.equipmentTypeOther,
           manufacturer: lead.manufacturer,
@@ -118,6 +118,7 @@ export async function handleClinicLeadPost(
           description: lead.description,
           urgency: lead.urgency,
           source: 'landing',
+          ...(lead.fax ? { fax: lead.fax } : {}),
           user_agent: String(body.userAgent ?? body.user_agent ?? '').trim().slice(0, 500) || null,
           confirmation_sent: false,
           organization_id: organizationId,
@@ -155,6 +156,7 @@ export async function handleClinicLeadPost(
         }
         if (error && isUnknownColumnError(error)) {
           // Older schema only (42703 / PGRST204). Not FK, NOT NULL or checks.
+          delete leadRow.fax;
           delete leadRow.organization_id;
           delete leadRow.service_request_id;
           delete leadRow.model;

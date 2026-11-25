@@ -345,6 +345,49 @@ test('an unknown column (42703) does take the fallback', async () => {
   }
 });
 
+test('a blank fax is omitted and a missing fax column is stripped on retry', async () => {
+  const c = captureConsole();
+  try {
+    const blank = fakeAdmin();
+    const sent = mailer({ team: 'ok', confirm: 'ok' });
+    const blankResult = await handleClinicLeadPost({ ...LEAD }, { admin: blank.admin, send: sent.send });
+    assert.equal(blankResult.body.stored, true);
+    assert.equal('fax' in blank.log.leadInserts[0], false);
+
+    const kept = fakeAdmin();
+    await handleClinicLeadPost({ ...LEAD, fax: '(555) 555-0199' }, { admin: kept.admin, send: mailer({ team: 'ok', confirm: 'ok' }).send });
+    assert.equal(kept.log.leadInserts[0].fax, '(555) 555-0199');
+
+    let faxAttempts = 0;
+    const db = fakeAdmin();
+    const realFrom = db.admin.from.bind(db.admin);
+    (db.admin as unknown as { from: (t: string) => unknown }).from = (t: string) => {
+      const q = realFrom(t) as unknown as { run: () => unknown; op: string; row: Row };
+      if (t === 'clinic_service_leads') {
+        const orig = q.run.bind(q);
+        q.run = () => {
+          if (q.op === 'insert' && 'fax' in q.row) {
+            faxAttempts += 1;
+            return { data: null, error: { code: 'PGRST204', message: "Could not find the 'fax' column of 'clinic_service_leads' in the schema cache" } };
+          }
+          return orig();
+        };
+      }
+      return q;
+    };
+    const retried = await handleClinicLeadPost(
+      { ...LEAD, fax: '(555) 555-0199' },
+      { admin: db.admin, send: mailer({ team: 'ok', confirm: 'ok' }).send }
+    );
+    assert.equal(retried.body.stored, true);
+    assert.ok(faxAttempts >= 1);
+    assert.equal('fax' in leadRows(db)[0], false);
+    assert.equal(leadRows(db)[0].clinic_name, LEAD.clinicName);
+  } finally {
+    c.restore();
+  }
+});
+
 test('unexpected throw returns a generic 500; detail only in logs; logs carry no clinic name/location', async () => {
   const c = captureConsole();
   try {

@@ -354,6 +354,14 @@ export function shopCustomerTextTooLong(fields: Partial<Record<keyof typeof SHOP
  * insert a customer org from the browser and link it in a second request: an
  * unlinked shop-created org was founder-claimable after the creator left.
  */
+/** PostgREST/Postgres has the pre-000976 8-arg create_shop_customer_org, not the 10-arg one. */
+function missingExtendedShopCustomerRpc(error: { message?: string; code?: string } | null | undefined): boolean {
+  const message = String(error?.message || '');
+  const code = String(error?.code || '');
+  if (!/create_shop_customer_org/i.test(message)) return false;
+  return code === 'PGRST202' || code === '42883' || /could not find the function|does not exist/i.test(message);
+}
+
 export async function createShopCustomerOrg(
   supabase: Pick<SupabaseClient, 'rpc'>,
   opts: {
@@ -389,7 +397,7 @@ export async function createShopCustomerOrg(
   if (tooLong) throw new Error(tooLong);
   // Over 30 creates per user per hour the RPC raises PT429 (HTTP 429); its
   // message is shown as is.
-  const { data, error } = await supabase.rpc('create_shop_customer_org', {
+  const args = {
     p_service_org: Number(opts.serviceOrgId),
     p_name: fields.name,
     p_address: fields.address,
@@ -400,7 +408,14 @@ export async function createShopCustomerOrg(
     p_address_line2: fields.addressLine2,
     p_laser_models: fields.laserModels,
     p_facility_type: fields.facilityType,
-  });
+  };
+  let { data, error } = await supabase.rpc('create_shop_customer_org', args);
+  // 000976 appends p_fax and p_address_line2. Before that migration the 8-arg
+  // function is still the one PostgREST knows.
+  if (error && missingExtendedShopCustomerRpc(error)) {
+    const { p_fax: _fax, p_address_line2: _line2, ...legacy } = args;
+    ({ data, error } = await supabase.rpc('create_shop_customer_org', legacy as typeof args));
+  }
   if (error) throw new Error(error.message || 'Failed to add customer');
   const id = Number(data);
   if (!Number.isFinite(id) || id <= 0) throw new Error('Failed to add customer');

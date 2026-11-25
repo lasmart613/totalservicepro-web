@@ -57,7 +57,8 @@ import type { CustomerEquipment } from '@/lib/customer-equipment';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { createShopCustomerOrg, filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
-import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, ORG_READABLE_COLUMNS_WITHOUT_FAX } from '@/lib/org-columns';
+import { missingFaxOrAddressLine2 } from '@/lib/fax-address';
 import {
   catalogManufacturerValue,
   catalogModelValue,
@@ -1332,7 +1333,16 @@ export default function NewServiceReport() {
         const { error: extraErr } = await supabase.from('organizations').update(extras).eq('id', orgId);
         if (extraErr) toast.error('Customer added, but the email/contact was not saved: ' + extraErr.message);
       }
-      const { data: org, error: readErr } = await supabase.from('organizations').select(ORG_READABLE_COLUMNS).eq('id', orgId).maybeSingle();
+      let { data: org, error: readErr } = await supabase.from('organizations').select(ORG_READABLE_COLUMNS).eq('id', orgId).maybeSingle();
+      if (readErr && missingFaxOrAddressLine2(readErr)) {
+        const again = await supabase
+          .from('organizations')
+          .select(ORG_READABLE_COLUMNS_WITHOUT_FAX as typeof ORG_READABLE_COLUMNS)
+          .eq('id', orgId)
+          .maybeSingle();
+        org = again.data;
+        readErr = again.error;
+      }
       if (readErr || !org) throw new Error(readErr?.message || 'Customer added, but it could not be loaded.');
 
       await loadCustomers(currentUserOrgId);
