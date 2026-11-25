@@ -7,6 +7,14 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { useT } from '@/lib/fa/locale';
 import { canvasHasInk } from '@/lib/signature-ink';
+import {
+  addressLine2FieldError,
+  faxFieldError,
+  missingFaxOrAddressLine2,
+  normalizeAddressLine2,
+  normalizeFax,
+  stripMissingFaxAddress,
+} from '@/lib/fax-address';
 
 export default function Profile() {
   const t = useT();
@@ -32,7 +40,10 @@ export default function Profile() {
         .select('*')
         .eq('id', user.id)
         .maybeSingle();
-      if (withSig.error && /signature_data/i.test(withSig.error.message || '')) {
+      if (
+        withSig.error &&
+        (/signature_data/i.test(withSig.error.message || '') || missingFaxOrAddressLine2(withSig.error))
+      ) {
         const bare = await supabase
           .from('user_profiles')
           .select('id, first_name, last_name, phone, job_title, role, email')
@@ -144,6 +155,16 @@ export default function Profile() {
       toast.error('Sign in to save profile');
       return;
     }
+    const faxError = faxFieldError(profile.fax);
+    if (faxError) {
+      toast.error(faxError);
+      return;
+    }
+    const lineError = addressLine2FieldError(profile.address_line2);
+    if (lineError) {
+      toast.error(lineError);
+      return;
+    }
     setSaving(true);
     try {
       // Capture latest canvas if drawn
@@ -168,18 +189,28 @@ export default function Profile() {
         first_name: profile.first_name || null,
         last_name: profile.last_name || null,
         phone: profile.phone || null,
+        fax: normalizeFax(profile.fax),
+        address_line1: String(profile.address_line1 || '').trim() || null,
+        address_line2: normalizeAddressLine2(profile.address_line2),
         job_title: profile.job_title || null,
       };
       if (signature) payload.signature_data = signature;
       else payload.signature_data = null;
 
       let { error } = await supabase.from('user_profiles').upsert(payload);
-      if (error && /signature_data/i.test(error.message || '')) {
-        delete payload.signature_data;
-        ({ error } = await supabase.from('user_profiles').upsert(payload));
-        if (!error) {
-          toast.message('Profile saved (signature column not available yet)');
+      let droppedSignature = false;
+      for (let attempt = 0; attempt < 4 && error; attempt++) {
+        const signatureMissing = /signature_data/i.test(error.message || '');
+        const contactMissing = stripMissingFaxAddress(payload, error);
+        if (!signatureMissing && !contactMissing) break;
+        if (signatureMissing) {
+          delete payload.signature_data;
+          droppedSignature = true;
         }
+        ({ error } = await supabase.from('user_profiles').upsert(payload));
+      }
+      if (!error && droppedSignature) {
+        toast.message('Profile saved (signature column not available yet)');
       }
       if (error) throw error;
 
@@ -229,6 +260,36 @@ export default function Profile() {
               className="input"
               value={profile.phone || ''}
               onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">{t('Fax')}</label>
+            <input
+              className="input"
+              type="tel"
+              autoComplete="fax"
+              placeholder={t('Optional')}
+              value={profile.fax || ''}
+              onChange={(e) => setProfile({ ...profile, fax: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">{t('Address')}</label>
+            <input
+              className="input"
+              autoComplete="address-line1"
+              value={profile.address_line1 || ''}
+              onChange={(e) => setProfile({ ...profile, address_line1: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">{t('Address line 2 (suite, unit, etc.)')}</label>
+            <input
+              className="input"
+              autoComplete="address-line2"
+              placeholder={t('Optional')}
+              value={profile.address_line2 || ''}
+              onChange={(e) => setProfile({ ...profile, address_line2: e.target.value })}
             />
           </div>
           <div>

@@ -8,6 +8,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { addressLine2FieldError, faxFieldError, normalizeAddressLine2, normalizeFax } from './fax-address.ts';
 import { insertOmittingCharOverflow, updateOmittingCharOverflow } from './char-overflow.ts';
 import { normalizeRegionInput } from './geo.ts';
 
@@ -19,10 +20,12 @@ export type CustomerLocation = {
   organization_id?: number | string | null;
   name: string;
   address?: string | null;
+  address_line2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  fax?: string | null;
   contact_name?: string | null;
   is_primary: boolean;
   /** ISO timestamp from the row. Used only to choose which primary to show. */
@@ -34,20 +37,24 @@ export type CustomerLocation = {
 export type LocationDraft = {
   name: string;
   address: string;
+  address_line2: string;
   city: string;
   state: string;
   zip: string;
   phone: string;
+  fax: string;
   contact_name: string;
   is_primary: boolean;
 };
 
 export type LocationAddressFields = {
   address?: string | null;
+  address_line2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  fax?: string | null;
 };
 
 export type LoadLocationsResult = {
@@ -66,7 +73,7 @@ export type LocationWriteResult = {
 };
 
 const SELECT_FULL =
-  'id, organization_id, name, address, city, state, zip, phone, contact_name, is_primary, updated_at';
+  'id, organization_id, name, address, address_line2, city, state, zip, phone, fax, contact_name, is_primary, updated_at';
 const SELECT_SAFE = 'id, organization_id, name, address, city, state, zip, phone, is_primary';
 
 type LocationsClient = {
@@ -84,10 +91,12 @@ export function emptyLocationDraft(partial?: Partial<LocationDraft>): LocationDr
   return {
     name: '',
     address: '',
+    address_line2: '',
     city: '',
     state: '',
     zip: '',
     phone: '',
+    fax: '',
     contact_name: '',
     is_primary: false,
     ...partial,
@@ -98,10 +107,12 @@ export function draftFromLocation(loc: CustomerLocation): LocationDraft {
   return {
     name: loc.name || '',
     address: loc.address || '',
+    address_line2: loc.address_line2 || '',
     city: loc.city || '',
     state: loc.state || '',
     zip: loc.zip || '',
     phone: loc.phone || '',
+    fax: loc.fax || '',
     contact_name: loc.contact_name || '',
     is_primary: loc.is_primary === true,
   };
@@ -109,6 +120,10 @@ export function draftFromLocation(loc: CustomerLocation): LocationDraft {
 
 export function validateLocationDraft(draft: LocationDraft): string | null {
   if (!draft.name.trim()) return 'Location name is required';
+  const faxError = faxFieldError(draft.fax);
+  if (faxError) return faxError;
+  const lineError = addressLine2FieldError(draft.address_line2);
+  if (lineError) return lineError;
   return null;
 }
 
@@ -135,10 +150,12 @@ export function locationWritePayload(
   return {
     name: draft.name.trim(),
     address: clean(draft.address),
+    address_line2: normalizeAddressLine2(draft.address_line2),
     city: clean(draft.city),
     state: region.state,
     zip: clean(draft.zip),
     phone: clean(draft.phone),
+    fax: normalizeFax(draft.fax),
     contact_name: clean(draft.contact_name),
     is_primary: draft.is_primary === true,
     updated_at: new Date().toISOString(),
@@ -154,10 +171,12 @@ export function normalizeLocation(row: Record<string, unknown> | null | undefine
     organization_id: (row.organization_id as number | string | null | undefined) ?? null,
     name,
     address: clean(row.address),
+    address_line2: clean(row.address_line2),
     city: clean(row.city),
     state: clean(row.state),
     zip: clean(row.zip),
     phone: clean(row.phone),
+    fax: clean(row.fax),
     contact_name: clean(row.contact_name),
     is_primary: row.is_primary === true,
     updated_at: row.updated_at == null || row.updated_at === '' ? null : String(row.updated_at),
@@ -209,10 +228,12 @@ export function localPrimaryFromOrg(
     organization_id: org.id ?? null,
     name: PRIMARY_LOCATION_NAME,
     address: clean(org.address),
+    address_line2: clean(org.address_line2),
     city: clean(org.city),
     state: clean(org.state),
     zip: clean(org.zip),
     phone: clean(org.phone),
+    fax: clean(org.fax),
     contact_name: clean(org.contact_name),
     is_primary: true,
     localOnly: true,
@@ -229,10 +250,12 @@ export function overlayPrimaryFromForm(
     return {
       ...loc,
       address: form.address != null ? clean(form.address) : loc.address,
+      address_line2: form.address_line2 != null ? clean(form.address_line2) : loc.address_line2,
       city: form.city != null ? clean(form.city) : loc.city,
       state: form.state != null ? clean(form.state) : loc.state,
       zip: form.zip != null ? clean(form.zip) : loc.zip,
       phone: form.phone != null ? clean(form.phone) : loc.phone,
+      fax: form.fax != null ? clean(form.fax) : loc.fax,
     };
   });
 }
@@ -271,10 +294,12 @@ export function serviceCallFromLocations(
   selectedId: string;
   fields: {
     customer_address: string;
+    customer_address_line2: string;
     customer_city: string;
     customer_state: string;
     customer_zip: string;
     customer_phone: string;
+    customer_fax: string;
     customer_contact: string;
   } | null;
 } {
@@ -284,10 +309,12 @@ export function serviceCallFromLocations(
   const applied = applyLocationToTicketFields(
     {
       customer_address: org.address || '',
+      customer_address_line2: org.address_line2 || '',
       customer_city: org.city || '',
       customer_state: org.state || '',
       customer_zip: org.zip || '',
       customer_phone: org.phone || '',
+      customer_fax: org.fax || '',
     },
     primary,
     { officePhone }
@@ -297,10 +324,12 @@ export function serviceCallFromLocations(
     selectedId: applied.customer_location_id != null ? String(applied.customer_location_id) : String(primary.id),
     fields: {
       customer_address: applied.customer_address,
+      customer_address_line2: applied.customer_address_line2,
       customer_city: applied.customer_city,
       customer_state: applied.customer_state,
       customer_zip: applied.customer_zip,
       customer_phone: applied.customer_phone,
+      customer_fax: applied.customer_fax,
       customer_contact: applied.customer_contact,
     },
   };
@@ -309,7 +338,7 @@ export function serviceCallFromLocations(
 export function formatLocationLine(loc: LocationAddressFields): string {
   const cityState = [clean(loc.city), clean(loc.state)].filter(Boolean).join(', ');
   const cityLine = [cityState, clean(loc.zip)].filter(Boolean).join(' ');
-  return [clean(loc.address), cityLine].filter(Boolean).join(', ');
+  return [clean(loc.address), clean(loc.address_line2), cityLine].filter(Boolean).join(', ');
 }
 
 export function formatLocationOption(loc: CustomerLocation): string {
@@ -372,10 +401,12 @@ export function applyDraftToLocations(
     id,
     name: draft.name.trim(),
     address: clean(draft.address),
+    address_line2: normalizeAddressLine2(draft.address_line2) || '',
     city: clean(draft.city),
     state: region.state,
     zip: clean(draft.zip),
     phone: clean(draft.phone),
+    fax: normalizeFax(draft.fax) || '',
     contact_name: clean(draft.contact_name),
     is_primary: draft.is_primary === true,
     localOnly: false,
@@ -419,10 +450,12 @@ export function ticketContactForLocation(opts: { locationContact?: string | null
 
 export type TicketLocationFields = {
   customer_address: string;
+  customer_address_line2: string;
   customer_city: string;
   customer_state: string;
   customer_zip: string;
   customer_phone: string;
+  customer_fax: string;
   customer_contact: string;
   customer_location_id: string | number | null;
 };
@@ -430,10 +463,12 @@ export type TicketLocationFields = {
 export function applyLocationToTicketFields(
   current: {
     customer_address?: string | null;
+    customer_address_line2?: string | null;
     customer_city?: string | null;
     customer_state?: string | null;
     customer_zip?: string | null;
     customer_phone?: string | null;
+    customer_fax?: string | null;
     customer_contact?: string | null;
   },
   loc: CustomerLocation,
@@ -445,6 +480,7 @@ export function applyLocationToTicketFields(
   const zip = clean(loc.zip);
   return {
     customer_address: address || String(current.customer_address || ''),
+    customer_address_line2: String(clean(loc.address_line2) || ''),
     customer_city: city || String(current.customer_city || ''),
     customer_state: state || String(current.customer_state || ''),
     customer_zip: zip || String(current.customer_zip || ''),
@@ -454,6 +490,7 @@ export function applyLocationToTicketFields(
       officePhone: opts?.officePhone,
       currentPhone: current.customer_phone,
     }),
+    customer_fax: String(loc.fax || '').trim(),
     customer_contact: ticketContactForLocation({ locationContact: loc.contact_name }),
     customer_location_id: persistedLocationId(loc.id),
   };
@@ -791,10 +828,12 @@ export async function syncPrimaryLocationFromForm(
   const draft = emptyLocationDraft({
     name: PRIMARY_LOCATION_NAME,
     address: String(form.address || ''),
+    address_line2: normalizeAddressLine2(form.address_line2) || '',
     city: String(form.city || ''),
     state: region.state || String(form.state || ''),
     zip: String(form.zip || ''),
     phone: String(form.phone || ''),
+    fax: normalizeFax(form.fax) || '',
     is_primary: true,
   });
   const primary = loaded.locations.find((loc) => loc.is_primary) || null;
@@ -806,10 +845,12 @@ export async function syncPrimaryLocationFromForm(
   const next = emptyLocationDraft({
     ...draftFromLocation(primary),
     address: draft.address,
+    address_line2: draft.address_line2,
     city: draft.city,
     state: draft.state,
     zip: draft.zip,
     phone: draft.phone,
+    fax: draft.fax,
     is_primary: true,
   });
   const saved = await saveCustomerLocation(supabase, organizationId, next, primary.id);
@@ -818,17 +859,21 @@ export async function syncPrimaryLocationFromForm(
 
 export function orgAddressPatch(loc: CustomerLocation): {
   address: string | null;
+  address_line2: string | null;
   city: string | null;
   state: string | null;
   zip: string | null;
   phone: string | null;
+  fax: string | null;
 } {
   const region = normalizeRegionInput(loc.state);
   return {
     address: clean(loc.address),
+    address_line2: normalizeAddressLine2(loc.address_line2),
     city: clean(loc.city),
     state: region.state,
     zip: clean(loc.zip),
     phone: clean(loc.phone),
+    fax: normalizeFax(loc.fax),
   };
 }

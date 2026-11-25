@@ -31,7 +31,13 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { OrgTypeStep, type OrgType } from './org-type-step';
 import { onboardingOrgUpdatePayload } from '@/lib/onboarding-org-update';
 import { logoContentType, logoExtension, validateLogoFile } from '@/lib/customer-logo';
-import { ORG_READABLE_COLUMNS } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, ORG_READABLE_COLUMNS_WITHOUT_FAX } from '@/lib/org-columns';
+import {
+  missingFaxOrAddressLine2,
+  optionalContactError,
+  optionalContactValues,
+  stripMissingFaxAddress,
+} from '@/lib/fax-address';
 type TeamMember = {
   id: string;
   email: string;
@@ -134,11 +140,21 @@ export default function Onboarding() {
         console.warn('onboarding claim invite', e);
       }
 
-      const { data: profile } = await supabase
+      let profileRes = await supabase
         .from('user_profiles')
         .select(`*, organizations(${ORG_READABLE_COLUMNS})`)
         .eq('id', user.id)
         .maybeSingle();
+      if (profileRes.error && missingFaxOrAddressLine2(profileRes.error)) {
+        profileRes = await supabase
+          .from('user_profiles')
+          .select(
+            `*, organizations(${ORG_READABLE_COLUMNS_WITHOUT_FAX})` as `*, organizations(${typeof ORG_READABLE_COLUMNS})`
+          )
+          .eq('id', user.id)
+          .maybeSingle();
+      }
+      const { data: profile } = profileRes;
 
       // No organization_id and no active org: render this wizard.
       // A claim that did not attach an org must not send the user back to /.
@@ -184,6 +200,8 @@ export default function Onboarding() {
         jobTitle: profile?.job_title || '',
         companyName: prev.companyName || pending?.name || meta.company || meta.facility || '',
         address: pending?.address || meta.address || '',
+        addressLine2: pending?.addressLine2 || meta.address_line2 || '',
+        fax: pending?.fax || meta.fax || '',
         city: pending?.city || meta.city || '',
         state: pending?.state || meta.state || '',
         website: pending?.website || meta.website || '',
@@ -202,12 +220,19 @@ export default function Onboarding() {
 
       let orgRow = profile?.organizations || null;
       if (!orgRow && profile?.organization_id) {
-        const { data: fetchedOrg } = await supabase
+        let orgRes = await supabase
           .from('organizations')
           .select(ORG_READABLE_COLUMNS)
           .eq('id', profile.organization_id)
           .maybeSingle();
-        orgRow = fetchedOrg;
+        if (orgRes.error && missingFaxOrAddressLine2(orgRes.error)) {
+          orgRes = await supabase
+            .from('organizations')
+            .select(ORG_READABLE_COLUMNS_WITHOUT_FAX as typeof ORG_READABLE_COLUMNS)
+            .eq('id', profile.organization_id)
+            .maybeSingle();
+        }
+        orgRow = orgRes.data;
       }
 
       if (orgRow) {
@@ -231,6 +256,8 @@ export default function Onboarding() {
           ...prev,
           companyName: o.name || prev.companyName || '',
           address: o.address || prev.address || '',
+          addressLine2: o.address_line2 || prev.addressLine2 || '',
+          fax: o.fax || prev.fax || '',
           city: o.city || prev.city || '',
           state: o.state || prev.state || '',
           country: o.country || prev.country || '',
@@ -547,14 +574,25 @@ export default function Onboarding() {
         }
       }
 
+      const contactError = optionalContactError({
+        fax: formData.fax,
+        address_line2: formData.addressLine2,
+      });
+      if (contactError) throw new Error(contactError);
+      const contact = optionalContactValues({
+        fax: formData.fax,
+        address_line2: formData.addressLine2,
+      });
       const orgPayload: any = {
         name: companyName,
         type: oType,
         address: formData.address || null,
+        address_line2: contact.address_line2,
         city: formData.city || null,
         state: formData.state || null,
         ...(normalizeCountryName(formData.country) ? { country: normalizeCountryName(formData.country) } : {}),
         phone: formData.phone || null,
+        fax: contact.fax,
         website: formData.website || null,
         supported_brands: selectedBrands.length ? selectedBrands : null,
         logo_url: logoUrl || null,
@@ -575,9 +613,10 @@ export default function Onboarding() {
         if (!upd.ok) throw new Error(upd.error);
         const updatePayload = upd.payload;
         let { error: uErr } = await supabase.from('organizations').update(updatePayload).eq('id', orgId);
-        if (uErr && /list_in_directory|country|column/i.test(uErr.message || '')) {
+        if (uErr && /list_in_directory|country|fax|address_line2|column/i.test(uErr.message || '')) {
           delete updatePayload.list_in_directory;
           if (/country/i.test(uErr.message || '')) delete updatePayload.country;
+          stripMissingFaxAddress(updatePayload, uErr);
           ({ error: uErr } = await supabase.from('organizations').update(updatePayload).eq('id', orgId));
         }
         if (uErr) throw new Error(uErr.message || 'Could not save organization.');
@@ -588,11 +627,12 @@ export default function Onboarding() {
           .insert(orgPayload)
           .select('id')
           .single();
-        if (iErr && /list_in_directory|is_premium|premium_until|premium_grant|column/i.test(iErr.message || '')) {
+        if (iErr && /list_in_directory|is_premium|premium_until|premium_grant|fax|address_line2|column/i.test(iErr.message || '')) {
           if (/list_in_directory/i.test(iErr.message || '')) delete orgPayload.list_in_directory;
           if (/'country'|\bcountry\b/i.test(iErr.message || '')) delete orgPayload.country;
           if (missingComplimentaryColumn(iErr.message)) stripUnbackedComplimentaryPremium(orgPayload);
           if (/is_premium/i.test(iErr.message || '')) delete orgPayload.is_premium;
+          stripMissingFaxAddress(orgPayload, iErr);
           ({ data: newOrg, error: iErr } = await supabase
             .from('organizations')
             .insert(orgPayload)
@@ -660,6 +700,8 @@ export default function Onboarding() {
         last_name: formData.lastName,
         email: currentUser.email,
         phone: formData.phone || null,
+        fax: contact.fax,
+        address_line2: contact.address_line2,
         job_title: finalJob,
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
@@ -689,11 +731,12 @@ export default function Onboarding() {
         .upsert(profilePayload, { onConflict: 'id' });
 
       // Retry without optional columns if schema lags
-      if (profErr && /additional_roles|onboarding_completed_at|column/i.test(profErr.message || '')) {
+      if (profErr && /additional_roles|onboarding_completed_at|fax|address_line2|column/i.test(profErr.message || '')) {
         console.warn('profile upsert retry without optional cols', profErr.message);
         const slim = { ...profilePayload };
         delete slim.additional_roles;
         delete slim.onboarding_completed_at;
+        stripMissingFaxAddress(slim, profErr);
         ({ error: profErr } = await supabase
           .from('user_profiles')
           .upsert(slim, { onConflict: 'id' }));
@@ -912,6 +955,7 @@ export default function Onboarding() {
             <div><label className="label">{t('Job Title')}</label><input className="input" value={formData.jobTitle||''} onChange={e=>updateForm('jobTitle',e.target.value)} /></div>
             <div><label className="label">{orgType==='clinic' ? t('Facility Name *') : t('Company Name *')}</label><input className="input" value={formData.companyName||''} onChange={e=>updateForm('companyName',e.target.value)} /></div>
             <div><label className="label">{t('Address')}</label><input className="input" value={formData.address||''} onChange={e=>updateForm('address',e.target.value)} /></div>
+            <div><label className="label">{t('Address line 2 (suite, unit, etc.)')}</label><input className="input" autoComplete="address-line2" placeholder={t('Optional')} value={formData.addressLine2||''} onChange={e=>updateForm('addressLine2',e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">{t('City')}</label><input className="input" value={formData.city||''} onChange={e=>updateForm('city',e.target.value)} /></div>
               <div><label className="label">{t('State')}</label><input className="input" value={formData.state||''} onChange={e=>updateForm('state',e.target.value)} /></div>
@@ -919,6 +963,7 @@ export default function Onboarding() {
             <div><label className="label" htmlFor="onboarding-country">{t('Country')}</label><CountrySelect id="onboarding-country" value={formData.country} onChange={(country)=>updateForm('country',country||'')} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">{t('Phone')}</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
+              <div><label className="label">{t('Fax')}</label><input className="input" type="tel" autoComplete="fax" placeholder={t('Optional')} value={formData.fax||''} onChange={e=>updateForm('fax',e.target.value)} /></div>
               <div><label className="label">{t('Website')}</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
             </div>
             <label className="flex items-start gap-3 cursor-pointer card p-4">

@@ -66,6 +66,7 @@ export type ClinicLeadInput = {
   contactName?: unknown;
   email?: unknown;
   phone?: unknown;
+  fax?: unknown;
   equipmentType?: unknown;
   equipmentTypeOther?: unknown;
   manufacturer?: unknown;
@@ -86,6 +87,7 @@ export type ClinicLead = {
   contactName: string;
   email: string | null;
   phone: string | null;
+  fax: string | null;
   equipmentType: ClinicLeadEquipmentType;
   equipmentTypeOther: string | null;
   manufacturer: string;
@@ -176,6 +178,11 @@ export function parseClinicLead(body: ClinicLeadInput):
   if (rawPhone && !phone) {
     return { ok: false, error: 'That phone number does not look valid.' };
   }
+  const rawFax = String(body.fax ?? '').trim();
+  const fax = normalizePhone(rawFax);
+  if (rawFax && !fax) {
+    return { ok: false, error: 'That fax number does not look valid.' };
+  }
   if (!email && !phone) {
     return { ok: false, error: 'Add an email or a phone number so we can reach you.' };
   }
@@ -218,6 +225,7 @@ export function parseClinicLead(body: ClinicLeadInput):
       contactName,
       email,
       phone,
+      fax,
       equipmentType,
       equipmentTypeOther: null,
       manufacturer,
@@ -300,6 +308,7 @@ export function organizationInsertFromClinicLead(lead: ClinicLead): Record<strin
     contact_name: lead.contactName,
     email: lead.email || '',
     phone: lead.phone || '',
+    fax: lead.fax || '',
     city: loc.city,
     state: loc.state || '',
     zip: loc.zip,
@@ -485,6 +494,7 @@ export function clinicLeadText(opts: {
     `Contact: ${lead.contactName}`,
     `Email: ${lead.email || '(not provided)'}`,
     `Phone: ${lead.phone || '(not provided)'}`,
+    ...(lead.fax ? [`Fax: ${lead.fax}`] : []),
     `Equipment type: ${equipmentTypeLabel(lead)}`,
     `Brand: ${lead.manufacturer}`,
     `Model: ${displayModelName(lead.model)}`,
@@ -532,6 +542,7 @@ export function clinicLeadHtml(opts: {
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Contact</td><td>${esc(lead.contactName)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Email</td><td>${esc(lead.email || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Phone</td><td>${esc(lead.phone || '(not provided)')}</td></tr>
+    ${lead.fax ? `<tr><td style="padding:4px 12px 4px 0;color:#6b7280">Fax</td><td>${esc(lead.fax)}</td></tr>` : ''}
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Equipment type</td><td>${esc(equipmentTypeLabel(lead))}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Brand</td><td>${esc(lead.manufacturer)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Model</td><td>${esc(displayModelName(lead.model))}</td></tr>

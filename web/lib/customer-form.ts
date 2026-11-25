@@ -29,6 +29,12 @@ import { normalizeRegionInput } from './geo.ts';
 import { syncPrimaryLocationFromForm } from './customer-locations.ts';
 import { emptySocialFields, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
+import {
+  addressLine2FieldError,
+  faxFieldError,
+  normalizeAddressLine2,
+  normalizeFax,
+} from './fax-address.ts';
 import { privateFieldsPatch, type OrgPrivateFields } from './org-columns.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
@@ -66,8 +72,10 @@ export type CustomerInfoFormValues = {
   website: string;
   notes: string;
   phone: string;
+  fax: string;
   email: string;
   address: string;
+  address_line2: string;
   city: string;
   state: string;
   zip: string;
@@ -84,8 +92,10 @@ export function emptyCustomerForm(): CustomerInfoFormValues {
     website: '',
     notes: '',
     phone: '',
+    fax: '',
     email: '',
     address: '',
+    address_line2: '',
     city: '',
     state: '',
     zip: '',
@@ -99,6 +109,10 @@ export function emptyCustomerForm(): CustomerInfoFormValues {
 
 export function validateCustomerForm(form: CustomerInfoFormValues): string | null {
   if (!form.name.trim()) return 'Business name is required';
+  const faxError = faxFieldError(form.fax);
+  if (faxError) return faxError;
+  const lineError = addressLine2FieldError(form.address_line2);
+  if (lineError) return lineError;
   return null;
 }
 
@@ -125,6 +139,8 @@ const OPTIONAL_ORG_COLUMNS = [
   'yelp_url',
   'threads_url',
   'directory_contacts',
+  'fax',
+  'address_line2',
 ] as const;
 
 export function customerOrgPayload(
@@ -140,10 +156,12 @@ export function customerOrgPayload(
   const row: Record<string, unknown> = {
     name: form.name.trim(),
     address: form.address.trim() || null,
+    address_line2: normalizeAddressLine2(form.address_line2),
     city: form.city.trim() || null,
     state: region.state,
     zip: form.zip.trim() || null,
     phone: form.phone.trim() || null,
+    fax: normalizeFax(form.fax),
     email: form.email.trim() || null,
     website: form.website.trim() || null,
     notes: form.notes.trim() || null,
@@ -285,7 +303,7 @@ export async function persistCustomerLogo(
 
 /** Organization columns create_shop_customer_org writes itself. */
 const SHOP_CUSTOMER_RPC_COLUMNS = new Set([
-  'name', 'type', 'created_by', 'address', 'city', 'state', 'phone', 'laser_models', 'facility_type',
+  'name', 'type', 'created_by', 'address', 'address_line2', 'city', 'state', 'phone', 'fax', 'laser_models', 'facility_type',
   // Not sent afterwards either: the row has the defaults / trigger values.
   'is_active', 'ticket_prefix',
 ]);
@@ -336,6 +354,14 @@ export function shopCustomerTextTooLong(fields: Partial<Record<keyof typeof SHOP
  * insert a customer org from the browser and link it in a second request: an
  * unlinked shop-created org was founder-claimable after the creator left.
  */
+/** PostgREST/Postgres has the pre-000976 8-arg create_shop_customer_org, not the 10-arg one. */
+function missingExtendedShopCustomerRpc(error: { message?: string; code?: string } | null | undefined): boolean {
+  const message = String(error?.message || '');
+  const code = String(error?.code || '');
+  if (!/create_shop_customer_org/i.test(message)) return false;
+  return code === 'PGRST202' || code === '42883' || /could not find the function|does not exist/i.test(message);
+}
+
 export async function createShopCustomerOrg(
   supabase: Pick<SupabaseClient, 'rpc'>,
   opts: {
@@ -345,6 +371,8 @@ export async function createShopCustomerOrg(
     city?: string | null;
     state?: string | null;
     phone?: string | null;
+    fax?: string | null;
+    addressLine2?: string | null;
     laserModels?: string | null;
     facilityType?: string | null;
   }
@@ -360,6 +388,8 @@ export async function createShopCustomerOrg(
     city: textOrNull(opts.city),
     state: textOrNull(opts.state),
     phone: textOrNull(opts.phone),
+    fax: normalizeFax(opts.fax),
+    addressLine2: normalizeAddressLine2(opts.addressLine2),
     laserModels: textOrNull(opts.laserModels),
     facilityType: textOrNull(opts.facilityType) || 'Clinic',
   };
@@ -367,16 +397,25 @@ export async function createShopCustomerOrg(
   if (tooLong) throw new Error(tooLong);
   // Over 30 creates per user per hour the RPC raises PT429 (HTTP 429); its
   // message is shown as is.
-  const { data, error } = await supabase.rpc('create_shop_customer_org', {
+  const args = {
     p_service_org: Number(opts.serviceOrgId),
     p_name: fields.name,
     p_address: fields.address,
     p_city: fields.city,
     p_state: fields.state,
     p_phone: fields.phone,
+    p_fax: fields.fax,
+    p_address_line2: fields.addressLine2,
     p_laser_models: fields.laserModels,
     p_facility_type: fields.facilityType,
-  });
+  };
+  let { data, error } = await supabase.rpc('create_shop_customer_org', args);
+  // 000976 appends p_fax and p_address_line2. Before that migration the 8-arg
+  // function is still the one PostgREST knows.
+  if (error && missingExtendedShopCustomerRpc(error)) {
+    const { p_fax: _fax, p_address_line2: _line2, ...legacy } = args;
+    ({ data, error } = await supabase.rpc('create_shop_customer_org', legacy as typeof args));
+  }
   if (error) throw new Error(error.message || 'Failed to add customer');
   const id = Number(data);
   if (!Number.isFinite(id) || id <= 0) throw new Error('Failed to add customer');
@@ -411,6 +450,8 @@ export async function createLinkedCustomer(
     city: payload.city as string | null,
     state: payload.state as string | null,
     phone: payload.phone as string | null,
+    fax: payload.fax as string | null,
+    addressLine2: payload.address_line2 as string | null,
     facilityType: payload.facility_type as string | null,
   });
   const created = { id: id as string | number };
@@ -533,10 +574,12 @@ export type LinkedCustomerOpt = {
   id: string | number;
   name: string;
   address?: string | null;
+  addressLine2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  fax?: string | null;
   email?: string | null;
   contact?: string | null;
   contactRole?: string | null;
@@ -685,7 +728,7 @@ export function sanitizeCustomerSearch(raw: string): string {
 }
 
 const LINKED_CUSTOMER_SEARCH_SELECT = [
-  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name, type, directory_contacts)',
+  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, address_line2, city, state, zip, phone, fax, email, contact_name, type, directory_contacts)',
   'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name, type)',
 ] as const;
 
@@ -704,10 +747,12 @@ function linkedCustomerFromEmbed(row: {
         id?: string | number;
         name?: string | null;
         address?: string | null;
+        address_line2?: string | null;
         city?: string | null;
         state?: string | null;
         zip?: string | null;
         phone?: string | null;
+        fax?: string | null;
         email?: string | null;
         contact_name?: string | null;
         type?: string | null;
@@ -729,10 +774,12 @@ function linkedCustomerFromEmbed(row: {
     id: org.id,
     name: String(org.name || '').trim(),
     address: org.address,
+    addressLine2: org.address_line2,
     city: org.city,
     state: org.state,
     zip: org.zip,
     phone: applied.phone,
+    fax: org.fax,
     email: applied.email,
     contact: applied.contact,
     contactRole: applied.contactRole,

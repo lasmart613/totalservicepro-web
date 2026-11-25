@@ -19,9 +19,11 @@ export type BillingPrefill = {
   customerOrganizationId: string | number | null;
   customerName: string;
   customerAddress: string;
+  customerAddressLine2: string;
   customerCity: string;
   customerState: string;
   customerPhone: string;
+  customerFax: string;
   customerEmail: string;
   customerContactName: string;
   equipmentType: string;
@@ -138,9 +140,11 @@ export function billingPrefill(source: BillingPrefillSource): BillingPrefill | n
     customerOrganizationId: (t?.customerOrganizationId ?? (r?.customer_organization_id as any) ?? null) || null,
     customerName: firstNonEmpty(r?.customer_name, t?.customerName),
     customerAddress: firstNonEmpty(r?.customer_address, t?.customerAddress),
+    customerAddressLine2: firstNonEmpty(r?.customer_address_line2, t?.customerAddressLine2),
     customerCity: firstNonEmpty(r?.customer_city, t?.customerCity),
     customerState: firstNonEmpty(r?.customer_state, t?.customerState),
     customerPhone: firstNonEmpty(r?.customer_phone, t?.customerPhone),
+    customerFax: firstNonEmpty(r?.customer_fax, t?.customerFax),
     customerEmail: firstNonEmpty(r?.customer_email, t?.customerEmail),
     customerContactName: firstNonEmpty(r?.customer_contact_name, t?.customerContactName),
     equipmentType: firstNonEmpty(r?.equipment_type, t?.equipmentType),

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { publicSiteOrigin } from '@/lib/customer-invite';
+import { formatPostalText } from '@/lib/fax-address';
 import { sendTicketAssignedEmail } from '@/lib/ticket-assign-email';
 import { ticketAssigneeId } from '@/lib/ticket-assignees';
 import { refuseForeignShopRead } from '@/lib/org-scoped-read';
@@ -16,10 +17,12 @@ function displayName(row: { first_name?: string | null; last_name?: string | nul
 }
 
 function addressLine(ticket: any): string {
-  return [ticket?.customer_address, ticket?.customer_city, ticket?.customer_state]
-    .map((p: unknown) => String(p || '').trim())
-    .filter(Boolean)
-    .join(', ');
+  return formatPostalText({
+    line1: ticket?.customer_address,
+    line2: ticket?.customer_address_line2,
+    city: ticket?.customer_city,
+    state: ticket?.customer_state,
+  });
 }
 
 /**
@@ -67,6 +70,7 @@ export async function POST(req: NextRequest) {
 
     // Ticket must already be visible to this session (shop RLS or assigned_to).
     const ticketSelects = [
+      'id, ticket_number, organization_id, assigned_to, customer_name, customer_phone, customer_fax, service_type, status, service_date, scheduled_time, priority, notes, description, customer_address, customer_address_line2, customer_city, customer_state',
       'id, ticket_number, organization_id, assigned_to, customer_name, customer_phone, service_type, status, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state',
       'id, ticket_number, organization_id, assigned_to, customer_name, service_type, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state',
     ];
@@ -162,6 +166,7 @@ export async function POST(req: NextRequest) {
       title,
       customerName: ticket.customer_name || null,
       customerPhone: ticket.customer_phone || null,
+      customerFax: ticket.customer_fax || null,
       serviceType: ticket.service_type || null,
       status: ticket.status || null,
       serviceDate: ticket.service_date || null,

@@ -24,7 +24,13 @@ export const ORG_PRIVATE_COLUMNS = [
 
 /** Every organizations column a signed-in client may select (prod, 000932). */
 export const ORG_READABLE_COLUMNS =
-  'id, name, type, address, city, state, zip, phone, email, website, is_active, created_at, updated_at, ticket_prefix, logo_url, description, years_in_business, supported_brands, service_territories, customer_rating, biz_type, specialties, created_by, services_offered, num_techs, num_laser_systems, laser_models, facility_type, preferred_services, is_premium, bio, slogan, alt_phone, num_locations, contact_name, manual_slots, subscription_tier, list_in_directory, plan, premium_until, premium_grant, directory_contacts, storefront_enabled, storefront_slug, storefront_bio, brand_primary_color, brand_accent_color, currency_code, number_format, timezone, country';
+  'id, name, type, address, address_line2, city, state, zip, phone, fax, email, website, is_active, created_at, updated_at, ticket_prefix, logo_url, description, years_in_business, supported_brands, service_territories, customer_rating, biz_type, specialties, created_by, services_offered, num_techs, num_laser_systems, laser_models, facility_type, preferred_services, is_premium, bio, slogan, alt_phone, num_locations, contact_name, manual_slots, subscription_tier, list_in_directory, plan, premium_until, premium_grant, directory_contacts, storefront_enabled, storefront_slug, storefront_bio, brand_primary_color, brand_accent_color, currency_code, number_format, timezone, country';
+
+/** Same list without fax and address_line2, for a database that has not applied 000976 yet. */
+export const ORG_READABLE_COLUMNS_WITHOUT_FAX = ORG_READABLE_COLUMNS.split(',')
+  .map((column) => column.trim())
+  .filter((column) => column !== 'fax' && column !== 'address_line2')
+  .join(', ');
 
 export const ORG_PRIVATE_FIELDS_RPC = 'org_private_fields';
 
@@ -111,3 +117,6 @@ export function guardPrivateFieldWipe(payload: Record<string, unknown>, body: Re
 
 /** Columns /api/org/profile returns to the saving member: readable + its own notes/tax_id. */
 export const ORG_PROFILE_RESPONSE_COLUMNS = `${ORG_READABLE_COLUMNS}, notes, tax_id`;
+
+/** Response select once fax / address_line2 have been dropped from a pre-000976 write. */
+export const ORG_PROFILE_RESPONSE_COLUMNS_WITHOUT_FAX = `${ORG_READABLE_COLUMNS_WITHOUT_FAX}, notes, tax_id`;

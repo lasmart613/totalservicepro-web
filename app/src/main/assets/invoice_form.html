@@ -53,10 +53,14 @@
             <div class="form-group">
                 <label>Address</label>
                 <input id="custAddress" placeholder="Street Address">
+                <label style="margin-top:8px">Address line 2 (suite, unit, etc.)</label>
+                <input id="custAddressLine2" placeholder="Optional" autocomplete="address-line2">
             </div>
             <div class="form-group">
                 <label>Contact Phone</label>
                 <input id="custPhone" type="tel">
+                <label style="margin-top:8px">Fax</label>
+                <input id="custFax" type="tel" placeholder="Optional" autocomplete="fax">
             </div>
         </div>
         <div class="grid-2">
@@ -232,6 +236,10 @@
         document.getElementById('custAddress').value = org.address || '';
         document.getElementById('custCity').value = org.city || '';
         document.getElementById('custPhone').value = reach.phone;
+        var faxEl = document.getElementById('custFax');
+        if (faxEl) faxEl.value = (typeof org !== 'undefined' && org && org.fax) || '';
+        var line2El = document.getElementById('custAddressLine2');
+        if (line2El && typeof org !== 'undefined' && org) line2El.value = org.address_line2 || '';
         document.getElementById('custDropdown').classList.remove('open');
     }
 
@@ -270,6 +278,8 @@
                     city: document.getElementById('custCity')?.value || null,
                     state: document.getElementById('custState')?.value || null,
                     phone: document.getElementById('custPhone')?.value || null,
+                    fax: document.getElementById('custFax')?.value || null,
+                    address_line2: document.getElementById('custAddressLine2')?.value || null,
                     email: document.getElementById('custEmail')?.value || null,
                     type: 'customer',
                     is_active: true,

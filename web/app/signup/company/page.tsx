@@ -11,6 +11,7 @@ import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
+import { optionalContactError, optionalContactValues } from '@/lib/fax-address';
 
 const SERVICES_OFFERED = [
   'Preventive Maintenance (PM)', 'Emergency / On-Call Repair', 'Install / Deinstall',
@@ -25,7 +26,9 @@ export default function CompanySignup() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
+  const [fax, setFax] = useState('');
   const [address, setAddress] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [website, setWebsite] = useState('');
@@ -48,6 +51,7 @@ export default function CompanySignup() {
   };
 
   function pendingPayload(): PendingSignup {
+    const contact = optionalContactValues({ fax, address_line2: addressLine2 });
     return {
       kind: 'company',
       name: companyName,
@@ -55,7 +59,9 @@ export default function CompanySignup() {
       lastName,
       email,
       phone: phone || null,
+      fax: contact.fax,
       address: address || null,
+      addressLine2: contact.address_line2,
       city: city || null,
       state: state || null,
       website: website || null,
@@ -90,6 +96,11 @@ export default function CompanySignup() {
       setMessage('Passwords do not match.');
       return;
     }
+    const contactError = optionalContactError({ fax, address_line2: addressLine2 });
+    if (contactError) {
+      setMessage(contactError);
+      return;
+    }
     setLoading(true);
 
     try {
@@ -108,9 +119,11 @@ export default function CompanySignup() {
             organization_type: 'service_company',
             signup_kind: 'company',
             address: address || '',
+            address_line2: addressLine2 || '',
             city: city || '',
             state: state || '',
             phone: phone || '',
+            fax: fax || '',
             website: website || '',
             services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
           },
@@ -235,8 +248,18 @@ export default function CompanySignup() {
             </div>
 
             <div>
+              <label className="label">{t('Fax')}</label>
+              <input className="input" type="tel" autoComplete="fax" placeholder={t('Optional')} value={fax} onChange={e => setFax(e.target.value)} />
+            </div>
+
+            <div>
               <label className="label">{t('Address')}</label>
               <input className="input" value={address} onChange={e => setAddress(e.target.value)} />
+            </div>
+
+            <div>
+              <label className="label">{t('Address line 2 (suite, unit, etc.)')}</label>
+              <input className="input" autoComplete="address-line2" placeholder={t('Optional')} value={addressLine2} onChange={e => setAddressLine2(e.target.value)} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

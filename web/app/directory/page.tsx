@@ -34,6 +34,7 @@ type OrgRow = {
   city?: string | null;
   state?: string | null;
   phone?: string | null;
+  fax?: string | null;
   email?: string | null;
   website?: string | null;
   logo_url?: string | null;
@@ -158,7 +159,7 @@ export default function DirectoryPage() {
             supabase
               .from('organization_customers')
               .select(
-                'customer_organization_id, organizations:customer_organization_id (id, name, type, city, state, phone, email, website, logo_url, is_active)'
+                'customer_organization_id, organizations:customer_organization_id (id, name, type, city, state, phone, fax, email, website, logo_url, is_active)'
               )
               .eq('service_organization_id', orgId)
               .range(from, to)
@@ -417,6 +418,7 @@ export default function DirectoryPage() {
                   {(o.phone || o.email || web) && (
                     <div className="text-xs text-[var(--text2)] mt-2.5 leading-relaxed">
                       {o.phone && <span>{o.phone}</span>}
+                      {o.fax && <span>{o.phone ? ' · ' : ''}Fax: {o.fax}</span>}
                       {o.phone && o.email && <span> · </span>}
                       {o.email && <span>{o.email}</span>}
                       {(o.phone || o.email) && web && <span> · </span>}

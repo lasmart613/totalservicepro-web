@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { missingFaxOrAddressLine2 } from '@/lib/fax-address';
 
 /**
  * Accept a bid on a service_request: award job, reject other bids,
@@ -48,20 +49,30 @@ export async function acceptServiceBid(
     location: req.location || null,
   };
   if (req.organization_id) {
-    const { data: org } = await supabase
+    let orgRes = await supabase
       .from('organizations')
-      .select('name, address, city, state, zip, phone, alt_phone, email, contact_name, website')
+      .select('name, address, address_line2, city, state, zip, phone, fax, alt_phone, email, contact_name, website')
       .eq('id', req.organization_id)
       .maybeSingle();
+    if (orgRes.error && missingFaxOrAddressLine2(orgRes.error)) {
+      orgRes = (await supabase
+        .from('organizations')
+        .select('name, address, city, state, zip, phone, alt_phone, email, contact_name, website')
+        .eq('id', req.organization_id)
+        .maybeSingle()) as typeof orgRes;
+    }
+    const org = orgRes.data;
     if (org) {
       facility_contact = {
         ...facility_contact,
         name: org.name,
         address: org.address,
+        address_line2: org.address_line2,
         city: org.city || req.city,
         state: org.state || req.state,
         zip: org.zip,
         phone: org.phone || org.alt_phone,
+        fax: org.fax,
         email: org.email,
         contact_name: org.contact_name,
         website: org.website,

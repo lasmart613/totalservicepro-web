@@ -7,7 +7,12 @@ import { companyBrandingEnabled, normalizeHex, type CompanyThemeSource } from '@
 import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
 import { parseOrgTimeZone } from '@/lib/org-timezone';
 import { normalizeCountryName } from '@/lib/countries';
-import { guardPrivateFieldWipe, ORG_PROFILE_RESPONSE_COLUMNS } from '@/lib/org-columns';
+import {
+  guardPrivateFieldWipe,
+  ORG_PROFILE_RESPONSE_COLUMNS,
+  ORG_PROFILE_RESPONSE_COLUMNS_WITHOUT_FAX,
+} from '@/lib/org-columns';
+import { missingFaxOrAddressLine2, orgProfileContactPatch } from '@/lib/fax-address';
 
 /**
  * POST /api/org/profile
@@ -22,10 +27,12 @@ import { guardPrivateFieldWipe, ORG_PROFILE_RESPONSE_COLUMNS } from '@/lib/org-c
 const ALLOWED_FIELDS = [
   'name',
   'address',
+  'address_line2',
   'city',
   'state',
   'zip',
   'phone',
+  'fax',
   'email',
   'website',
   'contact_name',
@@ -211,6 +218,10 @@ export async function POST(req: NextRequest) {
       }
       payload.country = name;
     }
+    const contact = orgProfileContactPatch(payload);
+    if (!contact.ok) {
+      return NextResponse.json({ error: contact.error }, { status: 400 });
+    }
     // QA #325 M-1: never wipe notes with an empty value unless the client asked (clear_notes).
     guardPrivateFieldWipe(payload, body);
     if (Object.keys(payload).length === 0) {
@@ -221,20 +232,28 @@ export async function POST(req: NextRequest) {
     let lastError: { message?: string } | null = null;
     let saved: Record<string, unknown> | null = null;
     const omittedColumns: string[] = [];
+    let responseColumns: string = ORG_PROFILE_RESPONSE_COLUMNS;
 
     for (let attempt = 0; attempt < 12; attempt++) {
-      const { data, error } = await admin
-        .from('organizations')
-        .update(payload)
-        .eq('id', linkedId)
-        .select(ORG_PROFILE_RESPONSE_COLUMNS)
-        .maybeSingle();
-      if (!error && data?.id != null) {
-        saved = data as unknown as Record<string, unknown>;
+      const writing = admin.from('organizations').update(payload).eq('id', linkedId);
+      const { data, error } =
+        responseColumns === ORG_PROFILE_RESPONSE_COLUMNS
+          ? await writing.select(ORG_PROFILE_RESPONSE_COLUMNS).maybeSingle()
+          : await writing
+              .select(ORG_PROFILE_RESPONSE_COLUMNS_WITHOUT_FAX as typeof ORG_PROFILE_RESPONSE_COLUMNS)
+              .maybeSingle();
+      const row = data as { id?: unknown } | null;
+      if (!error && row?.id != null) {
+        saved = row as Record<string, unknown>;
         lastError = null;
         break;
       }
       lastError = error;
+      let switchedSelect = false;
+      if (missingFaxOrAddressLine2(error) && responseColumns !== ORG_PROFILE_RESPONSE_COLUMNS_WITHOUT_FAX) {
+        responseColumns = ORG_PROFILE_RESPONSE_COLUMNS_WITHOUT_FAX;
+        switchedSelect = true;
+      }
       const col = missingColumn(error?.message);
       if (col && col in payload) {
         omittedColumns.push(col);
@@ -242,6 +261,7 @@ export async function POST(req: NextRequest) {
         if (Object.keys(payload).every((key) => key === 'updated_at')) break;
         continue;
       }
+      if (switchedSelect) continue;
       break;
     }
 

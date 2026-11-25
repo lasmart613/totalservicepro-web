@@ -12,6 +12,7 @@ import {
   formatLocationOption,
   isLocationsUnavailable,
   loadCustomerLocations,
+  syncPrimaryLocationFromForm,
   localPrimaryFromOrg,
   locationsForDisplay,
   persistedLocationId,
@@ -400,4 +401,87 @@ test('two primary flags display the most recently updated location', async () =>
   assert.equal(loaded.unavailable, false);
   assert.equal(loaded.locations.filter((loc) => loc.is_primary).length, 1);
   assert.equal(loaded.locations.find((loc) => loc.is_primary)?.id, 9);
+});
+
+test('a customer save keeps fax and address line 2 on the primary location', async () => {
+  const writes: Record<string, unknown>[] = [];
+  const rows = [
+    {
+      id: 7,
+      organization_id: 40,
+      name: 'Main office',
+      address: '1 Main',
+      address_line2: 'Old suite',
+      city: 'Mesa',
+      state: 'AZ',
+      zip: '85201',
+      phone: '480-555-0100',
+      fax: '480-555-0101',
+      is_primary: true,
+    },
+  ];
+  const client = {
+    from() {
+      const state: { op: string; row: Record<string, unknown> | null } = { op: 'select', row: null };
+      const api: {
+        select: () => typeof api;
+        eq: () => typeof api;
+        neq: () => typeof api;
+        order: () => typeof api;
+        insert: (row: Record<string, unknown>) => typeof api;
+        update: (row: Record<string, unknown>) => typeof api;
+        single: () => typeof api;
+        then: (resolve: (value: unknown) => unknown, reject?: (reason: unknown) => unknown) => Promise<unknown>;
+      } = {
+        select: () => api,
+        eq: () => api,
+        neq: () => api,
+        order: () => api,
+        insert(row) {
+          state.op = 'insert';
+          state.row = row;
+          writes.push(row);
+          return api;
+        },
+        update(row) {
+          state.op = 'update';
+          state.row = row;
+          writes.push(row);
+          return api;
+        },
+        single: () => api,
+        then(resolve, reject) {
+          const result =
+            state.op === 'select'
+              ? { data: rows, error: null }
+              : { data: { id: state.row?.id || 7 }, error: null };
+          return Promise.resolve(result).then(resolve, reject);
+        },
+      };
+      return api;
+    },
+  };
+  const form = {
+    address: '1 Main',
+    address_line2: 'Suite 9',
+    city: 'Mesa',
+    state: 'AZ',
+    zip: '85201',
+    phone: '480-555-0100',
+    fax: '(480) 555-0199',
+  };
+  const updated = await syncPrimaryLocationFromForm(client as never, 40, form);
+  assert.equal(updated.unavailable, false);
+  const saved = writes.find((row) => 'address_line2' in row && 'fax' in row);
+  assert.ok(saved, 'primary location write');
+  assert.equal(saved?.address_line2, 'Suite 9');
+  assert.equal(saved?.fax, '(480) 555-0199');
+
+  writes.length = 0;
+  rows.length = 0;
+  const created = await syncPrimaryLocationFromForm(client as never, 40, form);
+  assert.equal(created.unavailable, false);
+  const inserted = writes.find((row) => row.address_line2 === 'Suite 9');
+  assert.equal(inserted?.fax, '(480) 555-0199');
+  assert.equal(inserted?.is_primary, true);
 });

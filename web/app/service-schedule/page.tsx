@@ -106,10 +106,12 @@ type TicketForm = {
   serial_number: string;
   notes: string;
   customer_address: string;
+  customer_address_line2: string;
   customer_city: string;
   customer_state: string;
   customer_zip: string;
   customer_phone: string;
+  customer_fax: string;
   customer_contact: string;
   customer_email: string;
 };
@@ -130,10 +132,12 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   serial_number: '',
   notes: '',
   customer_address: '',
+  customer_address_line2: '',
   customer_city: '',
   customer_state: '',
   customer_zip: '',
   customer_phone: '',
+  customer_fax: '',
   customer_contact: '',
   customer_email: '',
 });
@@ -451,10 +455,12 @@ export default function ServiceSchedule() {
       return {
         ...prev,
         customer_address: fields.customer_address,
+        customer_address_line2: fields.customer_address_line2,
         customer_city: fields.customer_city,
         customer_state: fields.customer_state,
         customer_zip: fields.customer_zip,
         customer_phone: fields.customer_phone,
+        customer_fax: fields.customer_fax,
         customer_contact: fields.customer_contact,
       };
     });
@@ -466,10 +472,12 @@ export default function ServiceSchedule() {
     const base = {
       customer_name: c.name,
       customer_address: c.address || '',
+      customer_address_line2: c.addressLine2 || '',
       customer_city: c.city || '',
       customer_state: c.state || '',
       customer_zip: c.zip || '',
       customer_phone: c.phone || '',
+      customer_fax: c.fax || '',
       customer_contact: c.contact || '',
       customer_email: c.email || '',
     };
@@ -485,10 +493,12 @@ export default function ServiceSchedule() {
       rows,
       {
         address: base.customer_address,
+        address_line2: base.customer_address_line2,
         city: base.customer_city,
         state: base.customer_state,
         zip: base.customer_zip,
         phone: base.customer_phone,
+        fax: base.customer_fax,
       },
       c.officePhone
     );
@@ -504,10 +514,12 @@ export default function ServiceSchedule() {
       ...prev,
       ...base,
       customer_address: fields.customer_address,
+      customer_address_line2: fields.customer_address_line2,
       customer_city: fields.customer_city,
       customer_state: fields.customer_state,
       customer_zip: fields.customer_zip,
       customer_phone: fields.customer_phone,
+      customer_fax: fields.customer_fax,
       customer_contact: fields.customer_contact,
     }));
   }
@@ -691,9 +703,11 @@ export default function ServiceSchedule() {
         customer_organization_id: linkedCustomerId,
         customer_name: customer,
         customer_address: form.customer_address.trim() || null,
+        customer_address_line2: form.customer_address_line2.trim() || null,
         customer_city: form.customer_city.trim() || null,
         customer_state: customerState,
         customer_phone: form.customer_phone.trim() || null,
+        customer_fax: form.customer_fax.trim() || null,
         customer_email: form.customer_email.trim() || null,
         ...(form.customer_zip.trim() ? { zip: form.customer_zip.trim() } : {}),
         ...(persistedLocationId(selectedLocationId) != null
@@ -1647,6 +1661,16 @@ export default function ServiceSchedule() {
                   onChange={(e) => setForm({ ...form, customer_address: e.target.value })}
                 />
               </div>
+              <div className="sm:col-span-2">
+                <label className="label">{t('Address line 2 (suite, unit, etc.)')}</label>
+                <input
+                  className="input"
+                  autoComplete="address-line2"
+                  placeholder={t('Optional')}
+                  value={form.customer_address_line2}
+                  onChange={(e) => setForm({ ...form, customer_address_line2: e.target.value })}
+                />
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                   <label className="label">{t('City')}</label>
@@ -1681,6 +1705,17 @@ export default function ServiceSchedule() {
                     className="input"
                     value={form.customer_phone}
                     onChange={(e) => setForm({ ...form, customer_phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">{t('Fax')}</label>
+                  <input
+                    className="input"
+                    type="tel"
+                    autoComplete="fax"
+                    placeholder={t('Optional')}
+                    value={form.customer_fax}
+                    onChange={(e) => setForm({ ...form, customer_fax: e.target.value })}
                   />
                 </div>
                 <div>

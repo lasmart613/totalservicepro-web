@@ -98,12 +98,49 @@ test('createLinkedCustomer and createShopCustomerOrg: one RPC, errors thrown, no
   assert.equal(await createShopCustomerOrg(ok as never, { serviceOrgId: '4', name: '  Sunrise  ', city: ' ', state: 'AZ' }), 812);
   assert.deepEqual(calls, [['create_shop_customer_org', {
     p_service_org: 4, p_name: 'Sunrise', p_address: null, p_city: null, p_state: 'AZ', p_phone: null,
+    p_fax: null, p_address_line2: null,
     p_laser_models: null, p_facility_type: 'Clinic',
   }]]);
   const refused = { rpc: async () => ({ data: null, error: { message: 'only a current member of this service company can add customers' } }) };
   await assert.rejects(createShopCustomerOrg(refused as never, { serviceOrgId: 4, name: 'X' }), /only a current member/);
   await assert.rejects(createShopCustomerOrg(ok as never, { serviceOrgId: null, name: 'X' }), /not loaded/);
   await assert.rejects(createShopCustomerOrg(ok as never, { serviceOrgId: 4, name: '  ' }), /name is required/);
+});
+
+test('createShopCustomerOrg falls back to the 8-arg RPC when fax args are not in the schema cache', async () => {
+  const { createShopCustomerOrg } = await import('./customer-form.ts');
+  const calls: Array<[string, Record<string, unknown>]> = [];
+  const client = {
+    rpc: async (fn: string, args: Record<string, unknown>) => {
+      calls.push([fn, { ...args }]);
+      if ('p_fax' in args || 'p_address_line2' in args) {
+        return {
+          data: null,
+          error: {
+            code: 'PGRST202',
+            message:
+              'Could not find the function public.create_shop_customer_org(p_address, p_address_line2, p_city, p_fax, p_name, p_phone, p_service_org, p_state) in the schema cache',
+          },
+        };
+      }
+      return { data: 44, error: null };
+    },
+  };
+  assert.equal(
+    await createShopCustomerOrg(client as never, {
+      serviceOrgId: 9,
+      name: 'North',
+      fax: '(480) 555-0199',
+      addressLine2: 'Suite 2',
+    }),
+    44
+  );
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0][1].p_fax, '(480) 555-0199');
+  assert.equal(calls[0][1].p_address_line2, 'Suite 2');
+  assert.equal('p_fax' in calls[1][1], false);
+  assert.equal('p_address_line2' in calls[1][1], false);
+  assert.equal(calls[1][1].p_name, 'North');
 });
 
 test('migration 000919 rev 3: H3 link + membership rules, H1 type lock, any-type stamp/served, M1 insert policy, L1 guard, L2 caps + limiter, rollback', () => {

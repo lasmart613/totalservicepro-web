@@ -42,7 +42,8 @@ import { LockedHistoryPanel } from '@/components/LockedHistoryPanel';
 import { formatDisplayDay } from '@/lib/i18n/format-date';
 import { useT } from '@/lib/fa/locale';
 import { LOGO_NO_PERMISSION } from '@/lib/customer-logo';
-import { ORG_READABLE_COLUMNS, loadOrgPrivateFields, type OrgPrivateFields } from '@/lib/org-columns';
+import { ORG_READABLE_COLUMNS, ORG_READABLE_COLUMNS_WITHOUT_FAX, loadOrgPrivateFields, type OrgPrivateFields } from '@/lib/org-columns';
+import { formatFaxLine, formatPostalLines, missingFaxOrAddressLine2 } from '@/lib/fax-address';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -51,10 +52,12 @@ type CustomerOrg = {
   name?: string | null;
   type?: string | null;
   address?: string | null;
+  address_line2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  fax?: string | null;
   email?: string | null;
   website?: string | null;
   notes?: string | null;
@@ -288,11 +291,20 @@ export default function CustomerProfilePage() {
       // Load customer org — prefer * then fall back if RLS/schema issues
       let org: CustomerOrg | null = null;
       {
-        const { data, error } = await supabase
+        let { data, error } = await supabase
           .from('organizations')
           .select(ORG_READABLE_COLUMNS)
           .eq('id', id)
           .maybeSingle();
+        if (error && missingFaxOrAddressLine2(error)) {
+          const again = await supabase
+            .from('organizations')
+            .select(ORG_READABLE_COLUMNS_WITHOUT_FAX as typeof ORG_READABLE_COLUMNS)
+            .eq('id', id)
+            .maybeSingle();
+          data = again.data;
+          error = again.error;
+        }
         if (error) {
           console.warn('customer load * failed', error);
           const slim = await supabase
@@ -330,8 +342,10 @@ export default function CustomerProfilePage() {
         website: org.website || '',
         notes: org.notes || '',
         phone: org.phone || '',
+        fax: org.fax || '',
         email: org.email || '',
         address: org.address || '',
+        address_line2: org.address_line2 || '',
         city: org.city || '',
         state: org.state || '',
         zip: org.zip || '',
@@ -707,13 +721,16 @@ export default function CustomerProfilePage() {
               </h1>
               <div className="text-sm text-[var(--gold)] mt-0.5">{heroType}</div>
               <div className="text-sm text-[var(--text3)] mt-2 space-y-0.5">
-                {(form.address || form.city || form.state) && (
-                  <div>
-                    {[form.address, [form.city, form.state].filter(Boolean).join(', '), form.zip]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </div>
-                )}
+                {formatPostalLines({
+                  line1: form.address,
+                  line2: form.address_line2,
+                  city: form.city,
+                  state: form.state,
+                  zip: form.zip,
+                }).map((line, index) => (
+                  <div key={`${index}-${line}`}>{line}</div>
+                ))}
+                {formatFaxLine(form.fax) ? <div>{formatFaxLine(form.fax)}</div> : null}
                 {customerLocations.length > 1 && (
                   <div>
                     {customerLocations.length} locations

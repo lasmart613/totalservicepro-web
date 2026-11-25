@@ -7,6 +7,7 @@ import {
   ORG_PRIVATE_COLUMNS,
   ORG_PROFILE_RESPONSE_COLUMNS,
   ORG_READABLE_COLUMNS,
+  ORG_READABLE_COLUMNS_WITHOUT_FAX,
   guardPrivateFieldWipe,
   loadOrgPrivateFields,
   privateFieldsPatch,
@@ -161,6 +162,30 @@ test('QA #325: /api/org/profile guards wipes and returns readable columns only',
     assert.ok(!cols.includes(c), c);
   }
   assert.ok(cols.includes('notes') && cols.includes('tax_id'));
+});
+
+test('readable org selects retry without fax and address_line2 when those columns are missing', () => {
+  const full = ORG_READABLE_COLUMNS.split(',').map((c) => c.trim());
+  const slim = ORG_READABLE_COLUMNS_WITHOUT_FAX.split(',').map((c) => c.trim());
+  assert.ok(full.includes('fax') && full.includes('address_line2'));
+  assert.ok(!slim.includes('fax') && !slim.includes('address_line2'));
+  assert.deepEqual(slim, full.filter((c) => c !== 'fax' && c !== 'address_line2'));
+  for (const f of [
+    'app/company/page.tsx',
+    'app/customers/[id]/page.tsx',
+    'app/onboarding/page.tsx',
+    'app/reports/new/NewServiceReportClient.tsx',
+    'app/admin/settings/page.tsx',
+  ]) {
+    const src = readFileSync(join(web, f), 'utf8');
+    assert.match(src, /select\(ORG_READABLE_COLUMNS\)/, f);
+    assert.match(src, /ORG_READABLE_COLUMNS_WITHOUT_FAX/, f);
+    assert.match(src, /missingFaxOrAddressLine2/, f);
+  }
+  const award = readFileSync(join(web, 'lib/award.ts'), 'utf8');
+  assert.match(award, /address_line2, city, state, zip, phone, fax/);
+  assert.match(award, /missingFaxOrAddressLine2\(orgRes\.error\)/);
+  assert.match(award, /select\('name, address, city, state, zip, phone, alt_phone, email, contact_name, website'\)/);
 });
 
 test('QA #325 M-1: notes-unavailable state replaces the editor', () => {

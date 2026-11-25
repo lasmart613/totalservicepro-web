@@ -93,10 +93,14 @@
                 <div>
                     <label>Address</label>
                     <input type="text" id="custAddress" placeholder="123 Main St">
+                    <label style="margin-top:8px">Address line 2 (suite, unit, etc.)</label>
+                    <input type="text" id="custAddressLine2" placeholder="Optional" autocomplete="address-line2">
                 </div>
                 <div>
                     <label>Contact Phone</label>
                     <input type="tel" id="custPhone" placeholder="+1 555-000-0000">
+                    <label style="margin-top:8px">Fax</label>
+                    <input type="tel" id="custFax" placeholder="Optional" autocomplete="fax">
                 </div>
             </div>
             <div class="grid-2" style="margin-top:8px;">
@@ -563,9 +567,11 @@
                 const newOrg = {
                     name: customerName,
                     address: document.getElementById('custAddress')?.value || null,
+                    address_line2: document.getElementById('custAddressLine2')?.value || null,
                     city: document.getElementById('custCity')?.value || null,
                     state: document.getElementById('custState')?.value || null,
                     phone: document.getElementById('custPhone')?.value || null,
+                    fax: document.getElementById('custFax')?.value || null,
                     email: document.getElementById('custEmail')?.value || null,
                     type: 'customer',
                     is_active: true,
@@ -747,9 +753,11 @@
         var reach = directoryReach(org);
         document.getElementById('customer').value    = org.name || '';
         if (document.getElementById('custAddress')) document.getElementById('custAddress').value = org.address || '';
+        if (document.getElementById('custAddressLine2')) document.getElementById('custAddressLine2').value = org.address_line2 || '';
         if (document.getElementById('custCity'))    document.getElementById('custCity').value    = org.city    || '';
         if (document.getElementById('custState'))   document.getElementById('custState').value   = org.state   || '';
         if (document.getElementById('custPhone'))   document.getElementById('custPhone').value   = reach.phone;
+        if (document.getElementById('custFax')) document.getElementById('custFax').value = (org && org.fax) || '';
         if (document.getElementById('custEmail'))   document.getElementById('custEmail').value   = reach.email;
         const dropdown = document.getElementById('custDropdown');
         if (dropdown) dropdown.classList.remove('open');

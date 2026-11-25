@@ -14,6 +14,7 @@ import {
 import { formatLocaleDate } from './i18n/format-date.ts';
 import { translateApp, withDocDirection } from './i18n/translate-app.ts';
 import { viewMeasurement } from './fluence-measurement.ts';
+import { formatFaxLine, formatPostalLines } from './fax-address.ts';
 import { displayModelText } from './model-display.ts';
 import { systemParameterRows } from './models.ts';
 import { displaySectionsForReport } from './service-report-templates.ts';
@@ -28,6 +29,8 @@ export type PrintReportInput = {
   serial_number?: string | null;
   customer_name?: string | null;
   customer_address?: string | null;
+  customer_address_line2?: string | null;
+  customer_fax?: string | null;
   customer_city?: string | null;
   customer_state?: string | null;
   customer_phone?: string | null;
@@ -54,6 +57,9 @@ export type PrintReportInput = {
   signed_date?: string | null;
   tech_company_name?: string | null;
   tech_company_address?: string | null;
+  tech_company_address_line2?: string | null;
+  tech_company_fax?: string | null;
+  tech_fax?: string | null;
   tech_company_city?: string | null;
   tech_company_state?: string | null;
   tech_company_phone?: string | null;
@@ -162,7 +168,24 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
   const engineer = r.service_engineer || r.tech_name || '—';
   const reportNum = r.report_number || '—';
   const dateOut = showDate(r.date_out);
-  const addr = [r.customer_address, r.customer_city, r.customer_state].filter(Boolean).join(', ');
+  const addr = formatPostalLines({
+    line1: r.customer_address,
+    line2: r.customer_address_line2,
+    city: r.customer_city,
+    state: r.customer_state,
+  })
+    .map((line) => esc(line))
+    .join('<br>');
+  const customerFax = formatFaxLine(r.customer_fax);
+  const companyAddr = formatPostalLines({
+    line1: r.tech_company_address,
+    line2: r.tech_company_address_line2,
+    city: r.tech_company_city,
+    state: r.tech_company_state,
+  })
+    .map((line) => esc(line))
+    .join('<br>');
+  const companyFax = formatFaxLine(r.tech_company_fax);
   const theme = r.theme?.branded ? r.theme : null;
   const accent = themeAccentForScope(r.theme, r.themeScope);
   const ink = theme ? theme.onPrimary : '#111';
@@ -181,15 +204,14 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     (r.tech_company_name
       ? `<div style="font-size:14px;font-weight:800${theme ? `;color:${ink}` : ''}">${esc(r.tech_company_name)}</div>`
       : '') +
-    ([r.tech_company_address, r.tech_company_city, r.tech_company_state].filter(Boolean).length
-      ? `<div style="font-size:10px;color:${muted}">${esc(
-          [r.tech_company_address, r.tech_company_city, r.tech_company_state]
-            .filter(Boolean)
-            .join(', ')
-        )}</div>`
+    (companyAddr
+      ? `<div style="font-size:10px;color:${muted}">${companyAddr}</div>`
       : '') +
     (r.tech_company_phone
       ? `<div style="font-size:10px;color:${muted}">${esc(r.tech_company_phone)}</div>`
+      : '') +
+    (companyFax
+      ? `<div style="font-size:10px;color:${muted}">${esc(companyFax)}</div>`
       : '');
 
   const bar = theme
@@ -269,10 +291,12 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     `<div style="font-size:9px;font-weight:700;color:#8a6f2e;text-transform:uppercase;margin-bottom:3px">${esc(tr('Customer'))}</div>` +
     `<table style="width:100%;font-size:10px"><tr>` +
     `<td style="width:50%;padding:2px 4px 2px 0">${cap('Name')}<br><strong>${esc(r.customer_name || '—')}</strong></td>` +
-    `<td style="width:50%;padding:2px 0 2px 4px">${cap('Address')}<br><strong>${esc(addr || '—')}</strong></td>` +
+    `<td style="width:50%;padding:2px 0 2px 4px">${cap('Address')}<br><strong>${addr || '—'}</strong></td>` +
     `</tr><tr>` +
     `<td style="padding:2px 4px 2px 0">${cap('Contact')}<br><strong>${esc(r.customer_contact_name || '—')}</strong></td>` +
-    `<td style="padding:2px 0 2px 4px">${cap('Phone')}<br><strong>${esc(r.customer_phone || '—')}</strong></td>` +
+    `<td style="padding:2px 0 2px 4px">${cap('Phone')}<br><strong>${esc(r.customer_phone || '—')}</strong>${
+      customerFax ? `<br><strong>${esc(customerFax)}</strong>` : ''
+    }</td>` +
     `</tr></table></div>` +
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px">` +
     `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;margin-bottom:3px">${esc(tr('Report'))}</div>` +

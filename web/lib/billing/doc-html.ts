@@ -20,6 +20,7 @@ import { localeToBcp47, translateApp, translateAppFill, withDocDirection } from 
 import { displayModelName, displayModelText } from '../model-display.ts';
 import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import { formatFaxLine, formatPostalLines, type PostalParts } from '../fax-address.ts';
 import { estimateEmailActionUrl } from '../share.ts';
 
 function docT(locale: string | null | undefined, text: string): string {
@@ -46,10 +47,12 @@ export type DocThemeScope = ThemeScope;
 export type DocCompany = {
   company_name?: string;
   address?: string;
+  address_line2?: string;
   city?: string;
   state?: string;
   zip?: string;
   phone?: string;
+  fax?: string;
   email?: string;
   website?: string;
   slogan?: string;
@@ -60,11 +63,13 @@ export type DocCompany = {
 export type DocCustomer = {
   name: string;
   address?: string;
+  address_line2?: string;
   city?: string;
   state?: string;
   zip?: string;
   contact?: string;
   phone?: string;
+  fax?: string;
   email?: string;
   website?: string;
 };
@@ -98,6 +103,10 @@ function partLineHtml(line: string): string {
     return `${isolateUserText(colon[1].trim())}: ${isolateLtr(colon[2].trim())}`;
   }
   return isolateUserText(line);
+}
+
+function postalHtml(parts: PostalParts): string {
+  return formatPostalLines(parts).map((line) => esc(line)).join('<br>');
 }
 
 function money(
@@ -252,8 +261,15 @@ export function buildDocTopHeader(
   options?: { theme?: CompanyTheme | null; themeScope?: DocThemeScope; locale?: string | null }
 ): string {
   const cName = company.company_name || '';
-  const cAddr = [company.address, company.city, company.state, company.zip].filter(Boolean).join(', ');
+  const cAddr = postalHtml({
+    line1: company.address,
+    line2: company.address_line2,
+    city: company.city,
+    state: company.state,
+    zip: company.zip,
+  });
   const cPhone = company.phone || '';
+  const cFax = formatFaxLine(company.fax);
   const cEmail = company.email || '';
   const cWebsite = company.website || '';
   const cSlogan = company.slogan || '';
@@ -279,13 +295,14 @@ export function buildDocTopHeader(
   }
 
   let companyBlock = '';
-  if (cName || cAddr || cPhone || cEmail || cWebsite) {
+  if (cName || cAddr || cPhone || cFax || cEmail || cWebsite) {
     companyBlock =
       (cName
         ? `<div style="font-size:14px;font-weight:800;color:${ink};line-height:1.1;">${esc(cName)}</div>`
         : '') +
-      (cAddr ? `<div style="font-size:10px;color:${muted};line-height:1.15;">${esc(cAddr)}</div>` : '') +
+      (cAddr ? `<div style="font-size:10px;color:${muted};line-height:1.15;">${cAddr}</div>` : '') +
       (cPhone ? `<div style="font-size:10px;color:${muted};">${esc(cPhone)}</div>` : '') +
+      (cFax ? `<div style="font-size:10px;color:${muted};">${esc(cFax)}</div>` : '') +
       (cEmail ? `<div style="font-size:10px;color:${muted};">${esc(cEmail)}</div>` : '') +
       (cWebsite ? `<div style="font-size:10px;color:${linkColor};">${esc(cWebsite)}</div>` : '');
   }
@@ -331,9 +348,14 @@ function customerBillTo(
   heading = 'Customer / Bill To',
   locale?: string | null,
 ): string {
-  const addr = [customer.address, customer.city, customer.state, customer.zip]
-    .filter(Boolean)
-    .join(', ');
+  const addr = postalHtml({
+    line1: customer.address,
+    line2: customer.address_line2,
+    city: customer.city,
+    state: customer.state,
+    zip: customer.zip,
+  });
+  const faxLine = formatFaxLine(customer.fax);
   return (
     `<div style="margin-bottom:8px;padding:6px 8px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:4px;">` +
     `<div style="font-size:9px;font-weight:700;color:#8a6f2e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${esc(
@@ -341,9 +363,9 @@ function customerBillTo(
     )}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
     `<div>${fieldLabel(locale, 'Name')} ${esc(customer.name || '—')}</div>` +
-    `<div>${fieldLabel(locale, 'Address')} ${esc(addr || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Address')} ${addr || '—'}</div>` +
     `<div>${fieldLabel(locale, 'Contact')} ${esc(customer.contact || '—')}</div>` +
-    `<div>${fieldLabel(locale, 'Phone')} ${esc(customer.phone || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Phone')} ${esc(customer.phone || '—')}${faxLine ? `<br>${esc(faxLine)}` : ''}</div>` +
     `<div>${fieldLabel(locale, 'Email')} ${esc(customer.email || '—')}</div>` +
     (customer.website
       ? `<div>${fieldLabel(locale, 'Website')} ${esc(customer.website)}</div>`

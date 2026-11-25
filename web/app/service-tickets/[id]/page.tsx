@@ -54,8 +54,10 @@ const TICKET_SAVE_FIELDS = [
   'notes',
   'customer_name',
   'customer_phone',
+  'customer_fax',
   'customer_email',
   'customer_address',
+  'customer_address_line2',
   'customer_city',
   'customer_state',
   'zip',
@@ -301,10 +303,12 @@ export default function ServiceTicketDetail() {
       ...prev,
       customer_name: selectedOrg.name,
       customer_address: selectedOrg.address || prev.customer_address,
+      customer_address_line2: selectedOrg.addressLine2 || prev.customer_address_line2,
       customer_city: selectedOrg.city || prev.customer_city,
       customer_state: selectedOrg.state || prev.customer_state,
       zip: selectedOrg.zip || prev.zip,
       customer_phone: selectedOrg.phone || prev.customer_phone,
+      customer_fax: selectedOrg.fax || prev.customer_fax,
       customer_email: selectedOrg.email || prev.customer_email,
       customer_organization_id: selectedOrg.id,
     }));
@@ -602,6 +606,7 @@ export default function ServiceTicketDetail() {
                 : ticket.customer_name} />
 
               <Field label="Phone" value={isEditing ? <input className="input" value={formData.customer_phone || ''} onChange={(e) => handleInputChange('customer_phone', e.target.value)} /> : ticket.customer_phone} />
+              <Field label="Fax" value={isEditing ? <input className="input" type="tel" autoComplete="fax" placeholder="Optional" value={formData.customer_fax || ''} onChange={(e) => handleInputChange('customer_fax', e.target.value)} /> : (ticket.customer_fax ? `Fax: ${ticket.customer_fax}` : null)} />
               <Field label="Email" value={isEditing ? <input className="input" value={formData.customer_email || ''} onChange={(e) => handleInputChange('customer_email', e.target.value)} /> : ticket.customer_email} />
               <Field label="Address" value={isEditing ? <input className="input" value={formData.customer_address || formData.address || ''} onChange={(e) => handleInputChange('customer_address', e.target.value)} /> : (
                 <TicketAddressLink
@@ -610,6 +615,7 @@ export default function ServiceTicketDetail() {
                   className="underline text-[var(--gold)]"
                 />
               )} />
+              <Field label="Address line 2 (suite, unit, etc.)" value={isEditing ? <input className="input" autoComplete="address-line2" placeholder="Optional" value={formData.customer_address_line2 || ''} onChange={(e) => handleInputChange('customer_address_line2', e.target.value)} /> : (ticket.customer_address_line2 || null)} />
               {isEditing && (
                 <>
                   <Field label="City" value={<input className="input" value={formData.customer_city || formData.city || ''} onChange={(e) => handleInputChange('customer_city', e.target.value)} />} />

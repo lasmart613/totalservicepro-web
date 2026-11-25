@@ -153,6 +153,37 @@ test('a brand-new founder org created in the request gets 60 days and trial_gran
   );
   assert.equal(clinic.is_premium, false);
   assert.equal('trial_granted_at' in clinic, false);
+
+  assert.throws(
+    () =>
+      organizationInsertFromPending(
+        {
+          kind: 'company',
+          name: 'QA Founder',
+          firstName: 'QA',
+          lastName: 'Founder',
+          email: 'f@shop.test',
+          role: 'company_admin',
+          orgType: 'service_company',
+          fax: 'not a fax',
+        } as any,
+        FOUNDER
+      ),
+    /phone number/
+  );
+  const trimmed = organizationInsertFromPending(
+    {
+      kind: 'owner',
+      name: 'Clinic',
+      role: 'owner',
+      orgType: 'customer',
+      fax: '  (480) 555-0199 ',
+      addressLine2: '  Suite 2 ',
+    } as any,
+    FOUNDER
+  );
+  assert.equal(trimmed.fax, '(480) 555-0199');
+  assert.equal(trimmed.address_line2, 'Suite 2');
 });
 
 test('a just-created founder org (client insert, then founder link) gets 60 days in one write', async () => {

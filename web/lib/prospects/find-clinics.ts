@@ -8,11 +8,13 @@ export type ProspectClinic = {
   name: string | null;
   type?: string | null;
   address?: string | null;
+  address_line2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   country?: string | null;
   phone?: string | null;
+  fax?: string | null;
   email?: string | null;
   website?: string | null;
   contact_name?: string | null;

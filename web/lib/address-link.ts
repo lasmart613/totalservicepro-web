@@ -6,8 +6,11 @@
  * time and falls back to the https URL when Maps is not installed.
  */
 
+import { formatPostalText } from './fax-address.ts';
+
 export type AddressParts = {
   street?: string | null;
+  line2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
@@ -15,7 +18,9 @@ export type AddressParts = {
 
 export type AddressSource = {
   customer_address?: string | null;
+  customer_address_line2?: string | null;
   address?: string | null;
+  address_line2?: string | null;
   customer_city?: string | null;
   city?: string | null;
   customer_state?: string | null;
@@ -47,16 +52,19 @@ function firstText(...values: unknown[]): string {
  */
 export function formatServiceAddress(parts: AddressParts | null | undefined): string {
   if (!parts) return '';
-  const street = text(parts.street);
-  const city = text(parts.city);
-  const stateZip = [text(parts.state), text(parts.zip)].filter(Boolean).join(' ');
-  const locality = [city, stateZip].filter(Boolean).join(', ');
-  return [street, locality].filter(Boolean).join(', ');
+  return formatPostalText({
+    line1: parts.street,
+    line2: parts.line2,
+    city: parts.city,
+    state: parts.state,
+    zip: parts.zip,
+  });
 }
 
 export function ticketAddressParts(ticket: AddressSource | null | undefined): AddressParts {
   return {
     street: firstText(ticket?.customer_address, ticket?.address),
+    line2: firstText(ticket?.customer_address_line2, ticket?.address_line2),
     city: firstText(ticket?.customer_city, ticket?.city),
     state: firstText(ticket?.customer_state, ticket?.state),
     zip: firstText(ticket?.zip, ticket?.customer_zip),
@@ -72,7 +80,7 @@ export function formatTicketAddress(ticket: AddressSource | null | undefined): s
  * and geo:0,0?q=<encoded address>. Null when there is nothing to search.
  */
 export function serviceAddressMapsUrls(fullAddress: string | null | undefined): ServiceAddressMapsUrls | null {
-  const address = text(fullAddress);
+  const address = text(fullAddress).replace(/\s*\n\s*/g, ', ');
   if (!address) return null;
   const encoded = encodeURIComponent(address);
   return {
