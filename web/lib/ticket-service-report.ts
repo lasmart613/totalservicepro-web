@@ -35,9 +35,11 @@ export type TicketReportPrefill = {
   customerOrganizationId: string | number | null;
   customerName: string;
   customerAddress: string;
+  customerAddressLine2: string;
   customerCity: string;
   customerState: string;
   customerPhone: string;
+  customerFax: string;
   customerEmail: string;
   customerContactName: string;
   /** organizations.website of the customer. Empty when unknown. */
@@ -228,6 +230,11 @@ export function reportPrefillFromTicket(source: TicketReportSource): TicketRepor
         : (customerOrganizationId as string | number),
     customerName: gapFill(ticket.customer_name, null, customer?.name),
     customerAddress: addressWithZip(street, zip),
+    customerAddressLine2: gapFill(
+      firstNonEmpty(ticket.customer_address_line2, ticket.address_line2),
+      location?.address_line2,
+      customer?.address_line2
+    ),
     customerCity: gapFill(firstNonEmpty(ticket.customer_city, ticket.city), location?.city, customer?.city),
     customerState: gapFill(
       firstNonEmpty(ticket.customer_state, ticket.state),
@@ -235,6 +242,7 @@ export function reportPrefillFromTicket(source: TicketReportSource): TicketRepor
       customer?.state
     ),
     customerPhone: gapFill(ticket.customer_phone, location?.phone, customer?.phone),
+    customerFax: gapFill(ticket.customer_fax, location?.fax, customer?.fax),
     customerEmail: gapFill(ticket.customer_email, null, customer?.email),
     customerContactName: gapFill(null, location?.contact_name, customer?.contact_name),
     customerWebsite: clean(customer?.website),
@@ -323,7 +331,12 @@ async function loadLinkedCustomer(
   if (customerOrganizationId == null || customerOrganizationId === '') return null;
   const select = (columns: string) =>
     maybeOne(supabase.from('organizations').select(columns).eq('id', customerOrganizationId));
-  let res = await select('id, name, address, city, state, zip, phone, email, contact_name, website');
+  let res = await select(
+    'id, name, address, address_line2, city, state, zip, phone, fax, email, contact_name, website'
+  );
+  if (isMissingColumn(res.error, 'address_line2') || isMissingColumn(res.error, 'fax')) {
+    res = await select('id, name, address, city, state, zip, phone, email, contact_name, website');
+  }
   if (isMissingColumn(res.error, 'website')) {
     res = await select('id, name, address, city, state, zip, phone, email, contact_name');
   }
@@ -346,8 +359,13 @@ async function loadLinkedLocation(
       return query;
     };
     let res = await maybeOne(
-      scoped('id, organization_id, name, address, city, state, zip, phone, contact_name')
+      scoped('id, organization_id, name, address, address_line2, city, state, zip, phone, fax, contact_name')
     );
+    if (isMissingColumn(res.error, 'address_line2') || isMissingColumn(res.error, 'fax')) {
+      res = await maybeOne(
+        scoped('id, organization_id, name, address, city, state, zip, phone, contact_name')
+      );
+    }
     if (isMissingColumn(res.error, 'contact_name')) {
       res = await maybeOne(scoped('id, organization_id, name, address, city, state, zip, phone'));
     }
@@ -367,12 +385,20 @@ async function loadLinkedLocation(
 
   const siteId = ticket.site_id;
   if (siteId == null || siteId === '') return null;
-  const site = await maybeOne(
+  let site = await maybeOne(
     supabase
       .from('sites')
-      .select('id, organization_id, name, address, city, state, zip')
+      .select('id, organization_id, name, address, address_line2, city, state, zip')
       .eq('id', siteId)
   );
+  if (isMissingColumn(site.error, 'address_line2')) {
+    site = await maybeOne(
+      supabase
+        .from('sites')
+        .select('id, organization_id, name, address, city, state, zip')
+        .eq('id', siteId)
+    );
+  }
   if (site.error || !site.data) return null;
   if (
     customerOrganizationId != null &&

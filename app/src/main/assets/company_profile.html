@@ -199,6 +199,10 @@
                 <input type="tel" id="companyPhone" placeholder="+1 (555) 000-0000">
             </div>
             <div class="field">
+                <label>Fax</label>
+                <input type="tel" id="companyFax" placeholder="Optional" autocomplete="fax">
+            </div>
+            <div class="field">
                 <label>Email</label>
                 <input type="email" id="companyEmail" placeholder="service@company.com">
             </div>
@@ -207,6 +211,10 @@
             <div class="field">
                 <label>Address</label>
                 <input type="text" id="companyAddress" placeholder="123 Main St">
+            </div>
+            <div class="field">
+                <label>Address line 2 (suite, unit, etc.)</label>
+                <input type="text" id="companyAddressLine2" placeholder="Optional" autocomplete="address-line2">
             </div>
         </div>
         <div class="field-row">
@@ -505,8 +513,12 @@ function populateForm(org) {
     document.getElementById('companyWebsite').value     = org.website || '';
     document.getElementById('companyDescription').value = org.description || '';
     document.getElementById('companyPhone').value       = org.phone || '';
+    var companyFax = document.getElementById('companyFax');
+    if (companyFax) companyFax.value = org.fax || '';
     document.getElementById('companyEmail').value       = org.email || '';
     document.getElementById('companyAddress').value     = org.address || '';
+    var companyLine2 = document.getElementById('companyAddressLine2');
+    if (companyLine2) companyLine2.value = org.address_line2 || '';
     document.getElementById('companyCity').value        = org.city || '';
     document.getElementById('companyState').value       = org.state || '';
     document.getElementById('companyZip').value         = org.zip || '';
@@ -929,8 +941,10 @@ async function saveCompany() {
             name:               document.getElementById('companyName').value.trim(),
             website:            document.getElementById('companyWebsite').value.trim(),
             phone:              document.getElementById('companyPhone').value.trim(),
+            fax:                (document.getElementById('companyFax') || {}).value ? document.getElementById('companyFax').value.trim() : null,
             email:              document.getElementById('companyEmail').value.trim(),
             address:            document.getElementById('companyAddress').value.trim(),
+            address_line2:      (document.getElementById('companyAddressLine2') || {}).value ? document.getElementById('companyAddressLine2').value.trim() : null,
             city:               document.getElementById('companyCity').value.trim(),
             state:              document.getElementById('companyState').value.trim(),
             zip:                document.getElementById('companyZip').value.trim(),

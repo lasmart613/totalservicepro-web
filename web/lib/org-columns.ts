@@ -24,7 +24,7 @@ export const ORG_PRIVATE_COLUMNS = [
 
 /** Every organizations column a signed-in client may select (prod, 000932). */
 export const ORG_READABLE_COLUMNS =
-  'id, name, type, address, city, state, zip, phone, email, website, is_active, created_at, updated_at, ticket_prefix, logo_url, description, years_in_business, supported_brands, service_territories, customer_rating, biz_type, specialties, created_by, services_offered, num_techs, num_laser_systems, laser_models, facility_type, preferred_services, is_premium, bio, slogan, alt_phone, num_locations, contact_name, manual_slots, subscription_tier, list_in_directory, plan, premium_until, premium_grant, directory_contacts, storefront_enabled, storefront_slug, storefront_bio, brand_primary_color, brand_accent_color, currency_code, number_format, timezone, country';
+  'id, name, type, address, address_line2, city, state, zip, phone, fax, email, website, is_active, created_at, updated_at, ticket_prefix, logo_url, description, years_in_business, supported_brands, service_territories, customer_rating, biz_type, specialties, created_by, services_offered, num_techs, num_laser_systems, laser_models, facility_type, preferred_services, is_premium, bio, slogan, alt_phone, num_locations, contact_name, manual_slots, subscription_tier, list_in_directory, plan, premium_until, premium_grant, directory_contacts, storefront_enabled, storefront_slug, storefront_bio, brand_primary_color, brand_accent_color, currency_code, number_format, timezone, country';
 
 export const ORG_PRIVATE_FIELDS_RPC = 'org_private_fields';
 

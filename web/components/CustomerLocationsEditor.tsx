@@ -190,6 +190,15 @@ export function CustomerLocationsEditor({
               onChange={(e) => set('address', e.target.value)}
             />
           </Field>
+          <Field label="Address line 2 (suite, unit, etc.)">
+            <input
+              className="input w-full"
+              value={draft.address_line2}
+              autoComplete="address-line2"
+              placeholder="Optional"
+              onChange={(e) => set('address_line2', e.target.value)}
+            />
+          </Field>
           <div className="grid grid-cols-3 gap-3">
             <Field label="City">
               <input
@@ -223,7 +232,17 @@ export function CustomerLocationsEditor({
                 type="tel"
                 value={draft.phone}
                 placeholder="Optional"
-                onChange={(e) => set('phone', e.target.value)}
+              onChange={(e) => set('phone', e.target.value)}
+            />
+            </Field>
+            <Field label="Fax">
+              <input
+                className="input w-full"
+                type="tel"
+                value={draft.fax}
+                placeholder="Optional"
+                autoComplete="fax"
+                onChange={(e) => set('fax', e.target.value)}
               />
             </Field>
             <Field label="Contact">

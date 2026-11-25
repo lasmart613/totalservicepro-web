@@ -107,6 +107,7 @@
         <div class="form-group"><label>Last Name *</label><input type="text" class="form-input" id="lastName" placeholder="e.g. Smart" autocomplete="family-name"></div>
         <div class="form-group"><label>Job Title</label><input type="text" class="form-input" id="jobTitle" placeholder="e.g. Laser Service Engineer"></div>
         <div class="form-group"><label>Mobile Phone</label><input type="tel" class="form-input" id="techPhone" placeholder="+1 555-000-0000" autocomplete="tel"></div>
+        <div class="form-group"><label>Fax</label><input type="tel" class="form-input" id="techFax" placeholder="Optional" autocomplete="fax"></div>
     </div>
 
     <!-- Step 2: Company Info -->
@@ -116,11 +117,13 @@
         <div class="step-sub">This appears on your service reports and customer-facing documents.</div>
         <div class="form-group"><label>Company Name *</label><input type="text" class="form-input" id="companyName" placeholder="e.g. Luxor Photonix, Inc." autocomplete="organization"></div>
         <div class="form-group"><label>Business Address</label><input type="text" class="form-input" id="companyAddress" placeholder="123 Main St" autocomplete="street-address"></div>
+        <div class="form-group"><label>Address line 2 (suite, unit, etc.)</label><input type="text" class="form-input" id="companyAddressLine2" placeholder="Optional" autocomplete="address-line2"></div>
         <div class="form-row">
             <div class="form-group"><label>City</label><input type="text" class="form-input" id="companyCity" autocomplete="address-level2"></div>
             <div class="form-group"><label>State</label><input type="text" class="form-input" id="companyState" maxlength="2" placeholder="CA" autocomplete="address-level1"></div>
         </div>
         <div class="form-group"><label>Company Phone</label><input type="tel" class="form-input" id="companyPhone" placeholder="+1 555-000-0000"></div>
+        <div class="form-group"><label>Company Fax</label><input type="tel" class="form-input" id="companyFax" placeholder="Optional" autocomplete="fax"></div>
         <div class="form-group"><label>Company Website</label><input type="url" class="form-input" id="companyWebsite" placeholder="https://yourcompany.com" autocomplete="url"></div>
     </div>
 
@@ -300,6 +303,8 @@
                 name: companyName,
                 type: 'service_company',
                 address: document.getElementById('companyAddress').value.trim() || null,
+                address_line2: (document.getElementById('companyAddressLine2') || { value: '' }).value.trim() || null,
+                fax: (document.getElementById('companyFax') || { value: '' }).value.trim() || null,
                 city: document.getElementById('companyCity').value.trim() || null,
                 state: document.getElementById('companyState').value.trim().toUpperCase() || null,
                 phone: document.getElementById('companyPhone').value.trim() || null,
@@ -461,6 +466,8 @@
                 existingOrgId = org.id;
                 if (org.name)    document.getElementById('companyName').value    = org.name;
                 if (org.address) document.getElementById('companyAddress').value = org.address;
+                if (org.address_line2 && document.getElementById('companyAddressLine2')) document.getElementById('companyAddressLine2').value = org.address_line2;
+                if (org.fax && document.getElementById('companyFax')) document.getElementById('companyFax').value = org.fax;
                 if (org.city)    document.getElementById('companyCity').value    = org.city;
                 if (org.state)   document.getElementById('companyState').value   = org.state;
                 if (org.phone)   document.getElementById('companyPhone').value   = org.phone;

@@ -180,10 +180,12 @@ export function senderCompanyFromOrg(
   return {
     company_name: String(row.name || row.company_name || ''),
     address: String(row.address || ''),
+    address_line2: String(row.address_line2 || ''),
     city: String(row.city || ''),
     state: String(row.state || ''),
     zip: String(row.zip || ''),
     phone: String(row.phone || ''),
+    fax: String(row.fax || ''),
     email: String(row.email || ''),
     website: String(row.website || ''),
     logo_url: String(row.logo_url || ''),
@@ -193,6 +195,7 @@ export function senderCompanyFromOrg(
 }
 
 const SENDER_ORG_SELECTS = [
+  'name, address, address_line2, city, state, zip, phone, fax, email, website, logo_url, slogan',
   'name, address, city, state, zip, phone, email, website, logo_url, slogan',
   'name, address, city, state, zip, phone, email, website, logo_url',
   'name, phone, email',
@@ -249,11 +252,13 @@ export function buildOwnedInvoiceMessage(input: {
     customer: {
       name: String(input.row.customer_name || ''),
       address: String(data.custAddress || ''),
+      address_line2: String(data.custAddressLine2 || ''),
       city: String(data.custCity || ''),
       state: String(data.custState || ''),
       zip: String(data.custZip || ''),
       contact: String(data.custContact || ''),
       phone: String(data.custPhone || ''),
+      fax: String(data.custFax || ''),
       email: String(data.custEmail || ''),
     },
     invNumber: String(input.row.invoice_number || data.invoice_number || data.invNumber || ''),
@@ -357,11 +362,13 @@ function ownedEstimateHtmlInput(input: {
     customer: {
       name: String(input.row.customer_name || ''),
       address: String(data.custAddress || ''),
+      address_line2: String(data.custAddressLine2 || ''),
       city: String(data.custCity || ''),
       state: String(data.custState || ''),
       zip: String(data.custZip || ''),
       contact: String(data.custContact || ''),
       phone: String(data.custPhone || ''),
+      fax: String(data.custFax || ''),
       email: String(data.custEmail || ''),
     },
     estNumber: String(input.row.estimate_number || data.estimate_number || data.estNumber || ''),
@@ -521,10 +528,12 @@ function ownedPurchaseOrderInput(input: {
     supplier: {
       name: String(input.row.supplier_name || data.supplier_name || ''),
       address: String(data.supAddress || ''),
+      address_line2: String(data.supAddressLine2 || ''),
       city: String(data.supCity || ''),
       state: String(data.supState || ''),
       zip: String(data.supZip || ''),
       phone: String(data.supPhone || ''),
+      fax: String(data.supFax || ''),
       email: String(input.supplierEmail || input.row.supplier_email || ''),
     },
     poNumber: String(input.row.po_number || data.po_number || data.poNumber || ''),

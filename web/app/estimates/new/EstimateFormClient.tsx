@@ -87,10 +87,12 @@ export default function EstimateFormClient() {
   const [customerName, setCustomerName] = useState('');
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [custAddress, setCustAddress] = useState('');
+  const [custAddressLine2, setCustAddressLine2] = useState('');
   const [custCity, setCustCity] = useState('');
   const [custState, setCustState] = useState('');
   const [custZip, setCustZip] = useState('');
   const [custPhone, setCustPhone] = useState('');
+  const [custFax, setCustFax] = useState('');
   const [custEmail, setCustEmail] = useState('');
   const [ccText, setCcText] = useState('');
   const [custContact, setCustContact] = useState('');
@@ -247,10 +249,12 @@ export default function EstimateFormClient() {
     setCustomerOrgId(c.id);
     setCustSearch(c.name);
     setCustAddress(c.address || '');
+    setCustAddressLine2(c.addressLine2 || '');
     setCustCity(c.city || '');
     setCustState(c.state || '');
     setCustZip(c.zip || '');
     setCustPhone(c.phone || '');
+    setCustFax(c.fax || '');
     setCustEmail(c.email || '');
     setCustContact(c.contact || '');
     setShowCustDrop(false);
@@ -287,10 +291,12 @@ export default function EstimateFormClient() {
       setSerial(ed.serial || '');
       setPulseCount(ed.pulse_count != null ? String(ed.pulse_count) : '');
       setCustAddress(ed.custAddress || ed.address || '');
+      setCustAddressLine2(ed.custAddressLine2 || ed.address_line2 || '');
       setCustCity(ed.custCity || ed.city || '');
       setCustState(ed.custState || ed.state || '');
       setCustZip(ed.custZip || ed.zip || '');
       setCustPhone(ed.custPhone || ed.phone || '');
+      setCustFax(ed.custFax || ed.fax || '');
       setCcText(formatCcInput(ed.cc_emails));
       setCustEmail(ed.custEmail || ed.email || '');
       setCustContact(ed.custContact || ed.contact || '');
@@ -438,9 +444,11 @@ export default function EstimateFormClient() {
             setCustSearch((v) => fillIfEmpty(v, p.customerName));
             setCustomerOrgId((v) => (v != null && v !== '' ? v : p.customerOrganizationId));
             setCustAddress((v) => fillIfEmpty(v, p.customerAddress));
+            setCustAddressLine2((v) => fillIfEmpty(v, p.customerAddressLine2));
             setCustCity((v) => fillIfEmpty(v, p.customerCity));
             setCustState((v) => fillIfEmpty(v, p.customerState));
             setCustPhone((v) => fillIfEmpty(v, p.customerPhone));
+            setCustFax((v) => fillIfEmpty(v, p.customerFax));
             setCustEmail((v) => fillIfEmpty(v, p.customerEmail));
             setCustContact((v) => fillIfEmpty(v, p.customerContactName));
             if (p.equipmentMake || p.equipmentModel) {
@@ -683,10 +691,12 @@ export default function EstimateFormClient() {
               : []),
           ],
           custAddress,
+          custAddressLine2,
           custCity,
           custState,
           custZip,
           custPhone,
+          custFax,
           custEmail,
           custContact,
           cc_emails: ccValueForDocumentSave(ccText, opts?.ccEmails),
@@ -1031,6 +1041,8 @@ export default function EstimateFormClient() {
             <div className="sm:col-span-2">
               <label className="text-xs text-[var(--text3)]">{t('Address')}</label>
               <input className="input mt-1" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} />
+              <label className="text-xs text-[var(--text3)] mt-2 block">{t('Address line 2 (suite, unit, etc.)')}</label>
+              <input className="input mt-1" autoComplete="address-line2" placeholder={t('Optional')} value={custAddressLine2} onChange={(e) => setCustAddressLine2(e.target.value)} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('City')}</label>
@@ -1053,6 +1065,8 @@ export default function EstimateFormClient() {
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} />
+              <label className="text-xs text-[var(--text3)] mt-2 block">{t('Fax')}</label>
+              <input className="input mt-1" type="tel" autoComplete="fax" placeholder={t('Optional')} value={custFax} onChange={(e) => setCustFax(e.target.value)} />
             </div>
             <div className="sm:col-span-2">
               <label className="text-xs text-[var(--text3)]">{t('Email')}</label>

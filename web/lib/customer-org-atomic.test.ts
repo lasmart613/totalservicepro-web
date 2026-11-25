@@ -98,6 +98,7 @@ test('createLinkedCustomer and createShopCustomerOrg: one RPC, errors thrown, no
   assert.equal(await createShopCustomerOrg(ok as never, { serviceOrgId: '4', name: '  Sunrise  ', city: ' ', state: 'AZ' }), 812);
   assert.deepEqual(calls, [['create_shop_customer_org', {
     p_service_org: 4, p_name: 'Sunrise', p_address: null, p_city: null, p_state: 'AZ', p_phone: null,
+    p_fax: null, p_address_line2: null,
     p_laser_models: null, p_facility_type: 'Clinic',
   }]]);
   const refused = { rpc: async () => ({ data: null, error: { message: 'only a current member of this service company can add customers' } }) };

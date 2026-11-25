@@ -33,6 +33,7 @@ export function FindRepForm({
   const [contactName, setContactName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+  const [fax, setFax] = useState('');
   const [description, setDescription] = useState('');
   const [urgency, setUrgency] = useState('Medium');
   const [preferredDate, setPreferredDate] = useState('');
@@ -52,6 +53,7 @@ export function FindRepForm({
     setContactName('');
     setEmail('');
     setPhone('');
+    setFax('');
     setDescription('');
     setUrgency('Medium');
     setPreferredDate('');
@@ -78,6 +80,7 @@ export function FindRepForm({
           contactName,
           email: email.trim() || undefined,
           phone: phone.trim() || undefined,
+          fax: fax.trim() || undefined,
           description,
           urgency,
           preferredDate: preferredDate || undefined,
@@ -268,6 +271,16 @@ export function FindRepForm({
               onChange={(e) => setPhone(e.target.value)}
               placeholder="(555) 555-0100"
               autoComplete="tel"
+            />
+          </label>
+          <label className="lp-field">
+            <span>{t('Fax')}</span>
+            <input
+              type="tel"
+              value={fax}
+              onChange={(e) => setFax(e.target.value)}
+              placeholder={t('Optional')}
+              autoComplete="fax"
             />
           </label>
         </div>

@@ -257,6 +257,7 @@
                 </div>
                 <div class="form-row full">
                     <div class="form-group"><label>Address</label><input id="custAddress" placeholder="123 Main St"></div>
+                    <div class="form-group"><label>Address line 2 (suite, unit, etc.)</label><input id="custAddressLine2" placeholder="Optional" autocomplete="address-line2"></div>
                 </div>
                 <div class="form-row">
                     <div class="form-group"><label>City</label><input id="custCity" placeholder="City"></div>
@@ -264,6 +265,7 @@
                 </div>
                 <div class="form-row">
                     <div class="form-group"><label>Contact Phone</label><input id="custPhone" type="tel" placeholder="+1 555-000-0000"></div>
+                    <div class="form-group"><label>Fax</label><input id="custFax" type="tel" placeholder="Optional" autocomplete="fax"></div>
                     <div class="form-group"><label>Contact Email</label><input id="custEmail" type="email" placeholder="contact@clinic.com"></div>
                 </div>
             </div>
@@ -479,9 +481,11 @@
                 const newOrg = {
                     name: name,
                     address: document.getElementById('custAddress')?.value.trim() || null,
+                    address_line2: document.getElementById('custAddressLine2')?.value.trim() || null,
                     city: document.getElementById('custCity')?.value.trim() || null,
                     state: document.getElementById('custState')?.value.trim() || null,
                     phone: document.getElementById('custPhone')?.value.trim() || null,
+                    fax: document.getElementById('custFax')?.value.trim() || null,
                     email: document.getElementById('custEmail')?.value.trim() || null,
                     type: 'customer',
                     is_active: true,
@@ -607,9 +611,13 @@
         var reach = directoryReach(org);
         document.getElementById('custName').value    = org.name;
         document.getElementById('custAddress').value = org.address || '';
+        var line2 = document.getElementById('custAddressLine2');
+        if (line2) line2.value = org.address_line2 || '';
         document.getElementById('custCity').value    = org.city    || '';
         document.getElementById('custState').value   = org.state   || '';
         document.getElementById('custPhone').value   = reach.phone;
+        var faxEl = document.getElementById('custFax');
+        if (faxEl) faxEl.value = (org && org.fax) || '';
         document.getElementById('custEmail').value   = reach.email;
         if (document.getElementById('custContact')) document.getElementById('custContact').value = reach.contact;
         document.getElementById('custDropdown').classList.remove('open');
@@ -638,6 +646,8 @@
                     tech_email:       currentUser.email || '',
                     company_name:     org.name || '',
                     company_address:  org.address || '',
+                    company_address_line2: org.address_line2 || '',
+                    company_fax: org.fax || '',
                     company_city:     org.city || '',
                     company_state:    org.state || '',
                     company_phone:    org.phone || '',
@@ -1436,9 +1446,11 @@
             organization_id: isValidOrgId(currentUserOrgId) ? currentUserOrgId : null,
             customer_name:    document.getElementById('custName')?.value.trim() || null,
             customer_address: document.getElementById('custAddress')?.value.trim() || null,
+            customer_address_line2: document.getElementById('custAddressLine2')?.value.trim() || null,
             customer_city:    document.getElementById('custCity')?.value.trim() || null,
             customer_state:   document.getElementById('custState')?.value.trim() || null,
             customer_phone:   document.getElementById('custPhone')?.value.trim() || null,
+            customer_fax:     document.getElementById('custFax')?.value.trim() || null,
             customer_email:   document.getElementById('custEmail')?.value.trim() || null,
             ticket_number:    document.getElementById('ticketNum')?.value.trim() || null,
             // Technician / company snapshot
@@ -1447,6 +1459,8 @@
             tech_email:           techCompanyCache.tech_email || null,
             tech_company_name:    techCompanyCache.company_name || null,
             tech_company_address: techCompanyCache.company_address || null,
+            tech_company_address_line2: techCompanyCache.company_address_line2 || null,
+            tech_company_fax: techCompanyCache.company_fax || null,
             tech_company_city:    techCompanyCache.company_city || null,
             tech_company_state:   techCompanyCache.company_state || null,
             tech_company_phone:   techCompanyCache.company_phone || null,
@@ -1743,9 +1757,11 @@
             const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
             set('custName',    r.customer_name);
             set('custAddress', r.customer_address);
+            set('custAddressLine2', r.customer_address_line2);
             set('custCity',    r.customer_city);
             set('custState',   r.customer_state);
             set('custPhone',   r.customer_phone);
+            set('custFax',     r.customer_fax);
             set('custEmail',   r.customer_email);
             set('equipName',   r.equipment_name);
             set('sku',         r.sku);
@@ -2231,8 +2247,11 @@
             '<div class="header">' +
                 '<div>' + logoHTML +
                     '<div class="company-name">' + (cache.company_name || 'Total Service Pro') + '</div>' +
-                    '<div class="company-address">' + [cache.company_address, cache.company_city, cache.company_state].filter(Boolean).join(', ') + '</div>' +
+                    '<div class="company-address">' + (cache.company_address_line2
+                        ? [cache.company_address, cache.company_address_line2, [cache.company_city, cache.company_state].filter(Boolean).join(', ')].filter(Boolean).join('<br>')
+                        : [cache.company_address, cache.company_city, cache.company_state].filter(Boolean).join(', ')) + '</div>' +
                     '<div class="company-address">' + (cache.company_phone || '') + '</div>' +
+                    (cache.company_fax ? '<div class="company-address">Fax: ' + cache.company_fax + '</div>' : '') +
                 '</div>' +
                 '<div class="report-title"><h1>Service Report</h1>' +
                 '<div class="report-num">' + reportNum + '</div>' +
@@ -2240,7 +2259,12 @@
             '</div>' +
             '<div class="info-grid">' +
                 '<div class="info-item"><label>Customer</label><span>' + custName + '</span></div>' +
-                '<div class="info-item"><label>Address</label><span>' + [custAddress, custCity, custState].filter(Boolean).join(', ') + '</span></div>' +
+                '<div class="info-item"><label>Address</label><span>' + (function () {
+                    var line2 = (document.getElementById('custAddressLine2')?.value || '').trim();
+                    var place = [custCity, custState].filter(Boolean).join(', ');
+                    if (!line2) return [custAddress, place].filter(Boolean).join(', ');
+                    return [custAddress, line2, place].filter(Boolean).join('<br>');
+                })() + '</span></div>' +
                 '<div class="info-item"><label>Equipment</label><span>' + equipName + '</span></div>' +
                 '<div class="info-item"><label>Serial #</label><span>' + serialNum + '</span></div>' +
                 '<div class="info-item"><label>Service Engineer</label><span>' + engineer + '</span></div>' +

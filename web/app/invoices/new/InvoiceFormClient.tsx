@@ -128,10 +128,12 @@ export default function InvoiceFormClient() {
   const [customerName, setCustomerName] = useState('');
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [custAddress, setCustAddress] = useState('');
+  const [custAddressLine2, setCustAddressLine2] = useState('');
   const [custCity, setCustCity] = useState('');
   const [custState, setCustState] = useState('');
   const [custZip, setCustZip] = useState('');
   const [custPhone, setCustPhone] = useState('');
+  const [custFax, setCustFax] = useState('');
   const [custEmail, setCustEmail] = useState('');
   const [ccText, setCcText] = useState('');
   const [custContact, setCustContact] = useState('');
@@ -266,10 +268,12 @@ export default function InvoiceFormClient() {
     setCustomerOrgId(draft.orgId);
     setCustSearch(draft.name);
     setCustAddress(draft.address);
+    setCustAddressLine2(draft.addressLine2);
     setCustCity(draft.city);
     setCustState(draft.state);
     setCustZip(draft.zip);
     setCustPhone(draft.phone);
+    setCustFax(draft.fax);
     setCustEmail(draft.email);
     setCustContact(draft.contact);
   }
@@ -407,10 +411,12 @@ export default function InvoiceFormClient() {
         name: data.customer_name || '',
         orgId: data.customer_organization_id || null,
         address: ed.custAddress || '',
+        addressLine2: ed.custAddressLine2 || '',
         city: ed.custCity || '',
         state: ed.custState || '',
         zip: ed.custZip || '',
         phone: ed.custPhone || '',
+        fax: ed.custFax || '',
         email: ed.custEmail || '',
         contact: ed.custContact || '',
       });
@@ -517,10 +523,12 @@ export default function InvoiceFormClient() {
         name: fillIfEmpty(current.name, p.customerName),
         orgId: current.orgId != null && current.orgId !== '' ? current.orgId : p.customerOrganizationId,
         address: fillIfEmpty(current.address, p.customerAddress),
+        addressLine2: fillIfEmpty(current.addressLine2, p.customerAddressLine2),
         city: fillIfEmpty(current.city, p.customerCity),
         state: fillIfEmpty(current.state, p.customerState),
         zip: current.zip,
         phone: fillIfEmpty(current.phone, p.customerPhone),
+        fax: fillIfEmpty(current.fax, p.customerFax),
         email: fillIfEmpty(current.email, p.customerEmail),
         contact: fillIfEmpty(current.contact, p.customerContactName),
       });
@@ -775,10 +783,12 @@ export default function InvoiceFormClient() {
         invoice_number: invNum,
         invNumber: invNum,
         custAddress: picked.invoiceData.address,
+        custAddressLine2: picked.invoiceData.addressLine2,
         custCity: picked.invoiceData.city,
         custState: picked.invoiceData.state,
         custZip: picked.invoiceData.zip,
         custPhone: picked.invoiceData.phone,
+        custFax: picked.invoiceData.fax,
         custEmail: picked.invoiceData.email,
         custContact: picked.invoiceData.contact,
         payee_kind: payee.payee_kind,
@@ -1014,11 +1024,13 @@ export default function InvoiceFormClient() {
       customer: {
         name: customerName.trim() || custSearch.trim(),
         address: custAddress,
+        address_line2: custAddressLine2,
         city: custCity,
         state: custState,
         zip: custZip,
         contact: custContact,
         phone: custPhone,
+        fax: custFax,
         email: custEmail,
       },
       invNumber: docNumber || 'Draft',
@@ -1408,6 +1420,12 @@ export default function InvoiceFormClient() {
                 customerRef.current = { ...customerRef.current, address: e.target.value };
                 setCustAddress(e.target.value);
               }} />
+              <label className="text-xs text-[var(--text3)] mt-2 block">{t('Address line 2 (suite, unit, etc.)')}</label>
+              <input className="input mt-1" autoComplete="address-line2" placeholder={t('Optional')} value={custAddressLine2} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, addressLine2: e.target.value };
+                setCustAddressLine2(e.target.value);
+              }} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Contact')}</label>
@@ -1423,6 +1441,12 @@ export default function InvoiceFormClient() {
                 formTouchedRef.current = true;
                 customerRef.current = { ...customerRef.current, phone: e.target.value };
                 setCustPhone(e.target.value);
+              }} />
+              <label className="text-xs text-[var(--text3)] mt-2 block">{t('Fax')}</label>
+              <input className="input mt-1" type="tel" autoComplete="fax" placeholder={t('Optional')} value={custFax} onChange={(e) => {
+                formTouchedRef.current = true;
+                customerRef.current = { ...customerRef.current, fax: e.target.value };
+                setCustFax(e.target.value);
               }} />
             </div>
             <div>

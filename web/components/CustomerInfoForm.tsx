@@ -258,6 +258,20 @@ export function CustomerInfoForm({
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
+                Fax
+              </label>
+              <input
+                className="input w-full"
+                type="tel"
+                value={value.fax}
+                disabled={disabled}
+                autoComplete="fax"
+                placeholder="Optional"
+                onChange={(e) => setField('fax', e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
                 Main office email
               </label>
             <input
@@ -358,6 +372,16 @@ export function CustomerInfoForm({
                       disabled={disabled}
                       onChange={(e) => setRoleField(role, 'phone', e.target.value)}
                     />
+                    <input
+                      className="input w-full sm:col-span-2"
+                      type="tel"
+                      placeholder="Fax (optional)"
+                      autoComplete="fax"
+                      aria-label={`${DIRECTORY_ROLE_LABELS[role]} fax`}
+                      value={fields.fax}
+                      disabled={disabled}
+                      onChange={(e) => setRoleField(role, 'fax', e.target.value)}
+                    />
                   </div>
                 </div>
               );
@@ -384,6 +408,17 @@ export function CustomerInfoForm({
               value={value.address}
               disabled={disabled}
               onChange={(e) => setField('address', e.target.value)}
+            />
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1 mt-2">
+              Address line 2 (suite, unit, etc.)
+            </label>
+            <input
+              className="input w-full"
+              value={value.address_line2}
+              disabled={disabled}
+              autoComplete="address-line2"
+              placeholder="Optional"
+              onChange={(e) => setField('address_line2', e.target.value)}
             />
             <p className="text-[11px] text-[var(--text3)] mt-1">
               This is the main location. Use Add location for another office or clinic.

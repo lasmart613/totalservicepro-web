@@ -110,6 +110,7 @@ function CompanyProfile() {
     last_name: '',
     title: '',
     phone: '',
+    fax: '',
     email: '',
   });
   const [savingContact, setSavingContact] = useState(false);
@@ -449,9 +450,11 @@ function CompanyProfile() {
           name: currentOrg.name || (ownerMode ? 'My Facility' : supplierMode ? 'My Supplier Co' : 'My Company'),
           type: inferredType,
           address: currentOrg.address ?? null,
+          address_line2: currentOrg.address_line2 ?? null,
           city: currentOrg.city ?? null,
           state: currentOrg.state ?? null,
           phone: currentOrg.phone ?? null,
+          fax: currentOrg.fax ?? null,
           website: currentOrg.website ?? null,
           list_in_directory: !!currentOrg.list_in_directory,
         };
@@ -488,11 +491,13 @@ function CompanyProfile() {
         id: saveId,
         name: currentOrg.name ?? null,
         address: currentOrg.address ?? null,
+        address_line2: currentOrg.address_line2 ?? null,
         city: currentOrg.city ?? null,
         state: currentOrg.state ?? null,
         zip: currentOrg.zip ?? null,
         country: currentOrg.country ?? null,
         phone: currentOrg.phone ?? null,
+        fax: currentOrg.fax ?? null,
         email: currentOrg.email ?? null,
         website: currentOrg.website ?? null,
         contact_name: currentOrg.contact_name ?? null,
@@ -708,10 +713,11 @@ function CompanyProfile() {
         last_name: newContact.last_name.trim() || null,
         title: newContact.title.trim() || null,
         phone: newContact.phone.trim() || null,
+        fax: newContact.fax.trim() || null,
         email: newContact.email.trim() || null,
       });
       if (error) throw error;
-      setNewContact({ first_name: '', last_name: '', title: '', phone: '', email: '' });
+      setNewContact({ first_name: '', last_name: '', title: '', phone: '', fax: '', email: '' });
       toast.success('Contact added');
       await loadFacilityContacts(orgId);
     } catch (e: any) {
@@ -816,6 +822,10 @@ function CompanyProfile() {
                 <label className="label">{t('Address')}</label>
                 <input className="input" value={org.address || ''} onChange={e => setOrg({ ...org, address: e.target.value })} />
               </div>
+              <div>
+                <label className="label">{t('Address line 2 (suite, unit, etc.)')}</label>
+                <input className="input" value={org.address_line2 || ''} autoComplete="address-line2" placeholder={t('Optional')} onChange={e => setOrg({ ...org, address_line2: e.target.value })} />
+              </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="label">{t('City')}</label>
@@ -858,6 +868,10 @@ function CompanyProfile() {
               <div>
                 <label className="label">{t('Phone')}</label>
                 <input className="input" value={org.phone || ''} onChange={e => setOrg({ ...org, phone: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">{t('Fax')}</label>
+                <input className="input" type="tel" autoComplete="fax" value={org.fax || ''} placeholder={t('Optional')} onChange={e => setOrg({ ...org, fax: e.target.value })} />
               </div>
               <div>
                 <label className="label" htmlFor="company-details-email">{t('Email')}</label>
@@ -1290,7 +1304,7 @@ function CompanyProfile() {
                       {c.title ? <span className="text-[var(--text3)]"> · {c.title}</span> : null}
                     </span>
                     <span className="text-[var(--text3)] text-xs">
-                      {[c.phone, c.email].filter(Boolean).join(' · ') || ''}
+                      {[c.phone, c.fax ? `Fax: ${c.fax}` : '', c.email].filter(Boolean).join(' · ') || ''}
                     </span>
                   </li>
                 ))}
@@ -1320,6 +1334,13 @@ function CompanyProfile() {
                 placeholder={t('Phone')}
                 value={newContact.phone}
                 onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
+              />
+              <input
+                className="input"
+                type="tel"
+                placeholder={t('Fax')}
+                value={newContact.fax}
+                onChange={(e) => setNewContact({ ...newContact, fax: e.target.value })}
               />
               <input
                 className="input sm:col-span-2"

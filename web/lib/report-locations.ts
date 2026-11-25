@@ -33,9 +33,11 @@ export type EquipmentSiteGroups = {
 
 export type ReportSiteFields = {
   address: string;
+  address_line2: string;
   city: string;
   state: string;
   phone: string;
+  fax: string;
   contactName: string;
   siteName: string;
 };
@@ -104,9 +106,11 @@ export function reportLocationControl(
 export function reportSiteFields(loc: CustomerLocation): ReportSiteFields {
   return {
     address: addressWithZip(loc.address, loc.zip),
+    address_line2: clean(loc.address_line2),
     city: clean(loc.city),
     state: clean(loc.state),
     phone: clean(loc.phone),
+    fax: clean(loc.fax),
     contactName: clean(loc.contact_name),
     siteName: clean(loc.name),
   };

@@ -21,6 +21,8 @@ export type TicketAssignCopy = {
   title?: string | null;
   customerName?: string | null;
   customerPhone?: string | null;
+  customerFax?: string | null;
+  addressLine2?: string | null;
   serviceType?: string | null;
   status?: string | null;
   serviceDate?: string | null;
@@ -60,6 +62,7 @@ export function ticketAssignText(opts: TicketAssignCopy): string {
     opts.title ? `Job: ${opts.title}` : '',
     opts.customerName ? `Customer: ${opts.customerName}` : '',
     opts.customerPhone ? `Phone: ${opts.customerPhone}` : '',
+    opts.customerFax ? `Fax: ${opts.customerFax}` : '',
     opts.serviceType ? `Type: ${opts.serviceType}` : '',
     opts.status ? `Status: ${opts.status}` : '',
     opts.serviceDate
@@ -86,6 +89,7 @@ export function ticketAssignHtml(opts: TicketAssignCopy): string {
   if (opts.title) rows.push(['Job', String(opts.title)]);
   if (opts.customerName) rows.push(['Customer', String(opts.customerName)]);
   if (opts.customerPhone) rows.push(['Phone', String(opts.customerPhone)]);
+  if (opts.customerFax) rows.push(['Fax', String(opts.customerFax)]);
   if (opts.serviceType) rows.push(['Type', String(opts.serviceType)]);
   if (opts.status) rows.push(['Status', String(opts.status)]);
   if (opts.serviceDate) {

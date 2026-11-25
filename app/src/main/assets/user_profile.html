@@ -366,6 +366,10 @@
                 <input type="tel" id="phone" placeholder="+1 (555) 000-0000">
             </div>
             <div class="field">
+                <label>Fax</label>
+                <input type="tel" id="fax" placeholder="Optional" autocomplete="fax">
+            </div>
+            <div class="field">
                 <label>Role</label>
                 <input type="text" id="role" readonly style="background:var(--surface3);color:var(--text-muted);">
             </div>
@@ -572,7 +576,13 @@
         <div class="field-row">
             <div class="field" style="flex: 2 1 100%;">
                 <label>Street Address</label>
-                <input type="text" id="addressLine1" placeholder="123 Main Street, Apt 4B">
+                <input type="text" id="addressLine1" placeholder="123 Main Street">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field" style="flex: 2 1 100%;">
+                <label>Address line 2 (suite, unit, etc.)</label>
+                <input type="text" id="addressLine2" placeholder="Optional" autocomplete="address-line2">
             </div>
         </div>
         <div class="field-row">
@@ -733,6 +743,8 @@
         // Phone fallback for different possible column names in the DB
         const phoneVal = profile?.phone || profile?.phone_number || profile?.mobile || profile?.contact_phone || '';
         document.getElementById('phone').value = phoneVal;
+        var faxInput = document.getElementById('fax');
+        if (faxInput) faxInput.value = profile?.fax || '';
         document.getElementById('role').value        = displayRole;
         document.getElementById('employeeId').value  = profile?.employee_id || '';
         document.getElementById('website').value     = profile?.website || meta.website || '';
@@ -744,6 +756,8 @@
 
         // Address & Emergency Contact (with fallbacks)
         document.getElementById('addressLine1').value   = profile?.address_line1 || profile?.address || '';
+        var line2Input = document.getElementById('addressLine2');
+        if (line2Input) line2Input.value = profile?.address_line2 || '';
         document.getElementById('city').value           = profile?.city || '';
         document.getElementById('state').value          = (profile?.state || '').toUpperCase();
         document.getElementById('postalCode').value     = profile?.postal_code || profile?.zip || '';
@@ -978,12 +992,14 @@
                 first_name:         firstName,
                 last_name:          lastName,
                 phone:              document.getElementById('phone').value.trim(),
+                fax:                (document.getElementById('fax') || { value: '' }).value.trim(),
                 employee_id:        document.getElementById('employeeId').value.trim(),
                 website:            document.getElementById('website').value.trim(),
                 bio:                document.getElementById('bio').value.trim(),
                 job_title:          document.getElementById('jobTitle').value.trim(),
                 territory:                 document.getElementById('territory').value.trim(),
                 address_line1:             document.getElementById('addressLine1').value.trim(),
+                address_line2:             (document.getElementById('addressLine2') || { value: '' }).value.trim(),
                 city:                      document.getElementById('city').value.trim(),
                 state:                     document.getElementById('state').value.trim().toUpperCase(),
                 postal_code:               document.getElementById('postalCode').value.trim(),

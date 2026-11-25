@@ -41,9 +41,11 @@ type SupplierOpt = {
   id: string | number;
   name: string;
   address?: string | null;
+  address_line2?: string | null;
   city?: string | null;
   state?: string | null;
   phone?: string | null;
+  fax?: string | null;
   email?: string | null;
   zip?: string | null;
 };
@@ -84,10 +86,12 @@ export default function PurchaseOrderFormClient() {
   const [supplierName, setSupplierName] = useState('');
   const [supplierOrgId, setSupplierOrgId] = useState<string | number | null>(null);
   const [supAddress, setSupAddress] = useState('');
+  const [supAddressLine2, setSupAddressLine2] = useState('');
   const [supCity, setSupCity] = useState('');
   const [supState, setSupState] = useState('');
   const [supZip, setSupZip] = useState('');
   const [supPhone, setSupPhone] = useState('');
+  const [supFax, setSupFax] = useState('');
   const [supEmail, setSupEmail] = useState('');
   const [ccText, setCcText] = useState('');
 
@@ -203,7 +207,7 @@ export default function PurchaseOrderFormClient() {
     const { data, error } = await fetchAllPages<SupplierOpt>(async (from, to) => {
       const res = await supabase
         .from('organizations')
-        .select('id, name, address, city, state, phone, email')
+        .select('id, name, address, address_line2, city, state, phone, fax, email')
         .in('type', ['parts_supplier', 'vendor'])
         .order('name', { ascending: true })
         .range(from, to);
@@ -218,10 +222,12 @@ export default function PurchaseOrderFormClient() {
     setSupplierOrgId(s.id);
     setSupSearch(s.name);
     setSupAddress(s.address || '');
+    setSupAddressLine2(s.address_line2 || '');
     setSupCity(s.city || '');
     setSupState(s.state || '');
     setSupZip(s.zip || '');
     setSupPhone(s.phone || '');
+    setSupFax(s.fax || '');
     setSupEmail(s.email || '');
   };
 
@@ -230,10 +236,12 @@ export default function PurchaseOrderFormClient() {
     setSupplierOrgId(null);
     setSupSearch('');
     setSupAddress('');
+    setSupAddressLine2('');
     setSupCity('');
     setSupState('');
     setSupZip('');
     setSupPhone('');
+    setSupFax('');
     setSupEmail('');
   };
 
@@ -266,10 +274,12 @@ export default function PurchaseOrderFormClient() {
       setDocNumber(data.po_number || pdata.po_number || pdata.poNumber || '');
       setShipTo(pdata.shipTo || '');
       if (pdata.supAddress) setSupAddress(pdata.supAddress);
+      if (pdata.supAddressLine2) setSupAddressLine2(pdata.supAddressLine2);
       if (pdata.supCity) setSupCity(pdata.supCity);
       if (pdata.supState) setSupState(pdata.supState);
       if (pdata.supZip) setSupZip(pdata.supZip);
       if (pdata.supPhone) setSupPhone(pdata.supPhone);
+      if (pdata.supFax) setSupFax(pdata.supFax);
       setCcText(formatCcInput(pdata.cc_emails));
       const lines = Array.isArray(pdata.line_items) ? pdata.line_items : [];
       if (lines.length) {
@@ -401,10 +411,12 @@ export default function PurchaseOrderFormClient() {
           poNumber: num,
           shipTo,
           supAddress,
+          supAddressLine2,
           supCity,
           supState,
           supZip,
           supPhone,
+          supFax,
           cc_emails: ccValueForDocumentSave(ccText, opts?.ccEmails),
         },
       };
@@ -602,6 +614,10 @@ export default function PurchaseOrderFormClient() {
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1 opacity-90" readOnly value={supPhone || '—'} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text3)]">{t('Fax')}</label>
+              <input className="input mt-1 opacity-90" readOnly value={supFax || '—'} />
             </div>
           </div>
           <div className="mt-3">

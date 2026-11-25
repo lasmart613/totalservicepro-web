@@ -184,6 +184,8 @@ export default function Onboarding() {
         jobTitle: profile?.job_title || '',
         companyName: prev.companyName || pending?.name || meta.company || meta.facility || '',
         address: pending?.address || meta.address || '',
+        addressLine2: pending?.addressLine2 || meta.address_line2 || '',
+        fax: pending?.fax || meta.fax || '',
         city: pending?.city || meta.city || '',
         state: pending?.state || meta.state || '',
         website: pending?.website || meta.website || '',
@@ -231,6 +233,8 @@ export default function Onboarding() {
           ...prev,
           companyName: o.name || prev.companyName || '',
           address: o.address || prev.address || '',
+          addressLine2: o.address_line2 || prev.addressLine2 || '',
+          fax: o.fax || prev.fax || '',
           city: o.city || prev.city || '',
           state: o.state || prev.state || '',
           country: o.country || prev.country || '',
@@ -551,10 +555,12 @@ export default function Onboarding() {
         name: companyName,
         type: oType,
         address: formData.address || null,
+        address_line2: formData.addressLine2 || null,
         city: formData.city || null,
         state: formData.state || null,
         ...(normalizeCountryName(formData.country) ? { country: normalizeCountryName(formData.country) } : {}),
         phone: formData.phone || null,
+        fax: formData.fax || null,
         website: formData.website || null,
         supported_brands: selectedBrands.length ? selectedBrands : null,
         logo_url: logoUrl || null,
@@ -660,6 +666,7 @@ export default function Onboarding() {
         last_name: formData.lastName,
         email: currentUser.email,
         phone: formData.phone || null,
+        fax: formData.fax || null,
         job_title: finalJob,
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
@@ -912,6 +919,7 @@ export default function Onboarding() {
             <div><label className="label">{t('Job Title')}</label><input className="input" value={formData.jobTitle||''} onChange={e=>updateForm('jobTitle',e.target.value)} /></div>
             <div><label className="label">{orgType==='clinic' ? t('Facility Name *') : t('Company Name *')}</label><input className="input" value={formData.companyName||''} onChange={e=>updateForm('companyName',e.target.value)} /></div>
             <div><label className="label">{t('Address')}</label><input className="input" value={formData.address||''} onChange={e=>updateForm('address',e.target.value)} /></div>
+            <div><label className="label">{t('Address line 2 (suite, unit, etc.)')}</label><input className="input" autoComplete="address-line2" placeholder={t('Optional')} value={formData.addressLine2||''} onChange={e=>updateForm('addressLine2',e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">{t('City')}</label><input className="input" value={formData.city||''} onChange={e=>updateForm('city',e.target.value)} /></div>
               <div><label className="label">{t('State')}</label><input className="input" value={formData.state||''} onChange={e=>updateForm('state',e.target.value)} /></div>
@@ -919,6 +927,7 @@ export default function Onboarding() {
             <div><label className="label" htmlFor="onboarding-country">{t('Country')}</label><CountrySelect id="onboarding-country" value={formData.country} onChange={(country)=>updateForm('country',country||'')} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">{t('Phone')}</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
+              <div><label className="label">{t('Fax')}</label><input className="input" type="tel" autoComplete="fax" placeholder={t('Optional')} value={formData.fax||''} onChange={e=>updateForm('fax',e.target.value)} /></div>
               <div><label className="label">{t('Website')}</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
             </div>
             <label className="flex items-start gap-3 cursor-pointer card p-4">

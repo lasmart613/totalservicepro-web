@@ -110,6 +110,7 @@ export async function handleClinicLeadPost(
           contact_name: lead.contactName,
           email: lead.email,
           phone: lead.phone,
+          fax: lead.fax,
           equipment_type: lead.equipmentType,
           equipment_type_other: lead.equipmentTypeOther,
           manufacturer: lead.manufacturer,

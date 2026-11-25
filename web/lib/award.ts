@@ -50,7 +50,7 @@ export async function acceptServiceBid(
   if (req.organization_id) {
     const { data: org } = await supabase
       .from('organizations')
-      .select('name, address, city, state, zip, phone, alt_phone, email, contact_name, website')
+      .select('name, address, address_line2, city, state, zip, phone, fax, alt_phone, email, contact_name, website')
       .eq('id', req.organization_id)
       .maybeSingle();
     if (org) {
@@ -58,10 +58,12 @@ export async function acceptServiceBid(
         ...facility_contact,
         name: org.name,
         address: org.address,
+        address_line2: org.address_line2,
         city: org.city || req.city,
         state: org.state || req.state,
         zip: org.zip,
         phone: org.phone || org.alt_phone,
+        fax: org.fax,
         email: org.email,
         contact_name: org.contact_name,
         website: org.website,

@@ -13,6 +13,8 @@
  * Legacy orgs with only `contact_name` stay valid until a role is saved.
  */
 
+import { normalizeFax } from './fax-address.ts';
+
 export const DIRECTORY_CONTACT_ROLES = [
   'owner',
   'medical_director',
@@ -28,6 +30,7 @@ export type DirectoryRoleFields = {
   last_name: string;
   email: string;
   phone: string;
+  fax: string;
 };
 
 /** Stored JSON and older callers may still send a single `name`. */
@@ -48,6 +51,7 @@ export type DirectoryContactRow = {
   title?: string | null;
   email?: string | null;
   phone?: string | null;
+  fax?: string | null;
   is_primary?: boolean | null;
 };
 
@@ -73,7 +77,7 @@ const ROLE_BY_LABEL = new Map<string, DirectoryRoleKey>(
 );
 
 export function emptyRoleFields(): DirectoryRoleFields {
-  return { first_name: '', last_name: '', email: '', phone: '' };
+  return { first_name: '', last_name: '', email: '', phone: '', fax: '' };
 }
 
 export function emptyDirectoryContacts(): DirectoryContactsState {
@@ -111,7 +115,8 @@ export function isRoleFilled(role?: DirectoryRoleFieldsInput | null): boolean {
     fields.first_name.trim() ||
       fields.last_name.trim() ||
       fields.email.trim() ||
-      fields.phone.trim()
+      fields.phone.trim() ||
+      fields.fax.trim()
   );
 }
 
@@ -160,6 +165,7 @@ export function roleFieldsFromInput(
     last_name: apply(hasStructured ? lastRaw : split?.last_name || ''),
     email: apply(String(role?.email || '')),
     phone: apply(String(role?.phone || '')),
+    fax: apply(String(role?.fax || '')),
   };
 }
 
@@ -269,6 +275,7 @@ export function serializeDirectoryContacts(state: DirectoryContactsState): {
       name: roleDisplayName(role),
       email: role.email,
       phone: role.phone,
+      fax: role.fax,
     };
   }
   return {
@@ -307,6 +314,7 @@ export function directoryContactsFromContactRows(
       last_name: last,
       email: String(row.email || '').trim(),
       phone: String(row.phone || '').trim(),
+      fax: String(row.fax || '').trim(),
     };
     if (row.is_primary && isRoleFilled(state.roles[key])) primaryFromRow = key;
   }
@@ -503,6 +511,7 @@ export function contactWriteRows(
   title: string;
   email: string | null;
   phone: string | null;
+  fax: string | null;
   is_primary: boolean;
 }> {
   const normalized = normalizeDirectoryContacts(state);
@@ -518,6 +527,7 @@ export function contactWriteRows(
       title: label,
       email: role.email || null,
       phone: role.phone || null,
+      fax: normalizeFax(role.fax),
       is_primary: normalized.primaryRole === key,
     };
   });
@@ -570,6 +580,7 @@ export async function persistDirectoryContacts(
           title: payload.title,
           email: payload.email,
           phone: payload.phone,
+          fax: payload.fax,
           is_primary: payload.is_primary,
           updated_at: new Date().toISOString(),
         })

@@ -168,6 +168,7 @@ export default function Profile() {
         first_name: profile.first_name || null,
         last_name: profile.last_name || null,
         phone: profile.phone || null,
+        fax: profile.fax || null,
         job_title: profile.job_title || null,
       };
       if (signature) payload.signature_data = signature;
@@ -229,6 +230,17 @@ export default function Profile() {
               className="input"
               value={profile.phone || ''}
               onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className="label">{t('Fax')}</label>
+            <input
+              className="input"
+              type="tel"
+              autoComplete="fax"
+              placeholder={t('Optional')}
+              value={profile.fax || ''}
+              onChange={(e) => setProfile({ ...profile, fax: e.target.value })}
             />
           </div>
           <div>

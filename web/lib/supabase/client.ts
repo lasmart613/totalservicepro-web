@@ -86,6 +86,9 @@ export type UserProfile = {
   last_name?: string | null;
   email?: string | null;
   phone?: string | null;
+  fax?: string | null;
+  address_line1?: string | null;
+  address_line2?: string | null;
   job_title?: string | null;
   role?: 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'billing_manager' | 'crm' | 'admin' | 'owner' | 'customer' | string;
   additional_roles?: string[] | null;  // jsonb for multi-role support (sole prop etc); primary always in role field
@@ -98,9 +101,11 @@ export type UserProfile = {
     id: string | number;
     name?: string;
     address?: string;
+    address_line2?: string;
     city?: string;
     state?: string;
     phone?: string;
+    fax?: string;
     logo_url?: string;
     type?: string;
     ticket_prefix?: string;
@@ -117,6 +122,8 @@ export type ServiceReport = {
   serial_number?: string;
   customer_name?: string;
   customer_address?: string;
+  customer_address_line2?: string;
+  customer_fax?: string;
   customer_city?: string;
   customer_state?: string;
   customer_phone?: string;
@@ -142,9 +149,12 @@ export type ServiceReport = {
   test_equipment?: any[];
   tech_name?: string;
   tech_phone?: string;
+  tech_fax?: string;
   tech_email?: string;
   tech_company_name?: string;
   tech_company_address?: string;
+  tech_company_address_line2?: string;
+  tech_company_fax?: string;
   tech_company_city?: string;
   tech_company_state?: string;
   tech_company_phone?: string;

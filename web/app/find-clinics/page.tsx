@@ -319,8 +319,10 @@ export default function FindClinicsPage() {
                       <bdi>{[c.city, c.state, c.country ? countryLabel(c.country, locale) : null].filter(Boolean).join(', ') || '—'}</bdi>
                     </div>
                     {c.address && <div className="text-sm mb-1"><bdi>{c.address}</bdi></div>}
+                    {c.address_line2 && <div className="text-sm mb-1"><bdi>{c.address_line2}</bdi></div>}
                     {c.contact_name && <div className="text-sm">👤 <bdi>{c.contact_name}</bdi></div>}
                     {c.phone && <div className="text-sm">📞 <bdi dir="ltr">{c.phone}</bdi></div>}
+                    {c.fax && <div className="text-sm"><bdi dir="ltr">Fax: {c.fax}</bdi></div>}
                     {c.email && <div className="text-sm">✉️ <bdi dir="ltr">{c.email}</bdi></div>}
                     {c.laser_models && (
                       <div className="mt-3 pt-3 border-t border-[var(--border)]">

@@ -78,7 +78,9 @@ function OwnerSignupInner() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [phone, setPhone] = useState('');
+  const [fax, setFax] = useState('');
   const [address, setAddress] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
   const [city, setCity] = useState('');
   const [state, setState] = useState('');
   const [facilityType, setFacilityType] = useState('Clinic');
@@ -174,7 +176,9 @@ function OwnerSignupInner() {
       lastName,
       email,
       phone: phone || null,
+      fax: fax || null,
       address: address || null,
+      addressLine2: addressLine2 || null,
       city: city || null,
       state: state || null,
       role: 'owner',
@@ -269,9 +273,11 @@ function OwnerSignupInner() {
             organization_type: orgKind,
             signup_kind: 'owner',
             address: address || '',
+            address_line2: addressLine2 || '',
             city: city || '',
             state: state || '',
             phone: phone || '',
+            fax: fax || '',
             facility_type: facilityType,
             preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
             claim_token: claimToken || '',
@@ -474,8 +480,18 @@ function OwnerSignupInner() {
             </div>
 
             <div>
+              <label className="label">{t('Fax')}</label>
+              <input className="input" type="tel" autoComplete="fax" placeholder={t('Optional')} value={fax} onChange={e => setFax(e.target.value)} />
+            </div>
+
+            <div>
               <label className="label">{t('Address')}</label>
               <input className="input" value={address} onChange={e => setAddress(e.target.value)} />
+            </div>
+
+            <div>
+              <label className="label">{t('Address line 2 (suite, unit, etc.)')}</label>
+              <input className="input" autoComplete="address-line2" placeholder={t('Optional')} value={addressLine2} onChange={e => setAddressLine2(e.target.value)} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">

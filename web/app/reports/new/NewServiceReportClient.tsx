@@ -278,10 +278,12 @@ export default function NewServiceReport() {
 
   // Editable customer fields (Android has full form, not read-only summary)
   const [custAddress, setCustAddress] = useState('');
+  const [custAddressLine2, setCustAddressLine2] = useState('');
   const [custCity, setCustCity] = useState('');
   const [custState, setCustState] = useState('');
   const [custContactName, setCustContactName] = useState('');
   const [custPhone, setCustPhone] = useState('');
+  const [custFax, setCustFax] = useState('');
   const [custEmail, setCustEmail] = useState('');
   const [custWebsite, setCustWebsite] = useState('');
 
@@ -574,9 +576,12 @@ export default function NewServiceReport() {
         setTechCompanyCache({
           tech_name: techName,
           tech_phone: profile.phone || '',
+          tech_fax: profile.fax || '',
           tech_email: user.email || '',
           company_name: org?.name || '',
           company_address: org?.address || '',
+          company_address_line2: org?.address_line2 || '',
+          company_fax: org?.fax || '',
           company_city: org?.city || '',
           company_state: org?.state || '',
           company_phone: org?.phone || '',
@@ -736,10 +741,12 @@ export default function NewServiceReport() {
           );
         }
         setCustAddress(r.customer_address || '');
+        setCustAddressLine2(r.customer_address_line2 || '');
         setCustCity(r.customer_city || '');
         setCustState(r.customer_state || '');
         setCustContactName(r.customer_contact_name || '');
         setCustPhone(r.customer_phone || '');
+        setCustFax(r.customer_fax || '');
         setCustEmail(r.customer_email || '');
         setCustWebsite(r.customer_website || '');
         // Always restore model keys so checklists / params stay editable (gate removed but keys still needed)
@@ -1083,11 +1090,13 @@ export default function NewServiceReport() {
           setSelectedEquipmentId(String(prefill.equipmentId));
         }
         setCustAddress(prefill.customerAddress);
+        setCustAddressLine2(prefill.customerAddressLine2);
         setCustCity(prefill.customerCity);
         setCustState(prefill.customerState);
         setCustContactName(prefill.customerContactName);
         if (prefill.customerWebsite) setCustWebsite((prev) => prev || prefill.customerWebsite);
         setCustPhone(prefill.customerPhone);
+        setCustFax(prefill.customerFax);
         setCustEmail(prefill.customerEmail);
         ticketMakeRef.current = prefill.equipmentMake;
         ticketModelRef.current = prefill.equipmentModel;
@@ -1141,9 +1150,11 @@ export default function NewServiceReport() {
   function applyLocationFields(loc: CustomerLocation) {
     const fields = reportSiteFields(loc);
     setCustAddress(fields.address);
+    setCustAddressLine2(fields.address_line2 || '');
     setCustCity(fields.city);
     setCustState(fields.state);
     setCustPhone(fields.phone);
+    setCustFax(fields.fax || '');
     setCustContactName(fields.contactName);
     setSiteName(fields.siteName);
   }
@@ -1253,10 +1264,12 @@ export default function NewServiceReport() {
     setCustomerPick((n) => n + 1);
     setSearchTerm(customer.name || '');
     setCustAddress(customer.address || '');
+    setCustAddressLine2(customer.address_line2 || '');
     setCustCity(customer.city || '');
     setCustState(customer.state || '');
     setCustContactName(customer.contact_name || customer.contact || '');
     setCustPhone(customer.phone || '');
+    setCustFax(customer.fax || '');
     setCustEmail(customer.email || '');
     setCustWebsite(customer.website || '');
     setShowCustDrop(false);
@@ -1610,6 +1623,8 @@ export default function NewServiceReport() {
         serial_number: serialNumber || null,
         customer_name: selectedCustomer?.name || searchTerm || null,
         customer_address: custAddress || selectedCustomer?.address || null,
+        customer_address_line2: custAddressLine2 || selectedCustomer?.address_line2 || null,
+        customer_fax: custFax || selectedCustomer?.fax || null,
         customer_city: custCity || selectedCustomer?.city || null,
         customer_state: custState || selectedCustomer?.state || null,
         customer_phone: custPhone || selectedCustomer?.phone || null,
@@ -1651,6 +1666,9 @@ export default function NewServiceReport() {
         tech_email: techCompanyCache.tech_email,
         tech_company_name: techCompanyCache.company_name,
         tech_company_address: techCompanyCache.company_address,
+        tech_company_address_line2: techCompanyCache.company_address_line2 || null,
+        tech_company_fax: techCompanyCache.company_fax || null,
+        tech_fax: techCompanyCache.tech_fax || null,
         tech_company_city: techCompanyCache.company_city,
         tech_company_state: techCompanyCache.company_state,
         tech_company_phone: techCompanyCache.company_phone,
@@ -2058,6 +2076,8 @@ export default function NewServiceReport() {
             <div className="md:col-span-2">
               <label className="label">Address</label>
               <input className="input w-full" value={custAddress} onChange={e=>setCustAddress(e.target.value)} placeholder="123 Main St" />
+              <label className="label mt-2">Address line 2 (suite, unit, etc.)</label>
+              <input className="input w-full" value={custAddressLine2} onChange={e=>setCustAddressLine2(e.target.value)} placeholder="Optional" autoComplete="address-line2" />
             </div>
             <div>
               <label className="label">City</label>
@@ -2074,6 +2094,8 @@ export default function NewServiceReport() {
             <div>
               <label className="label">Contact Phone</label>
               <input className="input w-full" type="tel" value={custPhone} onChange={e=>setCustPhone(e.target.value)} />
+              <label className="label mt-2">Fax</label>
+              <input className="input w-full" type="tel" value={custFax} onChange={e=>setCustFax(e.target.value)} placeholder="Optional" autoComplete="fax" />
             </div>
             <div>
               <label className="label">Contact Email</label>

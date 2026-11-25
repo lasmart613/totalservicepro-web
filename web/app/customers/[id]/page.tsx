@@ -51,10 +51,12 @@ type CustomerOrg = {
   name?: string | null;
   type?: string | null;
   address?: string | null;
+  address_line2?: string | null;
   city?: string | null;
   state?: string | null;
   zip?: string | null;
   phone?: string | null;
+  fax?: string | null;
   email?: string | null;
   website?: string | null;
   notes?: string | null;
@@ -330,8 +332,10 @@ export default function CustomerProfilePage() {
         website: org.website || '',
         notes: org.notes || '',
         phone: org.phone || '',
+        fax: org.fax || '',
         email: org.email || '',
         address: org.address || '',
+        address_line2: org.address_line2 || '',
         city: org.city || '',
         state: org.state || '',
         zip: org.zip || '',

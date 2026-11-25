@@ -39,9 +39,11 @@ export const FIELD_LABELS: Record<string, string> = {
   zip: 'ZIP code',
   contact_name: 'Contact name',
   phone: 'Phone',
+  fax: 'Fax',
   alt_phone: 'Other phone',
   website: 'Website',
   address: 'Street address',
+  address_line2: 'Address line 2',
   city: 'City',
   description: 'Description',
   services_offered: 'Services offered',
@@ -50,8 +52,8 @@ export const FIELD_LABELS: Record<string, string> = {
   coverage: 'Coverage area',
 }
 export const FIELD_MAX: Record<string, number> = {
-  name: 160, email: 254, contact_name: 120, phone: 40, alt_phone: 40, website: 200,
-  address: 200, city: 80, description: 1000, services_offered: 500,
+  name: 160, email: 254, contact_name: 120, phone: 40, fax: 50, alt_phone: 40, website: 200,
+  address: 200, address_line2: 200, city: 80, description: 1000, services_offered: 500,
 }
 export function fieldError(field: string, reason: 'invalid' | 'too_long'): string {
   const label = FIELD_LABELS[field] || 'This field'
@@ -319,7 +321,7 @@ export function parseStep2(body: Record<string, unknown>): { ok: true; fields: R
     const contact = str(body.contact_name, 'contact_name')
     if (cpLength(contact) < 2 || !HAS_LETTER_OR_DIGIT.test(contact)) return { ok: false, field: 'contact_name', reason: 'invalid' }
     f.contact_name = contact
-    for (const k of ['phone', 'alt_phone'] as const) {
+    for (const k of ['phone', 'fax', 'alt_phone'] as const) {
       const p = str(body[k], k)
       if (p && !phoneOk(p)) return { ok: false, field: k, reason: 'invalid' }
       if (p) f[k] = p
@@ -329,7 +331,7 @@ export function parseStep2(body: Record<string, unknown>): { ok: true; fields: R
       if (!w) return { ok: false, field: 'website', reason: 'invalid' }
       f.website = w
     }
-    for (const k of ['address', 'city', 'description', 'services_offered'] as const) {
+    for (const k of ['address', 'address_line2', 'city', 'description', 'services_offered'] as const) {
       const s = str(body[k], k)
       if (s) f[k] = s
     }

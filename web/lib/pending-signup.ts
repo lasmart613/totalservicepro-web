@@ -20,7 +20,9 @@ export type PendingSignup = {
   lastName: string;
   email: string;
   phone?: string | null;
+  fax?: string | null;
   address?: string | null;
+  addressLine2?: string | null;
   city?: string | null;
   state?: string | null;
   website?: string | null;
@@ -98,9 +100,11 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     name: pending.name,
     type: pending.orgType,
     address: pending.address || null,
+    address_line2: pending.addressLine2 || null,
     city: pending.city || null,
     state: pending.state || null,
     phone: pending.phone || null,
+    fax: pending.fax || null,
     website: pending.website || null,
     created_by: userId,
     // Repair companies get time-boxed complimentary Premium. Others stay Free.
